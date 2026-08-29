@@ -22,7 +22,23 @@ Cahier des charges complet : [`docs/ERP_Specification_Complete_4_Phases.md`](doc
 - [ ] **Phase 4 — Achats et pilotage** : achats fournisseurs, sous-traitance,
       indicateurs
 
-## Démarrage local
+## Tester sur le Synology NAS (Docker)
+
+Un `Dockerfile` + `docker-compose.yml` sont fournis pour tester l'ERP
+directement sur le NAS via Container Manager. Voir le guide détaillé :
+[`docs/DEPLOIEMENT_SYNOLOGY.md`](docs/DEPLOIEMENT_SYNOLOGY.md).
+
+Résumé express (en SSH sur le NAS, depuis le dossier du projet) :
+
+```bash
+cp .env.example .env   # ajuster DJANGO_SECRET_KEY, DJANGO_ALLOWED_HOSTS, DB_PASSWORD
+docker compose up -d --build
+docker compose exec web python manage.py createsuperuser
+```
+
+Puis ouvrir `http://<ip-du-nas>:8000/admin/`.
+
+## Démarrage local (sans Docker)
 
 ```bash
 python3 -m venv .venv
