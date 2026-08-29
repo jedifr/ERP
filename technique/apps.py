@@ -1,0 +1,7 @@
+from django.apps import AppConfig
+
+
+class TechniqueConfig(AppConfig):
+    default_auto_field = "django.db.models.BigAutoField"
+    name = "technique"
+    verbose_name = "Socle technique"
