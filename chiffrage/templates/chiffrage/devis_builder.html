@@ -29,6 +29,8 @@
                 <th class="py-1 pr-4">Coût matière</th>
                 <th class="py-1 pr-4">Prix vente matière</th>
                 <th class="py-1 pr-4">Opérations</th>
+                <th class="py-1 pr-4">Prix vente opérations</th>
+                <th class="py-1 pr-4">Prix vente total</th>
             </tr>
         </thead>
         <tbody id="lignes-existantes">
@@ -41,11 +43,21 @@
                 <td class="py-1 pr-4">
                     {% for op in ligne.operations.all %}{{ op.poste }} (#{{ op.ordre }}){% if not forloop.last %}, {% endif %}{% endfor %}
                 </td>
+                <td class="py-1 pr-4">{{ ligne.prix_vente_operations|floatformat:2 }}</td>
+                <td class="py-1 pr-4 font-medium">{{ ligne.prix_vente_total|default:"—" }}</td>
             </tr>
             {% empty %}
-            <tr><td colspan="5" class="py-2 text-font-subtle-light dark:text-font-subtle-dark">Aucune ligne pour l'instant.</td></tr>
+            <tr><td colspan="7" class="py-2 text-font-subtle-light dark:text-font-subtle-dark">Aucune ligne pour l'instant.</td></tr>
             {% endfor %}
         </tbody>
+        {% if lignes %}
+        <tfoot>
+            <tr class="font-semibold border-t border-base-200 dark:border-base-700">
+                <td colspan="6" class="py-2 text-right pr-4">Total devis HT (matière + opérations)</td>
+                <td class="py-2">{{ devis.montant_total_ht|floatformat:2 }}</td>
+            </tr>
+        </tfoot>
+        {% endif %}
     </table>
 </div>
 

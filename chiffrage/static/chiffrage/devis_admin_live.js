@@ -29,12 +29,27 @@
         document.querySelectorAll("tbody.form-group").forEach((row) => wireRow(row, numero));
     }
 
+    function updateDevisTotals(data) {
+        const map = {
+            montant_matiere_ht: "#montant-matiere-ht",
+            montant_operations_ht: "#montant-operations-ht",
+            montant_total_ht: "#montant-total-ht",
+        };
+        Object.keys(map).forEach((key) => {
+            if (data[key] == null) return;
+            const el = document.querySelector(map[key]);
+            if (el) el.textContent = data[key];
+        });
+    }
+
     function wireRow(row, numero) {
         const idInput = row.querySelector('input[name$="-id"]');
         const quantiteInput = row.querySelector('input[name$="-quantite"]');
         const tauxInput = row.querySelector('input[name$="-taux_marge_matiere_applique"]');
         const coutCell = row.querySelector(".field-cout_matiere_calcule .readonly");
         const prixCell = row.querySelector(".field-prix_vente_matiere .readonly");
+        const operationsCell = row.querySelector(".field-prix_vente_operations .readonly");
+        const totalCell = row.querySelector(".field-prix_vente_total .readonly");
 
         // Ligne pas encore enregistrée (formulaire d'ajout vide) : pas de recalcul
         // live possible tant qu'elle n'a pas d'identifiant en base.
@@ -71,9 +86,17 @@
                     }
                     coutCell.textContent = data.cout_matiere_calcule != null ? data.cout_matiere_calcule : "-";
                     prixCell.textContent = data.prix_vente_matiere != null ? data.prix_vente_matiere : "-";
+                    if (operationsCell) {
+                        operationsCell.textContent =
+                            data.prix_vente_operations != null ? data.prix_vente_operations : "-";
+                    }
+                    if (totalCell) {
+                        totalCell.textContent = data.prix_vente_total != null ? data.prix_vente_total : "-";
+                    }
                     if (tauxInput && data.taux_marge_matiere_applique != null) {
                         tauxInput.value = data.taux_marge_matiere_applique;
                     }
+                    updateDevisTotals(data);
                 })
                 .catch(() => {
                     row.style.opacity = "1";

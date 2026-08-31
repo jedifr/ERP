@@ -26,6 +26,24 @@ class Devis(models.Model):
     def __str__(self):
         return self.numero
 
+    @property
+    def montant_matiere_ht(self):
+        return sum(ligne.prix_vente_matiere or 0 for ligne in self.lignes.all())
+
+    montant_matiere_ht.fget.short_description = "Montant matière HT"
+
+    @property
+    def montant_operations_ht(self):
+        return sum(ligne.prix_vente_operations for ligne in self.lignes.all())
+
+    montant_operations_ht.fget.short_description = "Montant opérations HT (temps machine / main d'œuvre)"
+
+    @property
+    def montant_total_ht(self):
+        return self.montant_matiere_ht + self.montant_operations_ht
+
+    montant_total_ht.fget.short_description = "Montant total HT"
+
 
 class DevisLigne(models.Model):
     devis = models.ForeignKey(Devis, verbose_name="devis", on_delete=models.CASCADE, related_name="lignes")
@@ -51,6 +69,23 @@ class DevisLigne(models.Model):
 
     def __str__(self):
         return f"{self.devis} — {self.article} × {self.quantite}"
+
+    @property
+    def prix_vente_operations(self):
+        """Prix de vente cumulé des opérations de gamme (temps machine / main d'œuvre)."""
+        return sum(op.prix_vente or 0 for op in self.operations.all())
+
+    prix_vente_operations.fget.short_description = "Prix de vente opérations"
+
+    @property
+    def prix_vente_total(self):
+        """Prix de vente matière + opérations. None tant que le chiffrage matière
+        n'a pas été calculé (cohérent avec cout_matiere_calcule/prix_vente_matiere)."""
+        if self.prix_vente_matiere is None:
+            return None
+        return self.prix_vente_matiere + self.prix_vente_operations
+
+    prix_vente_total.fget.short_description = "Prix de vente total (matière + opérations)"
 
 
 class DevisLigneOperation(models.Model):

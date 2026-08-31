@@ -183,6 +183,23 @@ class CalculerDevisTests(TestCase):
         with self.assertRaises(ChiffrageError):
             calculer_devis(self.devis)
 
+    def test_prix_vente_total_ligne_integre_les_operations(self):
+        calculer_devis(self.devis)
+        self.ligne.refresh_from_db()
+        # matière : 111.426 * 1.2 = 133.7112 ; opération : 1250 * 1.15 = 1437.5
+        self.assertAlmostEqual(self.ligne.prix_vente_operations, 1437.5)
+        self.assertAlmostEqual(self.ligne.prix_vente_total, 133.7112 + 1437.5, places=3)
+
+    def test_prix_vente_total_ligne_none_si_matiere_non_calculee(self):
+        self.assertIsNone(self.ligne.prix_vente_matiere)
+        self.assertIsNone(self.ligne.prix_vente_total)
+
+    def test_montants_devis_integrent_matiere_et_operations(self):
+        calculer_devis(self.devis)
+        self.assertAlmostEqual(self.devis.montant_matiere_ht, 133.7112, places=3)
+        self.assertAlmostEqual(self.devis.montant_operations_ht, 1437.5)
+        self.assertAlmostEqual(self.devis.montant_total_ht, 133.7112 + 1437.5, places=3)
+
 
 class LancerEnProductionTests(TestCase):
     def setUp(self):
@@ -514,9 +531,12 @@ class DevisBuilderViewTests(TestCase):
         self.assertTrue(Article.objects.filter(pk="PIECE-VIEW-1").exists())
         self.assertEqual(self.devis.lignes.count(), 1)
         data = response.json()
-        # 3 * (5 * 0.2) = 3 (composant VIS-VIEW) + 3 * 50 (étape forfaitaire) côté opération,
-        # seul le coût matière est reflété dans la ligne elle-même.
+        # matière : 3 * (5 * 0.2) = 3, marge 10% -> prix_vente_matiere = 3.3
+        # opération : 3 * 50 (étape forfaitaire) = 150, marge par défaut du poste (0%) -> 150
         self.assertEqual(data["cout_matiere_calcule"], 3)
+        self.assertAlmostEqual(data["prix_vente_operations"], 150)
+        self.assertAlmostEqual(data["prix_vente_total"], 153.3, places=3)
+        self.assertAlmostEqual(data["montant_total_ht"], 153.3, places=3)
         self.assertIsNone(data["avertissement"])
 
     def test_post_article_existant(self):
@@ -536,6 +556,8 @@ class DevisBuilderViewTests(TestCase):
         self.assertEqual(self.devis.lignes.get().article, article)
         data = response.json()
         self.assertEqual(data["cout_matiere_calcule"], 8)
+        self.assertEqual(data["prix_vente_operations"], 0)
+        self.assertEqual(data["prix_vente_total"], 8)
         self.assertIsNone(data["avertissement"])
 
     def test_post_article_sans_cout_unitaire_avertit_sans_bloquer(self):
@@ -555,6 +577,7 @@ class DevisBuilderViewTests(TestCase):
         self.assertEqual(self.devis.lignes.get().article, article)
         self.assertIsNotNone(data["avertissement"])
         self.assertIsNone(data["cout_matiere_calcule"])
+        self.assertIsNone(data["prix_vente_total"])
 
     def test_post_article_introuvable_400(self):
         payload = {"quantite": 1, "article_existant": "INEXISTANT"}
@@ -609,6 +632,9 @@ class RecalculerLigneViewTests(TestCase):
         data = response.json()
         self.assertEqual(data["cout_matiere_calcule"], 10)
         self.assertEqual(data["prix_vente_matiere"], 10)
+        self.assertEqual(data["prix_vente_operations"], 0)
+        self.assertEqual(data["prix_vente_total"], 10)
+        self.assertEqual(data["montant_total_ht"], 10)
         self.ligne.refresh_from_db()
         self.assertEqual(self.ligne.quantite, 5)
 
@@ -660,3 +686,59 @@ class RecalculerLigneViewTests(TestCase):
             self._url(), data={"quantite": 5}, content_type="application/json"
         )
         self.assertNotEqual(response.status_code, 200)
+
+
+class RecalculerLigneAvecOperationsTests(TestCase):
+    """Le recalcul en direct doit refléter le temps machine (opérations de gamme),
+    pas seulement le coût matière — reproduit le signalement utilisateur."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        self.user = User.objects.create_superuser("ops-admin", "o@example.com", "pass1234")
+        self.client.force_login(self.user)
+
+        self.article = Article.objects.create(
+            reference="PIECE-OPS", nature=Article.Nature.FABRIQUE, taux_marge_defaut=20
+        )
+        _creer_composants_nomenclature(self.article)
+
+        self.poste = PosteTravail.objects.create(
+            nom="Laser-Ops", mode_calcul=PosteTravail.ModeCalcul.HORAIRE, taux_marge_defaut=15
+        )
+        TarifPoste.objects.create(poste=self.poste, cout_horaire=50, date_debut=datetime.date(2020, 1, 1))
+        Gamme.objects.create(
+            article=self.article,
+            poste=self.poste,
+            ordre=1,
+            temps_fixe=10,
+            temps_variable=5,
+            date_debut=datetime.date(2020, 1, 1),
+        )
+
+        client_tiers = Tiers.objects.create(
+            code="CLI-OPS", raison_sociale="Client Ops", type_tiers=Tiers.TypeTiers.CLIENT
+        )
+        self.devis = Devis.objects.create(
+            numero="DEV-OPS",
+            client=client_tiers,
+            date_creation=datetime.date(2026, 1, 1),
+            statut=Devis.Statut.BROUILLON,
+        )
+        self.ligne = DevisLigne.objects.create(devis=self.devis, article=self.article, quantite=3)
+
+    def test_recalcul_live_integre_le_temps_machine(self):
+        response = self.client.post(
+            f"/admin/chiffrage/devis/{self.devis.pk}/lignes/{self.ligne.id}/recalculer/",
+            data={"quantite": 3},
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        data = response.json()
+        # matière : 111.426 * 1.2 = 133.7112
+        # opération : (10 + 5*3) * 50 = 1250, marge 15% -> 1437.5
+        self.assertAlmostEqual(data["prix_vente_matiere"], 133.7112, places=3)
+        self.assertAlmostEqual(data["prix_vente_operations"], 1437.5)
+        self.assertAlmostEqual(data["prix_vente_total"], 133.7112 + 1437.5, places=3)
+        self.assertAlmostEqual(data["montant_total_ht"], 133.7112 + 1437.5, places=3)

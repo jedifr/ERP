@@ -1,5 +1,6 @@
 from django.contrib import admin, messages
 from django.urls import path
+from django.utils.html import format_html
 from unfold.admin import ModelAdmin, TabularInline
 
 from .builder_views import devis_builder_view, recalculer_ligne_view
@@ -13,7 +14,7 @@ class DevisLigneInline(TabularInline):
     model = DevisLigne
     extra = 1
     autocomplete_fields = ["article"]
-    readonly_fields = ["cout_matiere_calcule", "prix_vente_matiere"]
+    readonly_fields = ["cout_matiere_calcule", "prix_vente_matiere", "prix_vente_operations", "prix_vente_total"]
 
 
 class DevisLigneOperationInline(TabularInline):
@@ -28,15 +29,48 @@ class DevisLigneOperationInline(TabularInline):
 
 @admin.register(Devis)
 class DevisAdmin(ModelAdmin):
-    list_display = ["numero", "client", "date_creation", "statut", "taux_marge_globale"]
+    list_display = [
+        "numero",
+        "client",
+        "date_creation",
+        "statut",
+        "taux_marge_globale",
+        "montant_matiere_ht",
+        "montant_operations_ht",
+        "montant_total_ht",
+    ]
     list_filter = ["statut"]
     search_fields = ["numero", "client__raison_sociale"]
     autocomplete_fields = ["client"]
+    readonly_fields = [
+        "montant_matiere_ht_display",
+        "montant_operations_ht_display",
+        "montant_total_ht_display",
+    ]
     inlines = [DevisLigneInline]
     actions = ["action_recalculer", "action_lancer_en_production"]
 
     class Media:
         js = ["chiffrage/devis_admin_live.js"]
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).prefetch_related("lignes__operations")
+
+    # Wrappés dans un <span id="..."> (plutôt que les propriétés du modèle
+    # directement) pour offrir un point d'accroche stable au JS de recalcul
+    # en direct (Unfold ne pose pas de classe `field-<nom>` sur les champs
+    # readonly de premier niveau, contrairement à ses tableaux inline).
+    @admin.display(description="Montant matière HT")
+    def montant_matiere_ht_display(self, obj):
+        return format_html('<span id="montant-matiere-ht">{}</span>', obj.montant_matiere_ht)
+
+    @admin.display(description="Montant opérations HT (temps machine / main d'œuvre)")
+    def montant_operations_ht_display(self, obj):
+        return format_html('<span id="montant-operations-ht">{}</span>', obj.montant_operations_ht)
+
+    @admin.display(description="Montant total HT")
+    def montant_total_ht_display(self, obj):
+        return format_html('<span id="montant-total-ht">{}</span>', obj.montant_total_ht)
 
     def get_urls(self):
         urls = [
@@ -78,7 +112,15 @@ class DevisAdmin(ModelAdmin):
 
 @admin.register(DevisLigne)
 class DevisLigneAdmin(ModelAdmin):
-    list_display = ["devis", "article", "quantite", "cout_matiere_calcule", "prix_vente_matiere"]
+    list_display = [
+        "devis",
+        "article",
+        "quantite",
+        "cout_matiere_calcule",
+        "prix_vente_matiere",
+        "prix_vente_operations",
+        "prix_vente_total",
+    ]
     search_fields = ["devis__numero", "article__reference"]
     autocomplete_fields = ["devis", "article"]
     inlines = [DevisLigneOperationInline]

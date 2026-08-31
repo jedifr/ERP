@@ -248,3 +248,33 @@ Limite assumée : une ligne pas encore enregistrée (ajoutée mais devis non
 sauvegardé) n'a pas encore d'identifiant, donc pas de recalcul live tant
 qu'elle n'a pas été enregistrée une première fois (normalement, via
 "Enregistrer" ou le constructeur de devis).
+
+## Montant total HT (matière + opérations / temps machine)
+
+Le moteur de chiffrage calculait déjà le coût des opérations de gamme
+(temps machine, main d'œuvre — `DevisLigneOperation.cout_calcule`/
+`prix_vente`), mais rien n'additionnait ce montant au prix matière pour
+donner un total exploitable : chaque ligne n'affichait que son prix de
+vente matière.
+
+Trois niveaux de total sont maintenant disponibles, tous dérivés des mêmes
+données déjà stockées (aucune nouvelle table) :
+
+- `DevisLigne.prix_vente_operations` / `prix_vente_total` (matière +
+  opérations, pour une ligne) ;
+- `Devis.montant_matiere_ht` / `montant_operations_ht` / `montant_total_ht`
+  (mêmes montants, cumulés sur tout le devis).
+
+Ces totaux apparaissent :
+- sur la fiche Devis (admin), au-dessus des lignes, et se mettent à jour en
+  direct avec le recalcul live (quantité/taux de marge d'une ligne) ;
+- sur chaque ligne de l'inline Devis et sur la liste `DevisLigne` ;
+- dans la liste des devis (colonnes "Montant matière/opérations/total HT") ;
+- sur la page Constructeur de devis, avec un total en pied de tableau.
+
+Note technique : Unfold ne pose pas de classe `field-<nom>` sur les champs
+readonly de premier niveau d'un ModelAdmin (contrairement à ses tableaux
+inline) ; les trois totaux du haut de la fiche Devis sont donc rendus via
+des méthodes d'admin (`montant_*_ht_display`) qui les enveloppent dans un
+`<span id="...">` pour donner un point d'accroche stable au JS de recalcul
+en direct.

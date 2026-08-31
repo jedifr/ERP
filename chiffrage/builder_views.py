@@ -79,6 +79,9 @@ def _traiter_ajout_ligne(request, devis):
             "quantite": ligne.quantite,
             "cout_matiere_calcule": ligne.cout_matiere_calcule,
             "prix_vente_matiere": ligne.prix_vente_matiere,
+            "prix_vente_operations": ligne.prix_vente_operations,
+            "prix_vente_total": ligne.prix_vente_total,
+            "montant_total_ht": devis.montant_total_ht,
             "avertissement": avertissement,
         }
     )
@@ -176,5 +179,10 @@ def recalculer_ligne_view(request, numero, ligne_id):
             "cout_matiere_calcule": ligne.cout_matiere_calcule,
             "prix_vente_matiere": ligne.prix_vente_matiere,
             "taux_marge_matiere_applique": ligne.taux_marge_matiere_applique,
+            "prix_vente_operations": ligne.prix_vente_operations,
+            "prix_vente_total": ligne.prix_vente_total,
+            "montant_matiere_ht": devis.montant_matiere_ht,
+            "montant_operations_ht": devis.montant_operations_ht,
+            "montant_total_ht": devis.montant_total_ht,
         }
     )
