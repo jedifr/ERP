@@ -21,8 +21,15 @@ Cahier des charges complet : [`docs/ERP_Specification_Complete_4_Phases.md`](doc
 - [x] **Phase 3 — Commercial et stock** (`commercial/`, `stock/`,
       `facturation/`) : contacts, emplacements, lots, mouvements de stock,
       alertes de seuil, pont de facturation vers Tiime
-- [ ] **Phase 4 — Achats et pilotage** : achats fournisseurs, sous-traitance,
-      indicateurs
+- [x] **Phase 4 — Achats et pilotage** (`achats/`, `soustraitance/`,
+      `pilotage/`) : commandes fournisseur et réceptions, envois/retours de
+      sous-traitance, marge réelle vs prévue, taux de charge des postes
+
+Les 4 phases du cahier des charges sont posées. Reste, hors périmètre des 4
+phases : une interface plus soignée que l'admin Django (voir plus bas,
+décision volontairement reportée), la synchronisation retour du planning
+atelier (Planning → ERP), et les points listés dans « Points encore ouverts »
+du cahier des charges.
 
 ## Tester sur le Synology NAS (Docker)
 
@@ -62,7 +69,9 @@ python manage.py runserver
 - API : http://127.0.0.1:8000/api/v1/ (articles, matieres, postes-travail,
   tarifs-poste, nomenclatures, gammes, tiers, adresses, contacts, devis,
   devis-lignes, commandes, ordres-fabrication, emplacements, lots,
-  mouvements-stock, alertes-stock, factures...)
+  mouvements-stock, alertes-stock, factures, commandes-fournisseur,
+  receptions, envois-sous-traitance, retours-sous-traitance,
+  pilotage/marge-reelle/{numero_of}/, pilotage/taux-charge/{poste}/...)
 
 ## Tests
 
@@ -132,3 +141,33 @@ App `chiffrage`, plus un socle minimal de l'app `commercial` (Tiers, Adresse
   référence renseignée ensuite ici (`mode_creation=manuel`). Passage à une
   création automatique via API Tiime non implémenté (aucune API publique
   documentée à ce jour, cf. cahier des charges).
+
+## Phase 4 — Achats et pilotage
+
+- **achats** : `CommandeFournisseur`, `LigneCommandeFournisseur`,
+  `Reception`, `ReceptionLigne`. Une ligne de commande liée à une
+  `AlerteStock` (`alerte_stock_origine`) la clôture automatiquement à sa
+  création. Une `ReceptionLigne` met à jour le cumul `quantite_recue` de sa
+  ligne de commande et génère un `MouvementStock` en entrée — sur le lot
+  unique de l'article (convention actuelle du module stock) : une erreur
+  explicite est levée s'il n'existe aucun lot, ou plusieurs (réception
+  automatique non applicable dans ce cas, à traiter manuellement).
+- **soustraitance** : `EnvoiSousTraitance`, `RetourSousTraitance` — distincts
+  du chiffrage (poste "Sous-Traitance" en mode forfaitaire, Phase 1). Un
+  retour alimente `quantite_bonne`/`quantite_rebut` sur l'`OperationOF`
+  correspondante (retours partiels cumulables) ; une fois la quantité
+  envoyée intégralement retournée, l'opération passe au statut `terminee`
+  et l'OF peut être considéré comme prêt pour l'étape suivante.
+- **pilotage** : aucune nouvelle table (cahier des charges) — fonctions de
+  service dans `pilotage/services.py`, exposées en lecture seule via l'API :
+  - `marge_reelle_ordre_fabrication(of)` — recalcule le coût réel à partir
+    des données remontées sur `OperationOF` (`temps_reel` pour les postes
+    horaires, coût figé au devis pour les postes forfaitaires dont le prix
+    ne varie pas), comparé à la marge prévue au devis (prix de vente resté
+    figé). `donnees_completes=False` tant que toutes les opérations
+    horaires n'ont pas remonté leur `temps_reel`.
+  - `taux_charge_poste(poste, date_debut, date_fin)` — temps réel cumulé
+    rapporté à la capacité disponible (`nombre_machines` × jours ouvrés ×
+    heures/jour/machine). Le cahier des charges ne précise pas la base de
+    calcul de la capacité (jours ouvrés, heures/jour) : approximation
+    lundi-vendredi à 7h/jour/machine, ajustable par appel de la fonction.

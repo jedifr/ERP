@@ -54,6 +54,9 @@ INSTALLED_APPS = [
     "chiffrage",
     "stock",
     "facturation",
+    "achats",
+    "soustraitance",
+    "pilotage",
 ]
 
 MIDDLEWARE = [

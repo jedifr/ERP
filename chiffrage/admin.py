@@ -99,3 +99,10 @@ class OrdreFabricationAdmin(admin.ModelAdmin):
             niveau = messages.SUCCESS if reussite else messages.WARNING
             statut = "synchronisé" if reussite else f"toujours en échec ({of.statut_synchro})"
             self.message_user(request, f"{of} : {statut}.", level=niveau)
+
+
+@admin.register(OperationOF)
+class OperationOFAdmin(admin.ModelAdmin):
+    list_display = ["ordre_fabrication", "ordre", "poste", "temps_prevu", "temps_reel", "statut"]
+    search_fields = ["ordre_fabrication__numero", "poste__nom"]
+    autocomplete_fields = ["ordre_fabrication", "poste"]
