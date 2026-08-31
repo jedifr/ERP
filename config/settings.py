@@ -5,6 +5,7 @@ Django settings for the ERP maison project.
 import os
 from pathlib import Path
 
+from django.urls import reverse_lazy
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -41,6 +42,7 @@ CSRF_TRUSTED_ORIGINS = [
 # Application definition
 
 INSTALLED_APPS = [
+    "unfold",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -159,11 +161,6 @@ REST_FRAMEWORK = {
 }
 
 
-# Logging
-# Le handler "console" par défaut de Django n'écrit que si DEBUG=True : sans
-# ceci, les erreurs 400 (ex. DisallowedHost) ou CSRF n'apparaissent nulle part
-# dans `docker compose logs` une fois DEBUG=False. On force donc les logs
-# Django (avertissements et erreurs) vers stdout, visibles par Docker.
 # Synchronisation avec l'outil de planification d'atelier (voir chiffrage/planning_sync.py)
 # Laisser PLANNING_API_URL vide tant que l'API du planning atelier n'est pas définie :
 # les OF restent créés localement, avec statut_synchro="en_attente".
@@ -172,6 +169,11 @@ PLANNING_API_KEY = os.environ.get("PLANNING_API_KEY", "")
 PLANNING_SYNC_MAX_TENTATIVES = int(os.environ.get("PLANNING_SYNC_MAX_TENTATIVES", "5"))
 
 
+# Logging
+# Le handler "console" par défaut de Django n'écrit que si DEBUG=True : sans
+# ceci, les erreurs 400 (ex. DisallowedHost) ou CSRF n'apparaissent nulle part
+# dans `docker compose logs` une fois DEBUG=False. On force donc les logs
+# Django (avertissements et erreurs) vers stdout, visibles par Docker.
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -180,5 +182,164 @@ LOGGING = {
     },
     "loggers": {
         "django": {"handlers": ["console"], "level": "WARNING"},
+    },
+}
+
+
+# Unfold — thème de l'admin Django
+# https://unfoldadmin.com/docs/configuration/settings/
+
+UNFOLD = {
+    "SITE_TITLE": "ERP maison",
+    "SITE_HEADER": "ERP maison",
+    "SITE_SYMBOL": "factory",
+    "SHOW_HISTORY": True,
+    "SHOW_VIEW_ON_SITE": False,
+    "SIDEBAR": {
+        "show_search": True,
+        "show_all_applications": False,
+        "navigation": [
+            {
+                "title": "Socle technique",
+                "separator": True,
+                "items": [
+                    {
+                        "title": "Matières",
+                        "icon": "science",
+                        "link": reverse_lazy("admin:technique_matiere_changelist"),
+                    },
+                    {
+                        "title": "Articles",
+                        "icon": "category",
+                        "link": reverse_lazy("admin:technique_article_changelist"),
+                    },
+                    {
+                        "title": "Postes de travail",
+                        "icon": "precision_manufacturing",
+                        "link": reverse_lazy("admin:technique_postetravail_changelist"),
+                    },
+                    {
+                        "title": "Tarifs de poste",
+                        "icon": "payments",
+                        "link": reverse_lazy("admin:technique_tarifposte_changelist"),
+                    },
+                    {
+                        "title": "Nomenclatures",
+                        "icon": "account_tree",
+                        "link": reverse_lazy("admin:technique_nomenclature_changelist"),
+                    },
+                    {
+                        "title": "Gammes",
+                        "icon": "route",
+                        "link": reverse_lazy("admin:technique_gamme_changelist"),
+                    },
+                ],
+            },
+            {
+                "title": "Commercial",
+                "separator": True,
+                "items": [
+                    {
+                        "title": "Tiers",
+                        "icon": "handshake",
+                        "link": reverse_lazy("admin:commercial_tiers_changelist"),
+                    },
+                    {
+                        "title": "Adresses",
+                        "icon": "location_on",
+                        "link": reverse_lazy("admin:commercial_adresse_changelist"),
+                    },
+                    {
+                        "title": "Contacts",
+                        "icon": "contacts",
+                        "link": reverse_lazy("admin:commercial_contact_changelist"),
+                    },
+                ],
+            },
+            {
+                "title": "Chiffrage et production",
+                "separator": True,
+                "items": [
+                    {
+                        "title": "Devis",
+                        "icon": "request_quote",
+                        "link": reverse_lazy("admin:chiffrage_devis_changelist"),
+                    },
+                    {
+                        "title": "Commandes",
+                        "icon": "shopping_cart",
+                        "link": reverse_lazy("admin:chiffrage_commande_changelist"),
+                    },
+                    {
+                        "title": "Ordres de fabrication",
+                        "icon": "build",
+                        "link": reverse_lazy("admin:chiffrage_ordrefabrication_changelist"),
+                    },
+                ],
+            },
+            {
+                "title": "Stock",
+                "separator": True,
+                "items": [
+                    {
+                        "title": "Emplacements",
+                        "icon": "warehouse",
+                        "link": reverse_lazy("admin:stock_emplacement_changelist"),
+                    },
+                    {
+                        "title": "Lots",
+                        "icon": "inventory_2",
+                        "link": reverse_lazy("admin:stock_lot_changelist"),
+                    },
+                    {
+                        "title": "Mouvements de stock",
+                        "icon": "sync_alt",
+                        "link": reverse_lazy("admin:stock_mouvementstock_changelist"),
+                    },
+                    {
+                        "title": "Alertes de stock",
+                        "icon": "warning",
+                        "link": reverse_lazy("admin:stock_alertestock_changelist"),
+                    },
+                ],
+            },
+            {
+                "title": "Achats et sous-traitance",
+                "separator": True,
+                "items": [
+                    {
+                        "title": "Commandes fournisseur",
+                        "icon": "local_shipping",
+                        "link": reverse_lazy("admin:achats_commandefournisseur_changelist"),
+                    },
+                    {
+                        "title": "Réceptions",
+                        "icon": "move_to_inbox",
+                        "link": reverse_lazy("admin:achats_reception_changelist"),
+                    },
+                    {
+                        "title": "Envois sous-traitance",
+                        "icon": "outbound",
+                        "link": reverse_lazy("admin:soustraitance_envoisoustraitance_changelist"),
+                    },
+                    {
+                        "title": "Retours sous-traitance",
+                        "icon": "keyboard_return",
+                        "link": reverse_lazy("admin:soustraitance_retoursoustraitance_changelist"),
+                    },
+                ],
+            },
+            {
+                "title": "Facturation",
+                "separator": True,
+                "items": [
+                    {
+                        "title": "Factures",
+                        "icon": "receipt_long",
+                        "link": reverse_lazy("admin:facturation_facture_changelist"),
+                    },
+                ],
+            },
+        ],
     },
 }

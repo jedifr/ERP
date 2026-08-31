@@ -1,20 +1,21 @@
 from django.contrib import admin
+from unfold.admin import ModelAdmin, TabularInline
 
 from .models import Adresse, Contact, Tiers
 
 
-class AdresseInline(admin.TabularInline):
+class AdresseInline(TabularInline):
     model = Adresse
     extra = 1
 
 
-class ContactInline(admin.TabularInline):
+class ContactInline(TabularInline):
     model = Contact
     extra = 1
 
 
 @admin.register(Tiers)
-class TiersAdmin(admin.ModelAdmin):
+class TiersAdmin(ModelAdmin):
     list_display = ["code", "raison_sociale", "type_tiers", "siret"]
     list_filter = ["type_tiers"]
     search_fields = ["code", "raison_sociale", "siret"]
@@ -22,7 +23,7 @@ class TiersAdmin(admin.ModelAdmin):
 
 
 @admin.register(Adresse)
-class AdresseAdmin(admin.ModelAdmin):
+class AdresseAdmin(ModelAdmin):
     list_display = ["tiers", "type_adresse", "libelle", "ville", "est_principale"]
     list_filter = ["type_adresse", "est_principale"]
     search_fields = ["tiers__code", "tiers__raison_sociale", "ville"]
@@ -30,7 +31,7 @@ class AdresseAdmin(admin.ModelAdmin):
 
 
 @admin.register(Contact)
-class ContactAdmin(admin.ModelAdmin):
+class ContactAdmin(ModelAdmin):
     list_display = ["nom", "prenom", "tiers", "email", "telephone", "fonction"]
     search_fields = ["nom", "prenom", "tiers__code", "tiers__raison_sociale"]
     autocomplete_fields = ["tiers"]

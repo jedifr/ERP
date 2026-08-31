@@ -1,4 +1,5 @@
 from django.contrib import admin, messages
+from unfold.admin import ModelAdmin, TabularInline
 
 from .models import Commande, Devis, DevisLigne, DevisLigneOperation, OperationOF, OrdreFabrication
 from .moteur import ChiffrageError, calculer_devis
@@ -6,14 +7,14 @@ from .planning_sync import resynchroniser
 from .production import lancer_en_production
 
 
-class DevisLigneInline(admin.TabularInline):
+class DevisLigneInline(TabularInline):
     model = DevisLigne
     extra = 1
     autocomplete_fields = ["article"]
     readonly_fields = ["cout_matiere_calcule", "prix_vente_matiere"]
 
 
-class DevisLigneOperationInline(admin.TabularInline):
+class DevisLigneOperationInline(TabularInline):
     model = DevisLigneOperation
     extra = 0
     readonly_fields = ["poste", "ordre", "cout_calcule", "prix_vente"]
@@ -24,7 +25,7 @@ class DevisLigneOperationInline(admin.TabularInline):
 
 
 @admin.register(Devis)
-class DevisAdmin(admin.ModelAdmin):
+class DevisAdmin(ModelAdmin):
     list_display = ["numero", "client", "date_creation", "statut", "taux_marge_globale"]
     list_filter = ["statut"]
     search_fields = ["numero", "client__raison_sociale"]
@@ -56,7 +57,7 @@ class DevisAdmin(admin.ModelAdmin):
 
 
 @admin.register(DevisLigne)
-class DevisLigneAdmin(admin.ModelAdmin):
+class DevisLigneAdmin(ModelAdmin):
     list_display = ["devis", "article", "quantite", "cout_matiere_calcule", "prix_vente_matiere"]
     search_fields = ["devis__numero", "article__reference"]
     autocomplete_fields = ["devis", "article"]
@@ -64,19 +65,19 @@ class DevisLigneAdmin(admin.ModelAdmin):
 
 
 @admin.register(Commande)
-class CommandeAdmin(admin.ModelAdmin):
+class CommandeAdmin(ModelAdmin):
     list_display = ["numero", "devis", "date_commande", "statut"]
     search_fields = ["numero", "devis__numero"]
     autocomplete_fields = ["devis", "adresse_facturation", "adresse_livraison"]
 
 
-class OperationOFInline(admin.TabularInline):
+class OperationOFInline(TabularInline):
     model = OperationOF
     extra = 0
 
 
 @admin.register(OrdreFabrication)
-class OrdreFabricationAdmin(admin.ModelAdmin):
+class OrdreFabricationAdmin(ModelAdmin):
     list_display = [
         "numero",
         "commande",
@@ -102,7 +103,7 @@ class OrdreFabricationAdmin(admin.ModelAdmin):
 
 
 @admin.register(OperationOF)
-class OperationOFAdmin(admin.ModelAdmin):
+class OperationOFAdmin(ModelAdmin):
     list_display = ["ordre_fabrication", "ordre", "poste", "temps_prevu", "temps_reel", "statut"]
     search_fields = ["ordre_fabrication__numero", "poste__nom"]
     autocomplete_fields = ["ordre_fabrication", "poste"]

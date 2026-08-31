@@ -1,29 +1,30 @@
 from django.contrib import admin
+from unfold.admin import ModelAdmin, TabularInline
 
 from .models import Article, Gamme, Matiere, Nomenclature, PosteTravail, TarifPoste
 
 
-class NomenclatureInline(admin.TabularInline):
+class NomenclatureInline(TabularInline):
     model = Nomenclature
     fk_name = "article_parent"
     extra = 1
     autocomplete_fields = ["article_composant"]
 
 
-class GammeInline(admin.TabularInline):
+class GammeInline(TabularInline):
     model = Gamme
     extra = 1
     autocomplete_fields = ["poste"]
 
 
 @admin.register(Matiere)
-class MatiereAdmin(admin.ModelAdmin):
+class MatiereAdmin(ModelAdmin):
     list_display = ["nom", "densite"]
     search_fields = ["nom"]
 
 
 @admin.register(Article)
-class ArticleAdmin(admin.ModelAdmin):
+class ArticleAdmin(ModelAdmin):
     list_display = [
         "reference",
         "nature",
@@ -40,28 +41,28 @@ class ArticleAdmin(admin.ModelAdmin):
 
 
 @admin.register(PosteTravail)
-class PosteTravailAdmin(admin.ModelAdmin):
+class PosteTravailAdmin(ModelAdmin):
     list_display = ["nom", "type_operation", "mode_calcul", "nombre_machines", "taux_marge_defaut"]
     list_filter = ["mode_calcul"]
     search_fields = ["nom"]
 
 
 @admin.register(TarifPoste)
-class TarifPosteAdmin(admin.ModelAdmin):
+class TarifPosteAdmin(ModelAdmin):
     list_display = ["poste", "cout_horaire", "date_debut", "date_fin"]
     list_filter = ["poste"]
     autocomplete_fields = ["poste"]
 
 
 @admin.register(Nomenclature)
-class NomenclatureAdmin(admin.ModelAdmin):
+class NomenclatureAdmin(ModelAdmin):
     list_display = ["article_parent", "article_composant", "quantite", "longueur_mm", "largeur_mm"]
     search_fields = ["article_parent__reference", "article_composant__reference"]
     autocomplete_fields = ["article_parent", "article_composant"]
 
 
 @admin.register(Gamme)
-class GammeAdmin(admin.ModelAdmin):
+class GammeAdmin(ModelAdmin):
     list_display = ["article", "ordre", "poste", "date_debut", "date_fin"]
     list_filter = ["poste"]
     search_fields = ["article__reference"]

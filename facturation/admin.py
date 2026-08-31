@@ -1,10 +1,11 @@
 from django.contrib import admin
+from unfold.admin import ModelAdmin, TabularInline
 
 from .models import Facture
 
 
 @admin.register(Facture)
-class FactureAdmin(admin.ModelAdmin):
+class FactureAdmin(ModelAdmin):
     list_display = [
         "numero",
         "commande",

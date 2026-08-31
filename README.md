@@ -7,7 +7,9 @@ Cahier des charges complet : [`docs/ERP_Specification_Complete_4_Phases.md`](doc
 
 - **Backend** : Django 5.2 + Django REST Framework
 - **Base de données** : PostgreSQL
-- **Admin** : interface d'administration Django (CRUD des référentiels)
+- **Admin** : interface d'administration Django habillée avec
+  [django-unfold](https://github.com/unfoldadmin/django-unfold) (thème,
+  navigation latérale par module, dashboard)
 - **API** : REST (DRF), destinée notamment à la synchronisation avec l'outil de
   planification d'atelier (fraisage/tournage) hébergé sur le NAS Synology
 
@@ -171,3 +173,20 @@ App `chiffrage`, plus un socle minimal de l'app `commercial` (Tiers, Adresse
     heures/jour/machine). Le cahier des charges ne précise pas la base de
     calcul de la capacité (jours ouvrés, heures/jour) : approximation
     lundi-vendredi à 7h/jour/machine, ajustable par appel de la fonction.
+
+## Interface — habillage de l'admin
+
+L'admin Django est thémé avec **django-unfold** (`config/settings.py`, clé
+`UNFOLD`) : navigation latérale groupée par module (Socle technique,
+Commercial, Chiffrage et production, Stock, Achats, Sous-traitance,
+Facturation), icônes, dashboard, recherche globale. Tous les `ModelAdmin` et
+`TabularInline` du projet utilisent `unfold.admin.ModelAdmin` /
+`unfold.admin.TabularInline` au lieu des classes Django standard — aucun
+changement de logique, uniquement la classe de base.
+
+Piste de polish facile pour la suite : la plupart des libellés de champs
+perdent leurs accents dans les formulaires (ex. "Cout unitaire", "Gere en
+stock") car ils sont auto-générés depuis les noms de champs Python. Ajouter
+un `verbose_name` explicite (avec accents) aux champs des modèles
+améliorerait immédiatement le rendu, sans aucun risque (n'affecte que
+l'affichage).
