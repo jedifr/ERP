@@ -15,15 +15,17 @@ class Facture(models.Model):
         MANUEL = "manuel", "Manuel"
         AUTOMATIQUE = "automatique", "Automatique"
 
-    numero = models.CharField(max_length=50, primary_key=True)
-    commande = models.ForeignKey(Commande, on_delete=models.PROTECT, related_name="factures")
-    reference_tiime = models.CharField(max_length=100, blank=True)
-    montant_ht = models.FloatField(null=True, blank=True)
-    montant_ttc = models.FloatField(null=True, blank=True)
-    date_facturation = models.DateField()
-    statut_paiement = models.CharField(max_length=50, blank=True)
+    numero = models.CharField("numéro", max_length=50, primary_key=True)
+    commande = models.ForeignKey(
+        Commande, verbose_name="commande", on_delete=models.PROTECT, related_name="factures"
+    )
+    reference_tiime = models.CharField("référence Tiime", max_length=100, blank=True)
+    montant_ht = models.FloatField("montant HT", null=True, blank=True)
+    montant_ttc = models.FloatField("montant TTC", null=True, blank=True)
+    date_facturation = models.DateField("date de facturation")
+    statut_paiement = models.CharField("statut de paiement", max_length=50, blank=True)
     mode_creation = models.CharField(
-        max_length=20, choices=ModeCreation.choices, default=ModeCreation.MANUEL
+        "mode de création", max_length=20, choices=ModeCreation.choices, default=ModeCreation.MANUEL
     )
 
     class Meta:

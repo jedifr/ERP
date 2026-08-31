@@ -12,11 +12,13 @@ class AchatsError(Exception):
 
 
 class CommandeFournisseur(models.Model):
-    numero = models.CharField(max_length=50, primary_key=True)
-    fournisseur = models.ForeignKey(Tiers, on_delete=models.PROTECT, related_name="commandes_fournisseur")
-    date_commande = models.DateField()
-    date_livraison_prevue = models.DateField(null=True, blank=True)
-    statut = models.CharField(max_length=50, blank=True)
+    numero = models.CharField("numéro", max_length=50, primary_key=True)
+    fournisseur = models.ForeignKey(
+        Tiers, verbose_name="fournisseur", on_delete=models.PROTECT, related_name="commandes_fournisseur"
+    )
+    date_commande = models.DateField("date de commande")
+    date_livraison_prevue = models.DateField("date de livraison prévue", null=True, blank=True)
+    statut = models.CharField("statut", max_length=50, blank=True)
 
     class Meta:
         verbose_name = "Commande fournisseur"
@@ -29,20 +31,28 @@ class CommandeFournisseur(models.Model):
 
 class LigneCommandeFournisseur(models.Model):
     commande_fournisseur = models.ForeignKey(
-        CommandeFournisseur, on_delete=models.CASCADE, related_name="lignes"
+        CommandeFournisseur, verbose_name="commande fournisseur", on_delete=models.CASCADE, related_name="lignes"
     )
-    article = models.ForeignKey(Article, on_delete=models.PROTECT, related_name="lignes_commande_fournisseur")
+    article = models.ForeignKey(
+        Article,
+        verbose_name="article",
+        on_delete=models.PROTECT,
+        related_name="lignes_commande_fournisseur",
+    )
     alerte_stock_origine = models.ForeignKey(
         AlerteStock,
+        verbose_name="alerte de stock d'origine",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
         related_name="lignes_commande_fournisseur",
         help_text="Nullable — clôture l'alerte à la commande",
     )
-    quantite_commandee = models.FloatField()
-    prix_unitaire_achat = models.FloatField()
-    quantite_recue = models.FloatField(default=0, editable=False, help_text="Cumul recalculé depuis les réceptions")
+    quantite_commandee = models.FloatField("quantité commandée")
+    prix_unitaire_achat = models.FloatField("prix unitaire d'achat")
+    quantite_recue = models.FloatField(
+        "quantité reçue", default=0, editable=False, help_text="Cumul recalculé depuis les réceptions"
+    )
 
     class Meta:
         verbose_name = "Ligne de commande fournisseur"
@@ -63,11 +73,14 @@ class LigneCommandeFournisseur(models.Model):
 
 
 class Reception(models.Model):
-    numero = models.CharField(max_length=50, primary_key=True)
+    numero = models.CharField("numéro", max_length=50, primary_key=True)
     commande_fournisseur = models.ForeignKey(
-        CommandeFournisseur, on_delete=models.PROTECT, related_name="receptions"
+        CommandeFournisseur,
+        verbose_name="commande fournisseur",
+        on_delete=models.PROTECT,
+        related_name="receptions",
     )
-    date_reception = models.DateField(default=timezone.now)
+    date_reception = models.DateField("date de réception", default=timezone.now)
 
     class Meta:
         verbose_name = "Réception"
@@ -79,11 +92,16 @@ class Reception(models.Model):
 
 
 class ReceptionLigne(models.Model):
-    reception = models.ForeignKey(Reception, on_delete=models.CASCADE, related_name="lignes")
-    ligne_commande_fournisseur = models.ForeignKey(
-        LigneCommandeFournisseur, on_delete=models.PROTECT, related_name="receptions_lignes"
+    reception = models.ForeignKey(
+        Reception, verbose_name="réception", on_delete=models.CASCADE, related_name="lignes"
     )
-    quantite_recue = models.FloatField()
+    ligne_commande_fournisseur = models.ForeignKey(
+        LigneCommandeFournisseur,
+        verbose_name="ligne de commande fournisseur",
+        on_delete=models.PROTECT,
+        related_name="receptions_lignes",
+    )
+    quantite_recue = models.FloatField("quantité reçue")
 
     class Meta:
         verbose_name = "Ligne de réception"

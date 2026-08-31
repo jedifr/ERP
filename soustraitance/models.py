@@ -8,14 +8,19 @@ from commercial.models import Tiers
 
 
 class EnvoiSousTraitance(models.Model):
-    numero = models.CharField(max_length=50, primary_key=True)
+    numero = models.CharField("numéro", max_length=50, primary_key=True)
     operation_of = models.ForeignKey(
-        OperationOF, on_delete=models.PROTECT, related_name="envois_sous_traitance"
+        OperationOF,
+        verbose_name="opération d'ordre de fabrication",
+        on_delete=models.PROTECT,
+        related_name="envois_sous_traitance",
     )
-    sous_traitant = models.ForeignKey(Tiers, on_delete=models.PROTECT, related_name="envois_sous_traitance")
-    date_envoi = models.DateField(default=timezone.now)
-    quantite_envoyee = models.FloatField()
-    statut = models.CharField(max_length=50, blank=True)
+    sous_traitant = models.ForeignKey(
+        Tiers, verbose_name="sous-traitant", on_delete=models.PROTECT, related_name="envois_sous_traitance"
+    )
+    date_envoi = models.DateField("date d'envoi", default=timezone.now)
+    quantite_envoyee = models.FloatField("quantité envoyée")
+    statut = models.CharField("statut", max_length=50, blank=True)
 
     class Meta:
         verbose_name = "Envoi en sous-traitance"
@@ -31,11 +36,13 @@ class EnvoiSousTraitance(models.Model):
 
 
 class RetourSousTraitance(models.Model):
-    numero = models.CharField(max_length=50, primary_key=True)
-    envoi = models.ForeignKey(EnvoiSousTraitance, on_delete=models.CASCADE, related_name="retours")
-    date_retour = models.DateField(default=timezone.now)
-    quantite_retournee = models.FloatField()
-    conforme = models.BooleanField(default=True, help_text="Contrôle qualité simple")
+    numero = models.CharField("numéro", max_length=50, primary_key=True)
+    envoi = models.ForeignKey(
+        EnvoiSousTraitance, verbose_name="envoi", on_delete=models.CASCADE, related_name="retours"
+    )
+    date_retour = models.DateField("date de retour", default=timezone.now)
+    quantite_retournee = models.FloatField("quantité retournée")
+    conforme = models.BooleanField("conforme", default=True, help_text="Contrôle qualité simple")
 
     class Meta:
         verbose_name = "Retour de sous-traitance"

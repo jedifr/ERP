@@ -10,12 +10,12 @@ class Devis(models.Model):
         BROUILLON = "brouillon", "Brouillon"
         VALIDE = "valide", "Validé"
 
-    numero = models.CharField(max_length=50, primary_key=True)
-    client = models.ForeignKey(Tiers, on_delete=models.PROTECT, related_name="devis")
-    date_creation = models.DateField()
-    statut = models.CharField(max_length=20, choices=Statut.choices, default=Statut.BROUILLON)
+    numero = models.CharField("numéro", max_length=50, primary_key=True)
+    client = models.ForeignKey(Tiers, verbose_name="client", on_delete=models.PROTECT, related_name="devis")
+    date_creation = models.DateField("date de création")
+    statut = models.CharField("statut", max_length=20, choices=Statut.choices, default=Statut.BROUILLON)
     taux_marge_globale = models.FloatField(
-        null=True, blank=True, help_text="Optionnel, écrase les marges par défaut"
+        "taux de marge globale", null=True, blank=True, help_text="Optionnel, écrase les marges par défaut"
     )
 
     class Meta:
@@ -28,14 +28,21 @@ class Devis(models.Model):
 
 
 class DevisLigne(models.Model):
-    devis = models.ForeignKey(Devis, on_delete=models.CASCADE, related_name="lignes")
-    article = models.ForeignKey(Article, on_delete=models.PROTECT, related_name="devis_lignes")
-    quantite = models.FloatField()
-    cout_matiere_calcule = models.FloatField(null=True, blank=True, editable=False)
-    taux_marge_matiere_applique = models.FloatField(
-        null=True, blank=True, help_text="Pré-rempli depuis l'article, éditable"
+    devis = models.ForeignKey(Devis, verbose_name="devis", on_delete=models.CASCADE, related_name="lignes")
+    article = models.ForeignKey(
+        Article, verbose_name="article", on_delete=models.PROTECT, related_name="devis_lignes"
     )
-    prix_vente_matiere = models.FloatField(null=True, blank=True, editable=False)
+    quantite = models.FloatField("quantité")
+    cout_matiere_calcule = models.FloatField(
+        "coût matière calculé", null=True, blank=True, editable=False
+    )
+    taux_marge_matiere_applique = models.FloatField(
+        "taux de marge matière appliqué",
+        null=True,
+        blank=True,
+        help_text="Pré-rempli depuis l'article, éditable",
+    )
+    prix_vente_matiere = models.FloatField("prix de vente matière", null=True, blank=True, editable=False)
 
     class Meta:
         verbose_name = "Ligne de devis"
@@ -47,14 +54,18 @@ class DevisLigne(models.Model):
 
 
 class DevisLigneOperation(models.Model):
-    devis_ligne = models.ForeignKey(DevisLigne, on_delete=models.CASCADE, related_name="operations")
-    poste = models.ForeignKey(PosteTravail, on_delete=models.PROTECT, related_name="devis_operations")
-    ordre = models.PositiveIntegerField()
-    cout_calcule = models.FloatField(null=True, blank=True, editable=False)
-    taux_marge_applique = models.FloatField(
-        null=True, blank=True, help_text="Pré-rempli depuis le poste, éditable"
+    devis_ligne = models.ForeignKey(
+        DevisLigne, verbose_name="ligne de devis", on_delete=models.CASCADE, related_name="operations"
     )
-    prix_vente = models.FloatField(null=True, blank=True, editable=False)
+    poste = models.ForeignKey(
+        PosteTravail, verbose_name="poste", on_delete=models.PROTECT, related_name="devis_operations"
+    )
+    ordre = models.PositiveIntegerField("ordre")
+    cout_calcule = models.FloatField("coût calculé", null=True, blank=True, editable=False)
+    taux_marge_applique = models.FloatField(
+        "taux de marge appliqué", null=True, blank=True, help_text="Pré-rempli depuis le poste, éditable"
+    )
+    prix_vente = models.FloatField("prix de vente", null=True, blank=True, editable=False)
 
     class Meta:
         verbose_name = "Opération de ligne de devis"
@@ -71,15 +82,21 @@ class DevisLigneOperation(models.Model):
 
 
 class Commande(models.Model):
-    numero = models.CharField(max_length=50, primary_key=True)
-    devis = models.ForeignKey(Devis, on_delete=models.PROTECT, related_name="commandes")
-    date_commande = models.DateField()
-    statut = models.CharField(max_length=50, blank=True)
+    numero = models.CharField("numéro", max_length=50, primary_key=True)
+    devis = models.ForeignKey(Devis, verbose_name="devis", on_delete=models.PROTECT, related_name="commandes")
+    date_commande = models.DateField("date de commande")
+    statut = models.CharField("statut", max_length=50, blank=True)
     adresse_facturation = models.ForeignKey(
-        Adresse, on_delete=models.PROTECT, related_name="commandes_facturation"
+        Adresse,
+        verbose_name="adresse de facturation",
+        on_delete=models.PROTECT,
+        related_name="commandes_facturation",
     )
     adresse_livraison = models.ForeignKey(
-        Adresse, on_delete=models.PROTECT, related_name="commandes_livraison"
+        Adresse,
+        verbose_name="adresse de livraison",
+        on_delete=models.PROTECT,
+        related_name="commandes_livraison",
     )
 
     class Meta:
@@ -97,17 +114,24 @@ class OrdreFabrication(models.Model):
         EN_ATTENTE = "en_attente", "En attente"
         ECHEC_PERSISTANT = "echec_persistant", "Échec persistant"
 
-    numero = models.CharField(max_length=50, primary_key=True)
-    commande = models.ForeignKey(Commande, on_delete=models.CASCADE, related_name="ordres_fabrication")
-    article = models.ForeignKey(Article, on_delete=models.PROTECT, related_name="ordres_fabrication")
-    quantite = models.FloatField()
-    date_lancement = models.DateField()
-    statut = models.CharField(max_length=50, blank=True, help_text="Statut de production")
-    statut_synchro = models.CharField(
-        max_length=20, choices=StatutSynchro.choices, default=StatutSynchro.EN_ATTENTE
+    numero = models.CharField("numéro", max_length=50, primary_key=True)
+    commande = models.ForeignKey(
+        Commande, verbose_name="commande", on_delete=models.CASCADE, related_name="ordres_fabrication"
     )
-    nombre_tentatives = models.PositiveIntegerField(default=0)
-    date_derniere_tentative = models.DateField(null=True, blank=True)
+    article = models.ForeignKey(
+        Article, verbose_name="article", on_delete=models.PROTECT, related_name="ordres_fabrication"
+    )
+    quantite = models.FloatField("quantité")
+    date_lancement = models.DateField("date de lancement")
+    statut = models.CharField("statut", max_length=50, blank=True, help_text="Statut de production")
+    statut_synchro = models.CharField(
+        "statut de synchronisation",
+        max_length=20,
+        choices=StatutSynchro.choices,
+        default=StatutSynchro.EN_ATTENTE,
+    )
+    nombre_tentatives = models.PositiveIntegerField("nombre de tentatives", default=0)
+    date_derniere_tentative = models.DateField("date de dernière tentative", null=True, blank=True)
 
     class Meta:
         verbose_name = "Ordre de fabrication"
@@ -127,15 +151,28 @@ class OrdreFabrication(models.Model):
 
 class OperationOF(models.Model):
     ordre_fabrication = models.ForeignKey(
-        OrdreFabrication, on_delete=models.CASCADE, related_name="operations"
+        OrdreFabrication,
+        verbose_name="ordre de fabrication",
+        on_delete=models.CASCADE,
+        related_name="operations",
     )
-    poste = models.ForeignKey(PosteTravail, on_delete=models.PROTECT, related_name="operations_of")
-    ordre = models.PositiveIntegerField()
-    temps_prevu = models.FloatField(null=True, blank=True, help_text="Copié de la gamme au lancement")
-    temps_reel = models.FloatField(null=True, blank=True, help_text="Alimenté par le planning atelier")
-    quantite_bonne = models.FloatField(null=True, blank=True, help_text="Alimenté par le planning atelier")
-    quantite_rebut = models.FloatField(null=True, blank=True, help_text="Alimenté par le planning atelier")
-    statut = models.CharField(max_length=50, blank=True)
+    poste = models.ForeignKey(
+        PosteTravail, verbose_name="poste", on_delete=models.PROTECT, related_name="operations_of"
+    )
+    ordre = models.PositiveIntegerField("ordre")
+    temps_prevu = models.FloatField(
+        "temps prévu", null=True, blank=True, help_text="Copié de la gamme au lancement"
+    )
+    temps_reel = models.FloatField(
+        "temps réel", null=True, blank=True, help_text="Alimenté par le planning atelier"
+    )
+    quantite_bonne = models.FloatField(
+        "quantité bonne", null=True, blank=True, help_text="Alimenté par le planning atelier"
+    )
+    quantite_rebut = models.FloatField(
+        "quantité rebut", null=True, blank=True, help_text="Alimenté par le planning atelier"
+    )
+    statut = models.CharField("statut", max_length=50, blank=True)
 
     class Meta:
         verbose_name = "Opération d'ordre de fabrication"

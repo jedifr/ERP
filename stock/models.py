@@ -7,8 +7,8 @@ from technique.models import Article
 
 
 class Emplacement(models.Model):
-    code = models.CharField(max_length=50, primary_key=True)
-    libelle = models.CharField(max_length=200, blank=True)
+    code = models.CharField("code", max_length=50, primary_key=True)
+    libelle = models.CharField("libellé", max_length=200, blank=True)
 
     class Meta:
         verbose_name = "Emplacement"
@@ -25,11 +25,17 @@ class Lot(models.Model):
     modèle, juste la création de lots supplémentaires — voir `longueur_restante`.
     """
 
-    article = models.ForeignKey(Article, on_delete=models.PROTECT, related_name="lots")
-    emplacement = models.ForeignKey(Emplacement, on_delete=models.PROTECT, related_name="lots")
-    quantite = models.FloatField(default=0)
-    longueur_restante = models.FloatField(null=True, blank=True, help_text="Inutilisé en v1")
-    statut = models.CharField(max_length=50, blank=True)
+    article = models.ForeignKey(
+        Article, verbose_name="article", on_delete=models.PROTECT, related_name="lots"
+    )
+    emplacement = models.ForeignKey(
+        Emplacement, verbose_name="emplacement", on_delete=models.PROTECT, related_name="lots"
+    )
+    quantite = models.FloatField("quantité", default=0)
+    longueur_restante = models.FloatField(
+        "longueur restante", null=True, blank=True, help_text="Inutilisé en v1"
+    )
+    statut = models.CharField("statut", max_length=50, blank=True)
 
     class Meta:
         verbose_name = "Lot"
@@ -52,12 +58,15 @@ class MouvementStock(models.Model):
         ENTREE = "entree", "Entrée"
         SORTIE = "sortie", "Sortie"
 
-    lot = models.ForeignKey(Lot, on_delete=models.PROTECT, related_name="mouvements")
-    type_mouvement = models.CharField(max_length=20, choices=TypeMouvement.choices)
-    quantite = models.FloatField()
-    date_mouvement = models.DateField(default=timezone.now)
+    lot = models.ForeignKey(Lot, verbose_name="lot", on_delete=models.PROTECT, related_name="mouvements")
+    type_mouvement = models.CharField("type de mouvement", max_length=20, choices=TypeMouvement.choices)
+    quantite = models.FloatField("quantité")
+    date_mouvement = models.DateField("date de mouvement", default=timezone.now)
     reference_origine = models.CharField(
-        max_length=100, blank=True, help_text="Pointe vers l'OF, la commande fournisseur, etc."
+        "référence d'origine",
+        max_length=100,
+        blank=True,
+        help_text="Pointe vers l'OF, la commande fournisseur, etc.",
     )
 
     class Meta:
@@ -93,11 +102,16 @@ class AlerteStock(models.Model):
         ACTIVE = "active", "Active"
         TRAITEE = "traitee", "Traitée"
 
-    article = models.ForeignKey(Article, on_delete=models.CASCADE, related_name="alertes_stock")
-    date_declenchement = models.DateField(default=timezone.now)
-    statut = models.CharField(max_length=20, choices=Statut.choices, default=Statut.ACTIVE)
+    article = models.ForeignKey(
+        Article, verbose_name="article", on_delete=models.CASCADE, related_name="alertes_stock"
+    )
+    date_declenchement = models.DateField("date de déclenchement", default=timezone.now)
+    statut = models.CharField("statut", max_length=20, choices=Statut.choices, default=Statut.ACTIVE)
     date_traitement = models.DateField(
-        null=True, blank=True, help_text="Clôture auto (stock remonté) ou manuelle (commande fournisseur)"
+        "date de traitement",
+        null=True,
+        blank=True,
+        help_text="Clôture auto (stock remonté) ou manuelle (commande fournisseur)",
     )
 
     class Meta:

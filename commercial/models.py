@@ -10,15 +10,20 @@ class Tiers(models.Model):
         FOURNISSEUR = "fournisseur", "Fournisseur"
         LES_DEUX = "les_deux", "Les deux"
 
-    code = models.CharField(max_length=50, primary_key=True)
-    raison_sociale = models.CharField(max_length=200)
-    type_tiers = models.CharField(max_length=20, choices=TypeTiers.choices)
+    code = models.CharField("code", max_length=50, primary_key=True)
+    raison_sociale = models.CharField("raison sociale", max_length=200)
+    type_tiers = models.CharField("type de tiers", max_length=20, choices=TypeTiers.choices)
     siret = models.CharField(
-        max_length=14, blank=True, help_text="Obligatoire pour la facturation électronique"
+        "SIRET", max_length=14, blank=True, help_text="Obligatoire pour la facturation électronique"
     )
-    numero_tva = models.CharField(max_length=20, blank=True, help_text="TVA intracommunautaire")
+    numero_tva = models.CharField(
+        "numéro de TVA", max_length=20, blank=True, help_text="TVA intracommunautaire"
+    )
     conditions_paiement = models.CharField(
-        max_length=200, blank=True, help_text="Valeur par défaut, reprise sur devis/commande"
+        "conditions de paiement",
+        max_length=200,
+        blank=True,
+        help_text="Valeur par défaut, reprise sur devis/commande",
     )
 
     class Meta:
@@ -37,13 +42,19 @@ class Adresse(models.Model):
         FACTURATION = "facturation", "Facturation"
         LIVRAISON = "livraison", "Livraison"
 
-    tiers = models.ForeignKey(Tiers, on_delete=models.CASCADE, related_name="adresses")
-    type_adresse = models.CharField(max_length=20, choices=TypeAdresse.choices)
-    libelle = models.CharField(max_length=100, blank=True, help_text='Ex. "Siège", "Entrepôt Nord"')
-    adresse = models.CharField(max_length=255)
-    code_postal = models.CharField(max_length=20)
-    ville = models.CharField(max_length=100)
-    est_principale = models.BooleanField(default=False, help_text="Adresse par défaut proposée")
+    tiers = models.ForeignKey(
+        Tiers, verbose_name="tiers", on_delete=models.CASCADE, related_name="adresses"
+    )
+    type_adresse = models.CharField("type d'adresse", max_length=20, choices=TypeAdresse.choices)
+    libelle = models.CharField(
+        "libellé", max_length=100, blank=True, help_text='Ex. "Siège", "Entrepôt Nord"'
+    )
+    adresse = models.CharField("adresse", max_length=255)
+    code_postal = models.CharField("code postal", max_length=20)
+    ville = models.CharField("ville", max_length=100)
+    est_principale = models.BooleanField(
+        "adresse principale", default=False, help_text="Adresse par défaut proposée"
+    )
 
     class Meta:
         verbose_name = "Adresse"
@@ -73,12 +84,14 @@ class Adresse(models.Model):
 
 
 class Contact(models.Model):
-    tiers = models.ForeignKey(Tiers, on_delete=models.CASCADE, related_name="contacts")
-    nom = models.CharField(max_length=100)
-    prenom = models.CharField(max_length=100, blank=True)
-    email = models.EmailField(blank=True)
-    telephone = models.CharField(max_length=30, blank=True)
-    fonction = models.CharField(max_length=100, blank=True)
+    tiers = models.ForeignKey(
+        Tiers, verbose_name="tiers", on_delete=models.CASCADE, related_name="contacts"
+    )
+    nom = models.CharField("nom", max_length=100)
+    prenom = models.CharField("prénom", max_length=100, blank=True)
+    email = models.EmailField("email", blank=True)
+    telephone = models.CharField("téléphone", max_length=30, blank=True)
+    fonction = models.CharField("fonction", max_length=100, blank=True)
 
     class Meta:
         verbose_name = "Contact"

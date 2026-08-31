@@ -5,8 +5,8 @@ from django.db import models
 class Matiere(models.Model):
     """Référentiel des matières (acier, aluminium, inox...)."""
 
-    nom = models.CharField(max_length=100, primary_key=True)
-    densite = models.FloatField(help_text="kg/dm³, utilisée pour le calcul au poids")
+    nom = models.CharField("nom", max_length=100, primary_key=True)
+    densite = models.FloatField("densité", help_text="kg/dm³, utilisée pour le calcul au poids")
 
     class Meta:
         verbose_name = "Matière"
@@ -37,25 +37,38 @@ class Article(models.Model):
         PROFIL_I = "profil_i", "Profilé I"
         PROFIL_U = "profil_u", "Profilé U"
 
-    reference = models.CharField(max_length=100, primary_key=True)
-    nature = models.CharField(max_length=20, choices=Nature.choices)
+    reference = models.CharField("référence", max_length=100, primary_key=True)
+    nature = models.CharField("nature", max_length=20, choices=Nature.choices)
     matiere = models.ForeignKey(
         Matiere,
+        verbose_name="matière",
         on_delete=models.PROTECT,
         related_name="articles",
         null=True,
         blank=True,
         help_text="Pertinent pour tôles/profilés",
     )
-    unite_cout = models.CharField(max_length=20, choices=UniteCout.choices, null=True, blank=True)
-    epaisseur = models.FloatField(null=True, blank=True, help_text="Tôle")
-    type_profil = models.CharField(max_length=20, choices=TypeProfil.choices, null=True, blank=True)
-    poids_lineique = models.FloatField(null=True, blank=True, help_text="kg/mètre (profilés vendus au poids)")
-    cout_unitaire = models.FloatField(null=True, blank=True, help_text="Coût d'achat (matière première)")
+    unite_cout = models.CharField(
+        "unité de coût", max_length=20, choices=UniteCout.choices, null=True, blank=True
+    )
+    epaisseur = models.FloatField("épaisseur", null=True, blank=True, help_text="Tôle")
+    type_profil = models.CharField(
+        "type de profil", max_length=20, choices=TypeProfil.choices, null=True, blank=True
+    )
+    poids_lineique = models.FloatField(
+        "poids linéique", null=True, blank=True, help_text="kg/mètre (profilés vendus au poids)"
+    )
+    cout_unitaire = models.FloatField(
+        "coût unitaire", null=True, blank=True, help_text="Coût d'achat (matière première)"
+    )
     taux_marge_defaut = models.FloatField(
-        null=True, blank=True, help_text="Marge par défaut sur le coût matière (articles fabriqués)"
+        "taux de marge par défaut",
+        null=True,
+        blank=True,
+        help_text="Marge par défaut sur le coût matière (articles fabriqués)",
     )
     gere_en_stock = models.BooleanField(
+        "géré en stock",
         null=True,
         blank=True,
         help_text=(
@@ -63,8 +76,15 @@ class Article(models.Model):
             "modifiable au cas par cas. Laisser vide pour appliquer le défaut."
         ),
     )
-    stock_mini = models.FloatField(null=True, blank=True, help_text="Seuil d'alerte de réapprovisionnement")
-    quantite_reappro = models.FloatField(null=True, blank=True, help_text="Quantité suggérée à commander")
+    stock_mini = models.FloatField(
+        "stock minimum", null=True, blank=True, help_text="Seuil d'alerte de réapprovisionnement"
+    )
+    quantite_reappro = models.FloatField(
+        "quantité de réapprovisionnement",
+        null=True,
+        blank=True,
+        help_text="Quantité suggérée à commander",
+    )
 
     class Meta:
         verbose_name = "Article"
@@ -99,12 +119,17 @@ class PosteTravail(models.Model):
         HORAIRE = "horaire", "Horaire"
         FORFAITAIRE = "forfaitaire", "Forfaitaire"
 
-    nom = models.CharField(max_length=100, primary_key=True)
-    type_operation = models.CharField(max_length=100, blank=True)
-    mode_calcul = models.CharField(max_length=20, choices=ModeCalcul.choices)
-    nombre_machines = models.PositiveIntegerField(default=1, help_text="Capacité agrégée (usage planning)")
+    nom = models.CharField("nom", max_length=100, primary_key=True)
+    type_operation = models.CharField("type d'opération", max_length=100, blank=True)
+    mode_calcul = models.CharField("mode de calcul", max_length=20, choices=ModeCalcul.choices)
+    nombre_machines = models.PositiveIntegerField(
+        "nombre de machines", default=1, help_text="Capacité agrégée (usage planning)"
+    )
     taux_marge_defaut = models.FloatField(
-        null=True, blank=True, help_text="Marge par défaut sur les opérations de ce poste"
+        "taux de marge par défaut",
+        null=True,
+        blank=True,
+        help_text="Marge par défaut sur les opérations de ce poste",
     )
 
     class Meta:
@@ -156,10 +181,12 @@ class TarifPoste(DateRangeHistoriqueMixin, models.Model):
 
     historique_scope_fields = ("poste",)
 
-    poste = models.ForeignKey(PosteTravail, on_delete=models.CASCADE, related_name="tarifs")
-    cout_horaire = models.FloatField(help_text="€/heure")
-    date_debut = models.DateField()
-    date_fin = models.DateField(null=True, blank=True)
+    poste = models.ForeignKey(
+        PosteTravail, verbose_name="poste", on_delete=models.CASCADE, related_name="tarifs"
+    )
+    cout_horaire = models.FloatField("coût horaire", help_text="€/heure")
+    date_debut = models.DateField("date de début")
+    date_fin = models.DateField("date de fin", null=True, blank=True)
 
     class Meta:
         verbose_name = "Tarif de poste"
@@ -173,11 +200,17 @@ class TarifPoste(DateRangeHistoriqueMixin, models.Model):
 class Nomenclature(models.Model):
     """Ce qu'un article fabriqué consomme."""
 
-    article_parent = models.ForeignKey(Article, on_delete=models.CASCADE, related_name="composants")
-    article_composant = models.ForeignKey(Article, on_delete=models.PROTECT, related_name="utilise_dans")
-    longueur_mm = models.FloatField(null=True, blank=True, help_text="Tôle (avec largeur) ou profilé (seule)")
-    largeur_mm = models.FloatField(null=True, blank=True, help_text="Tôle uniquement")
-    quantite = models.FloatField(help_text="Nombre de pièces/découpes identiques")
+    article_parent = models.ForeignKey(
+        Article, verbose_name="article parent", on_delete=models.CASCADE, related_name="composants"
+    )
+    article_composant = models.ForeignKey(
+        Article, verbose_name="article composant", on_delete=models.PROTECT, related_name="utilise_dans"
+    )
+    longueur_mm = models.FloatField(
+        "longueur (mm)", null=True, blank=True, help_text="Tôle (avec largeur) ou profilé (seule)"
+    )
+    largeur_mm = models.FloatField("largeur (mm)", null=True, blank=True, help_text="Tôle uniquement")
+    quantite = models.FloatField("quantité", help_text="Nombre de pièces/découpes identiques")
 
     class Meta:
         verbose_name = "Ligne de nomenclature"
@@ -204,14 +237,24 @@ class Gamme(DateRangeHistoriqueMixin, models.Model):
 
     historique_scope_fields = ("article", "poste", "ordre")
 
-    article = models.ForeignKey(Article, on_delete=models.CASCADE, related_name="gamme_etapes")
-    poste = models.ForeignKey(PosteTravail, on_delete=models.PROTECT, related_name="gamme_etapes")
-    ordre = models.PositiveIntegerField()
-    temps_fixe = models.FloatField(null=True, blank=True, help_text="Réglage (mode horaire)")
-    temps_variable = models.FloatField(null=True, blank=True, help_text="Temps unitaire (mode horaire)")
-    cout_forfaitaire = models.FloatField(null=True, blank=True, help_text="Mode forfaitaire (sous-traitance)")
-    date_debut = models.DateField()
-    date_fin = models.DateField(null=True, blank=True, help_text="Historisation de la révision")
+    article = models.ForeignKey(
+        Article, verbose_name="article", on_delete=models.CASCADE, related_name="gamme_etapes"
+    )
+    poste = models.ForeignKey(
+        PosteTravail, verbose_name="poste", on_delete=models.PROTECT, related_name="gamme_etapes"
+    )
+    ordre = models.PositiveIntegerField("ordre")
+    temps_fixe = models.FloatField("temps fixe", null=True, blank=True, help_text="Réglage (mode horaire)")
+    temps_variable = models.FloatField(
+        "temps variable", null=True, blank=True, help_text="Temps unitaire (mode horaire)"
+    )
+    cout_forfaitaire = models.FloatField(
+        "coût forfaitaire", null=True, blank=True, help_text="Mode forfaitaire (sous-traitance)"
+    )
+    date_debut = models.DateField("date de début")
+    date_fin = models.DateField(
+        "date de fin", null=True, blank=True, help_text="Historisation de la révision"
+    )
 
     class Meta:
         verbose_name = "Étape de gamme"
