@@ -10,9 +10,9 @@ from django.views.decorators.http import require_http_methods
 
 from technique.models import Article, PosteTravail
 
-from .builder import ajouter_ligne_devis, creer_article_fabrique
-from .models import Devis
-from .moteur import ChiffrageError
+from .builder import ajouter_ligne_devis, creer_article_fabrique, erreur_lisible
+from .models import Devis, DevisLigne
+from .moteur import ChiffrageError, calculer_devis
 
 
 @staff_member_required
@@ -115,4 +115,53 @@ def _creer_article_depuis_payload(data):
         taux_marge_defaut=data.get("taux_marge_defaut") or None,
         composants=composants,
         etapes=etapes,
+    )
+
+
+@staff_member_required
+@require_http_methods(["POST"])
+def recalculer_ligne_view(request, numero, ligne_id):
+    """Met à jour une ligne de devis (quantité / taux de marge) et recalcule
+    le devis en direct — utilisé par le JS de la fiche Devis (recalcul en
+    temps réel, sans passer par l'action admin "Recalculer le chiffrage")."""
+    devis = get_object_or_404(Devis, pk=numero)
+    ligne = get_object_or_404(DevisLigne, pk=ligne_id, devis=devis)
+
+    try:
+        payload = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"detail": "JSON invalide."}, status=400)
+
+    if "quantite" in payload:
+        try:
+            ligne.quantite = float(payload["quantite"])
+        except (TypeError, ValueError):
+            return JsonResponse({"detail": "Quantité invalide."}, status=400)
+
+    if "taux_marge_matiere_applique" in payload:
+        valeur = payload["taux_marge_matiere_applique"]
+        try:
+            ligne.taux_marge_matiere_applique = float(valeur) if valeur not in (None, "") else None
+        except (TypeError, ValueError):
+            return JsonResponse({"detail": "Taux de marge invalide."}, status=400)
+
+    try:
+        ligne.full_clean()
+    except Exception as exc:
+        return JsonResponse({"detail": erreur_lisible(exc)}, status=400)
+    ligne.save()
+
+    try:
+        calculer_devis(devis)
+    except ChiffrageError as exc:
+        return JsonResponse({"detail": str(exc)}, status=400)
+
+    ligne.refresh_from_db()
+    return JsonResponse(
+        {
+            "ok": True,
+            "cout_matiere_calcule": ligne.cout_matiere_calcule,
+            "prix_vente_matiere": ligne.prix_vente_matiere,
+            "taux_marge_matiere_applique": ligne.taux_marge_matiere_applique,
+        }
     )

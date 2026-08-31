@@ -226,3 +226,20 @@ apparaît sous "Coût unitaire" selon l'unité de coût choisie
 
 Ce champ est bidirectionnel : le modifier met à jour `cout_unitaire` (le
 seul champ réellement enregistré) instantanément, sans recharger la page.
+
+## Recalcul en direct des lignes de devis
+
+Sur la fiche standard d'un devis (admin), modifier la **quantité** ou le
+**taux de marge matière appliqué** d'une ligne déjà enregistrée déclenche
+un recalcul automatique (délai de 400ms après la dernière frappe), sans
+recharger la page ni cliquer sur "Recalculer le chiffrage" :
+`chiffrage/static/chiffrage/devis_admin_live.js` envoie la nouvelle valeur à
+`POST /admin/chiffrage/devis/<numero>/lignes/<id>/recalculer/`
+(`chiffrage/builder_views.py`, `recalculer_ligne_view`), qui réutilise
+`calculer_devis()` — une seule implémentation du calcul, côté serveur,
+jamais dupliquée en JavaScript.
+
+Limite assumée : une ligne pas encore enregistrée (ajoutée mais devis non
+sauvegardé) n'a pas encore d'identifiant, donc pas de recalcul live tant
+qu'elle n'a pas été enregistrée une première fois (normalement, via
+"Enregistrer" ou le constructeur de devis).

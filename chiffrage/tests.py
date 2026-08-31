@@ -538,3 +538,94 @@ class DevisBuilderViewTests(TestCase):
         self.client.logout()
         response = self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/constructeur/")
         self.assertNotEqual(response.status_code, 200)
+
+
+class RecalculerLigneViewTests(TestCase):
+    """Recalcul en direct d'une ligne de devis (quantité / taux de marge)."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        self.user = User.objects.create_superuser("live-admin", "l@example.com", "pass1234")
+        self.client.force_login(self.user)
+
+        self.article = Article.objects.create(
+            reference="ART-LIVE-TEST",
+            nature=Article.Nature.MATIERE_PREMIERE,
+            unite_cout=Article.UniteCout.PIECE,
+            cout_unitaire=2.0,
+        )
+        client_tiers = Tiers.objects.create(
+            code="CLI-LIVE-TEST", raison_sociale="Client Live Test", type_tiers=Tiers.TypeTiers.CLIENT
+        )
+        self.devis = Devis.objects.create(
+            numero="DEV-LIVE-TEST",
+            client=client_tiers,
+            date_creation=datetime.date(2026, 1, 1),
+            statut=Devis.Statut.BROUILLON,
+        )
+        self.ligne = DevisLigne.objects.create(devis=self.devis, article=self.article, quantite=3)
+
+    def _url(self):
+        return f"/admin/chiffrage/devis/{self.devis.pk}/lignes/{self.ligne.id}/recalculer/"
+
+    def test_recalcule_quantite(self):
+        response = self.client.post(
+            self._url(), data={"quantite": 5}, content_type="application/json"
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        data = response.json()
+        self.assertEqual(data["cout_matiere_calcule"], 10)
+        self.assertEqual(data["prix_vente_matiere"], 10)
+        self.ligne.refresh_from_db()
+        self.assertEqual(self.ligne.quantite, 5)
+
+    def test_recalcule_taux_marge(self):
+        self.client.post(self._url(), data={"quantite": 5}, content_type="application/json")
+        response = self.client.post(
+            self._url(), data={"taux_marge_matiere_applique": 25}, content_type="application/json"
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        data = response.json()
+        self.assertEqual(data["cout_matiere_calcule"], 10)
+        self.assertEqual(data["prix_vente_matiere"], 12.5)
+
+    def test_taux_marge_vide_revient_au_defaut(self):
+        self.article.taux_marge_defaut = 10
+        self.article.save()
+        self.client.post(
+            self._url(), data={"taux_marge_matiere_applique": 25}, content_type="application/json"
+        )
+        response = self.client.post(
+            self._url(), data={"taux_marge_matiere_applique": ""}, content_type="application/json"
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["taux_marge_matiere_applique"], 10)
+
+    def test_quantite_invalide_400(self):
+        response = self.client.post(
+            self._url(), data={"quantite": "abc"}, content_type="application/json"
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_ligne_dune_autre_devis_404(self):
+        autre_devis = Devis.objects.create(
+            numero="DEV-AUTRE",
+            client=self.devis.client,
+            date_creation=datetime.date(2026, 1, 1),
+            statut=Devis.Statut.BROUILLON,
+        )
+        response = self.client.post(
+            f"/admin/chiffrage/devis/{autre_devis.pk}/lignes/{self.ligne.id}/recalculer/",
+            data={"quantite": 5},
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_anonyme_refuse(self):
+        self.client.logout()
+        response = self.client.post(
+            self._url(), data={"quantite": 5}, content_type="application/json"
+        )
+        self.assertNotEqual(response.status_code, 200)

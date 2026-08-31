@@ -2,7 +2,7 @@ from django.contrib import admin, messages
 from django.urls import path
 from unfold.admin import ModelAdmin, TabularInline
 
-from .builder_views import devis_builder_view
+from .builder_views import devis_builder_view, recalculer_ligne_view
 from .models import Commande, Devis, DevisLigne, DevisLigneOperation, OperationOF, OrdreFabrication
 from .moteur import ChiffrageError, calculer_devis
 from .planning_sync import resynchroniser
@@ -35,12 +35,20 @@ class DevisAdmin(ModelAdmin):
     inlines = [DevisLigneInline]
     actions = ["action_recalculer", "action_lancer_en_production"]
 
+    class Media:
+        js = ["chiffrage/devis_admin_live.js"]
+
     def get_urls(self):
         urls = [
             path(
                 "<str:numero>/constructeur/",
                 self.admin_site.admin_view(devis_builder_view),
                 name="chiffrage_devis_builder",
+            ),
+            path(
+                "<str:numero>/lignes/<int:ligne_id>/recalculer/",
+                self.admin_site.admin_view(recalculer_ligne_view),
+                name="chiffrage_devisligne_recalculer",
             ),
         ]
         return urls + super().get_urls()

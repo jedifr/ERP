@@ -18,12 +18,12 @@ def _valider_et_sauver(instance):
     try:
         instance.full_clean()
     except Exception as exc:  # ValidationError Django
-        raise ChiffrageError(_erreur_lisible(exc)) from exc
+        raise ChiffrageError(erreur_lisible(exc)) from exc
     instance.save()
     return instance
 
 
-def _erreur_lisible(exc):
+def erreur_lisible(exc):
     message_dict = getattr(exc, "message_dict", None)
     if message_dict:
         return " ; ".join(f"{champ} : {', '.join(msgs)}" for champ, msgs in message_dict.items())
