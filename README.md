@@ -212,8 +212,13 @@ l'unité de coût de l'article :
   poids seuls ne suffisent pas à déterminer deux dimensions), avec surface
   et poids **affichés en direct** à côté au fur et à mesure de la saisie.
 
-Après ajout, penser à utiliser l'action admin **"Recalculer le chiffrage"**
-sur le devis pour calculer coût matière/opérations et prix de vente.
+Le coût matière et le prix de vente de la ligne sont calculés
+**automatiquement dès l'ajout** (le constructeur appelle `calculer_devis()`
+juste après avoir créé la ligne — pas besoin de repasser par l'action admin
+"Recalculer le chiffrage"). Si le calcul échoue pour une autre ligne du
+devis (ex. donnée de référence manquante sur un autre article), la ligne est
+tout de même créée et un message d'avertissement explique ce qui bloque le
+calcul, sans empêcher l'ajout.
 
 ## Conversion poids/surface/unité sur la fiche Article
 

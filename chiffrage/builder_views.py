@@ -61,12 +61,25 @@ def _traiter_ajout_ligne(request, devis):
     except ChiffrageError as exc:
         return JsonResponse({"detail": str(exc)}, status=400)
 
+    avertissement = None
+    try:
+        calculer_devis(devis)
+    except ChiffrageError as exc:
+        # La ligne est déjà enregistrée ; seul le calcul du chiffrage échoue
+        # (ex. donnée de référence manquante sur une autre ligne du devis).
+        avertissement = str(exc)
+    else:
+        ligne.refresh_from_db()
+
     return JsonResponse(
         {
             "ok": True,
             "ligne_id": ligne.id,
             "article": article.reference,
             "quantite": ligne.quantite,
+            "cout_matiere_calcule": ligne.cout_matiere_calcule,
+            "prix_vente_matiere": ligne.prix_vente_matiere,
+            "avertissement": avertissement,
         }
     )
 

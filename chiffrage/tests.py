@@ -513,9 +513,19 @@ class DevisBuilderViewTests(TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         self.assertTrue(Article.objects.filter(pk="PIECE-VIEW-1").exists())
         self.assertEqual(self.devis.lignes.count(), 1)
+        data = response.json()
+        # 3 * (5 * 0.2) = 3 (composant VIS-VIEW) + 3 * 50 (étape forfaitaire) côté opération,
+        # seul le coût matière est reflété dans la ligne elle-même.
+        self.assertEqual(data["cout_matiere_calcule"], 3)
+        self.assertIsNone(data["avertissement"])
 
     def test_post_article_existant(self):
-        article = Article.objects.create(reference="PIECE-VIEW-EXIST", nature=Article.Nature.FABRIQUE)
+        article = Article.objects.create(
+            reference="PIECE-VIEW-EXIST",
+            nature=Article.Nature.MATIERE_PREMIERE,
+            unite_cout=Article.UniteCout.PIECE,
+            cout_unitaire=4,
+        )
         payload = {"quantite": 2, "article_existant": "PIECE-VIEW-EXIST"}
         response = self.client.post(
             f"/admin/chiffrage/devis/{self.devis.pk}/constructeur/",
@@ -524,6 +534,27 @@ class DevisBuilderViewTests(TestCase):
         )
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(self.devis.lignes.get().article, article)
+        data = response.json()
+        self.assertEqual(data["cout_matiere_calcule"], 8)
+        self.assertIsNone(data["avertissement"])
+
+    def test_post_article_sans_cout_unitaire_avertit_sans_bloquer(self):
+        article = Article.objects.create(
+            reference="PIECE-VIEW-SANS-COUT",
+            nature=Article.Nature.MATIERE_PREMIERE,
+            unite_cout=Article.UniteCout.PIECE,
+        )
+        payload = {"quantite": 2, "article_existant": "PIECE-VIEW-SANS-COUT"}
+        response = self.client.post(
+            f"/admin/chiffrage/devis/{self.devis.pk}/constructeur/",
+            data=payload,
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        data = response.json()
+        self.assertEqual(self.devis.lignes.get().article, article)
+        self.assertIsNotNone(data["avertissement"])
+        self.assertIsNone(data["cout_matiere_calcule"])
 
     def test_post_article_introuvable_400(self):
         payload = {"quantite": 1, "article_existant": "INEXISTANT"}
