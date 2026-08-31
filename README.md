@@ -184,9 +184,45 @@ Facturation), icônes, dashboard, recherche globale. Tous les `ModelAdmin` et
 `unfold.admin.TabularInline` au lieu des classes Django standard — aucun
 changement de logique, uniquement la classe de base.
 
-Piste de polish facile pour la suite : la plupart des libellés de champs
-perdent leurs accents dans les formulaires (ex. "Cout unitaire", "Gere en
-stock") car ils sont auto-générés depuis les noms de champs Python. Ajouter
-un `verbose_name` explicite (avec accents) aux champs des modèles
-améliorerait immédiatement le rendu, sans aucun risque (n'affecte que
-l'affichage).
+Tous les libellés de champs portent un `verbose_name` explicite (français,
+avec accents).
+
+## Constructeur de devis (création à la volée)
+
+Depuis la fiche d'un devis en brouillon (admin), le bouton **"Constructeur
+de devis"** (en haut à droite) ouvre une page dédiée
+(`chiffrage/builder_views.py`, `chiffrage/templates/chiffrage/devis_builder.html`)
+permettant d'ajouter une ligne :
+
+- soit avec un **article existant** (recherche par référence) ;
+- soit avec un **nouvel article fabriqué**, créé à la volée avec sa
+  nomenclature (composants) et sa gamme (étapes), en une seule transaction
+  (`chiffrage/builder.py`, `creer_article_fabrique` — réutilise
+  `full_clean()` sur chaque objet, donc les mêmes règles métier que partout
+  ailleurs dans l'admin).
+
+Pour un composant matière première, la quantité consommée se saisit selon
+l'unité de coût de l'article :
+- **Pièce** : juste une quantité.
+- **Longueur** (profilé) : longueur (mm) — et si l'article a un poids
+  linéique, un champ **poids (kg)** apparaît, synchronisé dans les deux sens
+  instantanément (un seul inconnu, conversion sans ambiguïté).
+- **Surface**/**Poids** (tôle) : longueur × largeur restent la saisie de
+  référence (ce sont les dimensions réelles de découpe — une surface ou un
+  poids seuls ne suffisent pas à déterminer deux dimensions), avec surface
+  et poids **affichés en direct** à côté au fur et à mesure de la saisie.
+
+Après ajout, penser à utiliser l'action admin **"Recalculer le chiffrage"**
+sur le devis pour calculer coût matière/opérations et prix de vente.
+
+## Conversion poids/surface/unité sur la fiche Article
+
+Sur la fiche d'un article matière première (admin), un champ d'aide
+apparaît sous "Coût unitaire" selon l'unité de coût choisie
+(`technique/static/technique/article_admin.js`) :
+- **Poids** → "Prix équivalent au m²" (calculé via épaisseur × densité)
+- **Surface** → "Prix équivalent au kg"
+- **Longueur** avec poids linéique renseigné → "Prix équivalent au mètre"
+
+Ce champ est bidirectionnel : le modifier met à jour `cout_unitaire` (le
+seul champ réellement enregistré) instantanément, sans recharger la page.

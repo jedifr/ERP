@@ -6,6 +6,7 @@ from django.test import TestCase, override_settings
 from commercial.models import Adresse, Tiers
 from technique.models import Article, Gamme, Matiere, Nomenclature, PosteTravail, TarifPoste
 
+from .builder import ajouter_ligne_devis, creer_article_fabrique
 from .models import Commande, Devis, DevisLigne, OrdreFabrication
 from .moteur import ChiffrageError, calculer_devis, cout_matiere_article
 from .planning_sync import PlanningSyncError, resynchroniser, tenter_synchronisation
@@ -342,3 +343,198 @@ class PlanningSyncTests(TestCase):
                 from .planning_sync import PlanningSyncClient
 
                 PlanningSyncClient().envoyer_ordre_fabrication(self.of)
+
+
+class BuilderTests(TestCase):
+    """Constructeur de devis : création à la volée d'un article fabriqué
+    (nomenclature + gamme) et de sa ligne de devis, en une transaction."""
+
+    def setUp(self):
+        self.composant = Article.objects.create(
+            reference="VIS-BUILDER",
+            nature=Article.Nature.MATIERE_PREMIERE,
+            unite_cout=Article.UniteCout.PIECE,
+            cout_unitaire=0.1,
+        )
+        self.poste = PosteTravail.objects.create(
+            nom="Poste-Builder", mode_calcul=PosteTravail.ModeCalcul.HORAIRE
+        )
+        client_tiers = Tiers.objects.create(
+            code="CLI-BUILDER", raison_sociale="Client Builder", type_tiers=Tiers.TypeTiers.CLIENT
+        )
+        self.devis = Devis.objects.create(
+            numero="DEV-BUILDER",
+            client=client_tiers,
+            date_creation=datetime.date(2026, 1, 1),
+            statut=Devis.Statut.BROUILLON,
+        )
+
+    def _composants(self):
+        return [{"article_composant": self.composant, "quantite": 3}]
+
+    def _etapes(self):
+        return [
+            {
+                "poste": self.poste,
+                "ordre": 1,
+                "temps_fixe": 5,
+                "temps_variable": 2,
+                "date_debut": datetime.date(2026, 1, 1),
+            }
+        ]
+
+    def test_creer_article_fabrique_avec_nomenclature_et_gamme(self):
+        article = creer_article_fabrique(
+            reference="PIECE-BUILDER-TEST",
+            taux_marge_defaut=15,
+            composants=self._composants(),
+            etapes=self._etapes(),
+        )
+        self.assertEqual(article.nature, Article.Nature.FABRIQUE)
+        self.assertEqual(article.composants.count(), 1)
+        self.assertEqual(article.gamme_etapes.count(), 1)
+        self.assertEqual(article.composants.get().article_composant, self.composant)
+
+    def test_reference_existante_refusee(self):
+        Article.objects.create(reference="PIECE-DEJA", nature=Article.Nature.FABRIQUE)
+        with self.assertRaises(ChiffrageError):
+            creer_article_fabrique(
+                reference="PIECE-DEJA",
+                taux_marge_defaut=None,
+                composants=self._composants(),
+                etapes=self._etapes(),
+            )
+
+    def test_sans_composant_refuse(self):
+        with self.assertRaises(ChiffrageError):
+            creer_article_fabrique(
+                reference="PIECE-SANS-COMPOSANT",
+                taux_marge_defaut=None,
+                composants=[],
+                etapes=self._etapes(),
+            )
+
+    def test_sans_etape_refuse(self):
+        with self.assertRaises(ChiffrageError):
+            creer_article_fabrique(
+                reference="PIECE-SANS-ETAPE",
+                taux_marge_defaut=None,
+                composants=self._composants(),
+                etapes=[],
+            )
+
+    def test_etape_invalide_leve_erreur_et_ne_cree_rien(self):
+        # Poste horaire sans temps_fixe/temps_variable : invalide (règle Phase 1).
+        etapes_invalides = [{"poste": self.poste, "ordre": 1, "date_debut": datetime.date(2026, 1, 1)}]
+        with self.assertRaises(ChiffrageError):
+            creer_article_fabrique(
+                reference="PIECE-INVALIDE",
+                taux_marge_defaut=None,
+                composants=self._composants(),
+                etapes=etapes_invalides,
+            )
+        self.assertFalse(Article.objects.filter(pk="PIECE-INVALIDE").exists())
+
+    def test_ajouter_ligne_devis(self):
+        article = creer_article_fabrique(
+            reference="PIECE-BUILDER-LIGNE",
+            taux_marge_defaut=None,
+            composants=self._composants(),
+            etapes=self._etapes(),
+        )
+        ligne = ajouter_ligne_devis(self.devis, article, 4)
+        self.assertEqual(ligne.devis, self.devis)
+        self.assertEqual(ligne.quantite, 4)
+
+    def test_ajouter_ligne_sur_devis_non_brouillon_refuse(self):
+        self.devis.statut = Devis.Statut.VALIDE
+        self.devis.save()
+        article = creer_article_fabrique(
+            reference="PIECE-BUILDER-VALIDE",
+            taux_marge_defaut=None,
+            composants=self._composants(),
+            etapes=self._etapes(),
+        )
+        with self.assertRaises(ChiffrageError):
+            ajouter_ligne_devis(self.devis, article, 1)
+
+
+class DevisBuilderViewTests(TestCase):
+    """Vue du constructeur de devis (POST JSON)."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        self.user = User.objects.create_superuser("builder-admin", "b@example.com", "pass1234")
+        self.client.force_login(self.user)
+
+        self.composant = Article.objects.create(
+            reference="VIS-VIEW",
+            nature=Article.Nature.MATIERE_PREMIERE,
+            unite_cout=Article.UniteCout.PIECE,
+            cout_unitaire=0.2,
+        )
+        self.poste = PosteTravail.objects.create(
+            nom="Poste-View", mode_calcul=PosteTravail.ModeCalcul.FORFAITAIRE
+        )
+        client_tiers = Tiers.objects.create(
+            code="CLI-VIEW", raison_sociale="Client View", type_tiers=Tiers.TypeTiers.CLIENT
+        )
+        self.devis = Devis.objects.create(
+            numero="DEV-VIEW",
+            client=client_tiers,
+            date_creation=datetime.date(2026, 1, 1),
+            statut=Devis.Statut.BROUILLON,
+        )
+
+    def test_get_affiche_la_page(self):
+        response = self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/constructeur/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Constructeur de devis")
+
+    def test_post_nouvel_article_cree_tout(self):
+        payload = {
+            "quantite": 3,
+            "nouvel_article": {
+                "reference": "PIECE-VIEW-1",
+                "taux_marge_defaut": 10,
+                "composants": [{"article_composant": "VIS-VIEW", "quantite": 5}],
+                "etapes": [
+                    {"poste": "Poste-View", "ordre": 1, "cout_forfaitaire": 50, "date_debut": "2026-01-01"}
+                ],
+            },
+        }
+        response = self.client.post(
+            f"/admin/chiffrage/devis/{self.devis.pk}/constructeur/",
+            data=payload,
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(Article.objects.filter(pk="PIECE-VIEW-1").exists())
+        self.assertEqual(self.devis.lignes.count(), 1)
+
+    def test_post_article_existant(self):
+        article = Article.objects.create(reference="PIECE-VIEW-EXIST", nature=Article.Nature.FABRIQUE)
+        payload = {"quantite": 2, "article_existant": "PIECE-VIEW-EXIST"}
+        response = self.client.post(
+            f"/admin/chiffrage/devis/{self.devis.pk}/constructeur/",
+            data=payload,
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(self.devis.lignes.get().article, article)
+
+    def test_post_article_introuvable_400(self):
+        payload = {"quantite": 1, "article_existant": "INEXISTANT"}
+        response = self.client.post(
+            f"/admin/chiffrage/devis/{self.devis.pk}/constructeur/",
+            data=payload,
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_anonyme_redirige(self):
+        self.client.logout()
+        response = self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/constructeur/")
+        self.assertNotEqual(response.status_code, 200)

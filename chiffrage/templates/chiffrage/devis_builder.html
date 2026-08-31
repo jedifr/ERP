@@ -1,0 +1,194 @@
+{% extends "admin/base.html" %}
+{% load i18n static %}
+
+{% block content %}
+<div class="mb-6">
+    <h1 class="text-xl font-semibold text-font-important-light dark:text-font-important-dark">
+        Constructeur de devis — {{ devis.numero }}
+    </h1>
+    <p class="text-font-subtle-light dark:text-font-subtle-dark">
+        Client : {{ devis.client }} · Statut : {{ devis.get_statut_display }}
+        {% if devis.statut != "brouillon" %}
+            <span class="text-red-600 dark:text-red-500 font-medium">— devis non modifiable (pas en brouillon)</span>
+        {% endif %}
+    </p>
+    <p class="mt-2">
+        <a href="{% url 'admin:chiffrage_devis_change' devis.pk %}" class="text-primary-600 dark:text-primary-500 underline">
+            ← Retour à la fiche devis
+        </a>
+    </p>
+</div>
+
+<div class="bg-white dark:bg-base-900 border border-base-200 dark:border-base-700 rounded-default p-4 mb-6">
+    <h2 class="font-semibold mb-3">Lignes existantes</h2>
+    <table class="w-full text-sm">
+        <thead>
+            <tr class="text-left border-b border-base-200 dark:border-base-700">
+                <th class="py-1 pr-4">Article</th>
+                <th class="py-1 pr-4">Quantité</th>
+                <th class="py-1 pr-4">Coût matière</th>
+                <th class="py-1 pr-4">Prix vente matière</th>
+                <th class="py-1 pr-4">Opérations</th>
+            </tr>
+        </thead>
+        <tbody id="lignes-existantes">
+            {% for ligne in lignes %}
+            <tr class="border-b border-base-100 dark:border-base-800">
+                <td class="py-1 pr-4">{{ ligne.article }}</td>
+                <td class="py-1 pr-4">{{ ligne.quantite }}</td>
+                <td class="py-1 pr-4">{{ ligne.cout_matiere_calcule|default:"—" }}</td>
+                <td class="py-1 pr-4">{{ ligne.prix_vente_matiere|default:"—" }}</td>
+                <td class="py-1 pr-4">
+                    {% for op in ligne.operations.all %}{{ op.poste }} (#{{ op.ordre }}){% if not forloop.last %}, {% endif %}{% endfor %}
+                </td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="5" class="py-2 text-font-subtle-light dark:text-font-subtle-dark">Aucune ligne pour l'instant.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% if devis.statut == "brouillon" %}
+<div class="bg-white dark:bg-base-900 border border-base-200 dark:border-base-700 rounded-default p-4">
+    <h2 class="font-semibold mb-3">Ajouter une ligne</h2>
+
+    <div id="form-message" class="hidden mb-3 p-3 rounded-default text-sm"></div>
+
+    <div class="flex gap-4 mb-4">
+        <label class="flex items-center gap-2">
+            <input type="radio" name="mode-article" value="existant" checked> Article existant
+        </label>
+        <label class="flex items-center gap-2">
+            <input type="radio" name="mode-article" value="nouveau"> Nouvel article fabriqué
+        </label>
+    </div>
+
+    <div class="mb-4">
+        <label class="block font-medium mb-1">Quantité (ligne de devis)<span class="text-red-600">*</span></label>
+        <input type="number" step="any" id="ligne-quantite" class="border border-base-200 dark:border-base-700 dark:bg-base-800 rounded-default px-3 py-2 w-48" required>
+    </div>
+
+    <!-- Bloc article existant -->
+    <div id="bloc-article-existant">
+        <label class="block font-medium mb-1">Article</label>
+        <div class="relative w-96">
+            <input type="text" id="article-existant-search" placeholder="Rechercher une référence..."
+                   class="border border-base-200 dark:border-base-700 dark:bg-base-800 rounded-default px-3 py-2 w-full" autocomplete="off">
+            <ul id="article-existant-results" class="hidden absolute z-20 bg-white dark:bg-base-800 border border-base-200 dark:border-base-700 rounded-default mt-1 w-full max-h-56 overflow-auto shadow-lg"></ul>
+        </div>
+        <input type="hidden" id="article-existant-reference">
+    </div>
+
+    <!-- Bloc nouvel article -->
+    <div id="bloc-nouvel-article" class="hidden">
+        <div class="grid grid-cols-2 gap-4 mb-4">
+            <div>
+                <label class="block font-medium mb-1">Référence<span class="text-red-600">*</span></label>
+                <input type="text" id="na-reference" class="border border-base-200 dark:border-base-700 dark:bg-base-800 rounded-default px-3 py-2 w-full">
+            </div>
+            <div>
+                <label class="block font-medium mb-1">Taux de marge par défaut (%)</label>
+                <input type="number" step="any" id="na-taux-marge" class="border border-base-200 dark:border-base-700 dark:bg-base-800 rounded-default px-3 py-2 w-full">
+            </div>
+        </div>
+
+        <h3 class="font-medium mb-2">Nomenclature (composants)</h3>
+        <div id="nomenclature-rows" class="space-y-3 mb-2"></div>
+        <button type="button" id="add-nomenclature-row" class="text-primary-600 dark:text-primary-500 text-sm mb-6">+ Ajouter un composant</button>
+
+        <h3 class="font-medium mb-2">Gamme (étapes)</h3>
+        <div id="gamme-rows" class="space-y-3 mb-2"></div>
+        <button type="button" id="add-gamme-row" class="text-primary-600 dark:text-primary-500 text-sm mb-6">+ Ajouter une étape</button>
+    </div>
+
+    <button type="button" id="submit-ligne" class="bg-primary-600 hover:bg-primary-600/80 text-white rounded-default px-4 py-2 font-medium">
+        Ajouter la ligne
+    </button>
+</div>
+{% endif %}
+
+<template id="template-nomenclature-row">
+    <div class="nomenclature-row border border-base-200 dark:border-base-700 rounded-default p-3">
+        <div class="flex justify-between items-start gap-3 mb-2">
+            <div class="relative grow">
+                <label class="block text-sm font-medium mb-1">Article composant<span class="text-red-600">*</span></label>
+                <input type="text" class="composant-search border border-base-200 dark:border-base-700 dark:bg-base-800 rounded-default px-3 py-2 w-full" placeholder="Rechercher..." autocomplete="off">
+                <ul class="composant-results hidden absolute z-20 bg-white dark:bg-base-800 border border-base-200 dark:border-base-700 rounded-default mt-1 w-full max-h-56 overflow-auto shadow-lg"></ul>
+                <input type="hidden" class="composant-reference">
+            </div>
+            <button type="button" class="remove-row text-red-600 mt-6">✕</button>
+        </div>
+        <p class="composant-info text-xs text-font-subtle-light dark:text-font-subtle-dark mb-2"></p>
+        <div class="grid grid-cols-4 gap-3 champs-dimension hidden">
+            <div class="champ-longueur">
+                <label class="block text-sm mb-1">Longueur (mm)</label>
+                <input type="number" step="any" class="input-longueur border border-base-200 dark:border-base-700 dark:bg-base-800 rounded-default px-3 py-2 w-full">
+            </div>
+            <div class="champ-largeur hidden">
+                <label class="block text-sm mb-1">Largeur (mm)</label>
+                <input type="number" step="any" class="input-largeur border border-base-200 dark:border-base-700 dark:bg-base-800 rounded-default px-3 py-2 w-full">
+            </div>
+            <div class="champ-poids hidden">
+                <label class="block text-sm mb-1">Poids (kg) <span class="poids-editable-tag text-font-subtle-light dark:text-font-subtle-dark"></span></label>
+                <input type="number" step="any" class="input-poids border border-base-200 dark:border-base-700 dark:bg-base-800 rounded-default px-3 py-2 w-full">
+            </div>
+            <div class="champ-surface hidden">
+                <label class="block text-sm mb-1">Surface (m²)</label>
+                <input type="number" step="any" class="input-surface border border-base-200 dark:border-base-700 dark:bg-base-800 rounded-default px-3 py-2 w-full" readonly>
+            </div>
+        </div>
+        <div class="mt-2">
+            <label class="block text-sm mb-1">Quantité (nb de découpes/pièces identiques)<span class="text-red-600">*</span></label>
+            <input type="number" step="any" class="input-quantite border border-base-200 dark:border-base-700 dark:bg-base-800 rounded-default px-3 py-2 w-48" value="1">
+        </div>
+    </div>
+</template>
+
+<template id="template-gamme-row">
+    <div class="gamme-row border border-base-200 dark:border-base-700 rounded-default p-3">
+        <div class="flex justify-between items-start gap-3 mb-2">
+            <div class="grid grid-cols-3 gap-3 grow">
+                <div>
+                    <label class="block text-sm mb-1">Poste<span class="text-red-600">*</span></label>
+                    <select class="select-poste border border-base-200 dark:border-base-700 dark:bg-base-800 rounded-default px-3 py-2 w-full">
+                        <option value="">—</option>
+                        {% for poste in postes %}
+                        <option value="{{ poste.nom }}" data-mode="{{ poste.mode_calcul }}">{{ poste.nom }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm mb-1">Ordre<span class="text-red-600">*</span></label>
+                    <input type="number" class="input-ordre border border-base-200 dark:border-base-700 dark:bg-base-800 rounded-default px-3 py-2 w-full" value="1">
+                </div>
+                <div>
+                    <label class="block text-sm mb-1">Date de début</label>
+                    <input type="date" class="input-date-debut border border-base-200 dark:border-base-700 dark:bg-base-800 rounded-default px-3 py-2 w-full">
+                </div>
+            </div>
+            <button type="button" class="remove-row text-red-600 mt-6">✕</button>
+        </div>
+        <div class="grid grid-cols-3 gap-3 champs-horaire hidden">
+            <div>
+                <label class="block text-sm mb-1">Temps fixe</label>
+                <input type="number" step="any" class="input-temps-fixe border border-base-200 dark:border-base-700 dark:bg-base-800 rounded-default px-3 py-2 w-full">
+            </div>
+            <div>
+                <label class="block text-sm mb-1">Temps variable</label>
+                <input type="number" step="any" class="input-temps-variable border border-base-200 dark:border-base-700 dark:bg-base-800 rounded-default px-3 py-2 w-full">
+            </div>
+        </div>
+        <div class="grid grid-cols-3 gap-3 champs-forfaitaire hidden">
+            <div>
+                <label class="block text-sm mb-1">Coût forfaitaire</label>
+                <input type="number" step="any" class="input-cout-forfaitaire border border-base-200 dark:border-base-700 dark:bg-base-800 rounded-default px-3 py-2 w-full">
+            </div>
+        </div>
+    </div>
+</template>
+
+{% csrf_token %}
+<script id="devis-builder-data" type="application/json">{"numero": "{{ devis.numero|escapejs }}"}</script>
+<script src="{% static 'chiffrage/devis_builder.js' %}"></script>
+{% endblock %}

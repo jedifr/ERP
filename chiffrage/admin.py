@@ -1,6 +1,8 @@
 from django.contrib import admin, messages
+from django.urls import path
 from unfold.admin import ModelAdmin, TabularInline
 
+from .builder_views import devis_builder_view
 from .models import Commande, Devis, DevisLigne, DevisLigneOperation, OperationOF, OrdreFabrication
 from .moteur import ChiffrageError, calculer_devis
 from .planning_sync import resynchroniser
@@ -32,6 +34,16 @@ class DevisAdmin(ModelAdmin):
     autocomplete_fields = ["client"]
     inlines = [DevisLigneInline]
     actions = ["action_recalculer", "action_lancer_en_production"]
+
+    def get_urls(self):
+        urls = [
+            path(
+                "<str:numero>/constructeur/",
+                self.admin_site.admin_view(devis_builder_view),
+                name="chiffrage_devis_builder",
+            ),
+        ]
+        return urls + super().get_urls()
 
     @admin.action(description="Recalculer le chiffrage")
     def action_recalculer(self, request, queryset):

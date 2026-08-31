@@ -39,6 +39,9 @@ class ArticleAdmin(ModelAdmin):
     autocomplete_fields = ["matiere"]
     inlines = [NomenclatureInline, GammeInline]
 
+    class Media:
+        js = ["technique/article_admin.js"]
+
 
 @admin.register(PosteTravail)
 class PosteTravailAdmin(ModelAdmin):
