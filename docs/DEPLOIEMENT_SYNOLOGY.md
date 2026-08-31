@@ -74,7 +74,7 @@ docker compose exec web python manage.py createsuperuser
 
 ## 6. Accéder à l'ERP
 
-Depuis un poste du réseau local :
+Depuis un poste du réseau local, en accès direct au port du conteneur :
 
 - Admin : `http://<ip-du-nas>:8000/admin/`
 - API Phase 1 : `http://<ip-du-nas>:8000/api/v1/`
@@ -88,6 +88,26 @@ services:
     ports:
       - "8100:8000"   # accessible alors sur http://<ip-du-nas>:8100
 ```
+
+### Si le NAS utilise déjà le reverse proxy DSM (recommandé si un autre outil
+### comme le planning atelier y est déjà exposé en HTTPS)
+
+Dans **Panneau de configuration → Portail de connexion → Avancé → Reverse
+Proxy**, créer une règle (par exemple `https://*:441` → `http://localhost:8000`,
+sur le modèle de la règle déjà en place pour le planning atelier). L'ERP est
+alors accessible en `https://<ip-du-nas>:441/admin/` (certificat auto-signé
+par défaut : accepter l'avertissement du navigateur).
+
+**Indispensable dans ce cas** : ajouter l'origine HTTPS du reverse proxy dans
+`.env`, sinon la connexion à l'admin échouera avec une erreur CSRF (formulaire
+de login refusé) :
+
+```
+DJANGO_CSRF_TRUSTED_ORIGINS=https://192.168.1.50:441
+```
+
+Puis relancer `docker compose up -d --build` pour prendre en compte le
+changement.
 
 ## Alternative : via l'interface Container Manager
 

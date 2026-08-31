@@ -24,6 +24,19 @@ DEBUG = _env_bool("DJANGO_DEBUG", True)
 
 ALLOWED_HOSTS = [h.strip() for h in os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",") if h.strip()]
 
+# Derrière un reverse proxy (ex. le reverse proxy Synology DSM) qui termine le
+# HTTPS et transmet en HTTP au conteneur : indispensable pour que Django sache
+# que la requête d'origine était bien en HTTPS (redirections, cookies secure,
+# vérification CSRF sur les formulaires comme l'admin).
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+USE_X_FORWARDED_HOST = True
+
+# Origines HTTPS autorisées à soumettre des formulaires (protection CSRF de
+# Django). Ex. : https://192.168.1.50:441 pour un reverse proxy Synology.
+CSRF_TRUSTED_ORIGINS = [
+    o.strip() for o in os.environ.get("DJANGO_CSRF_TRUSTED_ORIGINS", "").split(",") if o.strip()
+]
+
 
 # Application definition
 
