@@ -70,3 +70,21 @@ class Adresse(models.Model):
                         )
                     }
                 )
+
+
+class Contact(models.Model):
+    tiers = models.ForeignKey(Tiers, on_delete=models.CASCADE, related_name="contacts")
+    nom = models.CharField(max_length=100)
+    prenom = models.CharField(max_length=100, blank=True)
+    email = models.EmailField(blank=True)
+    telephone = models.CharField(max_length=30, blank=True)
+    fonction = models.CharField(max_length=100, blank=True)
+
+    class Meta:
+        verbose_name = "Contact"
+        verbose_name_plural = "Contacts"
+        ordering = ["tiers", "nom"]
+
+    def __str__(self):
+        nom_complet = f"{self.prenom} {self.nom}".strip()
+        return f"{nom_complet} ({self.tiers})"

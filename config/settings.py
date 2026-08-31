@@ -52,6 +52,8 @@ INSTALLED_APPS = [
     "technique",
     "commercial",
     "chiffrage",
+    "stock",
+    "facturation",
 ]
 
 MIDDLEWARE = [

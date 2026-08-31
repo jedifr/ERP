@@ -23,5 +23,7 @@ urlpatterns = [
     path("api/v1/", include("technique.urls")),
     path("api/v1/", include("commercial.urls")),
     path("api/v1/", include("chiffrage.urls")),
+    path("api/v1/", include("stock.urls")),
+    path("api/v1/", include("facturation.urls")),
     path("api-auth/", include("rest_framework.urls")),
 ]

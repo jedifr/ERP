@@ -18,9 +18,9 @@ Cahier des charges complet : [`docs/ERP_Specification_Complete_4_Phases.md`](doc
 - [x] **Phase 2 — Chiffrage et planning** (`chiffrage/`) : moteur de
       chiffrage, devis, commande, ordre de fabrication, synchronisation avec
       le planning atelier
-- [ ] **Phase 3 — Commercial et stock** : tiers, adresses (socle posé en
-      Phase 2 dans `commercial/`), contacts, stock, pont de facturation vers
-      Tiime
+- [x] **Phase 3 — Commercial et stock** (`commercial/`, `stock/`,
+      `facturation/`) : contacts, emplacements, lots, mouvements de stock,
+      alertes de seuil, pont de facturation vers Tiime
 - [ ] **Phase 4 — Achats et pilotage** : achats fournisseurs, sous-traitance,
       indicateurs
 
@@ -60,8 +60,9 @@ python manage.py runserver
 
 - Admin : http://127.0.0.1:8000/admin/
 - API : http://127.0.0.1:8000/api/v1/ (articles, matieres, postes-travail,
-  tarifs-poste, nomenclatures, gammes, tiers, adresses, devis,
-  devis-lignes, commandes, ordres-fabrication...)
+  tarifs-poste, nomenclatures, gammes, tiers, adresses, contacts, devis,
+  devis-lignes, commandes, ordres-fabrication, emplacements, lots,
+  mouvements-stock, alertes-stock, factures...)
 
 ## Tests
 
@@ -112,3 +113,22 @@ App `chiffrage`, plus un socle minimal de l'app `commercial` (Tiers, Adresse
   leur création. Voir
   [`docs/SYNCHRONISATION_PLANNING.md`](docs/SYNCHRONISATION_PLANNING.md)
   pour la configuration et les tentatives automatiques.
+
+## Phase 3 — Commercial et stock
+
+- **commercial** (complété) : `Contact` s'ajoute à `Tiers`/`Adresse` posés en
+  Phase 2.
+- **stock** : `Emplacement`, `Lot`, `MouvementStock`, `AlerteStock`. Un
+  `MouvementStock` (entrée/sortie) met à jour la quantité de son `Lot` à la
+  création (jamais réappliqué sur une édition ultérieure — les mouvements
+  sont des écritures de journal, pas des enregistrements modifiables), puis
+  réévalue l'alerte de seuil de l'article (`Article.stock_mini`) : ouverture
+  automatique si le stock total (tous lots confondus) passe sous le seuil,
+  clôture automatique s'il repasse au-dessus — une seule alerte active à la
+  fois par article (contrainte base de données). Seuls les articles
+  `gere_en_stock=vrai` peuvent avoir des lots.
+- **facturation** : `Facture`, simple trace côté ERP liée à une `Commande`
+  (`chiffrage`) — la facture légale est créée manuellement dans Tiime, sa
+  référence renseignée ensuite ici (`mode_creation=manuel`). Passage à une
+  création automatique via API Tiime non implémenté (aucune API publique
+  documentée à ce jour, cf. cahier des charges).
