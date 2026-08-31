@@ -4,6 +4,7 @@ from django.core.exceptions import ValidationError
 from django.test import TestCase
 
 from .models import Article, Gamme, Matiere, Nomenclature, PosteTravail, TarifPoste
+from .services import DuplicationError, dupliquer_article
 
 
 class ArticleTests(TestCase):
@@ -175,3 +176,110 @@ class GammeTests(TestCase):
         )
         with self.assertRaises(ValidationError):
             revision.full_clean()
+
+
+class DupliquerArticleTests(TestCase):
+    def test_duplique_matiere_premiere_avec_reference_generee(self):
+        acier = Matiere.objects.create(nom="Acier-Dup", densite=7.85)
+        article = Article.objects.create(
+            reference="TOLE-DUP",
+            nature=Article.Nature.MATIERE_PREMIERE,
+            matiere=acier,
+            unite_cout=Article.UniteCout.POIDS,
+            epaisseur=3,
+            cout_unitaire=1.2,
+            stock_mini=10,
+        )
+        copie = dupliquer_article(article)
+        self.assertEqual(copie.reference, "TOLE-DUP-COPIE")
+        self.assertEqual(copie.nature, article.nature)
+        self.assertEqual(copie.matiere, acier)
+        self.assertEqual(copie.cout_unitaire, 1.2)
+        self.assertEqual(copie.stock_mini, 10)
+        self.assertNotEqual(copie.pk, article.pk)
+
+    def test_references_successives_incrementees(self):
+        Article.objects.create(reference="TOLE-DUP2", nature=Article.Nature.MATIERE_PREMIERE)
+        Article.objects.create(reference="TOLE-DUP2-COPIE", nature=Article.Nature.MATIERE_PREMIERE)
+        original = Article.objects.get(reference="TOLE-DUP2")
+        copie = dupliquer_article(original)
+        self.assertEqual(copie.reference, "TOLE-DUP2-COPIE-2")
+
+    def test_duplique_nomenclature_et_gamme_article_fabrique(self):
+        composant = Article.objects.create(
+            reference="VIS-DUP",
+            nature=Article.Nature.MATIERE_PREMIERE,
+            unite_cout=Article.UniteCout.PIECE,
+            cout_unitaire=0.1,
+        )
+        poste = PosteTravail.objects.create(
+            nom="Poste-Dup", mode_calcul=PosteTravail.ModeCalcul.FORFAITAIRE
+        )
+        parent = Article.objects.create(
+            reference="PIECE-DUP", nature=Article.Nature.FABRIQUE, taux_marge_defaut=15
+        )
+        Nomenclature.objects.create(
+            article_parent=parent,
+            article_composant=composant,
+            quantite=3,
+            longueur_mm=100,
+            largeur_mm=50,
+        )
+        Gamme.objects.create(
+            article=parent, poste=poste, ordre=1, cout_forfaitaire=25, date_debut=datetime.date(2025, 1, 1)
+        )
+
+        copie = dupliquer_article(parent)
+
+        self.assertEqual(copie.composants.count(), 1)
+        ligne = copie.composants.get()
+        self.assertEqual(ligne.article_composant, composant)
+        self.assertEqual(ligne.quantite, 3)
+        self.assertEqual(ligne.longueur_mm, 100)
+        self.assertEqual(ligne.largeur_mm, 50)
+
+        self.assertEqual(copie.gamme_etapes.count(), 1)
+        etape = copie.gamme_etapes.get()
+        self.assertEqual(etape.poste, poste)
+        self.assertEqual(etape.cout_forfaitaire, 25)
+
+    def test_originale_non_modifiee(self):
+        article = Article.objects.create(
+            reference="TOLE-DUP3", nature=Article.Nature.MATIERE_PREMIERE, cout_unitaire=5
+        )
+        dupliquer_article(article)
+        article.refresh_from_db()
+        self.assertEqual(article.reference, "TOLE-DUP3")
+        self.assertEqual(article.cout_unitaire, 5)
+
+
+class DupliquerArticleViewTests(TestCase):
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        self.user = User.objects.create_superuser("dup-admin", "d@example.com", "pass1234")
+        self.client.force_login(self.user)
+
+    def test_post_duplique_et_redirige_vers_la_copie(self):
+        Article.objects.create(
+            reference="TOLE-DUP-VIEW", nature=Article.Nature.MATIERE_PREMIERE, cout_unitaire=2
+        )
+        response = self.client.post("/admin/technique/article/TOLE-DUP-VIEW/dupliquer/")
+        self.assertRedirects(response, "/admin/technique/article/TOLE-DUP-VIEW-COPIE/change/")
+        self.assertTrue(Article.objects.filter(pk="TOLE-DUP-VIEW-COPIE").exists())
+
+    def test_article_introuvable_404(self):
+        response = self.client.post("/admin/technique/article/INEXISTANT/dupliquer/")
+        self.assertEqual(response.status_code, 404)
+
+    def test_get_refuse(self):
+        Article.objects.create(reference="TOLE-DUP-VIEW2", nature=Article.Nature.MATIERE_PREMIERE)
+        response = self.client.get("/admin/technique/article/TOLE-DUP-VIEW2/dupliquer/")
+        self.assertEqual(response.status_code, 405)
+
+    def test_anonyme_refuse(self):
+        self.client.logout()
+        Article.objects.create(reference="TOLE-DUP-VIEW3", nature=Article.Nature.MATIERE_PREMIERE)
+        response = self.client.post("/admin/technique/article/TOLE-DUP-VIEW3/dupliquer/")
+        self.assertNotEqual(response.status_code, 200)

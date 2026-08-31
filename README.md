@@ -278,3 +278,23 @@ inline) ; les trois totaux du haut de la fiche Devis sont donc rendus via
 des méthodes d'admin (`montant_*_ht_display`) qui les enveloppent dans un
 `<span id="...">` pour donner un point d'accroche stable au JS de recalcul
 en direct.
+
+## Dupliquer et modifier un article
+
+Sur la fiche d'un article existant (admin), le bouton **"Dupliquer et
+modifier"** (en haut à droite, à côté de "Historique") crée une copie de
+l'article — tous les champs sauf la référence, qui est générée
+automatiquement (`<référence>-COPIE`, puis `-COPIE-2`, `-COPIE-3`... si déjà
+prise) — et redirige directement vers la fiche de la copie pour édition.
+
+Pour un article **fabriqué**, sa nomenclature (composants) et sa gamme
+(étapes) sont dupliquées avec lui (`technique/services.py`,
+`dupliquer_article`) ; le stock (lots/mouvements) n'est jamais dupliqué, la
+copie en démarre à zéro. Toute la logique passe par `full_clean()` sur
+chaque objet créé, comme partout ailleurs dans l'admin.
+
+Implémentation : même schéma que le "Constructeur de devis" — une vue admin
+dédiée (`POST /admin/technique/article/<référence>/dupliquer/`) protégée
+par `staff_member_required`, et un override de template
+(`admin/technique/article/change_form.html`) ajoutant le bouton dans
+`object-tools-items`, visible uniquement sur un article déjà enregistré.

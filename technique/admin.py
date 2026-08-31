@@ -1,7 +1,12 @@
-from django.contrib import admin
+from django.contrib import admin, messages
+from django.contrib.admin.views.decorators import staff_member_required
+from django.shortcuts import get_object_or_404, redirect
+from django.urls import path
+from django.views.decorators.http import require_http_methods
 from unfold.admin import ModelAdmin, TabularInline
 
 from .models import Article, Gamme, Matiere, Nomenclature, PosteTravail, TarifPoste
+from .services import DuplicationError, dupliquer_article
 
 
 class NomenclatureInline(TabularInline):
@@ -23,6 +28,20 @@ class MatiereAdmin(ModelAdmin):
     search_fields = ["nom"]
 
 
+@staff_member_required
+@require_http_methods(["POST"])
+def dupliquer_article_view(request, reference):
+    article = get_object_or_404(Article, pk=reference)
+    try:
+        copie = dupliquer_article(article)
+    except DuplicationError as exc:
+        messages.error(request, f"Duplication impossible : {exc}")
+        return redirect("admin:technique_article_change", reference)
+
+    messages.success(request, f"« {article} » dupliqué en « {copie} ». Vous pouvez modifier la copie.")
+    return redirect("admin:technique_article_change", copie.pk)
+
+
 @admin.register(Article)
 class ArticleAdmin(ModelAdmin):
     list_display = [
@@ -41,6 +60,16 @@ class ArticleAdmin(ModelAdmin):
 
     class Media:
         js = ["technique/article_admin.js"]
+
+    def get_urls(self):
+        urls = [
+            path(
+                "<str:reference>/dupliquer/",
+                self.admin_site.admin_view(dupliquer_article_view),
+                name="technique_article_dupliquer",
+            ),
+        ]
+        return urls + super().get_urls()
 
 
 @admin.register(PosteTravail)
