@@ -150,3 +150,20 @@ REST_FRAMEWORK = {
     "PAGE_SIZE": 50,
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
 }
+
+
+# Logging
+# Le handler "console" par défaut de Django n'écrit que si DEBUG=True : sans
+# ceci, les erreurs 400 (ex. DisallowedHost) ou CSRF n'apparaissent nulle part
+# dans `docker compose logs` une fois DEBUG=False. On force donc les logs
+# Django (avertissements et erreurs) vers stdout, visibles par Docker.
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {
+        "console": {"class": "logging.StreamHandler"},
+    },
+    "loggers": {
+        "django": {"handlers": ["console"], "level": "WARNING"},
+    },
+}
