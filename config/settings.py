@@ -50,6 +50,8 @@ INSTALLED_APPS = [
     "rest_framework",
     "django_filters",
     "technique",
+    "commercial",
+    "chiffrage",
 ]
 
 MIDDLEWARE = [
@@ -157,6 +159,14 @@ REST_FRAMEWORK = {
 # ceci, les erreurs 400 (ex. DisallowedHost) ou CSRF n'apparaissent nulle part
 # dans `docker compose logs` une fois DEBUG=False. On force donc les logs
 # Django (avertissements et erreurs) vers stdout, visibles par Docker.
+# Synchronisation avec l'outil de planification d'atelier (voir chiffrage/planning_sync.py)
+# Laisser PLANNING_API_URL vide tant que l'API du planning atelier n'est pas définie :
+# les OF restent créés localement, avec statut_synchro="en_attente".
+PLANNING_API_URL = os.environ.get("PLANNING_API_URL", "")
+PLANNING_API_KEY = os.environ.get("PLANNING_API_KEY", "")
+PLANNING_SYNC_MAX_TENTATIVES = int(os.environ.get("PLANNING_SYNC_MAX_TENTATIVES", "5"))
+
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
