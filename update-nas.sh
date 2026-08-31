@@ -13,10 +13,13 @@ REPO="jedifr/ERP"
 # Ce script remplace son propre dossier plus bas dans l'exécution. On se
 # relance depuis une copie temporaire pour ne plus dépendre du fichier
 # original pendant l'opération (rien de dangereux en soi côté Unix, mais
-# c'est plus simple à raisonner ainsi).
+# c'est plus simple à raisonner ainsi). La copie est placée à côté du projet
+# plutôt que dans /tmp : sur DSM, /tmp est souvent monté "noexec" (écriture
+# et chmod +x possibles, mais exécution refusée par le noyau).
 if [ -z "$ERP_UPDATE_RELAUNCHED" ]; then
     ORIG_DIR="$(cd "$(dirname "$0")" && pwd)"
-    TMP_SELF="$(mktemp "${TMPDIR:-/tmp}/erp-update.XXXXXX")"
+    PARENT_DIR="$(dirname "$ORIG_DIR")"
+    TMP_SELF="$(mktemp "${PARENT_DIR}/.erp-update.XXXXXX")"
     cp "$0" "$TMP_SELF"
     chmod +x "$TMP_SELF"
     ERP_UPDATE_RELAUNCHED=1 ERP_UPDATE_ORIG_DIR="$ORIG_DIR" exec "$TMP_SELF" "$BRANCH"
