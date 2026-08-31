@@ -18,18 +18,36 @@ que le planning atelier existant utilise probablement déjà.
 
 ## 2. Récupérer le projet sur le NAS
 
-Connectez-vous en SSH au NAS (`ssh votre_utilisateur@ip-du-nas`), puis :
+Connectez-vous en SSH au NAS (`ssh votre_utilisateur@ip-du-nas`). La plupart
+des NAS Synology n'ont pas `git` par défaut : le plus simple est de
+télécharger l'archive de la branche directement avec `curl`/`tar` (déjà
+présents sur DSM) :
 
 ```bash
 # Choisir un dossier, par exemple un dossier partagé "docker"
 cd /volume1/docker
-git clone -b claude/project-construction-k7owwb https://github.com/jedifr/ERP.git erp
+curl -fL -o erp.tar.gz https://codeload.github.com/jedifr/ERP/tar.gz/refs/heads/claude/project-construction-k7owwb
+mkdir erp
+tar -xzf erp.tar.gz -C erp --strip-components=1
+rm erp.tar.gz
 cd erp
 ```
 
-Si `git` n'est pas disponible sur le NAS, téléchargez le zip du dépôt sur
-votre PC et transférez-le sur le NAS via **File Station**, puis décompressez-le
-dans `/volume1/docker/erp`.
+(Utilisez bien `codeload.github.com/.../tar.gz/refs/heads/<branche>` et non
+le lien `github.com/.../archive/...` : ce dernier ne fonctionne pas quand le
+nom de la branche contient un `/`.)
+
+Alternative sans SSH : télécharger le zip depuis github.com (bouton "Code" →
+"Download ZIP") sur votre PC, puis le transférer et l'extraire via **File
+Station**.
+
+Si vous installez `git` (paquet **Git Server** depuis Package Center),
+`git clone -b claude/project-construction-k7owwb https://github.com/jedifr/ERP.git erp`
+fonctionne aussi.
+
+Pour les mises à jour futures, une fois le projet en place, utilisez le
+script `update-nas.sh` fourni (voir plus bas) plutôt que de refaire ces
+étapes à la main.
 
 ## 3. Configurer l'environnement
 
@@ -121,15 +139,31 @@ du conteneur → onglet "Terminal").
 
 ## Mettre à jour après un nouveau push
 
+Le NAS n'ayant pas `git` (voir plus haut), le plus simple est le script
+`update-nas.sh` fourni à la racine du projet : il télécharge la dernière
+version de la branche, conserve votre `.env`, bascule, reconstruit et relance
+les conteneurs — équivalent en une commande de tout ce qu'on a fait
+manuellement à la main jusqu'ici.
+
 ```bash
 cd /volume1/docker/erp
-git pull
-docker compose up -d --build
+./update-nas.sh
 ```
 
-Les migrations sont réappliquées automatiquement au redémarrage du conteneur
-`web` (aucune donnée perdue — les données PostgreSQL sont conservées dans un
-volume Docker nommé `erp_postgres_data`).
+Pour mettre à jour vers une autre branche : `./update-nas.sh nom-de-la-branche`.
+
+Si `docker compose up --build` échoue après la bascule (ex. erreur de build),
+le script s'arrête **avant** de supprimer l'ancienne version : un dossier
+`erp_old` reste disponible juste à côté pour revenir en arrière au besoin
+(`rm -rf erp && mv erp_old erp`).
+
+Si vous avez installé `git` (paquet Git Server) : `git clone` puis `git pull`
+fonctionnent aussi normalement, suivi de `docker compose up -d --build`.
+
+Dans tous les cas, les migrations sont réappliquées automatiquement au
+redémarrage du conteneur `web` (aucune donnée perdue — les données
+PostgreSQL sont conservées dans un volume Docker nommé `erp_postgres_data`,
+non touché par une mise à jour du code).
 
 ## Sauvegarde des données
 
