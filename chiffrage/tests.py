@@ -1065,6 +1065,108 @@ class PrevisualiserLigneViewTests(TestCase):
         self.assertNotEqual(response.status_code, 200)
 
 
+class PrevisualiserLigneNouveauDevisViewTests(TestCase):
+    """Endpoint POST .../nouveau-devis/previsualiser-ligne/ : aperçu live sur
+    le formulaire d'AJOUT d'un devis, où le devis lui-même n'existe pas
+    encore en base (pas de numéro). Reproduit un signalement utilisateur :
+    le calcul en direct ne se déclenchait pas du tout sur ce formulaire."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        self.user = User.objects.create_superuser("nouveau-devis-admin", "n@example.com", "pass1234")
+        self.client.force_login(self.user)
+
+        self.article = Article.objects.create(
+            reference="ART-NOUVEAU-DEVIS",
+            nature=Article.Nature.MATIERE_PREMIERE,
+            unite_cout=Article.UniteCout.PIECE,
+            cout_unitaire=2.0,
+            taux_marge_defaut=10,
+        )
+
+    def _url(self):
+        return "/admin/chiffrage/devis/nouveau-devis/previsualiser-ligne/"
+
+    def test_apercu_reussi_sans_aucun_devis_en_base(self):
+        self.assertEqual(Devis.objects.count(), 0)
+        response = self.client.post(
+            self._url(),
+            data={"article": "ART-NOUVEAU-DEVIS", "quantite": 5, "date_creation": "2026-01-01"},
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        data = response.json()
+        self.assertEqual(data["cout_matiere_calcule"], 10)
+        # marge par défaut de l'article : 10% -> 10 * 1.10 = 11
+        self.assertAlmostEqual(data["prix_vente_matiere"], 11)
+        # rien n'a été créé en base (ni Devis, ni DevisLigne)
+        self.assertEqual(Devis.objects.count(), 0)
+        self.assertEqual(DevisLigne.objects.count(), 0)
+
+    def test_sans_date_creation_utilise_aujourdhui(self):
+        response = self.client.post(
+            self._url(),
+            data={"article": "ART-NOUVEAU-DEVIS", "quantite": 1},
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+
+    def test_taux_marge_globale_ecrase_le_defaut(self):
+        response = self.client.post(
+            self._url(),
+            data={
+                "article": "ART-NOUVEAU-DEVIS",
+                "quantite": 5,
+                "date_creation": "2026-01-01",
+                "taux_marge_globale": 50,
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        # 10 * 1.50 = 15, au lieu de la marge par défaut de l'article (10%)
+        self.assertEqual(response.json()["prix_vente_matiere"], 15)
+
+    def test_date_creation_invalide_400(self):
+        response = self.client.post(
+            self._url(),
+            data={"article": "ART-NOUVEAU-DEVIS", "quantite": 1, "date_creation": "pas-une-date"},
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_article_introuvable_400(self):
+        response = self.client.post(
+            self._url(),
+            data={"article": "INEXISTANT", "quantite": 1},
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_article_sans_cout_unitaire_400(self):
+        Article.objects.create(
+            reference="ART-NOUVEAU-DEVIS-SANS-COUT",
+            nature=Article.Nature.MATIERE_PREMIERE,
+            unite_cout=Article.UniteCout.PIECE,
+        )
+        response = self.client.post(
+            self._url(),
+            data={"article": "ART-NOUVEAU-DEVIS-SANS-COUT", "quantite": 1},
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_anonyme_refuse(self):
+        self.client.logout()
+        response = self.client.post(
+            self._url(),
+            data={"article": "ART-NOUVEAU-DEVIS", "quantite": 1},
+            content_type="application/json",
+        )
+        self.assertNotEqual(response.status_code, 200)
+
+
 class RecalculerLignePrixForceTests(TestCase):
     """recalculer_ligne_view honore aussi le prix unitaire forcé."""
 

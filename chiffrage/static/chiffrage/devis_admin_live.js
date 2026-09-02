@@ -11,15 +11,20 @@
     // fraîchement insérée (admin/js/inlines.js) — Unfold réutilise ce
     // mécanisme, seul le gabarit HTML change.
     document.addEventListener("formset:added", (event) => {
-        const numero = devisNumeroFromUrl();
-        if (!numero || !event.target || !event.target.closest) {
+        if (!event.target || !event.target.closest) {
             return;
         }
         // event.target est la ligne <tr> insérée par Django (admin/js/inlines.js),
         // pas le <tbody class="form-group"> qui l'englobe (structure propre à Unfold).
         const row = event.target.closest("tbody.form-group");
-        if (row) {
+        if (!row) {
+            return;
+        }
+        const numero = devisNumeroFromUrl();
+        if (numero) {
             wireRow(row, numero);
+        } else if (formulaireAjoutDevisActif()) {
+            wireRowNouveauDevis(row);
         }
     });
 
@@ -41,12 +46,22 @@
         return match ? match[1] : null;
     }
 
+    // Formulaire d'AJOUT d'un devis (/admin/chiffrage/devis/add/) : l'objet
+    // Devis n'existe pas encore en base, donc pas de numéro pour construire
+    // les URL de recalcul/aperçu habituelles — voir wireRowNouveauDevis().
+    function formulaireAjoutDevisActif() {
+        return /\/admin\/chiffrage\/devis\/add\/?$/.test(window.location.pathname);
+    }
+
     function init() {
         const numero = devisNumeroFromUrl();
-        if (!numero) {
-            return; // pas sur la fiche d'un devis existant
+        if (numero) {
+            document.querySelectorAll("tbody.form-group").forEach((row) => wireRow(row, numero));
+            return;
         }
-        document.querySelectorAll("tbody.form-group").forEach((row) => wireRow(row, numero));
+        if (formulaireAjoutDevisActif()) {
+            document.querySelectorAll("tbody.form-group").forEach((row) => wireRowNouveauDevis(row));
+        }
     }
 
     function updateDevisTotals(data) {
@@ -293,6 +308,101 @@
         // un formulaire partiellement rempli) : si article + quantité sont
         // déjà renseignés au chargement, calcule tout de suite plutôt que
         // d'attendre une interaction qui n'aura peut-être jamais lieu.
+        executer();
+    }
+
+    // Ligne sur le formulaire d'AJOUT d'un devis : le devis lui-même n'est pas
+    // encore enregistré (pas de numéro), donc pas question d'appeler les
+    // endpoints .../lignes/previsualiser/ qui exigent un Devis existant en
+    // base. previsualiser_ligne_nouveau_devis_view ne dépend d'aucun objet
+    // Devis persistant : on lui fournit directement, dans le payload, les
+    // deux champs de contexte que previsualiser_ligne() lit habituellement
+    // sur l'objet (date de création, taux de marge globale), lus en direct
+    // sur le formulaire au moment du calcul.
+    function wireRowNouveauDevis(row) {
+        if (row.dataset.liveWired === "1") {
+            return;
+        }
+
+        const quantiteInput = row.querySelector('input[name$="-quantite"]');
+        if (!quantiteInput || quantiteInput.name.indexOf("__prefix__") !== -1) {
+            return;
+        }
+        const articleSelect = row.querySelector('select[name$="-article"]');
+        if (!articleSelect) {
+            return;
+        }
+
+        row.dataset.liveWired = "1";
+
+        const tauxInput = row.querySelector('input[name$="-taux_marge_matiere_applique"]');
+        const prixForceInput = row.querySelector('input[name$="-prix_vente_unitaire_force"]');
+        const tauxTvaSelect = row.querySelector('select[name$="-taux_tva"]');
+
+        const url = "/admin/chiffrage/devis/nouveau-devis/previsualiser-ligne/";
+
+        const executer = () => {
+            const article = articleSelect.value;
+            const quantite = quantiteInput.value;
+            if (!article || !quantite) {
+                return; // pas assez d'information pour un aperçu
+            }
+
+            const dateCreationInput = document.querySelector('[name="date_creation"]');
+            const tauxGlobalInput = document.querySelector('[name="taux_marge_globale"]');
+
+            const payload = {
+                article: article,
+                quantite: quantite,
+                date_creation: dateCreationInput ? dateCreationInput.value : null,
+                taux_marge_globale: tauxGlobalInput ? tauxGlobalInput.value : null,
+                taux_marge_matiere_applique: tauxInput ? tauxInput.value : null,
+                prix_vente_unitaire_force: prixForceInput ? prixForceInput.value : null,
+                taux_tva: tauxTvaSelect ? tauxTvaSelect.value : null,
+            };
+
+            row.style.opacity = "0.6";
+
+            fetch(url, {
+                method: "POST",
+                credentials: "same-origin",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-CSRFToken": csrfToken(),
+                },
+                body: JSON.stringify(payload),
+            })
+                .then((response) => response.json().then((data) => ({ status: response.status, data })))
+                .then(({ status, data }) => {
+                    row.style.opacity = "1";
+                    if (status >= 400) {
+                        console.error("Aperçu ligne de devis (nouveau devis) :", data.detail);
+                        showLigneErreur(row, data.detail || "Erreur lors de l'aperçu.");
+                        return;
+                    }
+                    updateLigneCells(row, data);
+                })
+                .catch(() => {
+                    row.style.opacity = "1";
+                    console.error("Aperçu ligne de devis (nouveau devis) : erreur réseau.");
+                    showLigneErreur(row, "Erreur réseau lors de l'aperçu.");
+                });
+        };
+
+        const previsualiser = debounce(executer, 400);
+
+        quantiteInput.addEventListener("input", previsualiser);
+        articleSelect.addEventListener("change", previsualiser);
+        if (tauxInput) {
+            tauxInput.addEventListener("input", previsualiser);
+        }
+        if (prixForceInput) {
+            prixForceInput.addEventListener("input", previsualiser);
+        }
+        if (tauxTvaSelect) {
+            tauxTvaSelect.addEventListener("change", previsualiser);
+        }
+
         executer();
     }
 })();

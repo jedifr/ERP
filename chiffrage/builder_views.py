@@ -240,12 +240,41 @@ def recalculer_ligne_view(request, numero, ligne_id):
     )
 
 
+def _lire_payload_previsualisation(payload):
+    """Lit et valide les champs communs à un aperçu de ligne (article,
+    quantité, taux de marge, prix forcé, taux de TVA). Lève _ValeurInvalide
+    (avec un message déjà prêt pour la réponse 400) si l'un d'eux est
+    manquant/invalide. Partagé entre previsualiser_ligne_view (devis déjà
+    enregistré) et previsualiser_ligne_nouveau_devis_view (devis pas encore
+    enregistré)."""
+    reference = payload.get("article")
+    try:
+        article = Article.objects.get(pk=reference)
+    except Article.DoesNotExist:
+        raise _ValeurInvalide(f"Article « {reference} » introuvable.")
+
+    try:
+        quantite = float(payload["quantite"])
+    except (KeyError, TypeError, ValueError):
+        raise _ValeurInvalide("Quantité invalide.")
+
+    taux, _fourni = _parse_float_optionnel(payload, "taux_marge_matiere_applique", "Taux de marge invalide.")
+    prix_force, _fourni = _parse_float_optionnel(
+        payload, "prix_vente_unitaire_force", "Prix unitaire forcé invalide."
+    )
+    taux_tva, _fourni = _parse_fk_optionnel(payload, "taux_tva", TauxTVA.objects.all(), "Taux de TVA introuvable.")
+
+    return article, quantite, taux, prix_force, taux_tva
+
+
 @staff_member_required
 @require_http_methods(["POST"])
 def previsualiser_ligne_view(request, numero):
     """Aperçu du coût/prix d'une ligne pas encore enregistrée (article +
     quantité tout juste saisis dans une nouvelle ligne de l'inline, sur la
-    fiche Devis) — ne persiste rien, contrairement à recalculer_ligne_view."""
+    fiche d'un devis déjà enregistré) — ne persiste rien, contrairement à
+    recalculer_ligne_view. Pour un devis lui-même pas encore enregistré (le
+    formulaire d'ajout), voir previsualiser_ligne_nouveau_devis_view."""
     devis = get_object_or_404(Devis, pk=numero)
 
     try:
@@ -253,31 +282,67 @@ def previsualiser_ligne_view(request, numero):
     except json.JSONDecodeError:
         return JsonResponse({"detail": "JSON invalide."}, status=400)
 
-    reference = payload.get("article")
     try:
-        article = Article.objects.get(pk=reference)
-    except Article.DoesNotExist:
-        return JsonResponse({"detail": f"Article « {reference} » introuvable."}, status=400)
-
-    try:
-        quantite = float(payload["quantite"])
-    except (KeyError, TypeError, ValueError):
-        return JsonResponse({"detail": "Quantité invalide."}, status=400)
-
-    try:
-        taux, _fourni = _parse_float_optionnel(payload, "taux_marge_matiere_applique", "Taux de marge invalide.")
-        prix_force, _fourni = _parse_float_optionnel(
-            payload, "prix_vente_unitaire_force", "Prix unitaire forcé invalide."
-        )
-        taux_tva, _fourni = _parse_fk_optionnel(
-            payload, "taux_tva", TauxTVA.objects.all(), "Taux de TVA introuvable."
-        )
+        article, quantite, taux, prix_force, taux_tva = _lire_payload_previsualisation(payload)
     except _ValeurInvalide as exc:
         return JsonResponse({"detail": exc.message}, status=400)
 
     try:
         resultat = previsualiser_ligne(
             devis,
+            article,
+            quantite,
+            taux_marge_matiere_applique=taux,
+            prix_vente_unitaire_force=prix_force,
+            taux_tva=taux_tva,
+        )
+    except ChiffrageError as exc:
+        return JsonResponse({"detail": str(exc)}, status=400)
+
+    return JsonResponse({"ok": True, **resultat})
+
+
+@staff_member_required
+@require_http_methods(["POST"])
+def previsualiser_ligne_nouveau_devis_view(request):
+    """Même aperçu que previsualiser_ligne_view, mais pour un devis PAS
+    ENCORE enregistré (formulaire d'ajout d'un nouveau Devis) : il n'y a donc
+    ni `numero` pour construire l'URL, ni objet Devis en base. Le contexte
+    normalement lu sur l'objet (date de création, taux de marge globale) est
+    fourni directement dans le payload par le JS (valeurs actuelles du
+    formulaire) ; previsualiser_ligne() n'a besoin que de lectures d'attributs
+    sur `devis`, jamais d'une requête le concernant — un Devis en mémoire,
+    jamais enregistré, suffit donc comme contexte."""
+    try:
+        payload = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"detail": "JSON invalide."}, status=400)
+
+    try:
+        article, quantite, taux, prix_force, taux_tva = _lire_payload_previsualisation(payload)
+    except _ValeurInvalide as exc:
+        return JsonResponse({"detail": exc.message}, status=400)
+
+    date_creation_str = payload.get("date_creation")
+    try:
+        date_creation = (
+            datetime.date.fromisoformat(date_creation_str) if date_creation_str else datetime.date.today()
+        )
+    except ValueError:
+        return JsonResponse({"detail": "Date de création invalide."}, status=400)
+
+    try:
+        taux_marge_globale, _fourni = _parse_float_optionnel(
+            payload, "taux_marge_globale", "Taux de marge globale invalide."
+        )
+    except _ValeurInvalide as exc:
+        return JsonResponse({"detail": exc.message}, status=400)
+
+    devis_provisoire = Devis(date_creation=date_creation, taux_marge_globale=taux_marge_globale)
+
+    try:
+        resultat = previsualiser_ligne(
+            devis_provisoire,
             article,
             quantite,
             taux_marge_matiere_applique=taux,

@@ -6,7 +6,12 @@ from unfold.admin import ModelAdmin, TabularInline
 from codification.mixins import CodificationInitialeMixin
 from codification.models import RegleCodification
 
-from .builder_views import devis_builder_view, previsualiser_ligne_view, recalculer_ligne_view
+from .builder_views import (
+    devis_builder_view,
+    previsualiser_ligne_nouveau_devis_view,
+    previsualiser_ligne_view,
+    recalculer_ligne_view,
+)
 from .models import Commande, Devis, DevisLigne, DevisLigneOperation, OperationOF, OrdreFabrication
 from .moteur import ChiffrageError, calculer_devis
 from .planning_sync import resynchroniser
@@ -92,6 +97,14 @@ class DevisAdmin(CodificationInitialeMixin, ModelAdmin):
 
     def get_urls(self):
         urls = [
+            # Chemin fixe (pas de <str:numero>) : utilisé sur le formulaire
+            # d'AJOUT d'un devis, qui n'a par définition pas encore de numéro
+            # (l'objet Devis n'existe pas encore en base).
+            path(
+                "nouveau-devis/previsualiser-ligne/",
+                self.admin_site.admin_view(previsualiser_ligne_nouveau_devis_view),
+                name="chiffrage_devisligne_previsualiser_nouveau_devis",
+            ),
             path(
                 "<str:numero>/constructeur/",
                 self.admin_site.admin_view(devis_builder_view),

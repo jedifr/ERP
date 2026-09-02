@@ -451,3 +451,35 @@ même avec des taux différents d'une ligne à l'autre.
 Le taux de TVA et le prix TTC suivent le calcul en temps réel déjà en place
 (ligne existante comme ligne neuve) et s'affichent aussi sur la page
 Constructeur.
+
+## Calcul live sur le formulaire d'AJOUT d'un devis
+
+Troisième cause, plus fondamentale, du même signalement "le calcul en
+direct ne marche pas" : sur le formulaire d'**ajout** d'un nouveau devis
+(`/admin/chiffrage/devis/add/`), le calcul en direct ne se déclenchait tout
+simplement jamais, quoi qu'on saisisse dans les lignes.
+
+En cause : `devis_admin_live.js` déduit le numéro du devis depuis l'URL
+(`.../devis/<numéro>/change/`) pour construire les appels de recalcul/
+aperçu — mais tant que le devis n'a pas été enregistré une première fois,
+l'URL est `.../devis/add/` : il n'y a pas de numéro à en extraire (même si
+le champ "Numéro" affiche déjà un code proposé par la codification
+automatique — ce n'est qu'une valeur de formulaire, pas encore un objet
+Devis en base). `init()` détectait cette absence de numéro et abandonnait
+immédiatement, sans câbler aucune ligne.
+
+Comme les endpoints existants (`.../lignes/previsualiser/`,
+`.../lignes/<id>/recalculer/`) exigent tous les deux un Devis déjà en base
+(ne serait-ce que pour construire leur URL), il fallait un chemin
+spécifique pour ce cas : `POST /admin/chiffrage/devis/nouveau-devis/previsualiser-ligne/`
+(`previsualiser_ligne_nouveau_devis_view`) ne dépend d'aucun numéro ni
+d'aucun objet Devis en base. `previsualiser_ligne()` n'a besoin de l'objet
+`devis` que pour lire deux attributs simples (`date_creation`,
+`taux_marge_globale`) — jamais une requête qui exigerait qu'il soit
+persisté — donc un `Devis(...)` construit en mémoire, jamais enregistré,
+avec les valeurs actuelles du formulaire (lues en direct par le JS au
+moment du calcul) suffit comme contexte.
+
+Avec ce correctif, remplir article + quantité sur une ligne du formulaire
+d'ajout calcule désormais le prix instantanément, avant même d'enregistrer
+le devis — exactement le scénario initialement demandé.
