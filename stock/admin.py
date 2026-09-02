@@ -1,6 +1,9 @@
 from django.contrib import admin
 from unfold.admin import ModelAdmin, TabularInline
 
+from codification.mixins import CodificationInitialeMixin
+from codification.models import RegleCodification
+
 from .models import AlerteStock, Emplacement, Lot, MouvementStock
 
 
@@ -10,7 +13,9 @@ class MouvementStockInline(TabularInline):
 
 
 @admin.register(Emplacement)
-class EmplacementAdmin(ModelAdmin):
+class EmplacementAdmin(CodificationInitialeMixin, ModelAdmin):
+    codification_entite = RegleCodification.Entite.EMPLACEMENT
+
     list_display = ["code", "libelle"]
     search_fields = ["code", "libelle"]
 

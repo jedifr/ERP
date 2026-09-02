@@ -3,6 +3,9 @@ from django.urls import path
 from django.utils.html import format_html
 from unfold.admin import ModelAdmin, TabularInline
 
+from codification.mixins import CodificationInitialeMixin
+from codification.models import RegleCodification
+
 from .builder_views import devis_builder_view, recalculer_ligne_view
 from .models import Commande, Devis, DevisLigne, DevisLigneOperation, OperationOF, OrdreFabrication
 from .moteur import ChiffrageError, calculer_devis
@@ -28,7 +31,9 @@ class DevisLigneOperationInline(TabularInline):
 
 
 @admin.register(Devis)
-class DevisAdmin(ModelAdmin):
+class DevisAdmin(CodificationInitialeMixin, ModelAdmin):
+    codification_entite = RegleCodification.Entite.DEVIS
+
     list_display = [
         "numero",
         "client",
@@ -41,7 +46,7 @@ class DevisAdmin(ModelAdmin):
     ]
     list_filter = ["statut"]
     search_fields = ["numero", "client__raison_sociale"]
-    autocomplete_fields = ["client"]
+    autocomplete_fields = ["client", "adresse_facturation", "adresse_livraison", "contact"]
     readonly_fields = [
         "montant_matiere_ht_display",
         "montant_operations_ht_display",
@@ -127,7 +132,9 @@ class DevisLigneAdmin(ModelAdmin):
 
 
 @admin.register(Commande)
-class CommandeAdmin(ModelAdmin):
+class CommandeAdmin(CodificationInitialeMixin, ModelAdmin):
+    codification_entite = RegleCodification.Entite.COMMANDE
+
     list_display = ["numero", "devis", "date_commande", "statut"]
     search_fields = ["numero", "devis__numero"]
     autocomplete_fields = ["devis", "adresse_facturation", "adresse_livraison"]
@@ -139,7 +146,9 @@ class OperationOFInline(TabularInline):
 
 
 @admin.register(OrdreFabrication)
-class OrdreFabricationAdmin(ModelAdmin):
+class OrdreFabricationAdmin(CodificationInitialeMixin, ModelAdmin):
+    codification_entite = RegleCodification.Entite.ORDRE_FABRICATION
+
     list_display = [
         "numero",
         "commande",

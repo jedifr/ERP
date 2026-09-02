@@ -1,6 +1,9 @@
 from django.contrib import admin, messages
 from unfold.admin import ModelAdmin, TabularInline
 
+from codification.mixins import CodificationInitialeMixin
+from codification.models import RegleCodification
+
 from .models import AchatsError, CommandeFournisseur, LigneCommandeFournisseur, Reception, ReceptionLigne
 
 
@@ -12,7 +15,9 @@ class LigneCommandeFournisseurInline(TabularInline):
 
 
 @admin.register(CommandeFournisseur)
-class CommandeFournisseurAdmin(ModelAdmin):
+class CommandeFournisseurAdmin(CodificationInitialeMixin, ModelAdmin):
+    codification_entite = RegleCodification.Entite.COMMANDE_FOURNISSEUR
+
     list_display = ["numero", "fournisseur", "date_commande", "date_livraison_prevue", "statut"]
     list_filter = ["statut"]
     search_fields = ["numero", "fournisseur__raison_sociale"]
@@ -41,7 +46,9 @@ class ReceptionLigneInline(TabularInline):
 
 
 @admin.register(Reception)
-class ReceptionAdmin(ModelAdmin):
+class ReceptionAdmin(CodificationInitialeMixin, ModelAdmin):
+    codification_entite = RegleCodification.Entite.RECEPTION
+
     list_display = ["numero", "commande_fournisseur", "date_reception"]
     search_fields = ["numero", "commande_fournisseur__numero"]
     autocomplete_fields = ["commande_fournisseur"]

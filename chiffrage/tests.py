@@ -1,9 +1,10 @@
 import datetime
 from unittest.mock import patch
 
+from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings
 
-from commercial.models import Adresse, Tiers
+from commercial.models import Adresse, Contact, Tiers
 from technique.models import Article, Gamme, Matiere, Nomenclature, PosteTravail, TarifPoste
 
 from .builder import ajouter_ligne_devis, creer_article_fabrique
@@ -742,3 +743,79 @@ class RecalculerLigneAvecOperationsTests(TestCase):
         self.assertAlmostEqual(data["prix_vente_operations"], 1437.5)
         self.assertAlmostEqual(data["prix_vente_total"], 133.7112 + 1437.5, places=3)
         self.assertAlmostEqual(data["montant_total_ht"], 133.7112 + 1437.5, places=3)
+
+
+class DevisAdressesContactTests(TestCase):
+    """Client, adresse de facturation, adresse de livraison et contact sur le devis."""
+
+    def setUp(self):
+        self.client_tiers = Tiers.objects.create(
+            code="CLI-ADR", raison_sociale="Client Adresses", type_tiers=Tiers.TypeTiers.CLIENT
+        )
+        self.autre_tiers = Tiers.objects.create(
+            code="CLI-AUTRE", raison_sociale="Autre Client", type_tiers=Tiers.TypeTiers.CLIENT
+        )
+        self.adresse_facturation = Adresse.objects.create(
+            tiers=self.client_tiers,
+            type_adresse=Adresse.TypeAdresse.FACTURATION,
+            adresse="1 rue de la Facture",
+            code_postal="75000",
+            ville="Paris",
+        )
+        self.adresse_livraison = Adresse.objects.create(
+            tiers=self.client_tiers,
+            type_adresse=Adresse.TypeAdresse.LIVRAISON,
+            adresse="2 rue de la Livraison",
+            code_postal="75000",
+            ville="Paris",
+        )
+        self.contact = Contact.objects.create(tiers=self.client_tiers, nom="Dupont", prenom="Jean")
+
+    def test_devis_avec_adresses_et_contact_du_client(self):
+        devis = Devis(
+            numero="DEV-ADR-1",
+            client=self.client_tiers,
+            adresse_facturation=self.adresse_facturation,
+            adresse_livraison=self.adresse_livraison,
+            contact=self.contact,
+            date_creation=datetime.date(2026, 1, 1),
+        )
+        devis.full_clean()  # ne doit pas lever d'exception
+        devis.save()
+        self.assertEqual(devis.adresse_facturation, self.adresse_facturation)
+        self.assertEqual(devis.adresse_livraison, self.adresse_livraison)
+        self.assertEqual(devis.contact, self.contact)
+
+    def test_devis_sans_adresse_ni_contact_reste_valide(self):
+        devis = Devis(
+            numero="DEV-ADR-2", client=self.client_tiers, date_creation=datetime.date(2026, 1, 1)
+        )
+        devis.full_clean()  # tous optionnels : ne doit pas lever d'exception
+
+    def test_adresse_facturation_dun_autre_tiers_refusee(self):
+        adresse_autre = Adresse.objects.create(
+            tiers=self.autre_tiers,
+            type_adresse=Adresse.TypeAdresse.FACTURATION,
+            adresse="3 rue Ailleurs",
+            code_postal="69000",
+            ville="Lyon",
+        )
+        devis = Devis(
+            numero="DEV-ADR-3",
+            client=self.client_tiers,
+            adresse_facturation=adresse_autre,
+            date_creation=datetime.date(2026, 1, 1),
+        )
+        with self.assertRaises(ValidationError):
+            devis.full_clean()
+
+    def test_contact_dun_autre_tiers_refuse(self):
+        contact_autre = Contact.objects.create(tiers=self.autre_tiers, nom="Martin")
+        devis = Devis(
+            numero="DEV-ADR-4",
+            client=self.client_tiers,
+            contact=contact_autre,
+            date_creation=datetime.date(2026, 1, 1),
+        )
+        with self.assertRaises(ValidationError):
+            devis.full_clean()

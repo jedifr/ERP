@@ -1,7 +1,7 @@
 from django.core.exceptions import ValidationError
 from django.db import models
 
-from commercial.models import Adresse, Tiers
+from commercial.models import Adresse, Contact, Tiers
 from technique.models import Article, PosteTravail
 
 
@@ -12,6 +12,30 @@ class Devis(models.Model):
 
     numero = models.CharField("numéro", max_length=50, primary_key=True)
     client = models.ForeignKey(Tiers, verbose_name="client", on_delete=models.PROTECT, related_name="devis")
+    adresse_facturation = models.ForeignKey(
+        Adresse,
+        verbose_name="adresse de facturation",
+        on_delete=models.PROTECT,
+        related_name="devis_facturation",
+        null=True,
+        blank=True,
+    )
+    adresse_livraison = models.ForeignKey(
+        Adresse,
+        verbose_name="adresse de livraison",
+        on_delete=models.PROTECT,
+        related_name="devis_livraison",
+        null=True,
+        blank=True,
+    )
+    contact = models.ForeignKey(
+        Contact,
+        verbose_name="contact",
+        on_delete=models.PROTECT,
+        related_name="devis",
+        null=True,
+        blank=True,
+    )
     date_creation = models.DateField("date de création")
     statut = models.CharField("statut", max_length=20, choices=Statut.choices, default=Statut.BROUILLON)
     taux_marge_globale = models.FloatField(
@@ -25,6 +49,22 @@ class Devis(models.Model):
 
     def __str__(self):
         return self.numero
+
+    def clean(self):
+        super().clean()
+        if self.adresse_facturation_id and self.client_id:
+            if self.adresse_facturation.tiers_id != self.client_id:
+                raise ValidationError(
+                    {"adresse_facturation": "Cette adresse n'appartient pas au client sélectionné."}
+                )
+        if self.adresse_livraison_id and self.client_id:
+            if self.adresse_livraison.tiers_id != self.client_id:
+                raise ValidationError(
+                    {"adresse_livraison": "Cette adresse n'appartient pas au client sélectionné."}
+                )
+        if self.contact_id and self.client_id:
+            if self.contact.tiers_id != self.client_id:
+                raise ValidationError({"contact": "Ce contact n'appartient pas au client sélectionné."})
 
     @property
     def montant_matiere_ht(self):

@@ -51,6 +51,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "rest_framework",
     "django_filters",
+    "codification",
     "technique",
     "commercial",
     "chiffrage",
@@ -337,6 +338,17 @@ UNFOLD = {
                         "title": "Factures",
                         "icon": "receipt_long",
                         "link": reverse_lazy("admin:facturation_facture_changelist"),
+                    },
+                ],
+            },
+            {
+                "title": "Paramétrage",
+                "separator": True,
+                "items": [
+                    {
+                        "title": "Règles de codification",
+                        "icon": "tag",
+                        "link": reverse_lazy("admin:codification_reglecodification_changelist"),
                     },
                 ],
             },

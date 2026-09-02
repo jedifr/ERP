@@ -298,3 +298,45 @@ dédiée (`POST /admin/technique/article/<référence>/dupliquer/`) protégée
 par `staff_member_required`, et un override de template
 (`admin/technique/article/change_form.html`) ajoutant le bouton dans
 `object-tools-items`, visible uniquement sur un article déjà enregistré.
+
+## Codification paramétrable (préfixe + numéro)
+
+Nouvelle app `codification` : un modèle `RegleCodification` (menu
+**Paramétrage → Règles de codification**) définit, pour chaque entité
+concernée, un préfixe, un nombre de chiffres (largeur du numéro, complété
+par des zéros) et une réinitialisation (jamais, ou chaque année — l'année
+est alors insérée entre le préfixe et le numéro, ex. `FAC-2026-00001`).
+
+10 entités sont couvertes, avec des préfixes par défaut créés par une
+migration de données (`codification/migrations/0002_seed_regles_par_defaut.py`) :
+Devis (`DEV-`), Commande (`CDE-`), Ordre de fabrication (`OF-`), Commande
+fournisseur (`CDEF-`), Réception (`REC-`), Facture (`FAC-`), Envoi
+sous-traitance (`ENVST-`), Retour sous-traitance (`RETST-`), Tiers
+(`TIERS-`) et Emplacement (`EMP-`). Volontairement exclus : Article,
+Matière, Poste de travail — ce sont des références techniques choisies à la
+main (ex. `TOLE-S235-3MM`), pas des numéros de séquence.
+
+Fonctionnement (`codification/services.py`, `generer_code`) :
+- le code proposé **pré-remplit** le champ numéro/code du formulaire
+  d'ajout de l'entité (`codification/mixins.py`, `CodificationInitialeMixin`,
+  branché sur les 10 `ModelAdmin` concernés) ;
+- il reste un champ texte normal, modifiable avant enregistrement ;
+- le compteur est incrémenté dès l'ouverture du formulaire d'ajout (pas au
+  moment d'enregistrer) — un numéro peut donc être "sauté" si le formulaire
+  est abandonné sans être enregistré. Compromis assumé pour rester simple
+  (pas de réservation temporaire à nettoyer) ;
+- si aucune règle n'est configurée pour une entité, le champ reste vide
+  comme avant (comportement additif, jamais bloquant).
+
+Pour reprendre une numérotation existante, ajuster `compteur_actuel`
+directement sur la règle (le prochain code utilisera `compteur + 1`).
+
+## Adresse de livraison, adresse de facturation et contact sur le devis
+
+En plus du client, un devis peut porter une **adresse de facturation**, une
+**adresse de livraison** et un **contact** (tous optionnels — comme le
+client est déjà là dès le brouillon, ces informations peuvent être
+complétées plus tard). Ces trois champs se comportent comme sur `Commande`
+(mêmes modèles `Adresse`/`Contact` de l'app `commercial`) : `Devis.clean()`
+vérifie que l'adresse ou le contact choisi appartient bien au client
+sélectionné, sinon la validation échoue avec un message explicite.

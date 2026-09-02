@@ -1,6 +1,9 @@
 from django.contrib import admin
 from unfold.admin import ModelAdmin, TabularInline
 
+from codification.mixins import CodificationInitialeMixin
+from codification.models import RegleCodification
+
 from .models import Adresse, Contact, Tiers
 
 
@@ -15,7 +18,9 @@ class ContactInline(TabularInline):
 
 
 @admin.register(Tiers)
-class TiersAdmin(ModelAdmin):
+class TiersAdmin(CodificationInitialeMixin, ModelAdmin):
+    codification_entite = RegleCodification.Entite.TIERS
+
     list_display = ["code", "raison_sociale", "type_tiers", "siret"]
     list_filter = ["type_tiers"]
     search_fields = ["code", "raison_sociale", "siret"]

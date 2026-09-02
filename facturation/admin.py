@@ -1,11 +1,16 @@
 from django.contrib import admin
 from unfold.admin import ModelAdmin, TabularInline
 
+from codification.mixins import CodificationInitialeMixin
+from codification.models import RegleCodification
+
 from .models import Facture
 
 
 @admin.register(Facture)
-class FactureAdmin(ModelAdmin):
+class FactureAdmin(CodificationInitialeMixin, ModelAdmin):
+    codification_entite = RegleCodification.Entite.FACTURE
+
     list_display = [
         "numero",
         "commande",
