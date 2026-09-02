@@ -54,6 +54,7 @@
             montant_matiere_ht: "#montant-matiere-ht",
             montant_operations_ht: "#montant-operations-ht",
             montant_total_ht: "#montant-total-ht",
+            montant_total_ttc: "#montant-total-ttc",
         };
         Object.keys(map).forEach((key) => {
             if (data[key] == null) return;
@@ -68,6 +69,7 @@
             prixCell: row.querySelector(".field-prix_vente_matiere .readonly"),
             operationsCell: row.querySelector(".field-prix_vente_operations .readonly"),
             totalCell: row.querySelector(".field-prix_vente_total .readonly"),
+            ttcCell: row.querySelector(".field-prix_vente_ttc .readonly"),
         };
     }
 
@@ -86,6 +88,9 @@
         if (cells.totalCell) {
             cells.totalCell.textContent = data.prix_vente_total != null ? data.prix_vente_total : "-";
         }
+        if (cells.ttcCell) {
+            cells.ttcCell.textContent = data.prix_vente_ttc != null ? data.prix_vente_ttc : "-";
+        }
     }
 
     function wireRow(row, numero) {
@@ -97,6 +102,7 @@
         const quantiteInput = row.querySelector('input[name$="-quantite"]');
         const tauxInput = row.querySelector('input[name$="-taux_marge_matiere_applique"]');
         const prixForceInput = row.querySelector('input[name$="-prix_vente_unitaire_force"]');
+        const tauxTvaSelect = row.querySelector('select[name$="-taux_tva"]');
 
         if (!quantiteInput || quantiteInput.name.indexOf("__prefix__") !== -1) {
             // Le gabarit caché (__prefix__) sert uniquement de source de clonage au bouton
@@ -110,16 +116,19 @@
 
         row.dataset.liveWired = "1";
 
+        const champs = { quantiteInput, tauxInput, prixForceInput, tauxTvaSelect };
+
         if (idInput && idInput.value) {
-            wireRowExistante(row, numero, idInput.value, quantiteInput, tauxInput, prixForceInput);
+            wireRowExistante(row, numero, idInput.value, champs);
         } else {
-            wireRowNouvelle(row, numero, quantiteInput, tauxInput, prixForceInput);
+            wireRowNouvelle(row, numero, champs);
         }
     }
 
     // Ligne déjà enregistrée : recalcul en direct persisté côté serveur
     // (POST .../recalculer/), qui met aussi à jour les totaux du devis.
-    function wireRowExistante(row, numero, ligneId, quantiteInput, tauxInput, prixForceInput) {
+    function wireRowExistante(row, numero, ligneId, champs) {
+        const { quantiteInput, tauxInput, prixForceInput, tauxTvaSelect } = champs;
         const url = `/admin/chiffrage/devis/${encodeURIComponent(numero)}/lignes/${ligneId}/recalculer/`;
 
         const recalculer = debounce(() => {
@@ -127,6 +136,7 @@
                 quantite: quantiteInput.value,
                 taux_marge_matiere_applique: tauxInput ? tauxInput.value : null,
                 prix_vente_unitaire_force: prixForceInput ? prixForceInput.value : null,
+                taux_tva: tauxTvaSelect ? tauxTvaSelect.value : null,
             };
 
             row.style.opacity = "0.6";
@@ -166,12 +176,16 @@
         if (prixForceInput) {
             prixForceInput.addEventListener("input", recalculer);
         }
+        if (tauxTvaSelect) {
+            tauxTvaSelect.addEventListener("change", recalculer);
+        }
     }
 
     // Ligne pas encore enregistrée : simple aperçu (POST .../previsualiser/),
     // qui ne persiste rien et ne touche donc pas les totaux du devis — ceux-ci
     // ne reflètent que les lignes réellement enregistrées.
-    function wireRowNouvelle(row, numero, quantiteInput, tauxInput, prixForceInput) {
+    function wireRowNouvelle(row, numero, champs) {
+        const { quantiteInput, tauxInput, prixForceInput, tauxTvaSelect } = champs;
         const articleSelect = row.querySelector('select[name$="-article"]');
         if (!articleSelect) {
             return;
@@ -191,6 +205,7 @@
                 quantite: quantite,
                 taux_marge_matiere_applique: tauxInput ? tauxInput.value : null,
                 prix_vente_unitaire_force: prixForceInput ? prixForceInput.value : null,
+                taux_tva: tauxTvaSelect ? tauxTvaSelect.value : null,
             };
 
             row.style.opacity = "0.6";
@@ -226,6 +241,9 @@
         }
         if (prixForceInput) {
             prixForceInput.addEventListener("input", previsualiser);
+        }
+        if (tauxTvaSelect) {
+            tauxTvaSelect.addEventListener("change", previsualiser);
         }
     }
 })();

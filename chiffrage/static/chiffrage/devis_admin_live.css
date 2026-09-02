@@ -1,0 +1,13 @@
+/* Tableau des lignes de devis (admin) : les en-têtes de colonnes sont
+   volontairement descriptifs ("Prix de vente unitaire forcé (HT)"...), ce
+   qui pousse le tableau en scroll horizontal si le texte reste sur une
+   seule ligne (comportement Unfold par défaut : white-space: nowrap).
+   On autorise le retour à la ligne et on plafonne la largeur des colonnes
+   pour que les en-têtes tiennent sur 2 lignes plutôt que d'élargir la
+   colonne à l'infini. */
+#lignes-data th {
+    white-space: normal;
+    max-width: 130px;
+    vertical-align: bottom;
+    line-height: 1.2;
+}

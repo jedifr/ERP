@@ -1,8 +1,15 @@
 from django.core.exceptions import ValidationError
 from django.db import models
 
-from commercial.models import Adresse, Contact, Tiers
+from commercial.models import Adresse, Contact, TauxTVA, Tiers
 from technique.models import Article, PosteTravail
+
+
+def _taux_tva_par_defaut():
+    """Valeur par défaut du champ DevisLigne.taux_tva : le taux coché comme
+    « taux par défaut » dans le référentiel, ou aucun s'il n'y en a pas."""
+    defaut = TauxTVA.objects.filter(est_defaut=True).first()
+    return defaut.pk if defaut else None
 
 
 class Devis(models.Model):
@@ -84,6 +91,14 @@ class Devis(models.Model):
 
     montant_total_ht.fget.short_description = "Montant total HT"
 
+    @property
+    def montant_total_ttc(self):
+        """Somme des prix TTC de chaque ligne (chacune avec son propre taux de
+        TVA) — reflète donc correctement un devis à taux de TVA mixtes."""
+        return sum(ligne.prix_vente_ttc or 0 for ligne in self.lignes.all())
+
+    montant_total_ttc.fget.short_description = "Montant total TTC"
+
 
 class DevisLigne(models.Model):
     devis = models.ForeignKey(Devis, verbose_name="devis", on_delete=models.CASCADE, related_name="lignes")
@@ -112,6 +127,16 @@ class DevisLigne(models.Model):
     prix_vente_matiere = models.FloatField(
         "prix de vente matière (HT)", null=True, blank=True, editable=False
     )
+    taux_tva = models.ForeignKey(
+        TauxTVA,
+        verbose_name="taux de TVA",
+        on_delete=models.PROTECT,
+        related_name="devis_lignes",
+        null=True,
+        blank=True,
+        default=_taux_tva_par_defaut,
+        help_text="Pré-rempli avec le taux par défaut du référentiel, modifiable par ligne",
+    )
 
     class Meta:
         verbose_name = "Ligne de devis"
@@ -137,6 +162,18 @@ class DevisLigne(models.Model):
         return self.prix_vente_matiere + self.prix_vente_operations
 
     prix_vente_total.fget.short_description = "Prix de vente total (matière + opérations, HT)"
+
+    @property
+    def prix_vente_ttc(self):
+        """Prix de vente total (matière + opérations) TTC, à partir du taux de
+        TVA de la ligne. None tant que le chiffrage n'a pas été calculé ;
+        0 % appliqué si aucun taux de TVA n'est renseigné sur la ligne."""
+        if self.prix_vente_total is None:
+            return None
+        taux = self.taux_tva.taux if self.taux_tva_id else 0
+        return self.prix_vente_total * (1 + taux / 100)
+
+    prix_vente_ttc.fget.short_description = "Prix de vente TTC"
 
 
 class DevisLigneOperation(models.Model):

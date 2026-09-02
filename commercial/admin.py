@@ -4,7 +4,7 @@ from unfold.admin import ModelAdmin, TabularInline
 from codification.mixins import CodificationInitialeMixin
 from codification.models import RegleCodification
 
-from .models import Adresse, Contact, Tiers
+from .models import Adresse, Contact, TauxTVA, Tiers
 
 
 class AdresseInline(TabularInline):
@@ -40,3 +40,10 @@ class ContactAdmin(ModelAdmin):
     list_display = ["nom", "prenom", "tiers", "email", "telephone", "fonction"]
     search_fields = ["nom", "prenom", "tiers__code", "tiers__raison_sociale"]
     autocomplete_fields = ["tiers"]
+
+
+@admin.register(TauxTVA)
+class TauxTVAAdmin(ModelAdmin):
+    list_display = ["nom", "taux", "est_defaut"]
+    list_filter = ["est_defaut"]
+    search_fields = ["nom"]

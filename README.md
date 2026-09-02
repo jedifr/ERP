@@ -383,3 +383,35 @@ total, et le nouveau prix forcé) précisent maintenant "(HT)" dans leur
 libellé, sur la fiche Devis comme sur la page Constructeur. Les montants
 "Montant matière/opérations/total HT" du haut de la fiche Devis l'indiquaient
 déjà.
+
+## En-têtes de colonnes sur 2 lignes (fiche Devis)
+
+Le tableau des lignes de devis (admin) partait en scroll horizontal : Unfold
+force `white-space: nowrap` sur les en-têtes de colonnes, et plusieurs
+libellés sont volontairement descriptifs ("Prix de vente unitaire forcé
+(HT)"...). `chiffrage/static/chiffrage/devis_admin_live.css` (chargé par
+`DevisAdmin.Media.css`) autorise le retour à la ligne et plafonne la largeur
+des colonnes (`#lignes-data th { white-space: normal; max-width: 130px; }`)
+pour que les en-têtes tiennent sur 2 lignes plutôt que d'élargir le tableau.
+
+## Taux de TVA par ligne et prix TTC
+
+Référentiel `commercial.TauxTVA` (menu **Commercial → Taux de TVA**) : nom,
+taux (%), et un indicateur "taux par défaut" (un seul à la fois — même
+validation que "adresse principale" sur `Adresse`). Pré-rempli par une
+migration de données avec les taux français courants (normal 20 % par
+défaut, intermédiaire 10 %, réduit 5,5 %, particulier 2,1 %) ; librement
+modifiable ou complétable dans l'admin.
+
+Chaque `DevisLigne` a son propre `taux_tva` (optionnel), pré-rempli
+automatiquement avec le taux par défaut du référentiel
+(`default=_taux_tva_par_defaut`, une fonction évaluée à la création de
+l'instance — donc aussi bien sur une nouvelle ligne de l'inline que sur une
+ligne créée par le Constructeur). Un `prix_vente_ttc` (propriété, comme
+`prix_vente_total`) applique ce taux au prix de vente total HT de la ligne ;
+`Devis.montant_total_ttc` additionne le TTC de chaque ligne — donc correct
+même avec des taux différents d'une ligne à l'autre.
+
+Le taux de TVA et le prix TTC suivent le calcul en temps réel déjà en place
+(ligne existante comme ligne neuve) et s'affichent aussi sur la page
+Constructeur.

@@ -160,7 +160,14 @@ def calculer_devis(devis):
             ligne.operations.all().delete()
 
 
-def previsualiser_ligne(devis, article, quantite, taux_marge_matiere_applique=None, prix_vente_unitaire_force=None):
+def previsualiser_ligne(
+    devis,
+    article,
+    quantite,
+    taux_marge_matiere_applique=None,
+    prix_vente_unitaire_force=None,
+    taux_tva=None,
+):
     """Aperçu du coût/prix d'une ligne pas encore enregistrée (ligne tout juste
     ajoutée dans l'inline de la fiche Devis, ou dans le constructeur), en
     réutilisant exactement les mêmes règles que calculer_devis — sans rien
@@ -186,10 +193,14 @@ def previsualiser_ligne(devis, article, quantite, taux_marge_matiere_applique=No
             taux_operation = _taux_marge_operation(devis, etape.poste, None)
             prix_vente_operations += cout_etape * (1 + taux_operation / 100)
 
+    prix_vente_total = prix_vente_matiere + prix_vente_operations
+    taux_tva_valeur = taux_tva.taux if taux_tva is not None else 0
+
     return {
         "cout_matiere_calcule": cout_matiere,
         "taux_marge_matiere_applique": taux,
         "prix_vente_matiere": prix_vente_matiere,
         "prix_vente_operations": prix_vente_operations,
-        "prix_vente_total": prix_vente_matiere + prix_vente_operations,
+        "prix_vente_total": prix_vente_total,
+        "prix_vente_ttc": prix_vente_total * (1 + taux_tva_valeur / 100),
     }

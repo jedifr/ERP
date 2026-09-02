@@ -4,7 +4,7 @@ from unittest.mock import patch
 from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings
 
-from commercial.models import Adresse, Contact, Tiers
+from commercial.models import Adresse, Contact, TauxTVA, Tiers
 from technique.models import Article, Gamme, Matiere, Nomenclature, PosteTravail, TarifPoste
 
 from .builder import ajouter_ligne_devis, creer_article_fabrique
@@ -1052,3 +1052,151 @@ class RecalculerLignePrixForceTests(TestCase):
             content_type="application/json",
         )
         self.assertEqual(response.status_code, 400)
+
+
+class TauxTvaEtPrixTtcTests(TestCase):
+    """Taux de TVA par ligne (référentiel commercial.TauxTVA) et prix TTC."""
+
+    def setUp(self):
+        # "Taux normal" (20 %, par défaut) et "Taux réduit" (5.5 %) viennent de
+        # la migration de données commercial/migrations/0005_seed_taux_tva.py.
+        self.taux_normal = TauxTVA.objects.get(nom="Taux normal")
+        self.taux_reduit = TauxTVA.objects.get(nom="Taux réduit")
+
+        self.client_tiers = Tiers.objects.create(
+            code="CLI-TVA", raison_sociale="Client TVA", type_tiers=Tiers.TypeTiers.CLIENT
+        )
+        self.devis = Devis.objects.create(
+            numero="DEV-TVA",
+            client=self.client_tiers,
+            date_creation=datetime.date(2026, 1, 1),
+            statut=Devis.Statut.BROUILLON,
+        )
+        self.article = Article.objects.create(
+            reference="ART-TVA",
+            nature=Article.Nature.MATIERE_PREMIERE,
+            unite_cout=Article.UniteCout.PIECE,
+            cout_unitaire=10.0,
+        )
+
+    def test_nouvelle_ligne_recoit_le_taux_par_defaut(self):
+        ligne = DevisLigne.objects.create(devis=self.devis, article=self.article, quantite=1)
+        self.assertEqual(ligne.taux_tva, self.taux_normal)
+
+    def test_prix_vente_ttc_none_avant_calcul(self):
+        ligne = DevisLigne(devis=self.devis, article=self.article, quantite=1, taux_tva=self.taux_normal)
+        self.assertIsNone(ligne.prix_vente_ttc)
+
+    def test_prix_vente_ttc_avec_taux(self):
+        ligne = DevisLigne.objects.create(
+            devis=self.devis, article=self.article, quantite=2, taux_tva=self.taux_reduit
+        )
+        calculer_devis(self.devis)
+        ligne.refresh_from_db()
+        # cout=2*10=20, pas de marge -> prix_vente_matiere=20 ; TTC = 20 * 1.055 = 21.1
+        self.assertEqual(ligne.prix_vente_matiere, 20)
+        self.assertAlmostEqual(ligne.prix_vente_ttc, 21.1, places=3)
+
+    def test_prix_vente_ttc_sans_taux_egal_au_ht(self):
+        ligne = DevisLigne.objects.create(
+            devis=self.devis, article=self.article, quantite=2, taux_tva=None
+        )
+        calculer_devis(self.devis)
+        ligne.refresh_from_db()
+        self.assertEqual(ligne.prix_vente_ttc, ligne.prix_vente_total)
+
+    def test_montant_total_ttc_avec_taux_mixtes(self):
+        DevisLigne.objects.create(
+            devis=self.devis, article=self.article, quantite=1, taux_tva=self.taux_normal
+        )  # 10 HT -> 12 TTC
+        DevisLigne.objects.create(
+            devis=self.devis, article=self.article, quantite=2, taux_tva=self.taux_reduit
+        )  # 20 HT -> 21.1 TTC
+        calculer_devis(self.devis)
+        self.assertAlmostEqual(self.devis.montant_total_ttc, 12 + 21.1, places=3)
+
+    def test_previsualiser_ligne_inclut_le_ttc(self):
+        resultat = previsualiser_ligne(self.devis, self.article, 3, taux_tva=self.taux_normal)
+        # 3*10=30 HT -> 36 TTC
+        self.assertEqual(resultat["prix_vente_total"], 30)
+        self.assertEqual(resultat["prix_vente_ttc"], 36)
+
+    def test_previsualiser_ligne_sans_taux_ttc_egal_ht(self):
+        resultat = previsualiser_ligne(self.devis, self.article, 3)
+        self.assertEqual(resultat["prix_vente_ttc"], resultat["prix_vente_total"])
+
+
+class TauxTvaViewsTests(TestCase):
+    """Les endpoints live (recalcul + aperçu) prennent en compte taux_tva."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        self.user = User.objects.create_superuser("tva-admin", "t@example.com", "pass1234")
+        self.client.force_login(self.user)
+
+        self.taux_normal = TauxTVA.objects.get(nom="Taux normal")
+        self.taux_reduit = TauxTVA.objects.get(nom="Taux réduit")
+
+        self.article = Article.objects.create(
+            reference="ART-TVA-VIEW",
+            nature=Article.Nature.MATIERE_PREMIERE,
+            unite_cout=Article.UniteCout.PIECE,
+            cout_unitaire=10.0,
+        )
+        client_tiers = Tiers.objects.create(
+            code="CLI-TVA-VIEW", raison_sociale="Client TVA View", type_tiers=Tiers.TypeTiers.CLIENT
+        )
+        self.devis = Devis.objects.create(
+            numero="DEV-TVA-VIEW",
+            client=client_tiers,
+            date_creation=datetime.date(2026, 1, 1),
+            statut=Devis.Statut.BROUILLON,
+        )
+        self.ligne = DevisLigne.objects.create(
+            devis=self.devis, article=self.article, quantite=2, taux_tva=self.taux_normal
+        )
+
+    def test_recalcul_change_le_taux_tva(self):
+        response = self.client.post(
+            f"/admin/chiffrage/devis/{self.devis.pk}/lignes/{self.ligne.id}/recalculer/",
+            data={"taux_tva": self.taux_reduit.pk},
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        data = response.json()
+        # 2*10=20 HT -> 20*1.055=21.1 TTC
+        self.assertAlmostEqual(data["prix_vente_ttc"], 21.1, places=3)
+        self.assertAlmostEqual(data["montant_total_ttc"], 21.1, places=3)
+        self.ligne.refresh_from_db()
+        self.assertEqual(self.ligne.taux_tva, self.taux_reduit)
+
+    def test_recalcul_taux_tva_vide_le_retire(self):
+        response = self.client.post(
+            f"/admin/chiffrage/devis/{self.devis.pk}/lignes/{self.ligne.id}/recalculer/",
+            data={"taux_tva": ""},
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.ligne.refresh_from_db()
+        self.assertIsNone(self.ligne.taux_tva)
+
+    def test_recalcul_taux_tva_introuvable_400(self):
+        response = self.client.post(
+            f"/admin/chiffrage/devis/{self.devis.pk}/lignes/{self.ligne.id}/recalculer/",
+            data={"taux_tva": 999999},
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_apercu_avec_taux_tva(self):
+        response = self.client.post(
+            f"/admin/chiffrage/devis/{self.devis.pk}/lignes/previsualiser/",
+            data={"article": "ART-TVA-VIEW", "quantite": 3, "taux_tva": self.taux_normal.pk},
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        data = response.json()
+        # 3*10=30 HT -> 36 TTC
+        self.assertEqual(data["prix_vente_ttc"], 36)

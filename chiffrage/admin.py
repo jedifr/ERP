@@ -17,7 +17,13 @@ class DevisLigneInline(TabularInline):
     model = DevisLigne
     extra = 1
     autocomplete_fields = ["article"]
-    readonly_fields = ["cout_matiere_calcule", "prix_vente_matiere", "prix_vente_operations", "prix_vente_total"]
+    readonly_fields = [
+        "cout_matiere_calcule",
+        "prix_vente_matiere",
+        "prix_vente_operations",
+        "prix_vente_total",
+        "prix_vente_ttc",
+    ]
 
 
 class DevisLigneOperationInline(TabularInline):
@@ -43,6 +49,7 @@ class DevisAdmin(CodificationInitialeMixin, ModelAdmin):
         "montant_matiere_ht",
         "montant_operations_ht",
         "montant_total_ht",
+        "montant_total_ttc",
     ]
     list_filter = ["statut"]
     search_fields = ["numero", "client__raison_sociale"]
@@ -51,15 +58,17 @@ class DevisAdmin(CodificationInitialeMixin, ModelAdmin):
         "montant_matiere_ht_display",
         "montant_operations_ht_display",
         "montant_total_ht_display",
+        "montant_total_ttc_display",
     ]
     inlines = [DevisLigneInline]
     actions = ["action_recalculer", "action_lancer_en_production"]
 
     class Media:
         js = ["chiffrage/devis_admin_live.js"]
+        css = {"all": ["chiffrage/devis_admin_live.css"]}
 
     def get_queryset(self, request):
-        return super().get_queryset(request).prefetch_related("lignes__operations")
+        return super().get_queryset(request).prefetch_related("lignes__operations", "lignes__taux_tva")
 
     # Wrappés dans un <span id="..."> (plutôt que les propriétés du modèle
     # directement) pour offrir un point d'accroche stable au JS de recalcul
@@ -76,6 +85,10 @@ class DevisAdmin(CodificationInitialeMixin, ModelAdmin):
     @admin.display(description="Montant total HT")
     def montant_total_ht_display(self, obj):
         return format_html('<span id="montant-total-ht">{}</span>', obj.montant_total_ht)
+
+    @admin.display(description="Montant total TTC")
+    def montant_total_ttc_display(self, obj):
+        return format_html('<span id="montant-total-ttc">{}</span>', obj.montant_total_ttc)
 
     def get_urls(self):
         urls = [
@@ -130,6 +143,8 @@ class DevisLigneAdmin(ModelAdmin):
         "prix_vente_matiere",
         "prix_vente_operations",
         "prix_vente_total",
+        "taux_tva",
+        "prix_vente_ttc",
     ]
     search_fields = ["devis__numero", "article__reference"]
     autocomplete_fields = ["devis", "article"]

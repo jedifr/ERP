@@ -8,6 +8,7 @@ from django.shortcuts import get_object_or_404
 from django.template.response import TemplateResponse
 from django.views.decorators.http import require_http_methods
 
+from commercial.models import TauxTVA
 from technique.models import Article, PosteTravail
 
 from .builder import ajouter_ligne_devis, creer_article_fabrique, erreur_lisible
@@ -81,7 +82,9 @@ def _traiter_ajout_ligne(request, devis):
             "prix_vente_matiere": ligne.prix_vente_matiere,
             "prix_vente_operations": ligne.prix_vente_operations,
             "prix_vente_total": ligne.prix_vente_total,
+            "prix_vente_ttc": ligne.prix_vente_ttc,
             "montant_total_ht": devis.montant_total_ht,
+            "montant_total_ttc": devis.montant_total_ttc,
             "avertissement": avertissement,
         }
     )
@@ -152,6 +155,24 @@ def _parse_float_optionnel(payload, champ, message_erreur):
         raise _ValeurInvalide(message_erreur)
 
 
+def _parse_fk_optionnel(payload, champ, queryset, message_erreur):
+    """Lit l'identifiant de `champ` dans `payload` s'il est présent : None/"" ->
+    None (pas de relation), sinon résout l'objet via `queryset`. Lève
+    _ValeurInvalide si l'identifiant est invalide ou introuvable — évite de
+    laisser passer un id inexistant jusqu'à l'IntegrityError au save() (une
+    FK n'est pas vérifiée par full_clean()). Ne touche rien si `champ` est
+    absent du payload."""
+    if champ not in payload:
+        return None, False
+    valeur = payload[champ]
+    if valeur in (None, ""):
+        return None, True
+    try:
+        return queryset.get(pk=valeur), True
+    except (queryset.model.DoesNotExist, ValueError, TypeError):
+        raise _ValeurInvalide(message_erreur)
+
+
 @staff_member_required
 @require_http_methods(["POST"])
 def recalculer_ligne_view(request, numero, ligne_id):
@@ -181,6 +202,12 @@ def recalculer_ligne_view(request, numero, ligne_id):
         )
         if fourni:
             ligne.prix_vente_unitaire_force = prix_force
+
+        taux_tva, fourni = _parse_fk_optionnel(
+            payload, "taux_tva", TauxTVA.objects.all(), "Taux de TVA introuvable."
+        )
+        if fourni:
+            ligne.taux_tva = taux_tva
     except _ValeurInvalide as exc:
         return JsonResponse({"detail": exc.message}, status=400)
 
@@ -204,9 +231,11 @@ def recalculer_ligne_view(request, numero, ligne_id):
             "taux_marge_matiere_applique": ligne.taux_marge_matiere_applique,
             "prix_vente_operations": ligne.prix_vente_operations,
             "prix_vente_total": ligne.prix_vente_total,
+            "prix_vente_ttc": ligne.prix_vente_ttc,
             "montant_matiere_ht": devis.montant_matiere_ht,
             "montant_operations_ht": devis.montant_operations_ht,
             "montant_total_ht": devis.montant_total_ht,
+            "montant_total_ttc": devis.montant_total_ttc,
         }
     )
 
@@ -240,6 +269,9 @@ def previsualiser_ligne_view(request, numero):
         prix_force, _fourni = _parse_float_optionnel(
             payload, "prix_vente_unitaire_force", "Prix unitaire forcé invalide."
         )
+        taux_tva, _fourni = _parse_fk_optionnel(
+            payload, "taux_tva", TauxTVA.objects.all(), "Taux de TVA introuvable."
+        )
     except _ValeurInvalide as exc:
         return JsonResponse({"detail": exc.message}, status=400)
 
@@ -250,6 +282,7 @@ def previsualiser_ligne_view(request, numero):
             quantite,
             taux_marge_matiere_applique=taux,
             prix_vente_unitaire_force=prix_force,
+            taux_tva=taux_tva,
         )
     except ChiffrageError as exc:
         return JsonResponse({"detail": str(exc)}, status=400)

@@ -83,6 +83,43 @@ class Adresse(models.Model):
                 )
 
 
+class TauxTVA(models.Model):
+    """Référentiel des taux de TVA applicables (utilisé notamment par
+    DevisLigne, dans l'app chiffrage)."""
+
+    nom = models.CharField("nom", max_length=50, unique=True, help_text='Ex. "Taux normal"')
+    taux = models.FloatField("taux (%)", help_text="Ex. 20 pour 20 %")
+    est_defaut = models.BooleanField(
+        "taux par défaut",
+        default=False,
+        help_text="Un seul taux peut être coché par défaut ; proposé automatiquement sur les nouvelles lignes de devis.",
+    )
+
+    class Meta:
+        verbose_name = "Taux de TVA"
+        verbose_name_plural = "Taux de TVA"
+        ordering = ["-taux"]
+
+    def __str__(self):
+        return f"{self.nom} ({self.taux}%)"
+
+    def clean(self):
+        super().clean()
+        if self.est_defaut:
+            qs = TauxTVA.objects.filter(est_defaut=True)
+            if self.pk is not None:
+                qs = qs.exclude(pk=self.pk)
+            if qs.exists():
+                raise ValidationError(
+                    {
+                        "est_defaut": (
+                            "Un taux par défaut existe déjà. Décochez-le d'abord si vous "
+                            "voulez le remplacer."
+                        )
+                    }
+                )
+
+
 class Contact(models.Model):
     tiers = models.ForeignKey(
         Tiers, verbose_name="tiers", on_delete=models.CASCADE, related_name="contacts"

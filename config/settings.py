@@ -255,6 +255,11 @@ UNFOLD = {
                         "icon": "contacts",
                         "link": reverse_lazy("admin:commercial_contact_changelist"),
                     },
+                    {
+                        "title": "Taux de TVA",
+                        "icon": "percent",
+                        "link": reverse_lazy("admin:commercial_tauxtva_changelist"),
+                    },
                 ],
             },
             {

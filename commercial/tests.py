@@ -1,7 +1,7 @@
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 
-from .models import Adresse, Tiers
+from .models import Adresse, TauxTVA, Tiers
 
 
 class AdresseTests(TestCase):
@@ -48,6 +48,24 @@ class AdresseTests(TestCase):
             est_principale=True,
         )
         livraison.full_clean()  # ne doit pas lever d'exception
+
+
+class TauxTVATests(TestCase):
+    def test_seed_taux_normal_par_defaut(self):
+        # Vérifie la migration de données (0005_seed_taux_tva) : le référentiel
+        # est pré-rempli avec les taux français courants, "Taux normal" par défaut.
+        self.assertTrue(TauxTVA.objects.filter(nom="Taux normal", taux=20, est_defaut=True).exists())
+        self.assertEqual(TauxTVA.objects.filter(est_defaut=True).count(), 1)
+
+    def test_un_seul_taux_par_defaut(self):
+        autre = TauxTVA(nom="Taux test", taux=15, est_defaut=True)
+        with self.assertRaises(ValidationError):
+            autre.full_clean()
+
+    def test_remplacer_le_taux_par_defaut(self):
+        TauxTVA.objects.filter(est_defaut=True).update(est_defaut=False)
+        nouveau = TauxTVA(nom="Taux test 2", taux=8, est_defaut=True)
+        nouveau.full_clean()  # ne doit pas lever d'exception
 
 
 class TiersAdminCodificationTests(TestCase):
