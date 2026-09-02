@@ -13,7 +13,7 @@ from technique.models import Article, PosteTravail
 
 from .builder import ajouter_ligne_devis, creer_article_fabrique, erreur_lisible
 from .models import Devis, DevisLigne
-from .moteur import ChiffrageError, calculer_devis, previsualiser_ligne
+from .moteur import ChiffrageError, calculer_devis, calculer_ligne, previsualiser_ligne
 
 
 @staff_member_required
@@ -218,7 +218,7 @@ def recalculer_ligne_view(request, numero, ligne_id):
     ligne.save()
 
     try:
-        calculer_devis(devis)
+        calculer_ligne(devis, ligne)
     except ChiffrageError as exc:
         return JsonResponse({"detail": str(exc)}, status=400)
 

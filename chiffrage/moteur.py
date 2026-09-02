@@ -142,22 +142,36 @@ def _synchroniser_operations_ligne(devis, ligne):
         operation.save()
 
 
-def calculer_devis(devis):
-    """Recalcule le coût matière et les opérations de toutes les lignes d'un devis."""
-    for ligne in devis.lignes.select_related("article", "article__matiere").all():
-        ligne.cout_matiere_calcule = cout_matiere_article(ligne.article, ligne.quantite)
-        taux = _taux_marge_matiere(devis, ligne)
-        ligne.taux_marge_matiere_applique = taux
-        if ligne.prix_vente_unitaire_force is not None:
-            ligne.prix_vente_matiere = ligne.prix_vente_unitaire_force * ligne.quantite
-        else:
-            ligne.prix_vente_matiere = ligne.cout_matiere_calcule * (1 + taux / 100)
-        ligne.save()
+def calculer_ligne(devis, ligne):
+    """Calcule et enregistre le coût matière, le prix de vente matière et les
+    opérations d'UNE ligne. Peut lever ChiffrageError si les données de cette
+    ligne (ou de son article) sont insuffisantes — n'affecte jamais les
+    autres lignes du devis, contrairement à calculer_devis() qui s'arrête à
+    la première ligne en erreur. Utilisé isolément par le recalcul/aperçu en
+    direct d'une ligne, pour qu'une ligne à problème n'empêche pas les
+    autres lignes du même devis de se recalculer normalement."""
+    ligne.cout_matiere_calcule = cout_matiere_article(ligne.article, ligne.quantite)
+    taux = _taux_marge_matiere(devis, ligne)
+    ligne.taux_marge_matiere_applique = taux
+    if ligne.prix_vente_unitaire_force is not None:
+        ligne.prix_vente_matiere = ligne.prix_vente_unitaire_force * ligne.quantite
+    else:
+        ligne.prix_vente_matiere = ligne.cout_matiere_calcule * (1 + taux / 100)
+    ligne.save()
 
-        if ligne.article.nature == Article.Nature.FABRIQUE:
-            _synchroniser_operations_ligne(devis, ligne)
-        else:
-            ligne.operations.all().delete()
+    if ligne.article.nature == Article.Nature.FABRIQUE:
+        _synchroniser_operations_ligne(devis, ligne)
+    else:
+        ligne.operations.all().delete()
+
+
+def calculer_devis(devis):
+    """Recalcule le coût matière et les opérations de toutes les lignes d'un
+    devis (action admin "Recalculer le chiffrage"). S'arrête à la première
+    ligne en erreur — voir calculer_ligne() pour un recalcul isolé d'une
+    seule ligne, insensible aux erreurs sur les autres lignes."""
+    for ligne in devis.lignes.select_related("article", "article__matiere").all():
+        calculer_ligne(devis, ligne)
 
 
 def previsualiser_ligne(

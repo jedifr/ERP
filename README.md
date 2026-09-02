@@ -379,6 +379,34 @@ infobulle). Avant ce correctif, une erreur de calcul restait invisible
 "-" sans aucune explication, ce qui pouvait laisser croire que le calcul
 en direct ne fonctionnait pas du tout.
 
+Deux correctifs supplémentaires sur ce même calcul en direct, trouvés en
+creusant un signalement "ça ne calcule toujours pas" sur des lignes déjà
+enregistrées et déjà remplies :
+
+- **Calcul déclenché aussi au chargement de la page**, pas seulement sur
+  modification. Une ligne déjà enregistrée a par définition déjà un
+  article et une quantité ; sans un premier calcul automatique, elle
+  affichait des "-" jusqu'à ce que quelqu'un retouche un champ — ce qui,
+  vu de l'utilisateur, ressemble exactement à "le calcul ne marche pas".
+  `wireRowExistante`/`wireRowNouvelle` appellent maintenant la fonction de
+  calcul une première fois immédiatement après le câblage de la ligne (en
+  plus de l'appeler à chaque modification).
+- **Une ligne à problème ne bloque plus les autres.** `calculer_devis()`
+  s'arrête à la *première* ligne en erreur (comportement volontairement
+  conservé pour l'action admin "Recalculer le chiffrage", en bloc) — mais
+  `recalculer_ligne_view` l'appelait quand même pour recalculer une seule
+  ligne, si bien qu'une ligne à problème empêchait le calcul en direct de
+  **toutes** les autres lignes du même devis, y compris parfaitement
+  valides. Nouvelle fonction `chiffrage/moteur.py::calculer_ligne(devis,
+  ligne)` qui calcule une seule ligne en isolation ; `recalculer_ligne_view`
+  l'utilise à la place de `calculer_devis()`.
+
+Combinés, ces deux bugs expliquaient un signalement où deux lignes
+affichaient toutes les deux des "-" au chargement de la page, alors qu'une
+seule des deux avait réellement un problème (article sans coût unitaire) —
+le calcul ne s'était jamais déclenché pour aucune des deux, et même en le
+déclenchant, la ligne valide aurait échoué à cause de l'autre.
+
 **Prix de vente unitaire forcé** — `DevisLigne.prix_vente_unitaire_force`
 (optionnel) permet de fixer directement le prix de vente matière d'une
 ligne (`= quantité × ce prix`), en remplacement du calcul automatique

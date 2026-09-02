@@ -154,11 +154,17 @@
 
     // Ligne déjà enregistrée : recalcul en direct persisté côté serveur
     // (POST .../recalculer/), qui met aussi à jour les totaux du devis.
+    // Déclenché à la fois sur chaque modification ET une première fois tout de
+    // suite (une ligne enregistrée a forcément déjà une quantité et un
+    // article) : sans ce premier appel, une ligne déjà remplie au chargement
+    // de la page (le cas normal) affiche des "-" tant que personne n'a encore
+    // retouché un champ, ce qui donne l'impression que le calcul en direct ne
+    // fonctionne pas du tout.
     function wireRowExistante(row, numero, ligneId, champs) {
         const { quantiteInput, tauxInput, prixForceInput, tauxTvaSelect } = champs;
         const url = `/admin/chiffrage/devis/${encodeURIComponent(numero)}/lignes/${ligneId}/recalculer/`;
 
-        const recalculer = debounce(() => {
+        const executer = () => {
             const payload = {
                 quantite: quantiteInput.value,
                 taux_marge_matiere_applique: tauxInput ? tauxInput.value : null,
@@ -196,7 +202,9 @@
                     console.error("Recalcul ligne de devis : erreur réseau.");
                     showLigneErreur(row, "Erreur réseau lors du recalcul.");
                 });
-        }, 400);
+        };
+
+        const recalculer = debounce(executer, 400);
 
         quantiteInput.addEventListener("input", recalculer);
         if (tauxInput) {
@@ -208,6 +216,8 @@
         if (tauxTvaSelect) {
             tauxTvaSelect.addEventListener("change", recalculer);
         }
+
+        executer();
     }
 
     // Ligne pas encore enregistrée : simple aperçu (POST .../previsualiser/),
@@ -222,7 +232,7 @@
 
         const url = `/admin/chiffrage/devis/${encodeURIComponent(numero)}/lignes/previsualiser/`;
 
-        const previsualiser = debounce(() => {
+        const executer = () => {
             const article = articleSelect.value;
             const quantite = quantiteInput.value;
             if (!article || !quantite) {
@@ -263,7 +273,9 @@
                     console.error("Aperçu ligne de devis : erreur réseau.");
                     showLigneErreur(row, "Erreur réseau lors de l'aperçu.");
                 });
-        }, 400);
+        };
+
+        const previsualiser = debounce(executer, 400);
 
         quantiteInput.addEventListener("input", previsualiser);
         articleSelect.addEventListener("change", previsualiser);
@@ -276,5 +288,11 @@
         if (tauxTvaSelect) {
             tauxTvaSelect.addEventListener("change", previsualiser);
         }
+
+        // Cas rare mais possible (ex. retour arrière du navigateur restaurant
+        // un formulaire partiellement rempli) : si article + quantité sont
+        // déjà renseignés au chargement, calcule tout de suite plutôt que
+        // d'attendre une interaction qui n'aura peut-être jamais lieu.
+        executer();
     }
 })();

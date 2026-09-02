@@ -9,7 +9,7 @@ from technique.models import Article, Gamme, Matiere, Nomenclature, PosteTravail
 
 from .builder import ajouter_ligne_devis, creer_article_fabrique
 from .models import Commande, Devis, DevisLigne, DevisLigneOperation, OrdreFabrication
-from .moteur import ChiffrageError, calculer_devis, cout_matiere_article, previsualiser_ligne
+from .moteur import ChiffrageError, calculer_devis, calculer_ligne, cout_matiere_article, previsualiser_ligne
 from .planning_sync import PlanningSyncError, resynchroniser, tenter_synchronisation
 from .production import lancer_en_production
 
@@ -697,6 +697,79 @@ class RecalculerLigneViewTests(TestCase):
             self._url(), data={"quantite": 5}, content_type="application/json"
         )
         self.assertNotEqual(response.status_code, 200)
+
+
+class CalculerLigneIsoleeTests(TestCase):
+    """Une ligne à problème (ex. article sans coût unitaire) ne doit jamais
+    bloquer le calcul en direct des AUTRES lignes du même devis. Reproduit un
+    signalement utilisateur : deux lignes affichaient toutes les deux des "-"
+    (aucun calcul), alors qu'une seule des deux articles posait problème —
+    en cause, recalculer_ligne_view appelait calculer_devis() (qui s'arrête
+    à la première ligne en erreur) au lieu de calculer_ligne() (isolée)."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        self.user = User.objects.create_superuser("isolee-admin", "i@example.com", "pass1234")
+        self.client.force_login(self.user)
+
+        self.article_sans_cout = Article.objects.create(
+            reference="ART-SANS-COUT-ISOLEE",
+            nature=Article.Nature.MATIERE_PREMIERE,
+            unite_cout=Article.UniteCout.PIECE,
+        )
+        self.article_ok = Article.objects.create(
+            reference="ART-OK-ISOLEE",
+            nature=Article.Nature.MATIERE_PREMIERE,
+            unite_cout=Article.UniteCout.PIECE,
+            cout_unitaire=5.0,
+        )
+        client_tiers = Tiers.objects.create(
+            code="CLI-ISOLEE", raison_sociale="Client Isolee", type_tiers=Tiers.TypeTiers.CLIENT
+        )
+        self.devis = Devis.objects.create(
+            numero="DEV-ISOLEE",
+            client=client_tiers,
+            date_creation=datetime.date(2026, 1, 1),
+            statut=Devis.Statut.BROUILLON,
+        )
+        self.ligne_en_erreur = DevisLigne.objects.create(
+            devis=self.devis, article=self.article_sans_cout, quantite=2
+        )
+        self.ligne_ok = DevisLigne.objects.create(devis=self.devis, article=self.article_ok, quantite=3)
+
+    def test_calculer_devis_sarrete_a_la_premiere_erreur(self):
+        # Comportement historique de calculer_devis(), volontairement conservé
+        # pour l'action admin "Recalculer le chiffrage" (en bloc).
+        with self.assertRaises(ChiffrageError):
+            calculer_devis(self.devis)
+
+    def test_calculer_ligne_ok_reussit_malgre_lautre_ligne_en_erreur(self):
+        calculer_ligne(self.devis, self.ligne_ok)
+        self.ligne_ok.refresh_from_db()
+        self.assertEqual(self.ligne_ok.prix_vente_matiere, 15)
+
+    def test_calculer_ligne_en_erreur_leve_sans_toucher_lautre(self):
+        with self.assertRaises(ChiffrageError):
+            calculer_ligne(self.devis, self.ligne_en_erreur)
+        self.ligne_ok.refresh_from_db()
+        self.assertIsNone(self.ligne_ok.prix_vente_matiere)
+
+    def test_recalcul_live_ligne_ok_reussit_malgre_lautre_ligne_en_erreur(self):
+        url = f"/admin/chiffrage/devis/{self.devis.pk}/lignes/{self.ligne_ok.id}/recalculer/"
+        response = self.client.post(url, data={"quantite": 3}, content_type="application/json")
+        self.assertEqual(response.status_code, 200, response.content)
+        data = response.json()
+        self.assertEqual(data["prix_vente_matiere"], 15)
+        # Le montant du devis ne compte que la ligne effectivement calculée.
+        self.assertEqual(data["montant_total_ht"], 15)
+
+    def test_recalcul_live_ligne_en_erreur_renvoie_400(self):
+        url = f"/admin/chiffrage/devis/{self.devis.pk}/lignes/{self.ligne_en_erreur.id}/recalculer/"
+        response = self.client.post(url, data={"quantite": 2}, content_type="application/json")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("ART-SANS-COUT-ISOLEE", response.json()["detail"])
 
 
 class RecalculerLigneAvecOperationsTests(TestCase):
