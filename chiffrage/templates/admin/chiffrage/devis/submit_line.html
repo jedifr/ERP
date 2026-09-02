@@ -1,0 +1,12 @@
+{% extends "admin/submit_line.html" %}
+{% load unfold %}
+
+{% block submit-row %}
+    {% if not original %}
+        {% component "unfold/components/button.html" with submit=1 form=opts.model_name|add:"_form" name="_construire" variant="default" class="w-full lg:w-auto" %}
+            <span class="material-symbols-outlined">construction</span>
+            Enregistrer et ouvrir le constructeur
+        {% endcomponent %}
+    {% endif %}
+    {{ block.super }}
+{% endblock %}

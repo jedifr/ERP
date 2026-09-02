@@ -1,5 +1,6 @@
 from django.contrib import admin, messages
-from django.urls import path
+from django.http import HttpResponseRedirect
+from django.urls import path, reverse
 from django.utils.html import format_html
 from unfold.admin import ModelAdmin, TabularInline
 
@@ -94,6 +95,15 @@ class DevisAdmin(CodificationInitialeMixin, ModelAdmin):
     @admin.display(description="Montant total TTC")
     def montant_total_ttc_display(self, obj):
         return format_html('<span id="montant-total-ttc">{}</span>', obj.montant_total_ttc)
+
+    def response_add(self, request, obj, post_url_continue=None):
+        # Bouton "Enregistrer et ouvrir le constructeur" du formulaire d'ajout :
+        # le devis (et ses lignes déjà saisies dans l'inline) vient d'être
+        # enregistré normalement par la vue d'admin ; on redirige simplement
+        # vers le constructeur au lieu de la liste/fiche par défaut.
+        if "_construire" in request.POST:
+            return HttpResponseRedirect(reverse("admin:chiffrage_devis_builder", args=[obj.pk]))
+        return super().response_add(request, obj, post_url_continue)
 
     def get_urls(self):
         urls = [

@@ -512,3 +512,42 @@ chaîne délibérément absurde (`"pas-une-date"`) — un cas qui doit rester en
 erreur avec les deux approches. Un nouveau test dédié envoie une date au
 format français valide (`"02/09/2026"`) et vérifie que le calcul aboutit,
 pour couvrir spécifiquement ce format.
+
+## Constructeur de devis dès la création (devis pas encore enregistré)
+
+Le "Constructeur de devis" (page dédiée pour ajouter des lignes, y compris
+des articles fabriqués créés à la volée avec leur nomenclature/gamme)
+n'était accessible que depuis la fiche d'un devis **déjà enregistré**,
+puisqu'il crée réellement des enregistrements (Article, Nomenclature,
+Gamme, DevisLigne) rattachés à un `Devis` existant en base — il a donc
+besoin d'un numéro de devis valide dans son URL.
+
+Plutôt que de réécrire le constructeur pour fonctionner entièrement en
+mémoire (ce qui aurait exigé de repenser en profondeur sa logique, conçue
+pour écrire directement en base à chaque ajout de ligne), le formulaire
+d'ajout de devis propose désormais un bouton supplémentaire à côté
+d'"Enregistrer" : **"Enregistrer et ouvrir le constructeur"**. Il
+enregistre le devis normalement (avec les lignes déjà saisies dans
+l'inline, le cas échéant), puis redirige directement vers le constructeur
+au lieu de retourner sur la fiche — sans étape intermédiaire.
+
+Implémentation :
+- `chiffrage/templates/admin/chiffrage/devis/submit_line.html` étend le
+  `admin/submit_line.html` d'Unfold et ajoute ce bouton (nommé
+  `_construire`) uniquement quand `not original`, c'est-à-dire seulement
+  sur le formulaire d'ajout — il n'a pas de sens une fois le devis créé
+  (le bouton "Constructeur de devis" en haut de la fiche prend le relais).
+- `DevisAdmin.response_add()` détecte `"_construire" in request.POST` une
+  fois le devis effectivement enregistré par Django (l'admin a déjà
+  appelé `save_model`/`save_related` à ce stade — les lignes de l'inline
+  sont donc déjà en base) et redirige vers
+  `admin:chiffrage_devis_builder` avec le numéro du nouvel objet, au lieu
+  du comportement par défaut.
+
+Point technique notable : Unfold expose un mécanisme dédié pour ajouter
+des boutons à la barre de validation (`actions_submit_line`), mais celui-ci
+n'est peuplé par `ActionModelAdminMixin.changeform_view()` que lorsque
+`object_id` est fourni — donc jamais sur le formulaire d'ajout. Il a donc
+fallu passer par la surcharge de template `submit_line.html` (mécanisme
+standard de Django, résolu par app/modèle avant le fallback générique),
+plutôt que par cette API, pour couvrir spécifiquement ce cas.

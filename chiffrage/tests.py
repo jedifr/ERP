@@ -1386,3 +1386,73 @@ class TauxTvaViewsTests(TestCase):
         data = response.json()
         # 3*10=30 HT -> 36 TTC
         self.assertEqual(data["prix_vente_ttc"], 36)
+
+
+class AjoutDevisOuvrirConstructeurTests(TestCase):
+    """Bouton "Enregistrer et ouvrir le constructeur" du formulaire d'ajout de
+    devis : enregistre normalement le devis (et ses lignes déjà saisies dans
+    l'inline), puis redirige vers le constructeur au lieu de la fiche/liste
+    par défaut — pour pouvoir composer la suite du devis sans repasser par
+    la fiche standard."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        self.user = User.objects.create_superuser("construire-admin", "c@example.com", "pass1234")
+        self.client.force_login(self.user)
+
+        self.client_tiers = Tiers.objects.create(
+            code="CLI-CONSTRUIRE", raison_sociale="Client Construire", type_tiers=Tiers.TypeTiers.CLIENT
+        )
+        self.article = Article.objects.create(
+            reference="ART-CONSTRUIRE",
+            nature=Article.Nature.MATIERE_PREMIERE,
+            unite_cout=Article.UniteCout.PIECE,
+            cout_unitaire=2.0,
+        )
+
+    def _formulaire_de_base(self):
+        return {
+            "numero": "DEV-CONSTRUIRE-01",
+            "client": self.client_tiers.pk,
+            "date_creation": "2026-01-01",
+            "statut": Devis.Statut.BROUILLON,
+            "taux_marge_globale": "",
+            "adresse_facturation": "",
+            "adresse_livraison": "",
+            "contact": "",
+            "lignes-TOTAL_FORMS": "1",
+            "lignes-INITIAL_FORMS": "0",
+            "lignes-MIN_NUM_FORMS": "0",
+            "lignes-MAX_NUM_FORMS": "1000",
+            "lignes-0-article": self.article.pk,
+            "lignes-0-quantite": "4",
+            "lignes-0-taux_marge_matiere_applique": "",
+            "lignes-0-prix_vente_unitaire_force": "",
+            "lignes-0-taux_tva": "",
+            "lignes-0-id": "",
+            "lignes-0-devis": "",
+            "_construire": "Enregistrer et ouvrir le constructeur",
+        }
+
+    def test_redirige_vers_le_constructeur_apres_enregistrement(self):
+        response = self.client.post(
+            "/admin/chiffrage/devis/add/", data=self._formulaire_de_base(), follow=False
+        )
+        self.assertEqual(response.status_code, 302, getattr(response, "context", None))
+        self.assertEqual(response.url, "/admin/chiffrage/devis/DEV-CONSTRUIRE-01/constructeur/")
+
+        devis = Devis.objects.get(pk="DEV-CONSTRUIRE-01")
+        self.assertEqual(devis.lignes.count(), 1)
+        ligne = devis.lignes.first()
+        self.assertEqual(ligne.article, self.article)
+        self.assertEqual(ligne.quantite, 4)
+
+    def test_sans_bouton_construire_comportement_par_defaut_inchange(self):
+        data = self._formulaire_de_base()
+        del data["_construire"]
+        data["_save"] = "Enregistrer"
+        response = self.client.post("/admin/chiffrage/devis/add/", data=data, follow=False)
+        self.assertEqual(response.status_code, 302)
+        self.assertNotEqual(response.url, "/admin/chiffrage/devis/DEV-CONSTRUIRE-01/constructeur/")
