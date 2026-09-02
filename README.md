@@ -675,3 +675,41 @@ mais non chiffrée". Côté JS (`devis_builder.js`), le message d'erreur
 s'affiche en rouge sans recharger la page (au lieu du recharge-avec-
 avertissement précédent), pour laisser le formulaire tel quel et permettre
 de corriger sans tout ressaisir.
+
+## Correctif majeur : le coût des opérations horaires était 60 fois trop élevé
+
+Signalé par l'utilisateur, avec un calcul manuel de référence : pour une
+étape de gamme au poste LASER (150 €/h), avec 10 min de temps fixe + 1 min
+de temps variable par pièce, le coût attendu pour 1 pièce est
+`(10 + 1) / 60 × 150 = 27,50 €` — le prix affiché ne correspondait pas.
+
+En cause : `cout_etape_gamme()` (`chiffrage/moteur.py`) calculait
+`temps × tarif.cout_horaire` directement. Or `Gamme.temps_fixe`/
+`temps_variable` sont exprimés en **minutes** (voir la section précédente
+sur l'unité des temps du constructeur) alors que `TarifPoste.cout_horaire`
+est un tarif en **€/heure** — il manquait la conversion (`/ 60`) avant de
+multiplier. Concrètement, toute étape de gamme en mode horaire facturait
+60 fois son coût réel : 27,50 € devenait 1 650 €.
+
+Ce même bug (mêmes unités, même faute) existait aussi dans l'app
+`pilotage`, à deux endroits qui comparent des temps réels remontés par
+l'atelier (`OperationOF.temps_reel`, également en minutes) à un tarif
+horaire ou à une capacité exprimée en heures :
+- `cout_reel_operation()` — coût réel d'une opération d'OF (utilisé par
+  `marge_reelle_ordre_fabrication()`, marge réelle vs prévue) ;
+- `taux_charge_poste()` — le temps réel cumulé (minutes) était comparé
+  directement à une capacité disponible en heures
+  (`nombre_machines × jours_ouvrés × heures_par_jour`), gonflant le taux
+  de charge calculé du même facteur 60. `temps_reel_cumule` dans la
+  réponse de cette fonction est donc désormais exprimé en heures (comme
+  `capacite_disponible`), et non plus en minutes brutes.
+
+Les trois corrigés de la même façon : diviser le temps en minutes par 60
+avant de le multiplier par un montant en €/heure ou de le comparer à une
+capacité en heures. Point technique notable : ce bug n'avait aucune chance
+d'être détecté par les tests existants, qui codaient tous la même erreur
+dans leurs valeurs attendues (`(10 + 5×3) × 50 = 1250`, sans jamais
+diviser par 60) — corrigés en même temps que le code (`chiffrage/tests.py`,
+`pilotage/tests.py`), avec le calcul manuel de l'utilisateur repris tel
+quel comme vérification indépendante (`27,50 € / 15,00 € / 4,5833 €` par
+pièce pour 1, 2 et 12 pièces).

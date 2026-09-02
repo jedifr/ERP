@@ -44,8 +44,11 @@ def gamme_active(article, date_reference):
 def cout_etape_gamme(etape, quantite, date_reference):
     if etape.poste.mode_calcul == PosteTravail.ModeCalcul.HORAIRE:
         tarif = tarif_poste_valide(etape.poste, date_reference)
-        temps = (etape.temps_fixe or 0) + (etape.temps_variable or 0) * quantite
-        return temps * tarif.cout_horaire
+        # temps_fixe/temps_variable (Gamme) sont exprimés en MINUTES, alors que
+        # TarifPoste.cout_horaire est un €/HEURE : diviser par 60 avant de les
+        # multiplier est indispensable, sous peine de gonfler le coût x60.
+        temps_minutes = (etape.temps_fixe or 0) + (etape.temps_variable or 0) * quantite
+        return (temps_minutes / 60) * tarif.cout_horaire
     return (etape.cout_forfaitaire or 0) * quantite
 
 

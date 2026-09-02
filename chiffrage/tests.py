@@ -145,10 +145,11 @@ class CalculerDevisTests(TestCase):
     def test_calcul_operations_gamme(self):
         calculer_devis(self.devis)
         operation = self.ligne.operations.get(ordre=1)
-        # (10 + 5*3) * 50 = 1250
-        self.assertAlmostEqual(operation.cout_calcule, 1250)
+        # temps_fixe/temps_variable sont en MINUTES : (10 + 5*3) = 25 min,
+        # converties en heures avant le tarif horaire -> 25/60 * 50 = 20.8333...
+        self.assertAlmostEqual(operation.cout_calcule, 25 / 60 * 50)
         self.assertEqual(operation.taux_marge_applique, 15)
-        self.assertAlmostEqual(operation.prix_vente, 1250 * 1.15)
+        self.assertAlmostEqual(operation.prix_vente, 25 / 60 * 50 * 1.15)
 
     def test_marge_globale_ecrase_les_defauts(self):
         self.devis.taux_marge_globale = 10
@@ -176,8 +177,8 @@ class CalculerDevisTests(TestCase):
         )
         calculer_devis(self.devis)
         operation = self.ligne.operations.get(ordre=1)
-        # (10 + 5*3) * 60 = 1500
-        self.assertAlmostEqual(operation.cout_calcule, 1500)
+        # 25 min converties en heures -> 25/60 * 60 = 25
+        self.assertAlmostEqual(operation.cout_calcule, 25 / 60 * 60)
 
     def test_aucun_tarif_valide_leve_erreur(self):
         TarifPoste.objects.filter(poste=self.poste_horaire).delete()
@@ -197,9 +198,10 @@ class CalculerDevisTests(TestCase):
     def test_prix_vente_total_ligne_integre_les_operations(self):
         calculer_devis(self.devis)
         self.ligne.refresh_from_db()
-        # matière : 111.426 * 1.2 = 133.7112 ; opération : 1250 * 1.15 = 1437.5
-        self.assertAlmostEqual(self.ligne.prix_vente_operations, 1437.5)
-        self.assertAlmostEqual(self.ligne.prix_vente_total, 133.7112 + 1437.5, places=3)
+        # matière : 111.426 * 1.2 = 133.7112 ; opération : 25/60*50 * 1.15 = 23.9583...
+        operation_attendue = 25 / 60 * 50 * 1.15
+        self.assertAlmostEqual(self.ligne.prix_vente_operations, operation_attendue)
+        self.assertAlmostEqual(self.ligne.prix_vente_total, 133.7112 + operation_attendue, places=3)
 
     def test_prix_vente_total_ligne_none_si_matiere_non_calculee(self):
         self.assertIsNone(self.ligne.prix_vente_matiere)
@@ -207,9 +209,10 @@ class CalculerDevisTests(TestCase):
 
     def test_montants_devis_integrent_matiere_et_operations(self):
         calculer_devis(self.devis)
+        operation_attendue = 25 / 60 * 50 * 1.15
         self.assertAlmostEqual(self.devis.montant_matiere_ht, 133.7112, places=3)
-        self.assertAlmostEqual(self.devis.montant_operations_ht, 1437.5)
-        self.assertAlmostEqual(self.devis.montant_total_ht, 133.7112 + 1437.5, places=3)
+        self.assertAlmostEqual(self.devis.montant_operations_ht, operation_attendue)
+        self.assertAlmostEqual(self.devis.montant_total_ht, 133.7112 + operation_attendue, places=3)
 
 
 class LancerEnProductionTests(TestCase):
@@ -850,11 +853,12 @@ class RecalculerLigneAvecOperationsTests(TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         data = response.json()
         # matière : 111.426 * 1.2 = 133.7112
-        # opération : (10 + 5*3) * 50 = 1250, marge 15% -> 1437.5
+        # opération : (10 + 5*3) = 25 min -> 25/60*50 = 20.8333..., marge 15% -> 23.9583...
+        operation_attendue = 25 / 60 * 50 * 1.15
         self.assertAlmostEqual(data["prix_vente_matiere"], 133.7112, places=3)
-        self.assertAlmostEqual(data["prix_vente_operations"], 1437.5)
-        self.assertAlmostEqual(data["prix_vente_total"], 133.7112 + 1437.5, places=3)
-        self.assertAlmostEqual(data["montant_total_ht"], 133.7112 + 1437.5, places=3)
+        self.assertAlmostEqual(data["prix_vente_operations"], operation_attendue)
+        self.assertAlmostEqual(data["prix_vente_total"], 133.7112 + operation_attendue, places=3)
+        self.assertAlmostEqual(data["montant_total_ht"], 133.7112 + operation_attendue, places=3)
 
 
 class DevisAdressesContactTests(TestCase):
@@ -987,10 +991,12 @@ class PrevisualiserLigneTests(TestCase):
         )
 
         resultat = previsualiser_ligne(self.devis, article, 3)
-        # matière : 111.426 * 1.2 = 133.7112 ; opération : (10+5*3)*50 = 1250 * 1.15 = 1437.5
+        # matière : 111.426 * 1.2 = 133.7112
+        # opération : (10+5*3) = 25 min -> 25/60*50 = 20.8333..., marge 15% -> 23.9583...
+        operation_attendue = 25 / 60 * 50 * 1.15
         self.assertAlmostEqual(resultat["prix_vente_matiere"], 133.7112, places=3)
-        self.assertAlmostEqual(resultat["prix_vente_operations"], 1437.5)
-        self.assertAlmostEqual(resultat["prix_vente_total"], 133.7112 + 1437.5, places=3)
+        self.assertAlmostEqual(resultat["prix_vente_operations"], operation_attendue)
+        self.assertAlmostEqual(resultat["prix_vente_total"], 133.7112 + operation_attendue, places=3)
         self.assertEqual(DevisLigne.objects.count(), 0)
         self.assertEqual(DevisLigneOperation.objects.count(), 0)
 

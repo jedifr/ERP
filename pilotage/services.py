@@ -36,7 +36,9 @@ def cout_reel_operation(operation_of):
         if operation_of.temps_reel is None:
             return None
         tarif = tarif_poste_valide(poste, operation_of.ordre_fabrication.date_lancement)
-        return operation_of.temps_reel * tarif.cout_horaire
+        # temps_reel (OperationOF) est en MINUTES, comme temps_prevu — voir
+        # cout_etape_gamme() dans chiffrage/moteur.py pour la même conversion.
+        return (operation_of.temps_reel / 60) * tarif.cout_horaire
 
     # Forfaitaire (ex. sous-traitance) : prix fixé à l'avance, ne varie pas avec les
     # données réelles remontées — on reprend le coût déjà calculé au chiffrage.
@@ -100,7 +102,11 @@ def taux_charge_poste(poste, date_debut, date_fin, heures_par_jour_par_machine=7
     du lundi au vendredi, `heures_par_jour_par_machine` heures par machine
     et par jour ouvré (7h par défaut, ajustable par appel).
     """
-    temps_total = (
+    # Sum("temps_reel") est en MINUTES (comme OperationOF.temps_reel/temps_prevu) ;
+    # converti en heures ici pour rester dans la même unité que
+    # capacite_disponible (nombre_machines * jours * heures/jour), sans quoi
+    # le taux de charge calculé plus bas serait gonflé x60.
+    temps_total_minutes = (
         OperationOF.objects.filter(
             poste=poste,
             ordre_fabrication__date_lancement__gte=date_debut,
@@ -108,6 +114,7 @@ def taux_charge_poste(poste, date_debut, date_fin, heures_par_jour_par_machine=7
         ).aggregate(total=Sum("temps_reel"))["total"]
         or 0
     )
+    temps_total_heures = temps_total_minutes / 60
 
     jours_ouvres = _jours_ouvres(date_debut, date_fin)
     capacite_disponible = poste.nombre_machines * jours_ouvres * heures_par_jour_par_machine
@@ -116,7 +123,7 @@ def taux_charge_poste(poste, date_debut, date_fin, heures_par_jour_par_machine=7
         "poste": poste.nom,
         "date_debut": date_debut,
         "date_fin": date_fin,
-        "temps_reel_cumule": temps_total,
+        "temps_reel_cumule": temps_total_heures,
         "capacite_disponible": capacite_disponible,
-        "taux_charge": (temps_total / capacite_disponible) if capacite_disponible else None,
+        "taux_charge": (temps_total_heures / capacite_disponible) if capacite_disponible else None,
     }

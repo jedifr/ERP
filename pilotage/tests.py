@@ -56,21 +56,22 @@ class MargeReelleTests(TestCase):
         self.operation_of = self.of.operations.get(ordre=1)
 
     def test_marge_reelle_avec_temps_reel_superieur_au_prevu(self):
-        # prévu : matière 6*5=30 (marge 25% -> 37.5) ; opération (5+2*5)*40=600 (marge 25% -> 750)
-        # prévu total : prix 787.5, coût 630, marge prévue 157.5
+        # temps_fixe/temps_variable/temps_reel sont en MINUTES, cout_horaire en €/HEURE.
+        # prévu : matière 6*5=30 (marge 25% -> 37.5) ; opération (5+2*5)=15 min -> 15/60*40=10 (marge 25% -> 12.5)
+        # prévu total : prix 50, coût 40, marge prévue 10
         self.operation_of.temps_reel = 18  # réel plus long que prévu (15)
         self.operation_of.save()
 
         resultat = marge_reelle_ordre_fabrication(self.of)
 
         self.assertTrue(resultat["donnees_completes"])
-        self.assertAlmostEqual(resultat["prix_vente_prevu_total"], 787.5)
-        self.assertAlmostEqual(resultat["cout_prevu_total"], 630)
-        self.assertAlmostEqual(resultat["marge_prevue"], 157.5)
-        # coût réel : matière 30 + opération 18*40=720 = 750
-        self.assertAlmostEqual(resultat["cout_reel_total"], 750)
-        self.assertAlmostEqual(resultat["marge_reelle"], 787.5 - 750)
-        self.assertAlmostEqual(resultat["ecart_marge"], (787.5 - 750) - 157.5)
+        self.assertAlmostEqual(resultat["prix_vente_prevu_total"], 50)
+        self.assertAlmostEqual(resultat["cout_prevu_total"], 40)
+        self.assertAlmostEqual(resultat["marge_prevue"], 10)
+        # coût réel : matière 30 + opération 18/60*40=12 = 42
+        self.assertAlmostEqual(resultat["cout_reel_total"], 42)
+        self.assertAlmostEqual(resultat["marge_reelle"], 50 - 42)
+        self.assertAlmostEqual(resultat["ecart_marge"], (50 - 42) - 10)
 
     def test_donnees_incompletes_sans_temps_reel(self):
         resultat = marge_reelle_ordre_fabrication(self.of)
@@ -123,9 +124,11 @@ class TauxChargeTests(TestCase):
         resultat = taux_charge_poste(
             self.poste, datetime.date(2026, 1, 5), datetime.date(2026, 1, 9)  # lundi à vendredi
         )
-        self.assertEqual(resultat["temps_reel_cumule"], 25)
+        # temps_reel (OperationOF) est en minutes : 10+15=25 min -> converti en
+        # heures (25/60) pour rester dans la même unité que capacite_disponible.
+        self.assertAlmostEqual(resultat["temps_reel_cumule"], 25 / 60)
         self.assertEqual(resultat["capacite_disponible"], 2 * 5 * 7)  # 2 machines * 5 jours * 7h
-        self.assertAlmostEqual(resultat["taux_charge"], 25 / 70)
+        self.assertAlmostEqual(resultat["taux_charge"], (25 / 60) / 70)
 
     def test_mouvements_hors_periode_exclus(self):
         resultat = taux_charge_poste(
