@@ -34,7 +34,7 @@ def erreur_lisible(exc):
 
 
 @transaction.atomic
-def creer_article_fabrique(reference, taux_marge_defaut, composants, etapes):
+def creer_article_fabrique(reference, taux_marge_defaut, composants, etapes, libelle=""):
     """Crée un article fabriqué avec sa nomenclature et sa gamme.
 
     `composants` : liste de dicts {article_composant, quantite, longueur_mm, largeur_mm}
@@ -49,6 +49,7 @@ def creer_article_fabrique(reference, taux_marge_defaut, composants, etapes):
 
     article = Article(
         reference=reference,
+        libelle=libelle or "",
         nature=Article.Nature.FABRIQUE,
         taux_marge_defaut=taux_marge_defaut,
     )

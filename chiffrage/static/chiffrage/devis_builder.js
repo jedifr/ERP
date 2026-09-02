@@ -60,7 +60,10 @@
                 results.forEach((article) => {
                     const li = document.createElement("li");
                     li.className = "px-3 py-2 cursor-pointer hover:bg-base-100 dark:hover:bg-base-700";
-                    li.textContent = `${article.reference} (${article.nature === "matiere_premiere" ? "matière première" : "fabriqué"})`;
+                    const nature = article.nature === "matiere_premiere" ? "matière première" : "fabriqué";
+                    li.textContent = article.libelle
+                        ? `${article.reference} — ${article.libelle} (${nature})`
+                        : `${article.reference} (${nature})`;
                     li.addEventListener("click", () => {
                         inputEl.value = article.reference;
                         hiddenEl.value = article.reference;
@@ -315,6 +318,7 @@
                 }
                 payload.nouvel_article = {
                     reference: reference,
+                    libelle: document.getElementById("na-libelle").value.trim(),
                     taux_marge_defaut: parseFloat(document.getElementById("na-taux-marge").value) || null,
                     composants: collectNomenclature(),
                     etapes: collectGamme(),

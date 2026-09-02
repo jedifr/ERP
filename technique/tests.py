@@ -183,6 +183,7 @@ class DupliquerArticleTests(TestCase):
         acier = Matiere.objects.create(nom="Acier-Dup", densite=7.85)
         article = Article.objects.create(
             reference="TOLE-DUP",
+            libelle="Tôle laminée à froid",
             nature=Article.Nature.MATIERE_PREMIERE,
             matiere=acier,
             unite_cout=Article.UniteCout.POIDS,
@@ -192,6 +193,7 @@ class DupliquerArticleTests(TestCase):
         )
         copie = dupliquer_article(article)
         self.assertEqual(copie.reference, "TOLE-DUP-COPIE")
+        self.assertEqual(copie.libelle, "Tôle laminée à froid")
         self.assertEqual(copie.nature, article.nature)
         self.assertEqual(copie.matiere, acier)
         self.assertEqual(copie.cout_unitaire, 1.2)

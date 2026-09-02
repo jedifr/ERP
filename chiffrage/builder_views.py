@@ -86,6 +86,7 @@ def _traiter_ajout_ligne(request, devis):
             "prix_vente_matiere": ligne.prix_vente_matiere,
             "prix_vente_operations": ligne.prix_vente_operations,
             "prix_vente_total": ligne.prix_vente_total,
+            "prix_vente_unitaire": ligne.prix_vente_unitaire,
             "prix_vente_ttc": ligne.prix_vente_ttc,
             "montant_total_ht": devis.montant_total_ht,
             "montant_total_ttc": devis.montant_total_ttc,
@@ -134,6 +135,7 @@ def _creer_article_depuis_payload(data):
 
     return creer_article_fabrique(
         reference=reference,
+        libelle=(data.get("libelle") or "").strip(),
         taux_marge_defaut=data.get("taux_marge_defaut") or None,
         composants=composants,
         etapes=etapes,
@@ -234,6 +236,7 @@ def recalculer_ligne_view(request, numero, ligne_id):
             "taux_marge_matiere_applique": ligne.taux_marge_matiere_applique,
             "prix_vente_operations": ligne.prix_vente_operations,
             "prix_vente_total": ligne.prix_vente_total,
+            "prix_vente_unitaire": ligne.prix_vente_unitaire,
             "prix_vente_ttc": ligne.prix_vente_ttc,
             "montant_matiere_ht": devis.montant_matiere_ht,
             "montant_operations_ht": devis.montant_operations_ht,

@@ -219,5 +219,6 @@ def previsualiser_ligne(
         "prix_vente_matiere": prix_vente_matiere,
         "prix_vente_operations": prix_vente_operations,
         "prix_vente_total": prix_vente_total,
+        "prix_vente_unitaire": (prix_vente_total / quantite) if quantite else None,
         "prix_vente_ttc": prix_vente_total * (1 + taux_tva_valeur / 100),
     }

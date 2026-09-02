@@ -4,7 +4,7 @@ from unittest.mock import patch
 from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings
 
-from commercial.models import Adresse, Contact, TauxTVA, Tiers
+from commercial.models import Adresse, Contact, DelaiPropose, TauxTVA, Tiers
 from technique.models import Article, Gamme, Matiere, Nomenclature, PosteTravail, TarifPoste
 
 from .builder import ajouter_ligne_devis, creer_article_fabrique
@@ -206,6 +206,15 @@ class CalculerDevisTests(TestCase):
     def test_prix_vente_total_ligne_none_si_matiere_non_calculee(self):
         self.assertIsNone(self.ligne.prix_vente_matiere)
         self.assertIsNone(self.ligne.prix_vente_total)
+
+    def test_prix_vente_unitaire_ramene_le_total_a_une_unite(self):
+        calculer_devis(self.devis)
+        self.ligne.refresh_from_db()
+        # quantite=3 ; prix_vente_unitaire = prix_vente_total / 3
+        self.assertAlmostEqual(self.ligne.prix_vente_unitaire, self.ligne.prix_vente_total / 3)
+
+    def test_prix_vente_unitaire_none_si_matiere_non_calculee(self):
+        self.assertIsNone(self.ligne.prix_vente_unitaire)
 
     def test_montants_devis_integrent_matiere_et_operations(self):
         calculer_devis(self.devis)
@@ -420,8 +429,10 @@ class BuilderTests(TestCase):
             taux_marge_defaut=15,
             composants=self._composants(),
             etapes=self._etapes(),
+            libelle="Platine support moteur",
         )
         self.assertEqual(article.nature, Article.Nature.FABRIQUE)
+        self.assertEqual(article.libelle, "Platine support moteur")
         self.assertEqual(article.composants.count(), 1)
         self.assertEqual(article.gamme_etapes.count(), 1)
         self.assertEqual(article.composants.get().article_composant, self.composant)
@@ -532,6 +543,7 @@ class DevisBuilderViewTests(TestCase):
             "quantite": 3,
             "nouvel_article": {
                 "reference": "PIECE-VIEW-1",
+                "libelle": "Platine support moteur",
                 "taux_marge_defaut": 10,
                 "composants": [{"article_composant": "VIS-VIEW", "quantite": 5}],
                 "etapes": [
@@ -546,6 +558,7 @@ class DevisBuilderViewTests(TestCase):
         )
         self.assertEqual(response.status_code, 200, response.content)
         self.assertTrue(Article.objects.filter(pk="PIECE-VIEW-1").exists())
+        self.assertEqual(Article.objects.get(pk="PIECE-VIEW-1").libelle, "Platine support moteur")
         self.assertEqual(self.devis.lignes.count(), 1)
         data = response.json()
         # matière : 3 * (5 * 0.2) = 3, marge 10% -> prix_vente_matiere = 3.3
@@ -861,6 +874,50 @@ class RecalculerLigneAvecOperationsTests(TestCase):
         self.assertAlmostEqual(data["montant_total_ht"], 133.7112 + operation_attendue, places=3)
 
 
+class DevisDelaiTests(TestCase):
+    """Devis.delai : texte libre, jamais contraint au référentiel
+    DelaiPropose (qui ne fournit que des suggestions — voir DelaiWidget,
+    chiffrage/widgets.py)."""
+
+    def setUp(self):
+        self.client_tiers = Tiers.objects.create(
+            code="CLI-DELAI", raison_sociale="Client Délai", type_tiers=Tiers.TypeTiers.CLIENT
+        )
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        self.user = User.objects.create_superuser("delai-admin", "delai@example.com", "pass1234")
+        self.client.force_login(self.user)
+
+    def test_delai_hors_referentiel_accepte(self):
+        devis = Devis(
+            numero="DEV-DELAI-1",
+            client=self.client_tiers,
+            date_creation=datetime.date(2026, 1, 1),
+            delai="Livraison sous 3 jours ouvrés, à confirmer",
+        )
+        devis.full_clean()  # ne doit pas lever, même sans entrée DelaiPropose correspondante
+        devis.save()
+        self.assertEqual(devis.delai, "Livraison sous 3 jours ouvrés, à confirmer")
+
+    def test_delai_vide_reste_valide(self):
+        devis = Devis(
+            numero="DEV-DELAI-2", client=self.client_tiers, date_creation=datetime.date(2026, 1, 1)
+        )
+        devis.full_clean()  # optionnel : ne doit pas lever
+        self.assertEqual(devis.delai, "")
+
+    def test_formulaire_ajout_affiche_les_suggestions_du_referentiel(self):
+        DelaiPropose.objects.create(libelle="2 semaines", ordre=1)
+        DelaiPropose.objects.create(libelle="Sur stock", ordre=0)
+        response = self.client.get("/admin/chiffrage/devis/add/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'list="delai-suggestions"')
+        self.assertContains(response, "<datalist")
+        self.assertContains(response, "2 semaines")
+        self.assertContains(response, "Sur stock")
+
+
 class DevisAdressesContactTests(TestCase):
     """Client, adresse de facturation, adresse de livraison et contact sur le devis."""
 
@@ -965,6 +1022,8 @@ class PrevisualiserLigneTests(TestCase):
         self.assertEqual(resultat["prix_vente_matiere"], 10)
         self.assertEqual(resultat["prix_vente_operations"], 0)
         self.assertEqual(resultat["prix_vente_total"], 10)
+        # prix_vente_unitaire = prix_vente_total / quantite = 10 / 4
+        self.assertEqual(resultat["prix_vente_unitaire"], 2.5)
         self.assertEqual(DevisLigne.objects.count(), 0)
 
     def test_apercu_avec_prix_unitaire_force(self):
@@ -1251,6 +1310,8 @@ class RecalculerLignePrixForceTests(TestCase):
         # cout_matiere_calcule = 3*2 = 6 (informatif) ; prix_vente_matiere = 3*10 = 30 (forcé)
         self.assertEqual(data["cout_matiere_calcule"], 6)
         self.assertEqual(data["prix_vente_matiere"], 30)
+        # pas d'opérations (article matière première) : prix_vente_unitaire = 30/3 = 10 (= le prix forcé)
+        self.assertEqual(data["prix_vente_unitaire"], 10)
         self.ligne.refresh_from_db()
         self.assertEqual(self.ligne.prix_vente_unitaire_force, 10)
 

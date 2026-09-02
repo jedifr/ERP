@@ -38,6 +38,12 @@ class Article(models.Model):
         PROFIL_U = "profil_u", "Profilé U"
 
     reference = models.CharField("référence", max_length=100, primary_key=True)
+    libelle = models.CharField(
+        "libellé",
+        max_length=200,
+        blank=True,
+        help_text="Nom/description lisible de l'article, en plus de la référence",
+    )
     nature = models.CharField("nature", max_length=20, choices=Nature.choices)
     matiere = models.ForeignKey(
         Matiere,
@@ -92,6 +98,8 @@ class Article(models.Model):
         ordering = ["reference"]
 
     def __str__(self):
+        if self.libelle:
+            return f"{self.reference} — {self.libelle}"
         return self.reference
 
     def clean(self):

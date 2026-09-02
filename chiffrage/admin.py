@@ -1,3 +1,4 @@
+from django import forms
 from django.contrib import admin, messages
 from django.http import HttpResponseRedirect
 from django.urls import path, reverse
@@ -19,6 +20,7 @@ from .models import Commande, Devis, DevisLigne, DevisLigneOperation, OperationO
 from .moteur import ChiffrageError, calculer_devis
 from .planning_sync import resynchroniser
 from .production import lancer_en_production
+from .widgets import DelaiWidget
 
 
 class DevisLigneInline(TabularInline):
@@ -30,6 +32,7 @@ class DevisLigneInline(TabularInline):
         "prix_vente_matiere",
         "prix_vente_operations",
         "prix_vente_total",
+        "prix_vente_unitaire",
         "prix_vente_ttc",
     ]
 
@@ -44,15 +47,24 @@ class DevisLigneOperationInline(TabularInline):
         return False
 
 
+class DevisAdminForm(forms.ModelForm):
+    class Meta:
+        model = Devis
+        fields = "__all__"
+        widgets = {"delai": DelaiWidget()}
+
+
 @admin.register(Devis)
 class DevisAdmin(CodificationInitialeMixin, ModelAdmin):
     codification_entite = RegleCodification.Entite.DEVIS
+    form = DevisAdminForm
 
     list_display = [
         "numero",
         "client",
         "date_creation",
         "statut",
+        "delai",
         "taux_marge_globale",
         "montant_matiere_ht",
         "montant_operations_ht",
@@ -178,6 +190,7 @@ class DevisLigneAdmin(ModelAdmin):
         "prix_vente_matiere",
         "prix_vente_operations",
         "prix_vente_total",
+        "prix_vente_unitaire",
         "taux_tva",
         "prix_vente_ttc",
     ]

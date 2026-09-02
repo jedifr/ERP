@@ -31,6 +31,7 @@
                 <th class="py-1 pr-4">Opérations</th>
                 <th class="py-1 pr-4">Prix vente opérations (HT)</th>
                 <th class="py-1 pr-4">Prix vente total (HT)</th>
+                <th class="py-1 pr-4">Prix vente unitaire (HT)</th>
                 <th class="py-1 pr-4">Taux TVA</th>
                 <th class="py-1 pr-4">Prix vente total (TTC)</th>
             </tr>
@@ -47,11 +48,12 @@
                 </td>
                 <td class="py-1 pr-4">{{ ligne.prix_vente_operations|floatformat:2 }}</td>
                 <td class="py-1 pr-4 font-medium">{{ ligne.prix_vente_total|default:"—" }}</td>
+                <td class="py-1 pr-4">{{ ligne.prix_vente_unitaire|floatformat:2|default:"—" }}</td>
                 <td class="py-1 pr-4">{{ ligne.taux_tva|default:"—" }}</td>
                 <td class="py-1 pr-4 font-medium">{{ ligne.prix_vente_ttc|default:"—" }}</td>
             </tr>
             {% empty %}
-            <tr><td colspan="9" class="py-2 text-font-subtle-light dark:text-font-subtle-dark">Aucune ligne pour l'instant.</td></tr>
+            <tr><td colspan="10" class="py-2 text-font-subtle-light dark:text-font-subtle-dark">Aucune ligne pour l'instant.</td></tr>
             {% endfor %}
         </tbody>
         {% if lignes %}
@@ -61,9 +63,11 @@
                 <td class="py-2">{{ devis.montant_total_ht|floatformat:2 }}</td>
                 <td></td>
                 <td></td>
+                <td></td>
             </tr>
             <tr class="font-semibold">
                 <td colspan="6" class="py-2 text-right pr-4">Total devis TTC</td>
+                <td></td>
                 <td></td>
                 <td></td>
                 <td class="py-2">{{ devis.montant_total_ttc|floatformat:2 }}</td>
@@ -106,10 +110,14 @@
 
     <!-- Bloc nouvel article -->
     <div id="bloc-nouvel-article" class="hidden">
-        <div class="grid grid-cols-2 gap-4 mb-4">
+        <div class="grid grid-cols-3 gap-4 mb-4">
             <div>
                 <label class="block font-medium mb-1">Référence<span class="text-red-600">*</span></label>
                 <input type="text" id="na-reference" class="border border-base-200 dark:border-base-700 dark:bg-base-800 rounded-default px-3 py-2 w-full">
+            </div>
+            <div>
+                <label class="block font-medium mb-1">Libellé</label>
+                <input type="text" id="na-libelle" placeholder="Ex. Platine support moteur" class="border border-base-200 dark:border-base-700 dark:bg-base-800 rounded-default px-3 py-2 w-full">
             </div>
             <div>
                 <label class="block font-medium mb-1">Taux de marge par défaut (%)</label>

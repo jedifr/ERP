@@ -48,6 +48,16 @@ class Devis(models.Model):
     taux_marge_globale = models.FloatField(
         "taux de marge globale", null=True, blank=True, help_text="Optionnel, écrase les marges par défaut"
     )
+    delai = models.CharField(
+        "délai",
+        max_length=100,
+        blank=True,
+        help_text=(
+            "Délai de livraison annoncé. Texte libre : des suggestions viennent du "
+            "référentiel « Délais proposés » (commercial.DelaiPropose), mais toute "
+            "valeur saisie est acceptée."
+        ),
+    )
 
     class Meta:
         verbose_name = "Devis"
@@ -162,6 +172,17 @@ class DevisLigne(models.Model):
         return self.prix_vente_matiere + self.prix_vente_operations
 
     prix_vente_total.fget.short_description = "Prix de vente total (matière + opérations, HT)"
+
+    @property
+    def prix_vente_unitaire(self):
+        """Prix de vente total (matière + opérations, HT) ramené à une unité de
+        l'article — pratique pour comparer des lignes de quantités différentes.
+        None tant que le chiffrage n'a pas été calculé, ou si quantite est nulle."""
+        if self.prix_vente_total is None or not self.quantite:
+            return None
+        return self.prix_vente_total / self.quantite
+
+    prix_vente_unitaire.fget.short_description = "Prix de vente unitaire (HT)"
 
     @property
     def prix_vente_ttc(self):

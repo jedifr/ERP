@@ -713,3 +713,76 @@ diviser par 60) — corrigés en même temps que le code (`chiffrage/tests.py`,
 `pilotage/tests.py`), avec le calcul manuel de l'utilisateur repris tel
 quel comme vérification indépendante (`27,50 € / 15,00 € / 4,5833 €` par
 pièce pour 1, 2 et 12 pièces).
+
+## Libellé d'article, visible et saisissable dès le devis
+
+Un article n'avait que sa référence (ex. `PIECE-00042`) comme identifiant
+lisible — pas de nom/description. Ajouté `Article.libelle` (texte libre,
+optionnel), et `Article.__str__` l'intègre désormais partout où l'article
+est affiché (`"PIECE-00042 — Platine support moteur"`) : select2 des
+lignes de devis, résultats de recherche du constructeur, listes admin —
+sans changement de code supplémentaire à ces endroits, puisqu'ils
+affichent déjà `str(article)`.
+
+Modifiable dès la création de l'article :
+- **Constructeur de devis, "Nouvel article fabriqué"** : nouveau champ
+  "Libellé" à côté de "Référence", transmis à `creer_article_fabrique()`.
+- **Fiche Article** (`ArticleAdmin`) : champ visible dans la liste et la
+  recherche (`search_fields`).
+- **"Dupliquer et modifier"** (`dupliquer_article`) : le libellé est
+  copié comme les autres champs.
+
+Pour un article déjà existant choisi sur une ligne de devis, le petit menu
+(⋮) à côté du champ autocomplete (widget standard de l'admin Django,
+`RelatedFieldWidgetWrapper`) permet de voir/modifier l'article — donc son
+libellé — sans quitter la fiche du devis.
+
+## Prix de vente unitaire sur les lignes de devis
+
+Les lignes de devis n'affichaient que des montants **totaux** pour la
+ligne (prix de vente matière, opérations, total HT/TTC) — pas de prix
+"à l'unité", pourtant utile pour comparer des lignes de quantités
+différentes ou vérifier un tarif au coup d'œil.
+
+Ajouté `DevisLigne.prix_vente_unitaire` (propriété calculée, jamais
+stockée) = `prix_vente_total / quantite` — `None` tant que le chiffrage
+n'a pas été calculé, comme les autres montants dérivés. Branché partout où
+les autres montants de ligne le sont déjà : inline de la fiche Devis,
+`DevisLigneAdmin`, endpoints de calcul/aperçu en direct
+(`recalculer_ligne_view`, `previsualiser_ligne_view`,
+`previsualiser_ligne_nouveau_devis_view`, `moteur.previsualiser_ligne()`),
+JS de calcul live (`devis_admin_live.js`), et tableau "Lignes existantes"
+du constructeur.
+
+Aucune nouvelle règle de calcul : c'est une lecture différente de données
+déjà calculées (`prix_vente_total`), donc pas de risque d'incohérence avec
+les montants totaux déjà affichés — y compris quand un prix unitaire est
+forcé (`prix_vente_unitaire_force`), puisque celui-ci influence déjà
+`prix_vente_matiere` en amont.
+
+## Délai sur le devis : liste paramétrable + saisie libre
+
+Nouveau champ `Devis.delai` (texte libre, optionnel) pour annoncer un
+délai de livraison sur le devis. La contrainte du besoin — "on va le
+chercher dans une liste paramétrable, mais on peut aussi le taper
+directement" — ne correspond ni à un `ForeignKey` (empêcherait la saisie
+libre) ni à un `ChoiceField` (même problème) : elle correspond exactement
+au `<datalist>` HTML natif, qui associe un champ texte libre à une liste
+de suggestions sans jamais contraindre la valeur saisie.
+
+- Nouveau référentiel `commercial.DelaiPropose` (`libelle` + `ordre`
+  d'affichage), géré depuis un admin dédié (`DelaiProposeAdmin`) — vide au
+  départ, à peupler selon les délais habituels de l'atelier (aucune valeur
+  par défaut : contrairement aux taux de TVA, un délai type n'a rien
+  d'universel).
+- `DelaiWidget` (`chiffrage/widgets.py`) : sous-classe de
+  `forms.TextInput` dont `render()` ajoute un `<datalist id="delai-
+  suggestions">` peuplé depuis `DelaiPropose.objects.all()`, en plus du
+  champ texte (`list="delai-suggestions"` sur l'`<input>`). Branché sur le
+  champ `delai` via un `ModelForm` dédié (`DevisAdminForm`) sur
+  `DevisAdmin.form`.
+
+Résultat : le champ "Délai" de la fiche Devis propose les valeurs du
+référentiel dans son autocomplétion native du navigateur, mais accepte
+n'importe quel texte tapé à la main — vérifié en tapant un délai hors
+liste ("Livraison express sous 48h"), accepté sans erreur.

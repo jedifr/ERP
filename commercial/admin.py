@@ -4,7 +4,7 @@ from unfold.admin import ModelAdmin, TabularInline
 from codification.mixins import CodificationInitialeMixin
 from codification.models import RegleCodification
 
-from .models import Adresse, Contact, TauxTVA, Tiers
+from .models import Adresse, Contact, DelaiPropose, TauxTVA, Tiers
 
 
 class AdresseInline(TabularInline):
@@ -65,3 +65,10 @@ class TauxTVAAdmin(ModelAdmin):
     list_display = ["nom", "taux", "est_defaut"]
     list_filter = ["est_defaut"]
     search_fields = ["nom"]
+
+
+@admin.register(DelaiPropose)
+class DelaiProposeAdmin(ModelAdmin):
+    list_display = ["libelle", "ordre"]
+    search_fields = ["libelle"]
+    ordering = ["ordre", "libelle"]

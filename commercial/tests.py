@@ -1,7 +1,7 @@
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 
-from .models import Adresse, Contact, TauxTVA, Tiers
+from .models import Adresse, Contact, DelaiPropose, TauxTVA, Tiers
 
 
 class AdresseTests(TestCase):
@@ -165,3 +165,19 @@ class ContactAdresseLivraisonTests(TestCase):
         contact = Contact(tiers=self.tiers, nom="Site", adresse_livraison=self.facturation)
         with self.assertRaises(ValidationError):
             contact.full_clean()
+
+
+class DelaiProposeTests(TestCase):
+    def test_libelle_unique(self):
+        DelaiPropose.objects.create(libelle="2 semaines")
+        doublon = DelaiPropose(libelle="2 semaines")
+        with self.assertRaises(ValidationError):
+            doublon.full_clean()
+
+    def test_ordre_par_defaut_zero(self):
+        delai = DelaiPropose.objects.create(libelle="Sur stock")
+        self.assertEqual(delai.ordre, 0)
+
+    def test_str_renvoie_le_libelle(self):
+        delai = DelaiPropose.objects.create(libelle="4 à 6 semaines")
+        self.assertEqual(str(delai), "4 à 6 semaines")

@@ -179,6 +179,7 @@
             prixCell: row.querySelector(".field-prix_vente_matiere .readonly"),
             operationsCell: row.querySelector(".field-prix_vente_operations .readonly"),
             totalCell: row.querySelector(".field-prix_vente_total .readonly"),
+            unitaireCell: row.querySelector(".field-prix_vente_unitaire .readonly"),
             ttcCell: row.querySelector(".field-prix_vente_ttc .readonly"),
         };
     }
@@ -198,6 +199,9 @@
         }
         if (cells.totalCell) {
             cells.totalCell.textContent = data.prix_vente_total != null ? data.prix_vente_total : "-";
+        }
+        if (cells.unitaireCell) {
+            cells.unitaireCell.textContent = data.prix_vente_unitaire != null ? data.prix_vente_unitaire : "-";
         }
         if (cells.ttcCell) {
             cells.ttcCell.textContent = data.prix_vente_ttc != null ? data.prix_vente_ttc : "-";

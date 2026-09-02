@@ -49,6 +49,7 @@ def dupliquer_article(article):
     avec sa nomenclature et sa gamme s'il est fabriqué. Retourne la copie."""
     copie = Article(
         reference=_reference_copie(article.reference),
+        libelle=article.libelle,
         nature=article.nature,
         matiere=article.matiere,
         unite_cout=article.unite_cout,

@@ -120,6 +120,27 @@ class TauxTVA(models.Model):
                 )
 
 
+class DelaiPropose(models.Model):
+    """Référentiel de délais suggérés sur le devis (ex. "2 semaines", "Sur
+    stock") — de simples suggestions : le champ Devis.delai reste un texte
+    libre, non contraint à cette liste (voir DelaiWidget, chiffrage/widgets.py)."""
+
+    libelle = models.CharField(
+        "libellé", max_length=100, unique=True, help_text='Ex. "2 semaines", "Sur stock"'
+    )
+    ordre = models.PositiveIntegerField(
+        "ordre d'affichage", default=0, help_text="Ordre de présentation des suggestions"
+    )
+
+    class Meta:
+        verbose_name = "Délai proposé"
+        verbose_name_plural = "Délais proposés"
+        ordering = ["ordre", "libelle"]
+
+    def __str__(self):
+        return self.libelle
+
+
 class Contact(models.Model):
     tiers = models.ForeignKey(
         Tiers, verbose_name="tiers", on_delete=models.CASCADE, related_name="contacts"

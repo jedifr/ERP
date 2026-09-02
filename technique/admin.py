@@ -46,6 +46,7 @@ def dupliquer_article_view(request, reference):
 class ArticleAdmin(ModelAdmin):
     list_display = [
         "reference",
+        "libelle",
         "nature",
         "matiere",
         "unite_cout",
@@ -54,7 +55,7 @@ class ArticleAdmin(ModelAdmin):
         "stock_mini",
     ]
     list_filter = ["nature", "unite_cout", "type_profil", "gere_en_stock"]
-    search_fields = ["reference"]
+    search_fields = ["reference", "libelle"]
     autocomplete_fields = ["matiere"]
     inlines = [NomenclatureInline, GammeInline]
 
