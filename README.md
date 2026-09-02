@@ -638,3 +638,15 @@ Ce choix est fait à deux moments distincts :
   adresse précise ; le JS (`wireContactParAdresseLivraison()`) l'appelle à
   chaque changement du champ "Adresse de livraison" et propose ce contact
   — toujours sans écraser un contact déjà choisi.
+
+## Unité des temps dans le constructeur de devis
+
+Les champs "Temps fixe" et "Temps variable" d'une étape de gamme (mode de
+calcul horaire) n'affichaient aucune unité — ambigu sans connaître la
+convention du projet. Les temps sont exprimés en minutes dans toute
+l'application (`OperationOF.temps_prevu`/`temps_reel`, `Gamme.temps_fixe`/
+`temps_variable`) ; les libellés du constructeur l'indiquent maintenant
+explicitement : "Temps fixe (min)" et "Temps variable (min/pièce)" — ce
+second suffixe précise en plus qu'il s'applique par pièce produite (il est
+multiplié par la quantité de la ligne de devis dans `moteur.py` :
+`temps_fixe + temps_variable × quantité`), pas seulement son unité.

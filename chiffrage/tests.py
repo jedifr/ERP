@@ -520,6 +520,9 @@ class DevisBuilderViewTests(TestCase):
         response = self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/constructeur/")
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Constructeur de devis")
+        # Les temps de gamme (temps_fixe/temps_variable) s'expriment en minutes.
+        self.assertContains(response, "Temps fixe (min)")
+        self.assertContains(response, "Temps variable (min/pièce)")
 
     def test_post_nouvel_article_cree_tout(self):
         payload = {
