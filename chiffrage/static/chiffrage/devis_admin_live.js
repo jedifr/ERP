@@ -75,6 +75,7 @@
 
     function updateLigneCells(row, data) {
         const cells = ligneCells(row);
+        clearLigneErreur(row);
         if (cells.coutCell) {
             cells.coutCell.textContent = data.cout_matiere_calcule != null ? data.cout_matiere_calcule : "-";
         }
@@ -91,6 +92,32 @@
         if (cells.ttcCell) {
             cells.ttcCell.textContent = data.prix_vente_ttc != null ? data.prix_vente_ttc : "-";
         }
+    }
+
+    // Affiche le message d'erreur retourné par le serveur directement dans la
+    // ligne (au lieu de le laisser uniquement dans la console, invisible pour
+    // l'utilisateur) : ex. "L'article « TOTO1 » n'a pas de coût unitaire
+    // renseigné." — la colonne "Prix de vente total" est la plus visible et
+    // sert de point d'ancrage, le message complet apparaît en infobulle et
+    // sous le tableau si la ligne n'a pas de cellule à elle (ex. réseau).
+    function showLigneErreur(row, message) {
+        const cells = ligneCells(row);
+        const cible = cells.totalCell || cells.prixCell || cells.coutCell;
+        if (cible) {
+            cible.textContent = "⚠ " + message;
+            cible.title = message;
+            cible.style.color = "#dc2626";
+        }
+    }
+
+    function clearLigneErreur(row) {
+        const cells = ligneCells(row);
+        Object.values(cells).forEach((cell) => {
+            if (cell) {
+                cell.style.color = "";
+                cell.title = "";
+            }
+        });
     }
 
     function wireRow(row, numero) {
@@ -155,6 +182,7 @@
                     row.style.opacity = "1";
                     if (status >= 400) {
                         console.error("Recalcul ligne de devis :", data.detail);
+                        showLigneErreur(row, data.detail || "Erreur lors du recalcul.");
                         return;
                     }
                     updateLigneCells(row, data);
@@ -166,6 +194,7 @@
                 .catch(() => {
                     row.style.opacity = "1";
                     console.error("Recalcul ligne de devis : erreur réseau.");
+                    showLigneErreur(row, "Erreur réseau lors du recalcul.");
                 });
         }, 400);
 
@@ -224,6 +253,7 @@
                     row.style.opacity = "1";
                     if (status >= 400) {
                         console.error("Aperçu ligne de devis :", data.detail);
+                        showLigneErreur(row, data.detail || "Erreur lors de l'aperçu.");
                         return;
                     }
                     updateLigneCells(row, data);
@@ -231,6 +261,7 @@
                 .catch(() => {
                     row.style.opacity = "1";
                     console.error("Aperçu ligne de devis : erreur réseau.");
+                    showLigneErreur(row, "Erreur réseau lors de l'aperçu.");
                 });
         }, 400);
 

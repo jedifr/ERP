@@ -371,6 +371,14 @@ marquée "câblée" sans qu'aucun écouteur n'y soit réellement attaché ; ce
 gabarit (`name` contenant `__prefix__`) est donc explicitement exclu du
 câblage.
 
+Erreur de calcul (ex. article sans coût unitaire renseigné) : le message
+d'erreur du serveur s'affiche directement dans la ligne, en rouge, à la
+place des "-" (colonne "Prix de vente total", avec le détail complet en
+infobulle). Avant ce correctif, une erreur de calcul restait invisible
+(uniquement loguée dans la console du navigateur) — la ligne affichait des
+"-" sans aucune explication, ce qui pouvait laisser croire que le calcul
+en direct ne fonctionnait pas du tout.
+
 **Prix de vente unitaire forcé** — `DevisLigne.prix_vente_unitaire_force`
 (optionnel) permet de fixer directement le prix de vente matière d'une
 ligne (`= quantité × ce prix`), en remplacement du calcul automatique
