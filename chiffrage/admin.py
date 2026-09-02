@@ -6,7 +6,7 @@ from unfold.admin import ModelAdmin, TabularInline
 from codification.mixins import CodificationInitialeMixin
 from codification.models import RegleCodification
 
-from .builder_views import devis_builder_view, recalculer_ligne_view
+from .builder_views import devis_builder_view, previsualiser_ligne_view, recalculer_ligne_view
 from .models import Commande, Devis, DevisLigne, DevisLigneOperation, OperationOF, OrdreFabrication
 from .moteur import ChiffrageError, calculer_devis
 from .planning_sync import resynchroniser
@@ -88,6 +88,11 @@ class DevisAdmin(CodificationInitialeMixin, ModelAdmin):
                 "<str:numero>/lignes/<int:ligne_id>/recalculer/",
                 self.admin_site.admin_view(recalculer_ligne_view),
                 name="chiffrage_devisligne_recalculer",
+            ),
+            path(
+                "<str:numero>/lignes/previsualiser/",
+                self.admin_site.admin_view(previsualiser_ligne_view),
+                name="chiffrage_devisligne_previsualiser",
             ),
         ]
         return urls + super().get_urls()

@@ -12,7 +12,7 @@ from technique.models import Article, PosteTravail
 
 from .builder import ajouter_ligne_devis, creer_article_fabrique, erreur_lisible
 from .models import Devis, DevisLigne
-from .moteur import ChiffrageError, calculer_devis
+from .moteur import ChiffrageError, calculer_devis, previsualiser_ligne
 
 
 @staff_member_required
@@ -134,12 +134,31 @@ def _creer_article_depuis_payload(data):
     )
 
 
+class _ValeurInvalide(Exception):
+    def __init__(self, message):
+        self.message = message
+
+
+def _parse_float_optionnel(payload, champ, message_erreur):
+    """Lit `champ` dans `payload` s'il est présent : None/"" -> None, sinon float().
+    Lève _ValeurInvalide si la conversion échoue. Ne touche rien si absent du payload
+    (permet de ne modifier que les champs effectivement envoyés)."""
+    if champ not in payload:
+        return None, False
+    valeur = payload[champ]
+    try:
+        return (float(valeur) if valeur not in (None, "") else None), True
+    except (TypeError, ValueError):
+        raise _ValeurInvalide(message_erreur)
+
+
 @staff_member_required
 @require_http_methods(["POST"])
 def recalculer_ligne_view(request, numero, ligne_id):
-    """Met à jour une ligne de devis (quantité / taux de marge) et recalcule
-    le devis en direct — utilisé par le JS de la fiche Devis (recalcul en
-    temps réel, sans passer par l'action admin "Recalculer le chiffrage")."""
+    """Met à jour une ligne de devis (quantité / taux de marge / prix unitaire
+    forcé) et recalcule le devis en direct — utilisé par le JS de la fiche
+    Devis (recalcul en temps réel, sans passer par l'action admin
+    "Recalculer le chiffrage")."""
     devis = get_object_or_404(Devis, pk=numero)
     ligne = get_object_or_404(DevisLigne, pk=ligne_id, devis=devis)
 
@@ -148,18 +167,22 @@ def recalculer_ligne_view(request, numero, ligne_id):
     except json.JSONDecodeError:
         return JsonResponse({"detail": "JSON invalide."}, status=400)
 
-    if "quantite" in payload:
-        try:
-            ligne.quantite = float(payload["quantite"])
-        except (TypeError, ValueError):
-            return JsonResponse({"detail": "Quantité invalide."}, status=400)
+    try:
+        quantite, fourni = _parse_float_optionnel(payload, "quantite", "Quantité invalide.")
+        if fourni:
+            ligne.quantite = quantite
 
-    if "taux_marge_matiere_applique" in payload:
-        valeur = payload["taux_marge_matiere_applique"]
-        try:
-            ligne.taux_marge_matiere_applique = float(valeur) if valeur not in (None, "") else None
-        except (TypeError, ValueError):
-            return JsonResponse({"detail": "Taux de marge invalide."}, status=400)
+        taux, fourni = _parse_float_optionnel(payload, "taux_marge_matiere_applique", "Taux de marge invalide.")
+        if fourni:
+            ligne.taux_marge_matiere_applique = taux
+
+        prix_force, fourni = _parse_float_optionnel(
+            payload, "prix_vente_unitaire_force", "Prix unitaire forcé invalide."
+        )
+        if fourni:
+            ligne.prix_vente_unitaire_force = prix_force
+    except _ValeurInvalide as exc:
+        return JsonResponse({"detail": exc.message}, status=400)
 
     try:
         ligne.full_clean()
@@ -186,3 +209,49 @@ def recalculer_ligne_view(request, numero, ligne_id):
             "montant_total_ht": devis.montant_total_ht,
         }
     )
+
+
+@staff_member_required
+@require_http_methods(["POST"])
+def previsualiser_ligne_view(request, numero):
+    """Aperçu du coût/prix d'une ligne pas encore enregistrée (article +
+    quantité tout juste saisis dans une nouvelle ligne de l'inline, sur la
+    fiche Devis) — ne persiste rien, contrairement à recalculer_ligne_view."""
+    devis = get_object_or_404(Devis, pk=numero)
+
+    try:
+        payload = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"detail": "JSON invalide."}, status=400)
+
+    reference = payload.get("article")
+    try:
+        article = Article.objects.get(pk=reference)
+    except Article.DoesNotExist:
+        return JsonResponse({"detail": f"Article « {reference} » introuvable."}, status=400)
+
+    try:
+        quantite = float(payload["quantite"])
+    except (KeyError, TypeError, ValueError):
+        return JsonResponse({"detail": "Quantité invalide."}, status=400)
+
+    try:
+        taux, _fourni = _parse_float_optionnel(payload, "taux_marge_matiere_applique", "Taux de marge invalide.")
+        prix_force, _fourni = _parse_float_optionnel(
+            payload, "prix_vente_unitaire_force", "Prix unitaire forcé invalide."
+        )
+    except _ValeurInvalide as exc:
+        return JsonResponse({"detail": exc.message}, status=400)
+
+    try:
+        resultat = previsualiser_ligne(
+            devis,
+            article,
+            quantite,
+            taux_marge_matiere_applique=taux,
+            prix_vente_unitaire_force=prix_force,
+        )
+    except ChiffrageError as exc:
+        return JsonResponse({"detail": str(exc)}, status=400)
+
+    return JsonResponse({"ok": True, **resultat})

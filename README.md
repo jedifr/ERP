@@ -340,3 +340,46 @@ complétées plus tard). Ces trois champs se comportent comme sur `Commande`
 (mêmes modèles `Adresse`/`Contact` de l'app `commercial`) : `Devis.clean()`
 vérifie que l'adresse ou le contact choisi appartient bien au client
 sélectionné, sinon la validation échoue avec un message explicite.
+
+## Calcul live dès l'ajout d'une ligne, prix unitaire forcé, libellés HT
+
+Trois compléments au chiffrage d'un devis :
+
+**Aperçu live sur une ligne pas encore enregistrée** — jusqu'ici, le
+recalcul en direct (voir plus haut) ne fonctionnait que sur une ligne déjà
+sauvegardée. Désormais, choisir un article et une quantité sur une ligne
+*neuve* de l'inline (la ligne vide par défaut, ou une ligne ajoutée via
+"Ajouter un objet Ligne de devis supplémentaire") déclenche aussi un calcul
+en direct — coût matière, prix de vente matière/opérations/total. Différence
+avec le recalcul d'une ligne existante : cet aperçu ne persiste rien en base
+(`POST .../lignes/previsualiser/`, `chiffrage/moteur.py::previsualiser_ligne`,
+qui réutilise exactement les mêmes règles que `calculer_devis`) et ne met
+donc pas à jour les totaux du devis, qui ne reflètent que les lignes
+réellement enregistrées.
+
+Point technique notable : une ligne ajoutée dynamiquement est un clone DOM
+(bouton "Ajouter..."), et Django déclenche l'évènement `formset:added` sur
+la ligne insérée pour permettre de la câbler en JS — mais dans le rendu
+Unfold, cet évènement est émis sur le `<tr>` interne, pas sur le `<tbody
+class="form-group">` qui l'englobe (celui que cible le reste du script) :
+`devis_admin_live.js` remonte donc au `<tbody>` ancêtre via `closest()`. Un
+second écueil : le clonage DOM copie les attributs (dont un éventuel
+`data-*` marqueur "déjà câblée") mais jamais les écouteurs JS attachés en
+`addEventListener` — poser ce marqueur sur le gabarit caché utilisé pour le
+clonage aurait donc fait que chaque ligne ajoutée dynamiquement se retrouve
+marquée "câblée" sans qu'aucun écouteur n'y soit réellement attaché ; ce
+gabarit (`name` contenant `__prefix__`) est donc explicitement exclu du
+câblage.
+
+**Prix de vente unitaire forcé** — `DevisLigne.prix_vente_unitaire_force`
+(optionnel) permet de fixer directement le prix de vente matière d'une
+ligne (`= quantité × ce prix`), en remplacement du calcul automatique
+(coût matière × marge). Le coût matière calculé reste affiché à titre
+informatif. Pris en compte par `calculer_devis`, le recalcul en direct et
+l'aperçu d'une ligne neuve.
+
+**Libellés "(HT)"** — les champs de prix de vente (ligne, opérations,
+total, et le nouveau prix forcé) précisent maintenant "(HT)" dans leur
+libellé, sur la fiche Devis comme sur la page Constructeur. Les montants
+"Montant matière/opérations/total HT" du haut de la fiche Devis l'indiquaient
+déjà.

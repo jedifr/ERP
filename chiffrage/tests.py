@@ -8,8 +8,8 @@ from commercial.models import Adresse, Contact, Tiers
 from technique.models import Article, Gamme, Matiere, Nomenclature, PosteTravail, TarifPoste
 
 from .builder import ajouter_ligne_devis, creer_article_fabrique
-from .models import Commande, Devis, DevisLigne, OrdreFabrication
-from .moteur import ChiffrageError, calculer_devis, cout_matiere_article
+from .models import Commande, Devis, DevisLigne, DevisLigneOperation, OrdreFabrication
+from .moteur import ChiffrageError, calculer_devis, cout_matiere_article, previsualiser_ligne
 from .planning_sync import PlanningSyncError, resynchroniser, tenter_synchronisation
 from .production import lancer_en_production
 
@@ -183,6 +183,16 @@ class CalculerDevisTests(TestCase):
         TarifPoste.objects.filter(poste=self.poste_horaire).delete()
         with self.assertRaises(ChiffrageError):
             calculer_devis(self.devis)
+
+    def test_prix_unitaire_force_remplace_le_calcul_automatique(self):
+        self.ligne.prix_vente_unitaire_force = 50
+        self.ligne.save()
+        calculer_devis(self.devis)
+        self.ligne.refresh_from_db()
+        # quantite=3 * prix forcé 50 = 150, au lieu de 111.426 * 1.2 = 133.7112
+        self.assertEqual(self.ligne.prix_vente_matiere, 150)
+        # le coût matière reste calculé normalement (juste le prix de vente est forcé)
+        self.assertAlmostEqual(self.ligne.cout_matiere_calcule, 111.426, places=3)
 
     def test_prix_vente_total_ligne_integre_les_operations(self):
         calculer_devis(self.devis)
@@ -819,3 +829,226 @@ class DevisAdressesContactTests(TestCase):
         )
         with self.assertRaises(ValidationError):
             devis.full_clean()
+
+
+class PrevisualiserLigneTests(TestCase):
+    """moteur.previsualiser_ligne : aperçu sans rien persister en base."""
+
+    def setUp(self):
+        self.client_tiers = Tiers.objects.create(
+            code="CLI-APERCU", raison_sociale="Client Aperçu", type_tiers=Tiers.TypeTiers.CLIENT
+        )
+        self.devis = Devis.objects.create(
+            numero="DEV-APERCU",
+            client=self.client_tiers,
+            date_creation=datetime.date(2026, 1, 15),
+            statut=Devis.Statut.BROUILLON,
+        )
+        self.article_matiere = Article.objects.create(
+            reference="ART-APERCU",
+            nature=Article.Nature.MATIERE_PREMIERE,
+            unite_cout=Article.UniteCout.PIECE,
+            cout_unitaire=2.0,
+            taux_marge_defaut=25,
+        )
+
+    def test_apercu_matiere_premiere_ne_persiste_rien(self):
+        resultat = previsualiser_ligne(self.devis, self.article_matiere, 4)
+        self.assertEqual(resultat["cout_matiere_calcule"], 8)
+        self.assertEqual(resultat["taux_marge_matiere_applique"], 25)
+        self.assertEqual(resultat["prix_vente_matiere"], 10)
+        self.assertEqual(resultat["prix_vente_operations"], 0)
+        self.assertEqual(resultat["prix_vente_total"], 10)
+        self.assertEqual(DevisLigne.objects.count(), 0)
+
+    def test_apercu_avec_prix_unitaire_force(self):
+        resultat = previsualiser_ligne(self.devis, self.article_matiere, 4, prix_vente_unitaire_force=3)
+        self.assertEqual(resultat["prix_vente_matiere"], 12)
+        self.assertEqual(DevisLigne.objects.count(), 0)
+
+    def test_apercu_avec_operations_fabrique(self):
+        article = Article.objects.create(
+            reference="PIECE-APERCU", nature=Article.Nature.FABRIQUE, taux_marge_defaut=20
+        )
+        _creer_composants_nomenclature(article)
+        poste = PosteTravail.objects.create(
+            nom="Poste-Apercu", mode_calcul=PosteTravail.ModeCalcul.HORAIRE, taux_marge_defaut=15
+        )
+        TarifPoste.objects.create(poste=poste, cout_horaire=50, date_debut=datetime.date(2020, 1, 1))
+        Gamme.objects.create(
+            article=article,
+            poste=poste,
+            ordre=1,
+            temps_fixe=10,
+            temps_variable=5,
+            date_debut=datetime.date(2020, 1, 1),
+        )
+
+        resultat = previsualiser_ligne(self.devis, article, 3)
+        # matière : 111.426 * 1.2 = 133.7112 ; opération : (10+5*3)*50 = 1250 * 1.15 = 1437.5
+        self.assertAlmostEqual(resultat["prix_vente_matiere"], 133.7112, places=3)
+        self.assertAlmostEqual(resultat["prix_vente_operations"], 1437.5)
+        self.assertAlmostEqual(resultat["prix_vente_total"], 133.7112 + 1437.5, places=3)
+        self.assertEqual(DevisLigne.objects.count(), 0)
+        self.assertEqual(DevisLigneOperation.objects.count(), 0)
+
+    def test_apercu_erreur_si_article_sans_cout_unitaire(self):
+        article = Article.objects.create(
+            reference="ART-APERCU-SANS-COUT",
+            nature=Article.Nature.MATIERE_PREMIERE,
+            unite_cout=Article.UniteCout.PIECE,
+        )
+        with self.assertRaises(ChiffrageError):
+            previsualiser_ligne(self.devis, article, 1)
+
+
+class PrevisualiserLigneViewTests(TestCase):
+    """Endpoint POST .../lignes/previsualiser/ utilisé pour l'aperçu live d'une
+    ligne pas encore enregistrée dans l'inline de la fiche Devis."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        self.user = User.objects.create_superuser("apercu-admin", "a@example.com", "pass1234")
+        self.client.force_login(self.user)
+
+        self.article = Article.objects.create(
+            reference="ART-APERCU-VIEW",
+            nature=Article.Nature.MATIERE_PREMIERE,
+            unite_cout=Article.UniteCout.PIECE,
+            cout_unitaire=2.0,
+        )
+        client_tiers = Tiers.objects.create(
+            code="CLI-APERCU-VIEW", raison_sociale="Client Aperçu View", type_tiers=Tiers.TypeTiers.CLIENT
+        )
+        self.devis = Devis.objects.create(
+            numero="DEV-APERCU-VIEW",
+            client=client_tiers,
+            date_creation=datetime.date(2026, 1, 1),
+            statut=Devis.Statut.BROUILLON,
+        )
+
+    def _url(self):
+        return f"/admin/chiffrage/devis/{self.devis.pk}/lignes/previsualiser/"
+
+    def test_apercu_reussi(self):
+        response = self.client.post(
+            self._url(),
+            data={"article": "ART-APERCU-VIEW", "quantite": 5},
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        data = response.json()
+        self.assertEqual(data["cout_matiere_calcule"], 10)
+        self.assertEqual(data["prix_vente_matiere"], 10)
+        self.assertEqual(DevisLigne.objects.count(), 0)
+
+    def test_apercu_avec_prix_force(self):
+        response = self.client.post(
+            self._url(),
+            data={"article": "ART-APERCU-VIEW", "quantite": 5, "prix_vente_unitaire_force": 4},
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["prix_vente_matiere"], 20)
+
+    def test_article_introuvable_400(self):
+        response = self.client.post(
+            self._url(),
+            data={"article": "INEXISTANT", "quantite": 1},
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_quantite_invalide_400(self):
+        response = self.client.post(
+            self._url(),
+            data={"article": "ART-APERCU-VIEW", "quantite": "abc"},
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_article_sans_cout_unitaire_400(self):
+        Article.objects.create(
+            reference="ART-APERCU-VIEW-SANS-COUT",
+            nature=Article.Nature.MATIERE_PREMIERE,
+            unite_cout=Article.UniteCout.PIECE,
+        )
+        response = self.client.post(
+            self._url(),
+            data={"article": "ART-APERCU-VIEW-SANS-COUT", "quantite": 1},
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_anonyme_refuse(self):
+        self.client.logout()
+        response = self.client.post(
+            self._url(),
+            data={"article": "ART-APERCU-VIEW", "quantite": 1},
+            content_type="application/json",
+        )
+        self.assertNotEqual(response.status_code, 200)
+
+
+class RecalculerLignePrixForceTests(TestCase):
+    """recalculer_ligne_view honore aussi le prix unitaire forcé."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        self.user = User.objects.create_superuser("force-admin", "f@example.com", "pass1234")
+        self.client.force_login(self.user)
+
+        self.article = Article.objects.create(
+            reference="ART-FORCE-TEST",
+            nature=Article.Nature.MATIERE_PREMIERE,
+            unite_cout=Article.UniteCout.PIECE,
+            cout_unitaire=2.0,
+        )
+        client_tiers = Tiers.objects.create(
+            code="CLI-FORCE-TEST", raison_sociale="Client Force Test", type_tiers=Tiers.TypeTiers.CLIENT
+        )
+        self.devis = Devis.objects.create(
+            numero="DEV-FORCE-TEST",
+            client=client_tiers,
+            date_creation=datetime.date(2026, 1, 1),
+            statut=Devis.Statut.BROUILLON,
+        )
+        self.ligne = DevisLigne.objects.create(devis=self.devis, article=self.article, quantite=3)
+
+    def test_prix_force_via_recalcul_live(self):
+        response = self.client.post(
+            f"/admin/chiffrage/devis/{self.devis.pk}/lignes/{self.ligne.id}/recalculer/",
+            data={"prix_vente_unitaire_force": 10},
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        data = response.json()
+        # cout_matiere_calcule = 3*2 = 6 (informatif) ; prix_vente_matiere = 3*10 = 30 (forcé)
+        self.assertEqual(data["cout_matiere_calcule"], 6)
+        self.assertEqual(data["prix_vente_matiere"], 30)
+        self.ligne.refresh_from_db()
+        self.assertEqual(self.ligne.prix_vente_unitaire_force, 10)
+
+    def test_prix_force_vide_revient_au_calcul_automatique(self):
+        self.ligne.prix_vente_unitaire_force = 10
+        self.ligne.save()
+        response = self.client.post(
+            f"/admin/chiffrage/devis/{self.devis.pk}/lignes/{self.ligne.id}/recalculer/",
+            data={"prix_vente_unitaire_force": ""},
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        # revient au calcul auto : 6 * (1 + 0/100) = 6 (pas de marge par défaut sur l'article)
+        self.assertEqual(response.json()["prix_vente_matiere"], 6)
+
+    def test_prix_force_invalide_400(self):
+        response = self.client.post(
+            f"/admin/chiffrage/devis/{self.devis.pk}/lignes/{self.ligne.id}/recalculer/",
+            data={"prix_vente_unitaire_force": "abc"},
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)

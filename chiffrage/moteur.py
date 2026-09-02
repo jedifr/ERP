@@ -9,7 +9,7 @@ from django.db.models import Q
 
 from technique.models import Article, Gamme, PosteTravail, TarifPoste
 
-from .models import DevisLigneOperation
+from .models import DevisLigne, DevisLigneOperation
 
 
 class ChiffrageError(Exception):
@@ -148,10 +148,48 @@ def calculer_devis(devis):
         ligne.cout_matiere_calcule = cout_matiere_article(ligne.article, ligne.quantite)
         taux = _taux_marge_matiere(devis, ligne)
         ligne.taux_marge_matiere_applique = taux
-        ligne.prix_vente_matiere = ligne.cout_matiere_calcule * (1 + taux / 100)
+        if ligne.prix_vente_unitaire_force is not None:
+            ligne.prix_vente_matiere = ligne.prix_vente_unitaire_force * ligne.quantite
+        else:
+            ligne.prix_vente_matiere = ligne.cout_matiere_calcule * (1 + taux / 100)
         ligne.save()
 
         if ligne.article.nature == Article.Nature.FABRIQUE:
             _synchroniser_operations_ligne(devis, ligne)
         else:
             ligne.operations.all().delete()
+
+
+def previsualiser_ligne(devis, article, quantite, taux_marge_matiere_applique=None, prix_vente_unitaire_force=None):
+    """Aperçu du coût/prix d'une ligne pas encore enregistrée (ligne tout juste
+    ajoutée dans l'inline de la fiche Devis, ou dans le constructeur), en
+    réutilisant exactement les mêmes règles que calculer_devis — sans rien
+    persister en base (ni DevisLigne, ni DevisLigneOperation)."""
+    ligne_apercu = DevisLigne(
+        devis=devis,
+        article=article,
+        quantite=quantite,
+        taux_marge_matiere_applique=taux_marge_matiere_applique,
+    )
+    cout_matiere = cout_matiere_article(article, quantite)
+    taux = _taux_marge_matiere(devis, ligne_apercu)
+
+    if prix_vente_unitaire_force is not None:
+        prix_vente_matiere = prix_vente_unitaire_force * quantite
+    else:
+        prix_vente_matiere = cout_matiere * (1 + taux / 100)
+
+    prix_vente_operations = 0
+    if article.nature == Article.Nature.FABRIQUE:
+        for etape in gamme_active(article, devis.date_creation):
+            cout_etape = cout_etape_gamme(etape, quantite, devis.date_creation)
+            taux_operation = _taux_marge_operation(devis, etape.poste, None)
+            prix_vente_operations += cout_etape * (1 + taux_operation / 100)
+
+    return {
+        "cout_matiere_calcule": cout_matiere,
+        "taux_marge_matiere_applique": taux,
+        "prix_vente_matiere": prix_vente_matiere,
+        "prix_vente_operations": prix_vente_operations,
+        "prix_vente_total": prix_vente_matiere + prix_vente_operations,
+    }

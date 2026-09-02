@@ -100,7 +100,18 @@ class DevisLigne(models.Model):
         blank=True,
         help_text="Pré-rempli depuis l'article, éditable",
     )
-    prix_vente_matiere = models.FloatField("prix de vente matière", null=True, blank=True, editable=False)
+    prix_vente_unitaire_force = models.FloatField(
+        "prix de vente unitaire forcé (HT)",
+        null=True,
+        blank=True,
+        help_text=(
+            "Si renseigné, remplace le calcul automatique (coût matière × marge) : "
+            "prix de vente matière de la ligne = quantité × ce prix unitaire."
+        ),
+    )
+    prix_vente_matiere = models.FloatField(
+        "prix de vente matière (HT)", null=True, blank=True, editable=False
+    )
 
     class Meta:
         verbose_name = "Ligne de devis"
@@ -115,7 +126,7 @@ class DevisLigne(models.Model):
         """Prix de vente cumulé des opérations de gamme (temps machine / main d'œuvre)."""
         return sum(op.prix_vente or 0 for op in self.operations.all())
 
-    prix_vente_operations.fget.short_description = "Prix de vente opérations"
+    prix_vente_operations.fget.short_description = "Prix de vente opérations (HT)"
 
     @property
     def prix_vente_total(self):
@@ -125,7 +136,7 @@ class DevisLigne(models.Model):
             return None
         return self.prix_vente_matiere + self.prix_vente_operations
 
-    prix_vente_total.fget.short_description = "Prix de vente total (matière + opérations)"
+    prix_vente_total.fget.short_description = "Prix de vente total (matière + opérations, HT)"
 
 
 class DevisLigneOperation(models.Model):
@@ -140,7 +151,7 @@ class DevisLigneOperation(models.Model):
     taux_marge_applique = models.FloatField(
         "taux de marge appliqué", null=True, blank=True, help_text="Pré-rempli depuis le poste, éditable"
     )
-    prix_vente = models.FloatField("prix de vente", null=True, blank=True, editable=False)
+    prix_vente = models.FloatField("prix de vente (HT)", null=True, blank=True, editable=False)
 
     class Meta:
         verbose_name = "Opération de ligne de devis"
