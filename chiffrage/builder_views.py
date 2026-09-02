@@ -5,6 +5,7 @@ from django import forms
 from django.contrib import admin
 from django.contrib.admin.views.decorators import staff_member_required
 from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
 from django.template.response import TemplateResponse
@@ -15,7 +16,7 @@ from technique.models import Article, PosteTravail
 
 from .builder import ajouter_ligne_devis, creer_article_fabrique, erreur_lisible
 from .models import Devis, DevisLigne
-from .moteur import ChiffrageError, calculer_devis, calculer_ligne, previsualiser_ligne
+from .moteur import ChiffrageError, calculer_ligne, previsualiser_ligne
 
 
 @staff_member_required
@@ -50,29 +51,30 @@ def _traiter_ajout_ligne(request, devis):
     except (KeyError, TypeError, ValueError):
         return JsonResponse({"detail": "Quantité manquante ou invalide."}, status=400)
 
+    # Tout ou rien : si le prix de la ligne ne peut pas être calculé (ex.
+    # matière choisie sans coût unitaire renseigné), on ne doit RIEN valider
+    # — ni le nouvel article, ni sa nomenclature/gamme, ni la ligne de devis
+    # — plutôt que de laisser passer une ligne au chiffrage inconnu avec un
+    # simple avertissement. calculer_ligne() (et non calculer_devis()) pour
+    # ne juger que la ligne qu'on est en train d'ajouter, indépendamment de
+    # l'état d'éventuelles autres lignes déjà présentes sur ce devis.
     try:
-        if payload.get("nouvel_article"):
-            article = _creer_article_depuis_payload(payload["nouvel_article"])
-        else:
-            reference = payload.get("article_existant")
-            try:
-                article = Article.objects.get(pk=reference)
-            except Article.DoesNotExist:
-                return JsonResponse({"detail": f"Article « {reference} » introuvable."}, status=400)
+        with transaction.atomic():
+            if payload.get("nouvel_article"):
+                article = _creer_article_depuis_payload(payload["nouvel_article"])
+            else:
+                reference = payload.get("article_existant")
+                try:
+                    article = Article.objects.get(pk=reference)
+                except Article.DoesNotExist:
+                    raise ChiffrageError(f"Article « {reference} » introuvable.")
 
-        ligne = ajouter_ligne_devis(devis, article, quantite)
+            ligne = ajouter_ligne_devis(devis, article, quantite)
+            calculer_ligne(devis, ligne)
     except ChiffrageError as exc:
         return JsonResponse({"detail": str(exc)}, status=400)
 
-    avertissement = None
-    try:
-        calculer_devis(devis)
-    except ChiffrageError as exc:
-        # La ligne est déjà enregistrée ; seul le calcul du chiffrage échoue
-        # (ex. donnée de référence manquante sur une autre ligne du devis).
-        avertissement = str(exc)
-    else:
-        ligne.refresh_from_db()
+    ligne.refresh_from_db()
 
     return JsonResponse(
         {
@@ -87,7 +89,6 @@ def _traiter_ajout_ligne(request, devis):
             "prix_vente_ttc": ligne.prix_vente_ttc,
             "montant_total_ht": devis.montant_total_ht,
             "montant_total_ttc": devis.montant_total_ttc,
-            "avertissement": avertissement,
         }
     )
 

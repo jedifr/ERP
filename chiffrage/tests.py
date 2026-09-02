@@ -551,7 +551,6 @@ class DevisBuilderViewTests(TestCase):
         self.assertAlmostEqual(data["prix_vente_operations"], 150)
         self.assertAlmostEqual(data["prix_vente_total"], 153.3, places=3)
         self.assertAlmostEqual(data["montant_total_ht"], 153.3, places=3)
-        self.assertIsNone(data["avertissement"])
 
     def test_post_article_existant(self):
         article = Article.objects.create(
@@ -572,10 +571,12 @@ class DevisBuilderViewTests(TestCase):
         self.assertEqual(data["cout_matiere_calcule"], 8)
         self.assertEqual(data["prix_vente_operations"], 0)
         self.assertEqual(data["prix_vente_total"], 8)
-        self.assertIsNone(data["avertissement"])
 
-    def test_post_article_sans_cout_unitaire_avertit_sans_bloquer(self):
-        article = Article.objects.create(
+    def test_post_article_sans_cout_unitaire_bloque_la_ligne(self):
+        # Régression : le prix de la ligne doit pouvoir être calculé pour
+        # qu'elle soit validée — un article (matière) sans coût unitaire ne
+        # doit plus créer une ligne "en attente" avec un simple avertissement.
+        Article.objects.create(
             reference="PIECE-VIEW-SANS-COUT",
             nature=Article.Nature.MATIERE_PREMIERE,
             unite_cout=Article.UniteCout.PIECE,
@@ -586,12 +587,37 @@ class DevisBuilderViewTests(TestCase):
             data=payload,
             content_type="application/json",
         )
-        self.assertEqual(response.status_code, 200, response.content)
-        data = response.json()
-        self.assertEqual(self.devis.lignes.get().article, article)
-        self.assertIsNotNone(data["avertissement"])
-        self.assertIsNone(data["cout_matiere_calcule"])
-        self.assertIsNone(data["prix_vente_total"])
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("detail", response.json())
+        self.assertEqual(self.devis.lignes.count(), 0)
+
+    def test_post_nouvel_article_composant_sans_cout_unitaire_ne_cree_rien(self):
+        # Même règle côté "nouvel article fabriqué" : si un composant de la
+        # nomenclature n'a pas de coût unitaire, ni l'article, ni sa
+        # nomenclature/gamme, ni la ligne de devis ne doivent être créés.
+        Article.objects.create(
+            reference="VIS-SANS-COUT",
+            nature=Article.Nature.MATIERE_PREMIERE,
+            unite_cout=Article.UniteCout.PIECE,
+        )
+        payload = {
+            "quantite": 3,
+            "nouvel_article": {
+                "reference": "PIECE-VIEW-COMPOSANT-SANS-COUT",
+                "composants": [{"article_composant": "VIS-SANS-COUT", "quantite": 5}],
+                "etapes": [
+                    {"poste": "Poste-View", "ordre": 1, "cout_forfaitaire": 50, "date_debut": "2026-01-01"}
+                ],
+            },
+        }
+        response = self.client.post(
+            f"/admin/chiffrage/devis/{self.devis.pk}/constructeur/",
+            data=payload,
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(Article.objects.filter(pk="PIECE-VIEW-COMPOSANT-SANS-COUT").exists())
+        self.assertEqual(self.devis.lignes.count(), 0)
 
     def test_post_article_introuvable_400(self):
         payload = {"quantite": 1, "article_existant": "INEXISTANT"}

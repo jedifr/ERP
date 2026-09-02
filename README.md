@@ -650,3 +650,28 @@ explicitement : "Temps fixe (min)" et "Temps variable (min/pièce)" — ce
 second suffixe précise en plus qu'il s'applique par pièce produite (il est
 multiplié par la quantité de la ligne de devis dans `moteur.py` :
 `temps_fixe + temps_variable × quantité`), pas seulement son unité.
+
+## Constructeur de devis : impossible de valider une ligne dont le prix ne se calcule pas
+
+Signalé : ajouter une ligne dans le constructeur avec une matière sans
+coût unitaire renseigné (ou, côté "nouvel article fabriqué", un composant
+de nomenclature dans le même cas) créait quand même l'article, sa
+nomenclature/gamme éventuelle et la ligne de devis — seul un avertissement
+("le chiffrage n'a pas pu être recalculé") signalait le problème, mais
+tout restait enregistré avec un prix inconnu. Le test qui couvrait ce
+comportement s'appelait d'ailleurs très explicitement
+`test_post_article_sans_cout_unitaire_avertit_sans_bloquer`.
+
+Corrigé : `_traiter_ajout_ligne` (`chiffrage/builder_views.py`) enchaîne
+maintenant la création de l'article (le cas échéant), l'ajout de la ligne
+de devis et le calcul de son prix (`calculer_ligne`, pas `calculer_devis`
+— pour ne juger que la ligne qu'on ajoute, indépendamment de l'état
+d'éventuelles autres lignes déjà présentes sur ce devis) **dans une seule
+transaction atomique**. Si le prix ne peut pas être calculé, tout est
+annulé — article, nomenclature, gamme, ligne de devis — et la réponse
+devient une erreur 400 avec le message explicatif, exactement comme un
+autre champ invalide ; il n'y a plus d'état intermédiaire "ligne créée
+mais non chiffrée". Côté JS (`devis_builder.js`), le message d'erreur
+s'affiche en rouge sans recharger la page (au lieu du recharge-avec-
+avertissement précédent), pour laisser le formulaire tel quel et permettre
+de corriger sans tout ressaisir.

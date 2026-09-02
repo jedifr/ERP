@@ -343,15 +343,8 @@
                         showMessage(data.detail || "Erreur lors de l'ajout de la ligne.", true);
                         return;
                     }
-                    if (data.avertissement) {
-                        showMessage(
-                            `Ligne ajoutée (${data.article} × ${data.quantite}), mais le chiffrage n'a pas pu être recalculé : ${data.avertissement}`,
-                            true
-                        );
-                    } else {
-                        showMessage(`Ligne ajoutée (${data.article} × ${data.quantite}). Rechargement...`, false);
-                    }
-                    setTimeout(() => window.location.reload(), data.avertissement ? 2500 : 800);
+                    showMessage(`Ligne ajoutée (${data.article} × ${data.quantite}). Rechargement...`, false);
+                    setTimeout(() => window.location.reload(), 800);
                 })
                 .catch(() => showMessage("Erreur réseau lors de l'envoi.", true));
         });
