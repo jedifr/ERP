@@ -587,3 +587,24 @@ cas). Comme ces widgets sont initialisés par le script `autocomplete.js` de
 l'admin Django via `django.jQuery`, c'est ce même espace de noms
 (`django.jQuery`, pas un `$` global) qu'utilise le JS de la fiche Devis
 pour rester compatible.
+
+## Correctif : ligne vide "obligatoire" sur les inlines Adresse/Contact d'un tiers
+
+Signalé : modifier un tiers qui a déjà (par exemple) une adresse affichait
+systématiquement une deuxième ligne, vide, sous la vraie — avec des
+astérisques rouges "obligatoire" sur adresse/code postal/ville (champs
+réellement obligatoires sur le modèle `Adresse`) alors que l'utilisateur
+n'avait pas l'intention d'en ajouter une. Idem pour les contacts.
+
+En cause : `AdresseInline`/`ContactInline` utilisaient `extra = 1` — le
+réglage standard Django/Unfold qui ajoute toujours une ligne vide
+supplémentaire "prête à remplir" à la fin d'un inline, en plus des objets
+déjà enregistrés. Pratique quand les champs sont optionnels, gênant ici
+puisque la plupart sont obligatoires : la ligne fantôme n'a jamais été
+voulue mais a l'air de l'être.
+
+Corrigé en passant `extra = 0` sur les deux inlines : plus aucune ligne
+n'est ajoutée automatiquement, seuls les objets déjà enregistrés sont
+affichés. Le lien "Ajouter un objet Adresse/Contact supplémentaire" reste
+disponible pour en ajouter une volontairement — le comportement standard
+d'un inline Django, juste sans son ajout automatique.

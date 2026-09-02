@@ -1,7 +1,7 @@
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 
-from .models import Adresse, TauxTVA, Tiers
+from .models import Adresse, Contact, TauxTVA, Tiers
 
 
 class AdresseTests(TestCase):
@@ -88,3 +88,36 @@ class TiersAdminCodificationTests(TestCase):
         self.client.get("/admin/commercial/tiers/add/")
         response = self.client.get("/admin/commercial/tiers/add/")
         self.assertContains(response, "TIERS-00002")
+
+
+class TiersInlinesSansLigneVideTests(TestCase):
+    """Régression : modifier un tiers qui a déjà une adresse/un contact ne
+    doit plus afficher de ligne supplémentaire vide dans les inlines (les
+    champs adresse/code postal/ville étant obligatoires, cette ligne
+    "en trop" affichait des astérisques rouges "obligatoire" sur des champs
+    que l'utilisateur n'avait pas l'intention de remplir)."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        self.user = User.objects.create_superuser("inlines-admin", "i@example.com", "pass1234")
+        self.client.force_login(self.user)
+
+        self.tiers = Tiers.objects.create(
+            code="CLI-INLINES-VIDES", raison_sociale="Client Inlines Vides", type_tiers=Tiers.TypeTiers.CLIENT
+        )
+        Adresse.objects.create(
+            tiers=self.tiers,
+            type_adresse=Adresse.TypeAdresse.FACTURATION,
+            adresse="1 rue Test",
+            code_postal="75000",
+            ville="Paris",
+        )
+        Contact.objects.create(tiers=self.tiers, nom="Existant")
+
+    def test_une_seule_ligne_adresse_et_contact_sur_le_formulaire(self):
+        response = self.client.get(f"/admin/commercial/tiers/{self.tiers.pk}/change/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'name="adresses-TOTAL_FORMS" value="1"', html=False)
+        self.assertContains(response, 'name="contacts-TOTAL_FORMS" value="1"', html=False)

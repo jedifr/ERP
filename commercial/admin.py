@@ -9,12 +9,19 @@ from .models import Adresse, Contact, TauxTVA, Tiers
 
 class AdresseInline(TabularInline):
     model = Adresse
-    extra = 1
+    # extra=0 : pas de ligne vide ajoutée automatiquement. Les champs
+    # (adresse, code postal, ville...) sont obligatoires sur le modèle, donc
+    # une ligne vide "en trop" affichait des astérisques rouges "obligatoire"
+    # sur des champs que l'utilisateur n'avait pas l'intention de remplir —
+    # gênant à chaque modification d'un tiers qui a déjà ses adresses.
+    # "Ajouter un objet Adresse supplémentaire" reste disponible pour en
+    # ajouter une volontairement.
+    extra = 0
 
 
 class ContactInline(TabularInline):
     model = Contact
-    extra = 1
+    extra = 0
 
 
 @admin.register(Tiers)
