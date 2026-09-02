@@ -1456,3 +1456,102 @@ class AjoutDevisOuvrirConstructeurTests(TestCase):
         response = self.client.post("/admin/chiffrage/devis/add/", data=data, follow=False)
         self.assertEqual(response.status_code, 302)
         self.assertNotEqual(response.url, "/admin/chiffrage/devis/DEV-CONSTRUIRE-01/constructeur/")
+
+
+class ValeursDefautTiersViewTests(TestCase):
+    """Endpoint GET .../tiers/<code>/valeurs-defaut/ : adresse de facturation,
+    adresse de livraison et contact marqués "principal(e)" pour un tiers —
+    utilisé pour pré-remplir automatiquement ces champs sur la fiche Devis
+    dès qu'un client est sélectionné."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        self.user = User.objects.create_superuser("defaut-tiers-admin", "d@example.com", "pass1234")
+        self.client.force_login(self.user)
+
+        self.tiers = Tiers.objects.create(
+            code="CLI-DEFAUT-TIERS", raison_sociale="Client Défaut Tiers", type_tiers=Tiers.TypeTiers.CLIENT
+        )
+
+    def _url(self, code=None):
+        return f"/admin/chiffrage/devis/tiers/{code or self.tiers.pk}/valeurs-defaut/"
+
+    def test_aucune_valeur_par_defaut_renvoie_des_null(self):
+        response = self.client.get(self._url())
+        self.assertEqual(response.status_code, 200, response.content)
+        data = response.json()
+        self.assertIsNone(data["adresse_facturation"])
+        self.assertIsNone(data["adresse_livraison"])
+        self.assertIsNone(data["contact"])
+
+    def test_adresses_et_contact_principaux_renvoyes(self):
+        facturation = Adresse.objects.create(
+            tiers=self.tiers,
+            type_adresse=Adresse.TypeAdresse.FACTURATION,
+            adresse="1 rue de la Facture",
+            code_postal="75000",
+            ville="Paris",
+            est_principale=True,
+        )
+        # Une adresse de livraison non principale ne doit jamais être renvoyée.
+        Adresse.objects.create(
+            tiers=self.tiers,
+            type_adresse=Adresse.TypeAdresse.LIVRAISON,
+            adresse="2 rue Secondaire",
+            code_postal="75000",
+            ville="Paris",
+            est_principale=False,
+        )
+        livraison = Adresse.objects.create(
+            tiers=self.tiers,
+            type_adresse=Adresse.TypeAdresse.LIVRAISON,
+            adresse="3 rue de la Livraison",
+            code_postal="75000",
+            ville="Paris",
+            est_principale=True,
+        )
+        contact = Contact.objects.create(
+            tiers=self.tiers, nom="Dupont", prenom="Jean", est_principal=True
+        )
+
+        response = self.client.get(self._url())
+        self.assertEqual(response.status_code, 200, response.content)
+        data = response.json()
+        self.assertEqual(data["adresse_facturation"]["id"], facturation.pk)
+        self.assertEqual(data["adresse_livraison"]["id"], livraison.pk)
+        self.assertEqual(data["contact"]["id"], contact.pk)
+
+    def test_tiers_introuvable_404(self):
+        response = self.client.get(self._url(code="INEXISTANT"))
+        self.assertEqual(response.status_code, 404)
+
+    def test_anonyme_refuse(self):
+        self.client.logout()
+        response = self.client.get(self._url())
+        self.assertNotEqual(response.status_code, 200)
+
+
+class ContactEstPrincipalTests(TestCase):
+    """Contact.est_principal suit le même garde-fou "un seul par tiers" que
+    Adresse.est_principale (voir commercial.models.Adresse.clean)."""
+
+    def setUp(self):
+        self.tiers = Tiers.objects.create(
+            code="CLI-CONTACT-PRINCIPAL", raison_sociale="Client Contact Principal", type_tiers=Tiers.TypeTiers.CLIENT
+        )
+
+    def test_un_seul_contact_principal_par_tiers(self):
+        Contact.objects.create(tiers=self.tiers, nom="Premier", est_principal=True)
+        second = Contact(tiers=self.tiers, nom="Second", est_principal=True)
+        with self.assertRaises(ValidationError):
+            second.full_clean()
+
+    def test_deux_tiers_differents_peuvent_chacun_avoir_un_contact_principal(self):
+        autre_tiers = Tiers.objects.create(
+            code="CLI-CONTACT-PRINCIPAL-2", raison_sociale="Autre Client", type_tiers=Tiers.TypeTiers.CLIENT
+        )
+        Contact.objects.create(tiers=self.tiers, nom="Premier", est_principal=True)
+        autre = Contact(tiers=autre_tiers, nom="Second", est_principal=True)
+        autre.full_clean()  # ne doit pas lever

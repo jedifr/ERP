@@ -10,7 +10,7 @@ from django.shortcuts import get_object_or_404
 from django.template.response import TemplateResponse
 from django.views.decorators.http import require_http_methods
 
-from commercial.models import TauxTVA
+from commercial.models import Adresse, Contact, TauxTVA, Tiers
 from technique.models import Article, PosteTravail
 
 from .builder import ajouter_ligne_devis, creer_article_fabrique, erreur_lisible
@@ -302,6 +302,35 @@ def previsualiser_ligne_view(request, numero):
         return JsonResponse({"detail": str(exc)}, status=400)
 
     return JsonResponse({"ok": True, **resultat})
+
+
+@staff_member_required
+@require_http_methods(["GET"])
+def valeurs_defaut_tiers_view(request, code):
+    """Adresse de facturation, adresse de livraison et contact marqués
+    "principal(e)" pour le tiers `code` — utilisé pour pré-remplir ces
+    champs dès qu'un client est sélectionné sur la fiche Devis (formulaire
+    d'ajout comme de modification), sans écraser un choix déjà fait par
+    l'utilisateur (c'est le JS appelant qui décide de ça, pas cette vue)."""
+    tiers = get_object_or_404(Tiers, pk=code)
+
+    facturation = Adresse.objects.filter(
+        tiers=tiers, type_adresse=Adresse.TypeAdresse.FACTURATION, est_principale=True
+    ).first()
+    livraison = Adresse.objects.filter(
+        tiers=tiers, type_adresse=Adresse.TypeAdresse.LIVRAISON, est_principale=True
+    ).first()
+    contact = Contact.objects.filter(tiers=tiers, est_principal=True).first()
+
+    return JsonResponse(
+        {
+            "adresse_facturation": (
+                {"id": facturation.pk, "texte": str(facturation)} if facturation else None
+            ),
+            "adresse_livraison": ({"id": livraison.pk, "texte": str(livraison)} if livraison else None),
+            "contact": ({"id": contact.pk, "texte": str(contact)} if contact else None),
+        }
+    )
 
 
 @staff_member_required

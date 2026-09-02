@@ -37,7 +37,8 @@ class AdresseAdmin(ModelAdmin):
 
 @admin.register(Contact)
 class ContactAdmin(ModelAdmin):
-    list_display = ["nom", "prenom", "tiers", "email", "telephone", "fonction"]
+    list_display = ["nom", "prenom", "tiers", "email", "telephone", "fonction", "est_principal"]
+    list_filter = ["est_principal"]
     search_fields = ["nom", "prenom", "tiers__code", "tiers__raison_sociale"]
     autocomplete_fields = ["tiers"]
 

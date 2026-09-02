@@ -54,6 +54,8 @@
     }
 
     function init() {
+        wireClientDefaults();
+
         const numero = devisNumeroFromUrl();
         if (numero) {
             document.querySelectorAll("tbody.form-group").forEach((row) => wireRow(row, numero));
@@ -62,6 +64,58 @@
         if (formulaireAjoutDevisActif()) {
             document.querySelectorAll("tbody.form-group").forEach((row) => wireRowNouveauDevis(row));
         }
+    }
+
+    // Dès qu'un client est choisi (ajout comme modification), propose
+    // automatiquement son adresse de facturation, son adresse de livraison
+    // et son contact marqués "principal(e)" côté fiche Tiers — sans jamais
+    // écraser un choix déjà fait par l'utilisateur (voir remplirSiVide()).
+    // Les widgets autocomplete de l'admin (adresse_facturation, adresse_livraison,
+    // contact) sont des select2 alimentés en Ajax : ils n'ont pas d'options
+    // préchargées, donc les remplir programmatiquement demande de construire
+    // une Option puis de déclencher "change" sur le select2 lui-même (API
+    // select2 standard), pas juste de poser value= sur le <select>.
+    function wireClientDefaults() {
+        if (typeof django === "undefined" || !django.jQuery) {
+            return;
+        }
+        const $ = django.jQuery;
+        const $client = $("#id_client");
+        if ($client.length === 0) {
+            return;
+        }
+
+        $client.on("change", function () {
+            const code = $client.val();
+            if (!code) {
+                return;
+            }
+            fetch(`/admin/chiffrage/devis/tiers/${encodeURIComponent(code)}/valeurs-defaut/`, {
+                credentials: "same-origin",
+            })
+                .then((response) => (response.ok ? response.json() : null))
+                .then((data) => {
+                    if (!data) return;
+                    remplirSiVide($, "#id_adresse_facturation", data.adresse_facturation);
+                    remplirSiVide($, "#id_adresse_livraison", data.adresse_livraison);
+                    remplirSiVide($, "#id_contact", data.contact);
+                })
+                .catch(() => {
+                    console.error("Valeurs par défaut du tiers : erreur réseau.");
+                });
+        });
+    }
+
+    function remplirSiVide($, selector, valeur) {
+        if (!valeur) {
+            return;
+        }
+        const $select = $(selector);
+        if ($select.length === 0 || $select.val()) {
+            return; // champ absent, ou déjà une valeur choisie : on ne l'écrase jamais
+        }
+        const option = new Option(valeur.texte, valeur.id, true, true);
+        $select.append(option).trigger("change");
     }
 
     function updateDevisTotals(data) {

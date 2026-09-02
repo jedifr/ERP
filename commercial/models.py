@@ -129,6 +129,9 @@ class Contact(models.Model):
     email = models.EmailField("email", blank=True)
     telephone = models.CharField("téléphone", max_length=30, blank=True)
     fonction = models.CharField("fonction", max_length=100, blank=True)
+    est_principal = models.BooleanField(
+        "contact principal", default=False, help_text="Contact par défaut proposé"
+    )
 
     class Meta:
         verbose_name = "Contact"
@@ -138,3 +141,19 @@ class Contact(models.Model):
     def __str__(self):
         nom_complet = f"{self.prenom} {self.nom}".strip()
         return f"{nom_complet} ({self.tiers})"
+
+    def clean(self):
+        super().clean()
+        if self.est_principal and self.tiers_id:
+            qs = Contact.objects.filter(tiers_id=self.tiers_id, est_principal=True)
+            if self.pk is not None:
+                qs = qs.exclude(pk=self.pk)
+            if qs.exists():
+                raise ValidationError(
+                    {
+                        "est_principal": (
+                            "Un contact principal existe déjà pour ce tiers. Décochez-le "
+                            "d'abord si vous voulez le remplacer."
+                        )
+                    }
+                )

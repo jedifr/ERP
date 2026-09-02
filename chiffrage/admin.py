@@ -12,6 +12,7 @@ from .builder_views import (
     previsualiser_ligne_nouveau_devis_view,
     previsualiser_ligne_view,
     recalculer_ligne_view,
+    valeurs_defaut_tiers_view,
 )
 from .models import Commande, Devis, DevisLigne, DevisLigneOperation, OperationOF, OrdreFabrication
 from .moteur import ChiffrageError, calculer_devis
@@ -114,6 +115,11 @@ class DevisAdmin(CodificationInitialeMixin, ModelAdmin):
                 "nouveau-devis/previsualiser-ligne/",
                 self.admin_site.admin_view(previsualiser_ligne_nouveau_devis_view),
                 name="chiffrage_devisligne_previsualiser_nouveau_devis",
+            ),
+            path(
+                "tiers/<str:code>/valeurs-defaut/",
+                self.admin_site.admin_view(valeurs_defaut_tiers_view),
+                name="chiffrage_devis_valeurs_defaut_tiers",
             ),
             path(
                 "<str:numero>/constructeur/",

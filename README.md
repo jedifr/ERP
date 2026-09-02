@@ -551,3 +551,39 @@ n'est peuplé par `ActionModelAdminMixin.changeform_view()` que lorsque
 fallu passer par la surcharge de template `submit_line.html` (mécanisme
 standard de Django, résolu par app/modèle avant le fallback générique),
 plutôt que par cette API, pour couvrir spécifiquement ce cas.
+
+## Adresse et contact par défaut, pré-remplis à la sélection du client
+
+Un tiers peut avoir plusieurs adresses de facturation/livraison et
+plusieurs contacts ; `Adresse.est_principale` existait déjà comme repère
+"adresse par défaut", mais rien ne l'exploitait automatiquement : il
+fallait toujours re-sélectionner manuellement l'adresse de facturation,
+l'adresse de livraison et le contact sur chaque nouveau devis, alors même
+que c'est presque toujours la même pour un client donné.
+
+Deux ajouts :
+- `Contact` gagne un champ `est_principal` (même principe et même
+  garde-fou "un seul par tiers" — via `clean()` — que
+  `Adresse.est_principale`, qui existait déjà) : le contact par défaut
+  proposé pour ce tiers.
+- Sur la fiche Devis (ajout comme modification), sélectionner un client
+  déclenche automatiquement un appel à
+  `GET /admin/chiffrage/devis/tiers/<code>/valeurs-defaut/`
+  (`valeurs_defaut_tiers_view`), qui renvoie l'adresse de facturation,
+  l'adresse de livraison et le contact marqués principal/principale pour
+  ce tiers (`null` si aucun n'est défini). Le JS les injecte alors dans
+  les champs correspondants — mais seulement s'ils sont encore vides : un
+  champ déjà rempli (choix explicite de l'utilisateur, ou valeur restaurée
+  après un changement de client) n'est jamais écrasé.
+
+Point technique notable : les champs `adresse_facturation`,
+`adresse_livraison` et `contact` sont des widgets `autocomplete_fields`
+(select2 alimentés en Ajax, sans options préchargées). Poser une valeur
+dessus par JavaScript ne peut donc pas se faire en modifiant `value` sur le
+`<select>` sous-jacent — il faut construire une `Option` avec le texte et
+l'identifiant reçus du serveur, l'ajouter au select, puis déclencher
+`change` sur l'instance select2 elle-même (API standard de select2 pour ce
+cas). Comme ces widgets sont initialisés par le script `autocomplete.js` de
+l'admin Django via `django.jQuery`, c'est ce même espace de noms
+(`django.jQuery`, pas un `$` global) qu'utilise le JS de la fiche Devis
+pour rester compatible.
