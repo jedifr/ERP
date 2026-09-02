@@ -8,6 +8,7 @@ from codification.mixins import CodificationInitialeMixin
 from codification.models import RegleCodification
 
 from .builder_views import (
+    contact_associe_adresse_view,
     devis_builder_view,
     previsualiser_ligne_nouveau_devis_view,
     previsualiser_ligne_view,
@@ -120,6 +121,11 @@ class DevisAdmin(CodificationInitialeMixin, ModelAdmin):
                 "tiers/<str:code>/valeurs-defaut/",
                 self.admin_site.admin_view(valeurs_defaut_tiers_view),
                 name="chiffrage_devis_valeurs_defaut_tiers",
+            ),
+            path(
+                "adresses/<int:adresse_id>/contact-associe/",
+                self.admin_site.admin_view(contact_associe_adresse_view),
+                name="chiffrage_devis_contact_associe_adresse",
             ),
             path(
                 "<str:numero>/constructeur/",

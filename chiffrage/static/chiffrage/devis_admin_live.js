@@ -55,6 +55,7 @@
 
     function init() {
         wireClientDefaults();
+        wireContactParAdresseLivraison();
 
         const numero = devisNumeroFromUrl();
         if (numero) {
@@ -102,6 +103,46 @@
                 })
                 .catch(() => {
                     console.error("Valeurs par défaut du tiers : erreur réseau.");
+                });
+        });
+    }
+
+    // Un contact peut être associé à une adresse de livraison précise
+    // (Contact.adresse_livraison, ex. le contact sur place à un site) : dès
+    // que l'adresse de livraison change — que ce soit via wireClientDefaults()
+    // ci-dessus ou un choix manuel de l'utilisateur —, propose ce contact
+    // s'il existe (sans jamais écraser un contact déjà choisi, comme
+    // toujours). Écouteur indépendant de wireClientDefaults() : celui-ci
+    // calcule déjà le bon contact par défaut lors de la sélection du client
+    // (voir valeurs_defaut_tiers_view côté serveur, qui applique la même
+    // priorité adresse > tiers en une seule requête atomique) — cet
+    // écouteur-ci couvre le cas où l'adresse de livraison est changée
+    // ensuite, indépendamment du client.
+    function wireContactParAdresseLivraison() {
+        if (typeof django === "undefined" || !django.jQuery) {
+            return;
+        }
+        const $ = django.jQuery;
+        const $livraison = $("#id_adresse_livraison");
+        if ($livraison.length === 0) {
+            return;
+        }
+
+        $livraison.on("change", function () {
+            const adresseId = $livraison.val();
+            if (!adresseId) {
+                return;
+            }
+            fetch(`/admin/chiffrage/devis/adresses/${encodeURIComponent(adresseId)}/contact-associe/`, {
+                credentials: "same-origin",
+            })
+                .then((response) => (response.ok ? response.json() : null))
+                .then((data) => {
+                    if (!data) return;
+                    remplirSiVide($, "#id_contact", data.contact);
+                })
+                .catch(() => {
+                    console.error("Contact associé à l'adresse : erreur réseau.");
                 });
         });
     }

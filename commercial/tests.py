@@ -121,3 +121,47 @@ class TiersInlinesSansLigneVideTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'name="adresses-TOTAL_FORMS" value="1"', html=False)
         self.assertContains(response, 'name="contacts-TOTAL_FORMS" value="1"', html=False)
+
+
+class ContactAdresseLivraisonTests(TestCase):
+    """Contact.adresse_livraison : associe optionnellement un contact à une
+    adresse de livraison précise du tiers (ex. le contact sur place à un
+    site) — doit forcément appartenir au même tiers et être de type
+    Livraison (même esprit que Devis.clean() pour adresse_facturation/
+    adresse_livraison/contact vis-à-vis du client)."""
+
+    def setUp(self):
+        self.tiers = Tiers.objects.create(
+            code="CLI-CONTACT-ADRESSE", raison_sociale="Client Contact Adresse", type_tiers=Tiers.TypeTiers.CLIENT
+        )
+        self.livraison = Adresse.objects.create(
+            tiers=self.tiers,
+            type_adresse=Adresse.TypeAdresse.LIVRAISON,
+            adresse="1 rue de la Livraison",
+            code_postal="75000",
+            ville="Paris",
+        )
+        self.facturation = Adresse.objects.create(
+            tiers=self.tiers,
+            type_adresse=Adresse.TypeAdresse.FACTURATION,
+            adresse="2 rue de la Facture",
+            code_postal="75000",
+            ville="Paris",
+        )
+
+    def test_association_valide(self):
+        contact = Contact(tiers=self.tiers, nom="Site", adresse_livraison=self.livraison)
+        contact.full_clean()  # ne doit pas lever
+
+    def test_adresse_d_un_autre_tiers_refusee(self):
+        autre_tiers = Tiers.objects.create(
+            code="CLI-CONTACT-ADRESSE-2", raison_sociale="Autre Client", type_tiers=Tiers.TypeTiers.CLIENT
+        )
+        contact = Contact(tiers=autre_tiers, nom="Site", adresse_livraison=self.livraison)
+        with self.assertRaises(ValidationError):
+            contact.full_clean()
+
+    def test_adresse_de_facturation_refusee(self):
+        contact = Contact(tiers=self.tiers, nom="Site", adresse_livraison=self.facturation)
+        with self.assertRaises(ValidationError):
+            contact.full_clean()

@@ -608,3 +608,33 @@ n'est ajoutée automatiquement, seuls les objets déjà enregistrés sont
 affichés. Le lien "Ajouter un objet Adresse/Contact supplémentaire" reste
 disponible pour en ajouter une volontairement — le comportement standard
 d'un inline Django, juste sans son ajout automatique.
+
+## Contact associé à une adresse de livraison précise
+
+Le contact par défaut d'un tiers (`Contact.est_principal`, section
+précédente) est une propriété globale du tiers — mais un client avec
+plusieurs sites de livraison a souvent un interlocuteur différent par
+site. `Contact` gagne donc un champ optionnel `adresse_livraison` (FK vers
+`commercial.Adresse`, forcément de type Livraison et du même tiers que le
+contact — vérifié dans `Contact.clean()`, même esprit que la validation
+déjà en place sur `Devis.clean()` pour adresse_facturation/adresse_livraison/
+contact vis-à-vis du client).
+
+Le pré-remplissage automatique du contact sur la fiche Devis en tient
+compte, avec un ordre de priorité clair :
+1. le contact associé à l'adresse de livraison retenue, s'il y en a un ;
+2. sinon le contact principal du tiers (`est_principal`).
+
+Ce choix est fait à deux moments distincts :
+- **à la sélection du client** : `valeurs_defaut_tiers_view` calcule
+  d'abord l'adresse de livraison par défaut du tiers, puis applique cet
+  ordre de priorité pour choisir le contact — une seule requête, un choix
+  atomique et cohérent (évite toute course entre "adresse de livraison
+  remplie" et "contact déjà rempli avec le mauvais choix" côté JS).
+- **quand l'adresse de livraison est changée après coup**, indépendamment
+  du client (nouveau site sélectionné manuellement) : un nouvel endpoint
+  dédié, `GET /admin/chiffrage/devis/adresses/<id>/contact-associe/`
+  (`contact_associe_adresse_view`), renvoie le contact associé à cette
+  adresse précise ; le JS (`wireContactParAdresseLivraison()`) l'appelle à
+  chaque changement du champ "Adresse de livraison" et propose ce contact
+  — toujours sans écraser un contact déjà choisi.

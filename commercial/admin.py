@@ -22,6 +22,7 @@ class AdresseInline(TabularInline):
 class ContactInline(TabularInline):
     model = Contact
     extra = 0
+    autocomplete_fields = ["adresse_livraison"]
 
 
 @admin.register(Tiers)
@@ -38,16 +39,25 @@ class TiersAdmin(CodificationInitialeMixin, ModelAdmin):
 class AdresseAdmin(ModelAdmin):
     list_display = ["tiers", "type_adresse", "libelle", "ville", "est_principale"]
     list_filter = ["type_adresse", "est_principale"]
-    search_fields = ["tiers__code", "tiers__raison_sociale", "ville"]
+    search_fields = ["tiers__code", "tiers__raison_sociale", "ville", "libelle"]
     autocomplete_fields = ["tiers"]
 
 
 @admin.register(Contact)
 class ContactAdmin(ModelAdmin):
-    list_display = ["nom", "prenom", "tiers", "email", "telephone", "fonction", "est_principal"]
+    list_display = [
+        "nom",
+        "prenom",
+        "tiers",
+        "email",
+        "telephone",
+        "fonction",
+        "est_principal",
+        "adresse_livraison",
+    ]
     list_filter = ["est_principal"]
     search_fields = ["nom", "prenom", "tiers__code", "tiers__raison_sociale"]
-    autocomplete_fields = ["tiers"]
+    autocomplete_fields = ["tiers", "adresse_livraison"]
 
 
 @admin.register(TauxTVA)

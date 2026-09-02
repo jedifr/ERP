@@ -130,7 +130,20 @@ class Contact(models.Model):
     telephone = models.CharField("téléphone", max_length=30, blank=True)
     fonction = models.CharField("fonction", max_length=100, blank=True)
     est_principal = models.BooleanField(
-        "contact principal", default=False, help_text="Contact par défaut proposé"
+        "contact principal", default=False, help_text="Contact par défaut proposé pour le tiers"
+    )
+    adresse_livraison = models.ForeignKey(
+        Adresse,
+        verbose_name="adresse de livraison associée",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="contacts",
+        help_text=(
+            "Optionnel : associe ce contact à une adresse de livraison précise du "
+            "tiers (ex. le contact sur place à un site). Proposé en priorité sur "
+            "cette adresse, avant le contact principal du tiers."
+        ),
     )
 
     class Meta:
@@ -156,4 +169,13 @@ class Contact(models.Model):
                             "d'abord si vous voulez le remplacer."
                         )
                     }
+                )
+        if self.adresse_livraison_id and self.tiers_id:
+            if self.adresse_livraison.tiers_id != self.tiers_id:
+                raise ValidationError(
+                    {"adresse_livraison": "Cette adresse n'appartient pas au tiers sélectionné."}
+                )
+            if self.adresse_livraison.type_adresse != Adresse.TypeAdresse.LIVRAISON:
+                raise ValidationError(
+                    {"adresse_livraison": "Seule une adresse de type « Livraison » peut être associée."}
                 )

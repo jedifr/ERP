@@ -1532,6 +1532,89 @@ class ValeursDefautTiersViewTests(TestCase):
         response = self.client.get(self._url())
         self.assertNotEqual(response.status_code, 200)
 
+    def test_contact_associe_a_l_adresse_de_livraison_prioritaire(self):
+        # Le contact associé à l'adresse de livraison par défaut doit être
+        # préféré au contact principal du tiers, s'il y en a un.
+        livraison = Adresse.objects.create(
+            tiers=self.tiers,
+            type_adresse=Adresse.TypeAdresse.LIVRAISON,
+            adresse="Site Nord",
+            code_postal="59000",
+            ville="Lille",
+            est_principale=True,
+        )
+        Contact.objects.create(tiers=self.tiers, nom="Principal Tiers", est_principal=True)
+        contact_site = Contact.objects.create(
+            tiers=self.tiers, nom="Contact Site", adresse_livraison=livraison
+        )
+
+        response = self.client.get(self._url())
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["contact"]["id"], contact_site.pk)
+
+    def test_contact_replie_sur_le_principal_du_tiers_si_aucun_lie_a_l_adresse(self):
+        Adresse.objects.create(
+            tiers=self.tiers,
+            type_adresse=Adresse.TypeAdresse.LIVRAISON,
+            adresse="Site Sud",
+            code_postal="13000",
+            ville="Marseille",
+            est_principale=True,
+        )
+        principal = Contact.objects.create(tiers=self.tiers, nom="Principal Tiers", est_principal=True)
+
+        response = self.client.get(self._url())
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["contact"]["id"], principal.pk)
+
+
+class ContactAssocieAdresseViewTests(TestCase):
+    """Endpoint GET .../adresses/<id>/contact-associe/ : contact associé à
+    une adresse de livraison précise (Contact.adresse_livraison) — utilisé
+    quand l'utilisateur change l'adresse de livraison d'un devis après
+    coup, indépendamment de la sélection du client."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        self.user = User.objects.create_superuser("contact-adresse-admin", "ca@example.com", "pass1234")
+        self.client.force_login(self.user)
+
+        self.tiers = Tiers.objects.create(
+            code="CLI-CONTACT-ASSOCIE", raison_sociale="Client Contact Associé", type_tiers=Tiers.TypeTiers.CLIENT
+        )
+        self.livraison = Adresse.objects.create(
+            tiers=self.tiers,
+            type_adresse=Adresse.TypeAdresse.LIVRAISON,
+            adresse="Site Est",
+            code_postal="67000",
+            ville="Strasbourg",
+        )
+
+    def _url(self, adresse_id=None):
+        return f"/admin/chiffrage/devis/adresses/{adresse_id or self.livraison.pk}/contact-associe/"
+
+    def test_aucun_contact_associe_renvoie_null(self):
+        response = self.client.get(self._url())
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertIsNone(response.json()["contact"])
+
+    def test_contact_associe_renvoye(self):
+        contact = Contact.objects.create(tiers=self.tiers, nom="Site Est", adresse_livraison=self.livraison)
+        response = self.client.get(self._url())
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["contact"]["id"], contact.pk)
+
+    def test_adresse_introuvable_404(self):
+        response = self.client.get(self._url(adresse_id=999999))
+        self.assertEqual(response.status_code, 404)
+
+    def test_anonyme_refuse(self):
+        self.client.logout()
+        response = self.client.get(self._url())
+        self.assertNotEqual(response.status_code, 200)
+
 
 class ContactEstPrincipalTests(TestCase):
     """Contact.est_principal suit le même garde-fou "un seul par tiers" que

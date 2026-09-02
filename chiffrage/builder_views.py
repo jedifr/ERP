@@ -304,14 +304,24 @@ def previsualiser_ligne_view(request, numero):
     return JsonResponse({"ok": True, **resultat})
 
 
+def _contact_json(contact):
+    return {"id": contact.pk, "texte": str(contact)} if contact else None
+
+
 @staff_member_required
 @require_http_methods(["GET"])
 def valeurs_defaut_tiers_view(request, code):
-    """Adresse de facturation, adresse de livraison et contact marqués
-    "principal(e)" pour le tiers `code` — utilisé pour pré-remplir ces
-    champs dès qu'un client est sélectionné sur la fiche Devis (formulaire
-    d'ajout comme de modification), sans écraser un choix déjà fait par
-    l'utilisateur (c'est le JS appelant qui décide de ça, pas cette vue)."""
+    """Adresse de facturation, adresse de livraison et contact par défaut
+    pour le tiers `code` — utilisé pour pré-remplir ces champs dès qu'un
+    client est sélectionné sur la fiche Devis (formulaire d'ajout comme de
+    modification), sans écraser un choix déjà fait par l'utilisateur (c'est
+    le JS appelant qui décide de ça, pas cette vue).
+
+    Le contact suit un ordre de priorité : celui associé à l'adresse de
+    livraison par défaut (Contact.adresse_livraison), sinon le contact
+    principal du tiers (Contact.est_principal) — voir
+    contact_associe_adresse_view() pour le même choix quand l'utilisateur
+    change l'adresse de livraison après coup, indépendamment du client."""
     tiers = get_object_or_404(Tiers, pk=code)
 
     facturation = Adresse.objects.filter(
@@ -320,7 +330,12 @@ def valeurs_defaut_tiers_view(request, code):
     livraison = Adresse.objects.filter(
         tiers=tiers, type_adresse=Adresse.TypeAdresse.LIVRAISON, est_principale=True
     ).first()
-    contact = Contact.objects.filter(tiers=tiers, est_principal=True).first()
+
+    contact = None
+    if livraison is not None:
+        contact = Contact.objects.filter(adresse_livraison=livraison).first()
+    if contact is None:
+        contact = Contact.objects.filter(tiers=tiers, est_principal=True).first()
 
     return JsonResponse(
         {
@@ -328,9 +343,22 @@ def valeurs_defaut_tiers_view(request, code):
                 {"id": facturation.pk, "texte": str(facturation)} if facturation else None
             ),
             "adresse_livraison": ({"id": livraison.pk, "texte": str(livraison)} if livraison else None),
-            "contact": ({"id": contact.pk, "texte": str(contact)} if contact else None),
+            "contact": _contact_json(contact),
         }
     )
+
+
+@staff_member_required
+@require_http_methods(["GET"])
+def contact_associe_adresse_view(request, adresse_id):
+    """Contact associé à une adresse de livraison précise
+    (Contact.adresse_livraison) — utilisé quand l'utilisateur change
+    l'adresse de livraison d'un devis après coup (indépendamment de la
+    sélection du client, qui passe par valeurs_defaut_tiers_view ci-dessus)
+    : propose alors le contact sur place à cette adresse, s'il y en a un."""
+    adresse = get_object_or_404(Adresse, pk=adresse_id)
+    contact = Contact.objects.filter(adresse_livraison=adresse).first()
+    return JsonResponse({"contact": _contact_json(contact)})
 
 
 @staff_member_required
