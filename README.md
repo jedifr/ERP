@@ -483,3 +483,32 @@ moment du calcul) suffit comme contexte.
 Avec ce correctif, remplir article + quantité sur une ligne du formulaire
 d'ajout calcule désormais le prix instantanément, avant même d'enregistrer
 le devis — exactement le scénario initialement demandé.
+
+## Correctif : date de création au format français rejetée par le calcul live
+
+Régression introduite par la fonctionnalité précédente : sur le formulaire
+d'ajout d'un devis, le calcul en direct échouait avec le message « Date de
+création invalide. » dès que le champ "Date de création" contenait une
+valeur — ce qui est pourtant systématiquement le cas (le widget de date de
+l'admin le pré-remplit avec la date du jour).
+
+En cause : `previsualiser_ligne_nouveau_devis_view` lisait cette date avec
+`datetime.date.fromisoformat(...)`, qui n'accepte que le format ISO strict
+`AAAA-MM-JJ`. Or le projet est configuré en `LANGUAGE_CODE = "fr-fr"`, et
+le widget de date de l'admin (Unfold comme Django standard) affiche et
+soumet sa valeur au format local `JJ/MM/AAAA` (ex. `"02/09/2026"`) — un
+format qu'`fromisoformat()` rejette purement et simplement avec une
+`ValueError`, capturée et renvoyée telle quelle comme erreur 400.
+
+Corrigé en remplaçant l'appel par `django.forms.DateField().clean(...)` :
+ce champ de formulaire Django connaît nativement `DATE_INPUT_FORMATS` (donc
+le format local actif) et accepte aussi bien l'ISO, ce qui couvre les deux
+cas sans dépendre d'un format codé en dur. Une `ValidationError` (date
+réellement incompréhensible) est traduite en la même erreur 400 qu'avant.
+
+Point technique notable : ce bug n'avait aucune chance d'être détecté par
+le test existant (`test_date_creation_invalide_400`), qui envoyait une
+chaîne délibérément absurde (`"pas-une-date"`) — un cas qui doit rester en
+erreur avec les deux approches. Un nouveau test dédié envoie une date au
+format français valide (`"02/09/2026"`) et vérifie que le calcul aboutit,
+pour couvrir spécifiquement ce format.

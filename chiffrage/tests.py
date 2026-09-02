@@ -1136,6 +1136,17 @@ class PrevisualiserLigneNouveauDevisViewTests(TestCase):
         )
         self.assertEqual(response.status_code, 400)
 
+    def test_date_creation_au_format_francais_jj_mm_aaaa(self):
+        # Régression : le widget de date de l'admin (LANGUAGE_CODE="fr-fr")
+        # soumet la date au format JJ/MM/AAAA, pas l'ISO strict AAAA-MM-JJ.
+        response = self.client.post(
+            self._url(),
+            data={"article": "ART-NOUVEAU-DEVIS", "quantite": 5, "date_creation": "02/09/2026"},
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertAlmostEqual(response.json()["prix_vente_matiere"], 11)
+
     def test_article_introuvable_400(self):
         response = self.client.post(
             self._url(),

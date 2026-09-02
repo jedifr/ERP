@@ -1,8 +1,10 @@
 import datetime
 import json
 
+from django import forms
 from django.contrib import admin
 from django.contrib.admin.views.decorators import staff_member_required
+from django.core.exceptions import ValidationError
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
 from django.template.response import TemplateResponse
@@ -324,12 +326,17 @@ def previsualiser_ligne_nouveau_devis_view(request):
         return JsonResponse({"detail": exc.message}, status=400)
 
     date_creation_str = payload.get("date_creation")
-    try:
-        date_creation = (
-            datetime.date.fromisoformat(date_creation_str) if date_creation_str else datetime.date.today()
-        )
-    except ValueError:
-        return JsonResponse({"detail": "Date de création invalide."}, status=400)
+    if date_creation_str:
+        # Le widget de date de l'admin soumet sa valeur selon le format local
+        # (ex. JJ/MM/AAAA en fr-fr), pas nécessairement l'ISO strict attendu
+        # par date.fromisoformat() — on utilise donc le DateField de Django,
+        # qui connaît DATE_INPUT_FORMATS et accepte aussi bien l'ISO.
+        try:
+            date_creation = forms.DateField().clean(date_creation_str.strip())
+        except ValidationError:
+            return JsonResponse({"detail": "Date de création invalide."}, status=400)
+    else:
+        date_creation = datetime.date.today()
 
     try:
         taux_marge_globale, _fourni = _parse_float_optionnel(
