@@ -11,7 +11,7 @@ from django.utils import timezone
 from commercial.models import Adresse
 from technique.models import Article, PosteTravail
 
-from .models import Commande, Devis, OperationOF, OrdreFabrication
+from .models import Commande, CommandeLigne, Devis, OperationOF, OrdreFabrication
 from .moteur import ChiffrageError, gamme_active
 from .planning_sync import tenter_synchronisation
 
@@ -52,6 +52,14 @@ def lancer_en_production(devis):
         ordres_crees = []
         index = 1
         for ligne in devis.lignes.select_related("article").all():
+            # Une ligne de commande par ligne de devis, quelle que soit la
+            # nature de l'article : c'est elle qui porte le suivi de
+            # livraison (partielle, article par article) — indépendant des
+            # ordres de fabrication, qui ne concernent que les FABRIQUE.
+            CommandeLigne.objects.create(
+                commande=commande, article=ligne.article, quantite_commandee=ligne.quantite
+            )
+
             if ligne.article.nature != Article.Nature.FABRIQUE:
                 continue
 

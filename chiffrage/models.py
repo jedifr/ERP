@@ -1,7 +1,9 @@
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, transaction
+from django.utils import timezone
 
 from commercial.models import Adresse, Contact, TauxTVA, Tiers
+from stock.models import Lot, MouvementStock
 from technique.models import Article, PosteTravail
 
 
@@ -250,6 +252,155 @@ class Commande(models.Model):
 
     def __str__(self):
         return self.numero
+
+
+class LivraisonError(Exception):
+    """Donnée de référence manquante ou incohérente empêchant la livraison."""
+
+
+class CommandeLigne(models.Model):
+    """Une ligne par article commandé — créée automatiquement (une par ligne
+    de devis, quelle que soit sa nature) au lancement en production
+    (`production.lancer_en_production`). Permet une livraison partielle,
+    article par article, indépendante des ordres de fabrication."""
+
+    commande = models.ForeignKey(
+        Commande, verbose_name="commande", on_delete=models.CASCADE, related_name="lignes"
+    )
+    article = models.ForeignKey(
+        Article, verbose_name="article", on_delete=models.PROTECT, related_name="lignes_commande"
+    )
+    quantite_commandee = models.FloatField("quantité commandée")
+    quantite_livree = models.FloatField(
+        "quantité livrée", default=0, editable=False, help_text="Cumul recalculé depuis les livraisons"
+    )
+
+    class Meta:
+        verbose_name = "Ligne de commande"
+        verbose_name_plural = "Lignes de commande"
+        ordering = ["commande", "id"]
+
+    def __str__(self):
+        return f"{self.commande} — {self.article} × {self.quantite_commandee}"
+
+    @property
+    def reliquat(self):
+        """Quantité restant à livrer (commandée − déjà livrée)."""
+        return self.quantite_commandee - self.quantite_livree
+
+    reliquat.fget.short_description = "Reliquat"
+
+    @property
+    def entierement_livree(self):
+        return self.reliquat <= 0
+
+    entierement_livree.fget.short_description = "Entièrement livrée"
+
+
+class Livraison(models.Model):
+    numero = models.CharField("numéro", max_length=50, primary_key=True)
+    commande = models.ForeignKey(
+        Commande, verbose_name="commande", on_delete=models.PROTECT, related_name="livraisons"
+    )
+    date_livraison = models.DateField("date de livraison", default=timezone.now)
+
+    class Meta:
+        verbose_name = "Livraison"
+        verbose_name_plural = "Livraisons"
+        ordering = ["-date_livraison", "numero"]
+
+    def __str__(self):
+        return self.numero
+
+
+class LivraisonLigne(models.Model):
+    """Une livraison peut porter sur une partie seulement de la quantité
+    commandée d'un article (livraison partielle) ; le cumul sur
+    CommandeLigne.quantite_livree matérialise le reliquat éventuel — même
+    principe que achats.ReceptionLigne côté réception fournisseur."""
+
+    livraison = models.ForeignKey(
+        Livraison, verbose_name="livraison", on_delete=models.CASCADE, related_name="lignes"
+    )
+    commande_ligne = models.ForeignKey(
+        CommandeLigne,
+        verbose_name="ligne de commande",
+        on_delete=models.PROTECT,
+        related_name="livraisons_lignes",
+    )
+    quantite_livree = models.FloatField("quantité livrée")
+
+    class Meta:
+        verbose_name = "Ligne de livraison"
+        verbose_name_plural = "Lignes de livraison"
+        ordering = ["livraison", "id"]
+
+    def __str__(self):
+        return f"{self.livraison} — {self.commande_ligne.article} × {self.quantite_livree}"
+
+    def clean(self):
+        super().clean()
+        if self.quantite_livree is not None and self.quantite_livree <= 0:
+            raise ValidationError({"quantite_livree": "La quantité livrée doit être positive."})
+        if self.pk is None and self.commande_ligne_id:
+            deja_livre = self.commande_ligne.quantite_livree
+            commandee = self.commande_ligne.quantite_commandee
+            if deja_livre + (self.quantite_livree or 0) > commandee:
+                raise ValidationError(
+                    {
+                        "quantite_livree": (
+                            f"Dépasse la quantité commandée ({commandee}, déjà livré {deja_livre})."
+                        )
+                    }
+                )
+
+    def save(self, *args, **kwargs):
+        creation = self.pk is None
+        if not creation:
+            super().save(*args, **kwargs)
+            return
+        # Tout ou rien : si le lot est ambigu (LivraisonError), ni cette
+        # ligne ni la mise à jour du cumul livré ne doivent être enregistrées
+        # — sans quoi on se retrouve avec une ligne "fantôme" enregistrée
+        # dont la quantité livrée n'a jamais été répercutée nulle part.
+        with transaction.atomic():
+            super().save(*args, **kwargs)
+            self._appliquer()
+
+    def _appliquer(self):
+        ligne = self.commande_ligne
+        # Contrairement aux matières premières achetées, un article fabriqué
+        # sur mesure n'a le plus souvent aucun lot de stock (gere_en_stock
+        # est faux par défaut pour un FABRIQUE) : dans ce cas la sortie de
+        # stock est simplement sautée plutôt que de bloquer la livraison.
+        # Résolu AVANT toute mise à jour : si plusieurs lots existent (cas
+        # ambigu), tout doit être annulé (voir save()).
+        lot = self._lot_unique_pour_article(ligne.article)
+
+        CommandeLigne.objects.filter(pk=ligne.pk).update(
+            quantite_livree=models.F("quantite_livree") + self.quantite_livree
+        )
+
+        if lot is not None:
+            MouvementStock.objects.create(
+                lot=lot,
+                type_mouvement=MouvementStock.TypeMouvement.SORTIE,
+                quantite=self.quantite_livree,
+                date_mouvement=self.livraison.date_livraison,
+                reference_origine=f"LIVRAISON-{self.livraison.numero}",
+            )
+
+    @staticmethod
+    def _lot_unique_pour_article(article):
+        lots = list(Lot.objects.filter(article=article))
+        if len(lots) == 0:
+            return None
+        if len(lots) > 1:
+            raise LivraisonError(
+                f"Plusieurs lots existent pour l'article « {article} » : sortie de stock automatique "
+                "non applicable, mettez à jour le stock manuellement."
+            )
+        return lots[0]
 
 
 class OrdreFabrication(models.Model):

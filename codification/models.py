@@ -14,6 +14,7 @@ class RegleCodification(models.Model):
         ORDRE_FABRICATION = "ordre_fabrication", "Ordre de fabrication"
         COMMANDE_FOURNISSEUR = "commande_fournisseur", "Commande fournisseur"
         RECEPTION = "reception", "Réception"
+        LIVRAISON = "livraison", "Livraison"
         FACTURE = "facture", "Facture"
         ENVOI_SOUS_TRAITANCE = "envoi_sous_traitance", "Envoi sous-traitance"
         RETOUR_SOUS_TRAITANCE = "retour_sous_traitance", "Retour sous-traitance"

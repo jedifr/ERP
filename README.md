@@ -786,3 +786,64 @@ Résultat : le champ "Délai" de la fiche Devis propose les valeurs du
 référentiel dans son autocomplétion native du navigateur, mais accepte
 n'importe quel texte tapé à la main — vérifié en tapant un délai hors
 liste ("Livraison express sous 48h"), accepté sans erreur.
+
+## Livraisons partielles d'une commande
+
+Jusqu'ici, une `Commande` n'avait pas de lignes à elle : les quantités
+venaient directement des lignes du devis, et rien ne suivait ce qui avait
+effectivement été livré. Demandé : pouvoir livrer une commande
+**partiellement**, **article par article**, avec une **quantité livrée
+différente de la quantité commandée**, en laissant apparaître un
+**reliquat** quand la livraison est incomplète.
+
+Architecture reprise à l'identique du modèle déjà en place côté achats
+(`CommandeFournisseur` → `LigneCommandeFournisseur` → `Reception` →
+`ReceptionLigne`), pour la cohérence et parce qu'il couvre exactement le
+même besoin côté réception fournisseur :
+
+- **`CommandeLigne`** (nouveau) : une ligne par article commandé —
+  `quantite_commandee` (figée au moment de la commande) et
+  `quantite_livree` (cumul recalculé, `editable=False`). Propriétés
+  calculées `reliquat` (= commandée − livrée) et `entierement_livree`.
+  Créée automatiquement par `production.lancer_en_production()`, **une
+  par ligne de devis, quelle que soit sa nature** — contrairement aux
+  ordres de fabrication, qui ne concernent que les articles FABRIQUE, le
+  suivi de livraison doit couvrir aussi les matières premières vendues
+  directement.
+- **`Livraison`** / **`LivraisonLigne`** (nouveaux, numérotation
+  automatique via la codification — nouvelle entité `LIVRAISON`, préfixe
+  `LIV-`) : une livraison peut porter sur plusieurs lignes de commande, et
+  une ligne de commande peut être livrée en plusieurs fois.
+  `LivraisonLigne.clean()` refuse qu'une livraison dépasse le reliquat
+  restant (`quantite déjà livrée + nouvelle quantité > quantité
+  commandée`), avec le reliquat déjà connu dans le message d'erreur.
+
+**Effet de bord stock**, symétrique à la réception fournisseur (qui crée
+un mouvement `ENTREE`) : `LivraisonLigne._appliquer()` crée un mouvement
+`SORTIE` (`MouvementStock`) sur le lot de l'article livré. Différence
+assumée avec le mode achats : un article fabriqué sur mesure n'a le plus
+souvent **aucun lot de stock** (`gere_en_stock` vaut faux par défaut pour
+un `FABRIQUE`) — la sortie de stock est donc **sautée silencieusement**
+plutôt que de bloquer la livraison (contrairement à la réception
+fournisseur, qui exige un lot existant). Si plusieurs lots existent pour
+l'article (cas ambigu, comme côté achats), `LivraisonError` est levée.
+
+Point technique notable, corrigé par rapport au modèle achats d'origine :
+dans `ReceptionLigne._appliquer()`, la mise à jour du cumul reçu a lieu
+*avant* la résolution du lot — si celle-ci échoue (lots ambigus), la ligne
+de réception reste tout de même enregistrée avec son cumul incrémenté,
+sans mouvement de stock associé (état incohérent). `LivraisonLigne.save()`
+évite ce piège : la résolution du lot est faite *avant* toute écriture, et
+l'ensemble (`save()` de la ligne + mise à jour du cumul + mouvement de
+stock) est englobé dans une transaction atomique — si le lot est ambigu,
+tout est annulé, y compris l'enregistrement de la ligne elle-même. Aucun
+état "ligne enregistrée mais jamais répercutée" n'est possible.
+
+`LivraisonAdmin.save_formset()` intercepte `LivraisonError` pour l'afficher
+comme un message d'erreur normal de l'admin plutôt que de laisser
+remonter une page 500 (même pattern que `ReceptionAdmin` côté achats).
+
+Vérifié de bout en bout (Playwright) : devis validé → `lancer_en_production`
+crée une commande avec sa ligne (quantité commandée 10, livrée 0, reliquat
+10) → une première livraison de 6 unités laisse un reliquat de 4, visible
+immédiatement sur la fiche Commande.

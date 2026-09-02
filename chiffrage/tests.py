@@ -5,10 +5,21 @@ from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings
 
 from commercial.models import Adresse, Contact, DelaiPropose, TauxTVA, Tiers
+from stock.models import Emplacement, Lot, MouvementStock
 from technique.models import Article, Gamme, Matiere, Nomenclature, PosteTravail, TarifPoste
 
 from .builder import ajouter_ligne_devis, creer_article_fabrique
-from .models import Commande, Devis, DevisLigne, DevisLigneOperation, OrdreFabrication
+from .models import (
+    Commande,
+    CommandeLigne,
+    Devis,
+    DevisLigne,
+    DevisLigneOperation,
+    Livraison,
+    LivraisonError,
+    LivraisonLigne,
+    OrdreFabrication,
+)
 from .moteur import ChiffrageError, calculer_devis, calculer_ligne, cout_matiere_article, previsualiser_ligne
 from .planning_sync import PlanningSyncError, resynchroniser, tenter_synchronisation
 from .production import lancer_en_production
@@ -290,6 +301,22 @@ class LancerEnProductionTests(TestCase):
         # (5 + 2*2) = 9
         self.assertAlmostEqual(operation.temps_prevu, 9)
 
+    def test_cree_une_ligne_de_commande_par_ligne_de_devis(self):
+        # Une CommandeLigne par ligne de devis, quelle que soit la nature de
+        # l'article (contrairement aux OF, qui ne concernent que le FABRIQUE) —
+        # c'est elle qui porte le suivi de livraison.
+        commande = lancer_en_production(self.devis)
+        self.assertEqual(commande.lignes.count(), 2)
+
+        ligne_fabrique = commande.lignes.get(article=self.article_fabrique)
+        self.assertEqual(ligne_fabrique.quantite_commandee, 2)
+        self.assertEqual(ligne_fabrique.quantite_livree, 0)
+        self.assertEqual(ligne_fabrique.reliquat, 2)
+        self.assertFalse(ligne_fabrique.entierement_livree)
+
+        ligne_mp = commande.lignes.get(article=self.article_mp)
+        self.assertEqual(ligne_mp.quantite_commandee, 50)
+
     def test_of_reste_en_attente_sans_api_planning_configuree(self):
         of = lancer_en_production(self.devis).ordres_fabrication.first()
         self.assertEqual(of.statut_synchro, OrdreFabrication.StatutSynchro.EN_ATTENTE)
@@ -310,6 +337,132 @@ class LancerEnProductionTests(TestCase):
         Adresse.objects.filter(tiers=self.client_tiers, type_adresse=Adresse.TypeAdresse.LIVRAISON).delete()
         with self.assertRaises(ChiffrageError):
             lancer_en_production(self.devis)
+
+
+class LivraisonPartielleTests(TestCase):
+    """Livraison partielle d'une commande, article par article : la quantité
+    livrée peut être inférieure à la quantité commandée (reliquat), et
+    plusieurs livraisons successives peuvent compléter une même ligne —
+    même principe que achats.ReceptionLigne côté réception fournisseur."""
+
+    def setUp(self):
+        self.client_tiers = Tiers.objects.create(
+            code="CLI-LIV", raison_sociale="Client Livraison", type_tiers=Tiers.TypeTiers.CLIENT
+        )
+        for type_adresse in [Adresse.TypeAdresse.FACTURATION, Adresse.TypeAdresse.LIVRAISON]:
+            Adresse.objects.create(
+                tiers=self.client_tiers,
+                type_adresse=type_adresse,
+                adresse="1 rue",
+                code_postal="75000",
+                ville="Paris",
+                est_principale=True,
+            )
+
+        self.article = Article.objects.create(
+            reference="VIS-LIV",
+            nature=Article.Nature.MATIERE_PREMIERE,
+            unite_cout=Article.UniteCout.PIECE,
+            cout_unitaire=1.0,
+            gere_en_stock=True,
+        )
+        self.devis = Devis.objects.create(
+            numero="DEV-LIV",
+            client=self.client_tiers,
+            date_creation=datetime.date(2026, 1, 1),
+            statut=Devis.Statut.VALIDE,
+        )
+        DevisLigne.objects.create(devis=self.devis, article=self.article, quantite=10)
+        self.commande = lancer_en_production(self.devis)
+        self.commande_ligne = self.commande.lignes.get(article=self.article)
+
+    def _livraison(self, numero="LIV-1"):
+        return Livraison.objects.create(numero=numero, commande=self.commande, date_livraison=datetime.date(2026, 2, 1))
+
+    def test_livraison_partielle_laisse_un_reliquat(self):
+        livraison = self._livraison()
+        LivraisonLigne.objects.create(livraison=livraison, commande_ligne=self.commande_ligne, quantite_livree=6)
+
+        self.commande_ligne.refresh_from_db()
+        self.assertEqual(self.commande_ligne.quantite_livree, 6)
+        self.assertEqual(self.commande_ligne.reliquat, 4)
+        self.assertFalse(self.commande_ligne.entierement_livree)
+
+    def test_deux_livraisons_successives_completent_la_commande(self):
+        livraison1 = self._livraison("LIV-1")
+        LivraisonLigne.objects.create(livraison=livraison1, commande_ligne=self.commande_ligne, quantite_livree=6)
+
+        livraison2 = self._livraison("LIV-2")
+        LivraisonLigne.objects.create(livraison=livraison2, commande_ligne=self.commande_ligne, quantite_livree=4)
+
+        self.commande_ligne.refresh_from_db()
+        self.assertEqual(self.commande_ligne.quantite_livree, 10)
+        self.assertEqual(self.commande_ligne.reliquat, 0)
+        self.assertTrue(self.commande_ligne.entierement_livree)
+
+    def test_depasser_la_quantite_commandee_refuse(self):
+        livraison = self._livraison()
+        ligne = LivraisonLigne(livraison=livraison, commande_ligne=self.commande_ligne, quantite_livree=11)
+        with self.assertRaises(ValidationError):
+            ligne.full_clean()
+
+    def test_deuxieme_livraison_qui_depasse_le_reliquat_refusee(self):
+        livraison1 = self._livraison("LIV-1")
+        LivraisonLigne.objects.create(livraison=livraison1, commande_ligne=self.commande_ligne, quantite_livree=6)
+        self.commande_ligne.refresh_from_db()  # quantite_livree mise à jour en base via .update(), pas en mémoire
+
+        livraison2 = self._livraison("LIV-2")
+        ligne = LivraisonLigne(livraison=livraison2, commande_ligne=self.commande_ligne, quantite_livree=5)
+        with self.assertRaises(ValidationError):
+            ligne.full_clean()  # reliquat = 4, on tente d'en livrer 5
+
+    def test_quantite_livree_negative_ou_nulle_refusee(self):
+        livraison = self._livraison()
+        ligne = LivraisonLigne(livraison=livraison, commande_ligne=self.commande_ligne, quantite_livree=0)
+        with self.assertRaises(ValidationError):
+            ligne.full_clean()
+
+    def test_livraison_decremente_le_lot_de_stock(self):
+        emplacement = Emplacement.objects.create(code="EMP-LIV")
+        lot = Lot.objects.create(article=self.article, emplacement=emplacement, quantite=20)
+
+        livraison = self._livraison()
+        LivraisonLigne.objects.create(livraison=livraison, commande_ligne=self.commande_ligne, quantite_livree=6)
+
+        lot.refresh_from_db()
+        self.assertEqual(lot.quantite, 14)
+        mouvement = MouvementStock.objects.get(lot=lot)
+        self.assertEqual(mouvement.type_mouvement, MouvementStock.TypeMouvement.SORTIE)
+        self.assertEqual(mouvement.quantite, 6)
+        self.assertEqual(mouvement.reference_origine, f"LIVRAISON-{livraison.numero}")
+
+    def test_livraison_sans_lot_ne_bloque_pas(self):
+        # Article non géré en stock (cas courant d'un fabriqué sur mesure) :
+        # aucun Lot n'existe, la livraison doit quand même passer.
+        self.assertEqual(Lot.objects.filter(article=self.article).count(), 0)
+        livraison = self._livraison()
+        LivraisonLigne.objects.create(livraison=livraison, commande_ligne=self.commande_ligne, quantite_livree=6)
+        self.commande_ligne.refresh_from_db()
+        self.assertEqual(self.commande_ligne.quantite_livree, 6)
+
+    def test_plusieurs_lots_leve_erreur_et_annule_tout(self):
+        emplacement1 = Emplacement.objects.create(code="EMP-LIV-1")
+        emplacement2 = Emplacement.objects.create(code="EMP-LIV-2")
+        Lot.objects.create(article=self.article, emplacement=emplacement1, quantite=5)
+        Lot.objects.create(article=self.article, emplacement=emplacement2, quantite=5)
+
+        livraison = self._livraison()
+        with self.assertRaises(LivraisonError):
+            LivraisonLigne.objects.create(
+                livraison=livraison, commande_ligne=self.commande_ligne, quantite_livree=6
+            )
+
+        # Tout ou rien : ni la ligne, ni le cumul livré ne doivent être
+        # enregistrés (pas de ligne "fantôme" avec une quantité jamais
+        # répercutée) — voir LivraisonLigne.save().
+        self.assertEqual(LivraisonLigne.objects.count(), 0)
+        self.commande_ligne.refresh_from_db()
+        self.assertEqual(self.commande_ligne.quantite_livree, 0)
 
 
 class PlanningSyncTests(TestCase):
@@ -1734,3 +1887,82 @@ class ContactEstPrincipalTests(TestCase):
         Contact.objects.create(tiers=self.tiers, nom="Premier", est_principal=True)
         autre = Contact(tiers=autre_tiers, nom="Second", est_principal=True)
         autre.full_clean()  # ne doit pas lever
+
+
+class LivraisonAdminTests(TestCase):
+    """Fiche admin Livraison : numérotation automatique (codification) et
+    remontée propre d'une LivraisonError (pas une page 500) si le stock
+    automatique ne peut pas être appliqué (plusieurs lots pour l'article)."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        self.user = User.objects.create_superuser("livraison-admin", "l@example.com", "pass1234")
+        self.client.force_login(self.user)
+
+        self.client_tiers = Tiers.objects.create(
+            code="CLI-LIV-ADMIN", raison_sociale="Client Livraison Admin", type_tiers=Tiers.TypeTiers.CLIENT
+        )
+        for type_adresse in [Adresse.TypeAdresse.FACTURATION, Adresse.TypeAdresse.LIVRAISON]:
+            Adresse.objects.create(
+                tiers=self.client_tiers,
+                type_adresse=type_adresse,
+                adresse="1 rue",
+                code_postal="75000",
+                ville="Paris",
+                est_principale=True,
+            )
+        self.article = Article.objects.create(
+            reference="VIS-LIV-ADMIN",
+            nature=Article.Nature.MATIERE_PREMIERE,
+            unite_cout=Article.UniteCout.PIECE,
+            cout_unitaire=1.0,
+        )
+        self.devis = Devis.objects.create(
+            numero="DEV-LIV-ADMIN",
+            client=self.client_tiers,
+            date_creation=datetime.date(2026, 1, 1),
+            statut=Devis.Statut.VALIDE,
+        )
+        DevisLigne.objects.create(devis=self.devis, article=self.article, quantite=10)
+        self.commande = lancer_en_production(self.devis)
+        self.commande_ligne = self.commande.lignes.get(article=self.article)
+
+    def test_formulaire_ajout_pre_rempli_avec_le_code_genere(self):
+        response = self.client.get("/admin/chiffrage/livraison/add/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "LIV-00001")
+
+    def test_erreur_lots_multiples_affichee_sans_500(self):
+        emplacement1 = Emplacement.objects.create(code="EMP-LIV-ADMIN-1")
+        emplacement2 = Emplacement.objects.create(code="EMP-LIV-ADMIN-2")
+        Lot.objects.create(article=self.article, emplacement=emplacement1, quantite=5)
+        Lot.objects.create(article=self.article, emplacement=emplacement2, quantite=5)
+
+        payload = {
+            "numero": "LIV-ADMIN-TEST",
+            "commande": self.commande.pk,
+            "date_livraison": "2026-02-01",
+            "lignes-TOTAL_FORMS": "1",
+            "lignes-INITIAL_FORMS": "0",
+            "lignes-MIN_NUM_FORMS": "0",
+            "lignes-MAX_NUM_FORMS": "1000",
+            "lignes-0-commande_ligne": self.commande_ligne.pk,
+            "lignes-0-quantite_livree": "6",
+            "lignes-0-id": "",
+            "lignes-0-livraison": "",
+            "_save": "Enregistrer",
+        }
+        response = self.client.post("/admin/chiffrage/livraison/add/", data=payload, follow=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Plusieurs lots existent")
+        # La livraison (l'objet parent) est enregistrée normalement — c'est
+        # l'admin lui-même qui la sauvegarde avant de traiter les inlines.
+        self.assertTrue(Livraison.objects.filter(pk="LIV-ADMIN-TEST").exists())
+        # Mais la ligne, elle, ne doit pas être enregistrée "à moitié" :
+        # LivraisonLigne.save() est atomique (voir le modèle) — ni la ligne
+        # ni le cumul livré ne doivent survivre à l'échec de résolution du lot.
+        self.assertEqual(LivraisonLigne.objects.count(), 0)
+        self.commande_ligne.refresh_from_db()
+        self.assertEqual(self.commande_ligne.quantite_livree, 0)

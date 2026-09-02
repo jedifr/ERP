@@ -16,7 +16,18 @@ from .builder_views import (
     recalculer_ligne_view,
     valeurs_defaut_tiers_view,
 )
-from .models import Commande, Devis, DevisLigne, DevisLigneOperation, OperationOF, OrdreFabrication
+from .models import (
+    Commande,
+    CommandeLigne,
+    Devis,
+    DevisLigne,
+    DevisLigneOperation,
+    Livraison,
+    LivraisonError,
+    LivraisonLigne,
+    OperationOF,
+    OrdreFabrication,
+)
 from .moteur import ChiffrageError, calculer_devis
 from .planning_sync import resynchroniser
 from .production import lancer_en_production
@@ -199,6 +210,16 @@ class DevisLigneAdmin(ModelAdmin):
     inlines = [DevisLigneOperationInline]
 
 
+class CommandeLigneInline(TabularInline):
+    model = CommandeLigne
+    extra = 0
+    can_delete = False
+    readonly_fields = ["article", "quantite_commandee", "quantite_livree", "reliquat", "entierement_livree"]
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+
 @admin.register(Commande)
 class CommandeAdmin(CodificationInitialeMixin, ModelAdmin):
     codification_entite = RegleCodification.Entite.COMMANDE
@@ -206,6 +227,52 @@ class CommandeAdmin(CodificationInitialeMixin, ModelAdmin):
     list_display = ["numero", "devis", "date_commande", "statut"]
     search_fields = ["numero", "devis__numero"]
     autocomplete_fields = ["devis", "adresse_facturation", "adresse_livraison"]
+    inlines = [CommandeLigneInline]
+
+
+@admin.register(CommandeLigne)
+class CommandeLigneAdmin(ModelAdmin):
+    list_display = [
+        "commande",
+        "article",
+        "quantite_commandee",
+        "quantite_livree",
+        "reliquat",
+        "entierement_livree",
+    ]
+    list_filter = ["commande"]
+    search_fields = ["commande__numero", "article__reference"]
+    autocomplete_fields = ["commande", "article"]
+    readonly_fields = ["quantite_livree"]
+
+
+class LivraisonLigneInline(TabularInline):
+    model = LivraisonLigne
+    extra = 1
+    autocomplete_fields = ["commande_ligne"]
+
+
+@admin.register(Livraison)
+class LivraisonAdmin(CodificationInitialeMixin, ModelAdmin):
+    codification_entite = RegleCodification.Entite.LIVRAISON
+
+    list_display = ["numero", "commande", "date_livraison"]
+    search_fields = ["numero", "commande__numero"]
+    autocomplete_fields = ["commande"]
+    inlines = [LivraisonLigneInline]
+
+    def save_formset(self, request, form, formset, change):
+        try:
+            super().save_formset(request, form, formset, change)
+        except LivraisonError as exc:
+            self.message_user(request, str(exc), level=messages.ERROR)
+
+
+@admin.register(LivraisonLigne)
+class LivraisonLigneAdmin(ModelAdmin):
+    list_display = ["livraison", "commande_ligne", "quantite_livree"]
+    search_fields = ["livraison__numero", "commande_ligne__article__reference"]
+    autocomplete_fields = ["livraison", "commande_ligne"]
 
 
 class OperationOFInline(TabularInline):
