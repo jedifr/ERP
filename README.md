@@ -847,3 +847,51 @@ Vérifié de bout en bout (Playwright) : devis validé → `lancer_en_production
 crée une commande avec sa ligne (quantité commandée 10, livrée 0, reliquat
 10) → une première livraison de 6 unités laisse un reliquat de 4, visible
 immédiatement sur la fiche Commande.
+
+## Correctif : étape de gamme créée dans le constructeur, prix des opérations à 0
+
+Signalé avec capture : un article fabriqué ("toto123") créé via le
+constructeur, avec une étape de gamme correctement renseignée (poste
+LASER, 10 min fixe + 1 min variable), affichait pourtant "Prix vente
+opérations (HT)" à 0,00 et aucun poste listé dans la colonne "Opérations"
+du tableau "Lignes existantes" — sans aucune erreur, contrairement aux
+autres lignes du même devis qui, elles, affichaient un prix correct.
+
+En cause : `addGammeRow()` (`chiffrage/static/chiffrage/devis_builder.js`)
+pré-remplissait la "Date de début" d'une nouvelle étape avec **la date du
+jour** (`new Date().toISOString()`), sans lien avec la date de création du
+devis en cours. Or `gamme_active()` (`chiffrage/moteur.py`) ne retient que
+les étapes dont `date_debut <= devis.date_creation` — une étape datée
+d'aujourd'hui sur un devis créé à une date antérieure (le cas courant : la
+plupart des devis ne sont pas construits le jour même de leur création)
+est donc **silencieusement exclue** du calcul, sans lever d'erreur (une
+gamme vide de résultats n'est pas une gamme invalide). Reproduit et
+confirmé localement : `gamme_active(article, devis.date_creation)` renvoie
+0 étape dès que `Gamme.date_debut` est postérieure à `Devis.date_creation`.
+
+Corrigé en exposant `devis.date_creation` au JS (`devis-builder-data`,
+`chiffrage/templates/chiffrage/devis_builder.html`) et en l'utilisant
+comme valeur par défaut de la nouvelle étape, à la place de la date du
+jour. Un test dédié documente explicitement ce mécanisme côté serveur
+(`test_etape_datee_apres_le_devis_est_silencieusement_ignoree`), pour
+qu'un futur changement de `gamme_active()` ne puisse pas faire revivre ce
+piège sans le remarquer.
+
+**Pour la ligne déjà créée en production** (l'étape de gamme existante de
+"toto123" reste datée après `date_creation` du devis) : il faut corriger
+sa date de début manuellement — soit depuis la fiche Article (via le
+nouveau lien "Voir la fiche de cet article", section suivante), soit
+directement dans Techniques → Gammes.
+
+## Ouvrir la fiche d'un article directement depuis le constructeur
+
+Ajouté deux liens, pour ne plus avoir à chercher l'article dans le menu
+"Articles" :
+- dans le tableau "Lignes existantes", chaque référence d'article est
+  désormais un lien vers sa fiche (`admin:technique_article_change`),
+  ouvert dans un nouvel onglet (`target="_blank"`) pour ne pas perdre sa
+  place dans le constructeur ;
+- dans le panneau "Ajouter une ligne", en mode "Article existant", un lien
+  "Voir la fiche de cet article ↗" apparaît dès qu'un article est
+  sélectionné dans la recherche (masqué à nouveau si la recherche est
+  modifiée).

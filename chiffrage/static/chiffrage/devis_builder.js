@@ -7,7 +7,9 @@
         ? document.querySelector("[name=csrfmiddlewaretoken]").value
         : "";
     const dataEl = document.getElementById("devis-builder-data");
-    const DEVIS_NUMERO = dataEl ? JSON.parse(dataEl.textContent).numero : null;
+    const devisBuilderData = dataEl ? JSON.parse(dataEl.textContent) : {};
+    const DEVIS_NUMERO = devisBuilderData.numero || null;
+    const DEVIS_DATE_CREATION = devisBuilderData.date_creation || null;
 
     const matiereCache = {};
 
@@ -102,12 +104,22 @@
     // ---- Typeahead article existant ----
     const articleExistantSearch = document.getElementById("article-existant-search");
     if (articleExistantSearch) {
+        const voirArticleLink = document.getElementById("article-existant-voir");
         wireTypeahead(
             articleExistantSearch,
             document.getElementById("article-existant-results"),
             document.getElementById("article-existant-reference"),
-            () => {}
+            (article) => {
+                if (voirArticleLink) {
+                    voirArticleLink.href = `/admin/technique/article/${encodeURIComponent(article.reference)}/change/`;
+                    voirArticleLink.classList.remove("hidden");
+                }
+            }
         );
+        // Retape dans la recherche = plus d'article sélectionné : cacher le lien.
+        articleExistantSearch.addEventListener("input", () => {
+            if (voirArticleLink) voirArticleLink.classList.add("hidden");
+        });
     }
 
     // ---- Nomenclature rows ----
@@ -242,8 +254,14 @@
         const ordreInput = row.querySelector(".input-ordre");
         ordreInput.value = gammeRowsEl.children.length;
 
+        // Par défaut la date de début de l'étape, c'est la date de création
+        // du DEVIS — pas la date du jour : la validité d'une étape de gamme
+        // est vérifiée par rapport à devis.date_creation (gamme_active(),
+        // chiffrage/moteur.py), donc une étape datée d'aujourd'hui sur un
+        // devis créé à une date antérieure serait silencieusement exclue du
+        // calcul (aucune erreur, juste un prix d'opérations à 0).
         const dateDebut = row.querySelector(".input-date-debut");
-        dateDebut.value = new Date().toISOString().slice(0, 10);
+        dateDebut.value = DEVIS_DATE_CREATION || new Date().toISOString().slice(0, 10);
 
         const selectPoste = row.querySelector(".select-poste");
         const champsHoraire = row.querySelector(".champs-horaire");

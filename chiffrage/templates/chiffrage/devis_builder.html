@@ -39,7 +39,10 @@
         <tbody id="lignes-existantes">
             {% for ligne in lignes %}
             <tr class="border-b border-base-100 dark:border-base-800">
-                <td class="py-1 pr-4">{{ ligne.article }}</td>
+                <td class="py-1 pr-4">
+                    <a href="{% url 'admin:technique_article_change' ligne.article.pk %}" target="_blank"
+                       class="text-primary-600 dark:text-primary-500 underline">{{ ligne.article }}</a>
+                </td>
                 <td class="py-1 pr-4">{{ ligne.quantite }}</td>
                 <td class="py-1 pr-4">{{ ligne.cout_matiere_calcule|default:"—" }}</td>
                 <td class="py-1 pr-4">{{ ligne.prix_vente_matiere|default:"—" }}</td>
@@ -106,6 +109,9 @@
             <ul id="article-existant-results" class="hidden absolute z-20 bg-white dark:bg-base-800 border border-base-200 dark:border-base-700 rounded-default mt-1 w-full max-h-56 overflow-auto shadow-lg"></ul>
         </div>
         <input type="hidden" id="article-existant-reference">
+        <a id="article-existant-voir" href="#" target="_blank" class="hidden text-primary-600 dark:text-primary-500 underline text-sm mt-1 inline-block">
+            Voir la fiche de cet article ↗
+        </a>
     </div>
 
     <!-- Bloc nouvel article -->
@@ -221,6 +227,6 @@
 </template>
 
 {% csrf_token %}
-<script id="devis-builder-data" type="application/json">{"numero": "{{ devis.numero|escapejs }}"}</script>
+<script id="devis-builder-data" type="application/json">{"numero": "{{ devis.numero|escapejs }}", "date_creation": "{{ devis.date_creation|date:'Y-m-d' }}"}</script>
 <script src="{% static 'chiffrage/devis_builder.js' %}"></script>
 {% endblock %}

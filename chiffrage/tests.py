@@ -690,6 +690,17 @@ class DevisBuilderViewTests(TestCase):
         # Les temps de gamme (temps_fixe/temps_variable) s'expriment en minutes.
         self.assertContains(response, "Temps fixe (min)")
         self.assertContains(response, "Temps variable (min/pièce)")
+        # date_creation du devis exposée au JS (voir devis_builder.js :
+        # les nouvelles étapes de gamme doivent par défaut être datées de
+        # la date de création du devis, pas du jour — régression :
+        # une étape datée d'aujourd'hui sur un devis créé à une date
+        # antérieure était silencieusement exclue du calcul des opérations).
+        self.assertContains(response, '"date_creation": "2026-01-01"')
+
+    def test_lien_vers_la_fiche_article_sur_chaque_ligne(self):
+        ligne = DevisLigne.objects.create(devis=self.devis, article=self.composant, quantite=1)
+        response = self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/constructeur/")
+        self.assertContains(response, f"/admin/technique/article/{ligne.article.pk}/change/")
 
     def test_post_nouvel_article_cree_tout(self):
         payload = {
@@ -720,6 +731,34 @@ class DevisBuilderViewTests(TestCase):
         self.assertAlmostEqual(data["prix_vente_operations"], 150)
         self.assertAlmostEqual(data["prix_vente_total"], 153.3, places=3)
         self.assertAlmostEqual(data["montant_total_ht"], 153.3, places=3)
+
+    def test_etape_datee_apres_le_devis_est_silencieusement_ignoree(self):
+        # Documente le mécanisme derrière la régression signalée par
+        # l'utilisateur : une étape de gamme dont la date de début est
+        # POSTÉRIEURE à devis.date_creation (2026-01-01 ici) n'est pas
+        # active pour ce devis (gamme_active(), chiffrage/moteur.py) — le
+        # prix des opérations retombe à 0 sans aucune erreur. C'est
+        # exactement ce que produisait l'ancien défaut JS (date du jour)
+        # sur un devis créé à une date antérieure — voir devis_builder.js,
+        # addGammeRow(), qui utilise désormais devis.date_creation par défaut.
+        payload = {
+            "quantite": 3,
+            "nouvel_article": {
+                "reference": "PIECE-VIEW-DATE-POSTERIEURE",
+                "composants": [{"article_composant": "VIS-VIEW", "quantite": 5}],
+                "etapes": [
+                    {"poste": "Poste-View", "ordre": 1, "cout_forfaitaire": 50, "date_debut": "2026-06-01"}
+                ],
+            },
+        }
+        response = self.client.post(
+            f"/admin/chiffrage/devis/{self.devis.pk}/constructeur/",
+            data=payload,
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        data = response.json()
+        self.assertEqual(data["prix_vente_operations"], 0)
 
     def test_post_article_existant(self):
         article = Article.objects.create(
