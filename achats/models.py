@@ -2,6 +2,7 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 
+from chiffrage.models import CommandeLigne
 from commercial.models import Tiers
 from stock.models import AlerteStock, Lot, MouvementStock
 from technique.models import Article
@@ -48,6 +49,20 @@ class LigneCommandeFournisseur(models.Model):
         related_name="lignes_commande_fournisseur",
         help_text="Nullable — clôture l'alerte à la commande",
     )
+    commande_ligne_client = models.ForeignKey(
+        CommandeLigne,
+        verbose_name="ligne de commande client",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="approvisionnements",
+        help_text=(
+            "Commande client que cet achat sert à approvisionner (facultatif). "
+            "Plusieurs lignes de commande fournisseur peuvent pointer vers la "
+            "même ligne de commande client (réappro en plusieurs fois, ou "
+            "auprès de plusieurs fournisseurs)."
+        ),
+    )
     quantite_commandee = models.FloatField("quantité commandée")
     prix_unitaire_achat = models.FloatField("prix unitaire d'achat")
     quantite_recue = models.FloatField(
@@ -64,6 +79,14 @@ class LigneCommandeFournisseur(models.Model):
 
     def save(self, *args, **kwargs):
         creation = self.pk is None
+        if creation and self.commande_ligne_client_id and not self.alerte_stock_origine_id:
+            # Rattacher cette ligne à une commande client montre qu'elle
+            # répond à un besoin identifié : si une alerte de stock active
+            # existe déjà pour le même article, on la clôture avec cette
+            # ligne au lieu d'attendre une sélection manuelle.
+            self.alerte_stock_origine = AlerteStock.objects.filter(
+                article=self.article, statut=AlerteStock.Statut.ACTIVE
+            ).first()
         super().save(*args, **kwargs)
         if creation and self.alerte_stock_origine_id and self.alerte_stock_origine.statut == AlerteStock.Statut.ACTIVE:
             alerte = self.alerte_stock_origine

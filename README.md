@@ -1012,3 +1012,37 @@ base, il n'y avait donc rien à afficher.
   applique cette même synchronisation à toutes les commandes existantes
   au `migrate` — corrige automatiquement les commandes déjà en production
   sans action manuelle (dont celle remontée dans le rapport).
+
+## Rattacher une commande fournisseur à une ligne de commande client
+
+`achats.LigneCommandeFournisseur.commande_ligne_client` (FK optionnelle
+vers `chiffrage.CommandeLigne`) trace l'achat qui sert à approvisionner une
+ligne de commande client précise — plusieurs lignes d'achat (réappro en
+plusieurs fois, ou fournisseurs différents) peuvent pointer vers la même
+ligne de commande client. Choisi côté ligne (pas en-tête de commande
+fournisseur) pour permettre le mélange, sur une même commande fournisseur,
+d'achats destinés à des clients différents.
+
+Trois effets, une fois le rattachement fait :
+- **`CommandeLigne.date_livraison_possible`** (propriété, jamais stockée) :
+  la plus tardive des `date_livraison_prevue` des commandes fournisseur
+  rattachées — la ligne client n'est complète que quand tout est arrivé.
+  Toujours recalculée en direct, donc jamais périmée. À la différence de
+  `date_livraison_prevue` (l'engagement pris auprès du client, saisi à la
+  main) : celle-ci n'est **jamais** réécrite automatiquement, même quand un
+  achat est rattaché — les deux dates coexistent volontairement, l'une
+  reflète ce qu'on a promis, l'autre ce que l'appro permet réellement.
+  (Affichée via un petit formatage dédié, `date_livraison_possible_display`
+  dans `chiffrage/admin.py` : Unfold ne localise en `jj/mm/aaaa` que les
+  vrais champs de modèle — une propriété readonly comme celle-ci serait
+  sinon affichée en ISO, `str(date)` brut.)
+- **`CommandeLigne.statut_approvisionnement`** (propriété) : résumé
+  lisible de l'avancement des achats rattachés — ex. "Aciers du Nord —
+  reçu 8/20". Purement informatif, ne touche jamais `quantite_livree`
+  (livraison au client, pilotée indépendamment par `Livraison`).
+- **Clôture automatique d'alerte de stock** : à la création d'une ligne de
+  commande fournisseur avec `commande_ligne_client` renseigné (et sans
+  `alerte_stock_origine` choisie à la main), une alerte de stock active
+  pour le même article est recherchée et clôturée automatiquement — réutilise
+  le mécanisme déjà existant (`alerte_stock_origine`), simplement déclenché
+  par ce nouveau rattachement plutôt que par une sélection manuelle.

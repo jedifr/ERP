@@ -342,6 +342,43 @@ class CommandeLigne(models.Model):
 
     montant_ttc.fget.short_description = "Montant TTC"
 
+    @property
+    def date_livraison_possible(self):
+        """Date de livraison réaliste selon l'approvisionnement en cours,
+        calculée en direct depuis les lignes de commande fournisseur
+        rattachées (achats.LigneCommandeFournisseur.commande_ligne_client) —
+        jamais stockée, donc toujours à jour, contrairement à
+        date_livraison_prevue (engagement client, saisi à la main, jamais
+        réécrit automatiquement par l'approvisionnement). Le plus tardif des
+        fournisseurs rattachés : la ligne n'est complète que quand tout est
+        arrivé. None si aucun achat n'est rattaché, ou si aucun n'a de date
+        de livraison prévue renseignée."""
+        dates = [
+            ligne.commande_fournisseur.date_livraison_prevue
+            for ligne in self.approvisionnements.select_related("commande_fournisseur").all()
+            if ligne.commande_fournisseur.date_livraison_prevue
+        ]
+        return max(dates) if dates else None
+
+    date_livraison_possible.fget.short_description = "Date de livraison possible (appro)"
+
+    @property
+    def statut_approvisionnement(self):
+        """Résumé lisible de l'avancement des achats rattachés — purement
+        informatif, ne touche jamais quantite_livree (livraison au client,
+        pilotée par Livraison/LivraisonLigne, indépendante de l'achat)."""
+        lignes = list(self.approvisionnements.select_related("commande_fournisseur__fournisseur").all())
+        if not lignes:
+            return None
+        commande = sum(ligne.quantite_commandee for ligne in lignes)
+        recu = sum(ligne.quantite_recue for ligne in lignes)
+        fournisseurs = ", ".join(
+            sorted({ligne.commande_fournisseur.fournisseur.raison_sociale for ligne in lignes})
+        )
+        return f"{fournisseurs} — reçu {recu:g}/{commande:g}"
+
+    statut_approvisionnement.fget.short_description = "Statut d'approvisionnement"
+
 
 class Livraison(models.Model):
     numero = models.CharField("numéro", max_length=50, primary_key=True)

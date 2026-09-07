@@ -3,7 +3,8 @@ import datetime
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 
-from commercial.models import Tiers
+from chiffrage.models import Commande, CommandeLigne, Devis
+from commercial.models import Adresse, Tiers
 from stock.models import AlerteStock, Emplacement, Lot, MouvementStock
 from technique.models import Article
 
@@ -95,3 +96,158 @@ class AlerteStockClotureTests(TestCase):
         alerte.refresh_from_db()
         self.assertEqual(alerte.statut, AlerteStock.Statut.TRAITEE)
         self.assertIsNotNone(alerte.date_traitement)
+
+
+class CommandeLigneClientTests(TestCase):
+    """Rattachement d'une ligne de commande fournisseur à une ligne de
+    commande client (traçabilité de l'approvisionnement) : clôture
+    automatique d'une alerte de stock active pour le même article, sans
+    sélection manuelle de alerte_stock_origine."""
+
+    def setUp(self):
+        self.fournisseur = Tiers.objects.create(
+            code="FOUR-CLI", raison_sociale="Fournisseur Client", type_tiers=Tiers.TypeTiers.FOURNISSEUR
+        )
+        self.client_tiers = Tiers.objects.create(code="CLI-APPRO", raison_sociale="Client Appro")
+        self.adresse = Adresse.objects.create(
+            tiers=self.client_tiers, type_adresse=Adresse.TypeAdresse.FACTURATION,
+            adresse="1 rue A", code_postal="75000", ville="Paris",
+        )
+        self.article = Article.objects.create(reference="TOLE-APPRO", nature=Article.Nature.MATIERE_PREMIERE)
+        devis = Devis.objects.create(
+            numero="DEV-APPRO", client=self.client_tiers, date_creation=datetime.date(2026, 1, 1),
+        )
+        self.commande_client = Commande.objects.create(
+            numero="CDE-APPRO", devis=devis, date_commande=datetime.date(2026, 1, 1),
+            adresse_facturation=self.adresse, adresse_livraison=self.adresse,
+        )
+        self.ligne_client = CommandeLigne.objects.create(
+            commande=self.commande_client, article=self.article, quantite_commandee=20
+        )
+        self.commande_fournisseur = CommandeFournisseur.objects.create(
+            numero="CF-APPRO", fournisseur=self.fournisseur, date_commande=datetime.date(2026, 1, 1),
+            date_livraison_prevue=datetime.date(2026, 2, 1),
+        )
+
+    def test_rattachement_cloture_alerte_active_sans_selection_manuelle(self):
+        alerte = AlerteStock.objects.create(article=self.article, date_declenchement=datetime.date(2026, 1, 1))
+        LigneCommandeFournisseur.objects.create(
+            commande_fournisseur=self.commande_fournisseur,
+            article=self.article,
+            commande_ligne_client=self.ligne_client,
+            quantite_commandee=20,
+            prix_unitaire_achat=3.0,
+        )
+        alerte.refresh_from_db()
+        self.assertEqual(alerte.statut, AlerteStock.Statut.TRAITEE)
+
+    def test_alerte_deja_traitee_non_reprise(self):
+        alerte_traitee = AlerteStock.objects.create(
+            article=self.article, date_declenchement=datetime.date(2026, 1, 1),
+            statut=AlerteStock.Statut.TRAITEE, date_traitement=datetime.date(2026, 1, 2),
+        )
+        ligne = LigneCommandeFournisseur.objects.create(
+            commande_fournisseur=self.commande_fournisseur,
+            article=self.article,
+            commande_ligne_client=self.ligne_client,
+            quantite_commandee=20,
+            prix_unitaire_achat=3.0,
+        )
+        # Une alerte déjà traitée n'est jamais reprise comme alerte_stock_origine.
+        self.assertIsNone(ligne.alerte_stock_origine)
+        self.assertNotEqual(ligne.alerte_stock_origine_id, alerte_traitee.pk)
+
+    def test_selection_manuelle_respectee_sans_ecrasement(self):
+        autre_alerte = AlerteStock.objects.create(
+            article=self.article, date_declenchement=datetime.date(2026, 1, 1)
+        )
+        ligne = LigneCommandeFournisseur.objects.create(
+            commande_fournisseur=self.commande_fournisseur,
+            article=self.article,
+            commande_ligne_client=self.ligne_client,
+            alerte_stock_origine=autre_alerte,
+            quantite_commandee=20,
+            prix_unitaire_achat=3.0,
+        )
+        self.assertEqual(ligne.alerte_stock_origine, autre_alerte)
+
+    def test_date_livraison_possible_reprend_la_date_fournisseur(self):
+        self.assertIsNone(self.ligne_client.date_livraison_possible)
+        LigneCommandeFournisseur.objects.create(
+            commande_fournisseur=self.commande_fournisseur,
+            article=self.article,
+            commande_ligne_client=self.ligne_client,
+            quantite_commandee=20,
+            prix_unitaire_achat=3.0,
+        )
+        self.assertEqual(self.ligne_client.date_livraison_possible, datetime.date(2026, 2, 1))
+
+    def test_date_livraison_possible_prend_la_plus_tardive(self):
+        LigneCommandeFournisseur.objects.create(
+            commande_fournisseur=self.commande_fournisseur,
+            article=self.article,
+            commande_ligne_client=self.ligne_client,
+            quantite_commandee=10,
+            prix_unitaire_achat=3.0,
+        )
+        commande_fournisseur_2 = CommandeFournisseur.objects.create(
+            numero="CF-APPRO-2", fournisseur=self.fournisseur, date_commande=datetime.date(2026, 1, 1),
+            date_livraison_prevue=datetime.date(2026, 3, 15),
+        )
+        LigneCommandeFournisseur.objects.create(
+            commande_fournisseur=commande_fournisseur_2,
+            article=self.article,
+            commande_ligne_client=self.ligne_client,
+            quantite_commandee=10,
+            prix_unitaire_achat=3.0,
+        )
+        self.assertEqual(self.ligne_client.date_livraison_possible, datetime.date(2026, 3, 15))
+
+    def test_date_livraison_prevue_client_jamais_ecrasee(self):
+        self.ligne_client.date_livraison_prevue = datetime.date(2026, 1, 20)
+        self.ligne_client.save()
+        LigneCommandeFournisseur.objects.create(
+            commande_fournisseur=self.commande_fournisseur,
+            article=self.article,
+            commande_ligne_client=self.ligne_client,
+            quantite_commandee=20,
+            prix_unitaire_achat=3.0,
+        )
+        self.ligne_client.refresh_from_db()
+        self.assertEqual(self.ligne_client.date_livraison_prevue, datetime.date(2026, 1, 20))
+
+    def test_statut_approvisionnement(self):
+        self.assertIsNone(self.ligne_client.statut_approvisionnement)
+        ligne_achat = LigneCommandeFournisseur.objects.create(
+            commande_fournisseur=self.commande_fournisseur,
+            article=self.article,
+            commande_ligne_client=self.ligne_client,
+            quantite_commandee=20,
+            prix_unitaire_achat=3.0,
+        )
+        LigneCommandeFournisseur.objects.filter(pk=ligne_achat.pk).update(quantite_recue=8)
+        statut = self.ligne_client.statut_approvisionnement
+        self.assertIn("Fournisseur Client", statut)
+        self.assertIn("8/20", statut)
+
+    def test_date_livraison_possible_affichee_au_format_francais_dans_admin(self):
+        # Une propriété (pas un vrai champ de modèle) affichée en readonly
+        # dans l'admin Unfold passe par str(date) et non par le format
+        # localisé — sans le wrapper *_display, elle apparaît en ISO
+        # (aaaa-mm-jj) au lieu du format utilisé partout ailleurs (jj/mm/aaaa).
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        user = User.objects.create_superuser("appro-admin", "a@example.com", "pass1234")
+        self.client.force_login(user)
+
+        LigneCommandeFournisseur.objects.create(
+            commande_fournisseur=self.commande_fournisseur,
+            article=self.article,
+            commande_ligne_client=self.ligne_client,
+            quantite_commandee=20,
+            prix_unitaire_achat=3.0,
+        )
+        response = self.client.get(f"/admin/chiffrage/commande/{self.commande_client.pk}/change/")
+        self.assertContains(response, "01/02/2026")
+        self.assertNotContains(response, "2026-02-01")

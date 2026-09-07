@@ -233,6 +233,16 @@ def taux_tva_display(obj):
     return f"{obj.taux_tva.taux:g}%"
 
 
+def date_livraison_possible_display(obj):
+    # Unfold n'applique le format localisé (jj/mm/aaaa) qu'aux vrais champs
+    # de modèle : une propriété readonly comme date_livraison_possible passe
+    # par str(date) (linebreaksbr), donc en ISO (aaaa-mm-jj) sans ce
+    # contournement — on formate nous-mêmes pour rester cohérent avec les
+    # autres dates affichées sur l'écran.
+    date = obj.date_livraison_possible
+    return date.strftime("%d/%m/%Y") if date else "—"
+
+
 class CommandeLigneInline(TabularInline):
     model = CommandeLigne
     extra = 0
@@ -245,6 +255,8 @@ class CommandeLigneInline(TabularInline):
         "montant_ht",
         "montant_ttc",
         "date_livraison_prevue",
+        "date_livraison_possible_display",
+        "statut_approvisionnement",
         "quantite_livree",
         "reliquat",
         "entierement_livree",
@@ -256,6 +268,8 @@ class CommandeLigneInline(TabularInline):
         "taux_tva_display",
         "montant_ht",
         "montant_ttc",
+        "date_livraison_possible_display",
+        "statut_approvisionnement",
         "quantite_livree",
         "reliquat",
         "entierement_livree",
@@ -264,6 +278,10 @@ class CommandeLigneInline(TabularInline):
     @admin.display(description="Taux de TVA")
     def taux_tva_display(self, obj):
         return taux_tva_display(obj)
+
+    @admin.display(description="Date de livraison possible (appro)")
+    def date_livraison_possible_display(self, obj):
+        return date_livraison_possible_display(obj)
 
     def has_add_permission(self, request, obj=None):
         return False
@@ -302,6 +320,7 @@ class CommandeLigneAdmin(ModelAdmin):
         "prix_vente_unitaire",
         "taux_tva_display",
         "date_livraison_prevue",
+        "date_livraison_possible_display",
         "quantite_livree",
         "reliquat",
         "entierement_livree",
@@ -316,11 +335,17 @@ class CommandeLigneAdmin(ModelAdmin):
         "taux_tva_display",
         "montant_ht",
         "montant_ttc",
+        "date_livraison_possible_display",
+        "statut_approvisionnement",
     ]
 
     @admin.display(description="Taux de TVA")
     def taux_tva_display(self, obj):
         return taux_tva_display(obj)
+
+    @admin.display(description="Date de livraison possible (appro)")
+    def date_livraison_possible_display(self, obj):
+        return date_livraison_possible_display(obj)
 
 
 class LivraisonLigneInline(TabularInline):

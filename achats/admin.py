@@ -10,7 +10,7 @@ from .models import AchatsError, CommandeFournisseur, LigneCommandeFournisseur, 
 class LigneCommandeFournisseurInline(TabularInline):
     model = LigneCommandeFournisseur
     extra = 1
-    autocomplete_fields = ["article", "alerte_stock_origine"]
+    autocomplete_fields = ["article", "alerte_stock_origine", "commande_ligne_client"]
     readonly_fields = ["quantite_recue"]
 
 
@@ -33,9 +33,10 @@ class LigneCommandeFournisseurAdmin(ModelAdmin):
         "quantite_commandee",
         "quantite_recue",
         "prix_unitaire_achat",
+        "commande_ligne_client",
     ]
     search_fields = ["commande_fournisseur__numero", "article__reference"]
-    autocomplete_fields = ["commande_fournisseur", "article", "alerte_stock_origine"]
+    autocomplete_fields = ["commande_fournisseur", "article", "alerte_stock_origine", "commande_ligne_client"]
     readonly_fields = ["quantite_recue"]
 
 
