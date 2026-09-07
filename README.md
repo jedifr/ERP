@@ -1064,3 +1064,46 @@ les fiches (`change_view`) : Unfold n'y expose pas
 contexte `cl` existe) — `GLOBAL_CALLBACK` est le seul point d'accroche qui
 couvre aussi bien les fiches que les listes, sans avoir à surcharger un
 template par modèle.
+
+## Lignes de commande modifiables après enregistrement (surcharges + traçabilité)
+
+Quantité, prix de vente unitaire, taux de TVA et désignation restaient
+figés une fois la commande créée. Ils sont maintenant modifiables, avec
+trois garde-fous discutés et validés avant développement :
+
+- **Surcharges, jamais d'écrasement du devis** : `quantite_commandee`,
+  `prix_vente_unitaire` (nouveau champ, avant une propriété qui lisait
+  `devis_ligne`), `taux_tva` (idem, nouvelle FK propre à la commande) et
+  `designation` (nouveau champ) sont pré-remplis depuis le devis à la
+  création (`lancer_en_production`/`synchroniser_lignes_commande`), puis
+  librement modifiables — `devis_ligne` reste un simple pointeur vers la
+  valeur d'origine, jamais touché. `montant_ht`/`montant_ttc` restent des
+  propriétés, mais recalculées depuis les valeurs courantes de la ligne
+  (plus depuis le devis).
+- **Traçabilité complète** (pas seulement le bouton "Historique" générique,
+  qui ne liste que les noms de champs) : `CommandeLigneModification`,
+  peuplé par `CommandeAdmin.save_formset`/`CommandeLigneAdmin.save_model`
+  (il faut `request.user`, indisponible au niveau du modèle) — une ligne
+  par champ suivi réellement modifié (`champ`, `ancienne_valeur`,
+  `nouvelle_valeur`, `utilisateur`, `date_modification`), visible en
+  inline sur la fiche de la ligne de commande. Migration `0011` : backfill
+  de `prix_vente_unitaire`/`taux_tva` sur les lignes déjà existantes
+  (sinon elles se seraient retrouvées vides après la migration de schéma).
+- **Quantité — augmentation** : plutôt que de modifier une ligne dont
+  l'ordre de fabrication est déjà lancé (ses temps machine resteraient
+  basés sur l'ancienne quantité, jamais recalculés), l'admin autorise
+  maintenant l'ajout d'une nouvelle ligne à une commande existante
+  (`CommandeLigneInline` : l'ajout n'était pas permis avant). Un
+  avertissement (pas un blocage — l'inverse reste possible) s'affiche si
+  la quantité d'une ligne existante augmente alors qu'un OF existe déjà
+  pour son article. `production.lancer_ligne_en_production(ligne)` crée
+  l'OF d'une seule ligne (factorisé avec `lancer_en_production` via
+  `_creer_ordre_fabrication`) — exposé comme action d'admin **"Lancer
+  cette ligne en production (OF)"** sur la liste des lignes de commande.
+- **Quantité — diminution** : aucune tentative de clôturer l'OF côté ERP
+  (ses statuts sont alimentés à sens unique depuis le planning atelier,
+  piloter sa clôture depuis l'ERP entrerait en conflit avec cette
+  synchronisation). Diminuer `quantite_commandee` recalcule juste le
+  `reliquat` côté client ; `CommandeLigne.clean()` refuse de descendre
+  en dessous de `quantite_livree` (déjà livré ne peut pas être "délivré"),
+  et refuse de changer l'article d'une ligne déjà partiellement livrée.

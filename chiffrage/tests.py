@@ -12,6 +12,7 @@ from .builder import ajouter_ligne_devis, creer_article_fabrique
 from .models import (
     Commande,
     CommandeLigne,
+    CommandeLigneModification,
     Devis,
     DevisLigne,
     DevisLigneOperation,
@@ -22,7 +23,7 @@ from .models import (
 )
 from .moteur import ChiffrageError, calculer_devis, calculer_ligne, cout_matiere_article, previsualiser_ligne
 from .planning_sync import PlanningSyncError, resynchroniser, tenter_synchronisation
-from .production import lancer_en_production, synchroniser_lignes_commande
+from .production import lancer_en_production, lancer_ligne_en_production, synchroniser_lignes_commande
 
 
 def _creer_composants_nomenclature(parent):
@@ -2269,6 +2270,11 @@ class CommandeLigneInlineAdminTests(TestCase):
             "lignes-MIN_NUM_FORMS": "0",
             "lignes-MAX_NUM_FORMS": "1000",
             "lignes-0-id": self.ligne.pk,
+            "lignes-0-article": self.ligne.article_id,
+            "lignes-0-designation": "",
+            "lignes-0-quantite_commandee": "4",
+            "lignes-0-prix_vente_unitaire": "",
+            "lignes-0-taux_tva": "",
             "lignes-0-date_livraison_prevue": "15/02/2026",
             "_save": "Enregistrer",
         }
@@ -2316,3 +2322,287 @@ class ActionSynchroniserLignesAdminTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.commande.lignes.count(), 1)
         self.assertContains(response, "1 ligne(s) de commande recréée(s)")
+
+
+class SurchargesCommandeLigneTests(TestCase):
+    """CommandeLigne.quantite_commandee/prix_vente_unitaire/taux_tva/
+    designation sont des surcharges (valeur de départ = devis, modifiable
+    ensuite sans jamais toucher le devis) — voir CommandeLigne.clean() pour
+    les garde-fous et montant_ht/montant_ttc pour le recalcul."""
+
+    def setUp(self):
+        client_tiers = Tiers.objects.create(code="CLI-SURCH", raison_sociale="Client Surcharge")
+        adresse = Adresse.objects.create(
+            tiers=client_tiers, type_adresse=Adresse.TypeAdresse.FACTURATION,
+            adresse="1 rue A", code_postal="75000", ville="Paris",
+        )
+        self.article = Article.objects.create(reference="ART-SURCH", nature=Article.Nature.MATIERE_PREMIERE)
+        devis = Devis.objects.create(
+            numero="DEV-SURCH", client=client_tiers, date_creation=datetime.date(2026, 1, 1),
+        )
+        self.commande = Commande.objects.create(
+            numero="CDE-SURCH", devis=devis, date_commande=datetime.date(2026, 1, 1),
+            adresse_facturation=adresse, adresse_livraison=adresse,
+        )
+        self.taux = TauxTVA.objects.create(nom="Taux Surch", taux=10)
+        self.ligne = CommandeLigne.objects.create(
+            commande=self.commande, article=self.article, quantite_commandee=10,
+            prix_vente_unitaire=5.0, taux_tva=self.taux,
+        )
+
+    def test_quantite_inferieure_a_livree_refusee(self):
+        CommandeLigne.objects.filter(pk=self.ligne.pk).update(quantite_livree=6)
+        self.ligne.refresh_from_db()
+        self.ligne.quantite_commandee = 5
+        with self.assertRaises(ValidationError):
+            self.ligne.full_clean()
+
+    def test_quantite_egale_a_livree_acceptee(self):
+        CommandeLigne.objects.filter(pk=self.ligne.pk).update(quantite_livree=6)
+        self.ligne.refresh_from_db()
+        self.ligne.quantite_commandee = 6
+        self.ligne.full_clean()  # ne lève pas
+
+    def test_changer_article_ligne_livree_refuse(self):
+        autre_article = Article.objects.create(reference="ART-SURCH-2", nature=Article.Nature.MATIERE_PREMIERE)
+        CommandeLigne.objects.filter(pk=self.ligne.pk).update(quantite_livree=3)
+        self.ligne.refresh_from_db()
+        self.ligne.article = autre_article
+        with self.assertRaises(ValidationError):
+            self.ligne.full_clean()
+
+    def test_changer_article_ligne_non_livree_accepte(self):
+        autre_article = Article.objects.create(reference="ART-SURCH-3", nature=Article.Nature.MATIERE_PREMIERE)
+        self.ligne.article = autre_article
+        self.ligne.full_clean()  # ne lève pas, rien n'a encore été livré
+
+    def test_montant_recalcule_depuis_les_valeurs_de_la_ligne(self):
+        self.assertEqual(self.ligne.montant_ht, 50.0)
+        self.assertAlmostEqual(self.ligne.montant_ttc, 55.0)
+
+        self.ligne.prix_vente_unitaire = 8.0
+        self.ligne.save()
+        self.assertEqual(self.ligne.montant_ht, 80.0)
+        self.assertAlmostEqual(self.ligne.montant_ttc, 88.0)
+
+    def test_montant_none_sans_prix(self):
+        ligne_sans_prix = CommandeLigne.objects.create(
+            commande=self.commande, article=self.article, quantite_commandee=3
+        )
+        self.assertIsNone(ligne_sans_prix.montant_ht)
+        self.assertIsNone(ligne_sans_prix.montant_ttc)
+
+
+class LancerLigneEnProductionTests(TestCase):
+    """production.lancer_ligne_en_production : crée l'OF d'UNE ligne de
+    commande précise (ex. ligne ajoutée après coup pour représenter une
+    augmentation de quantité) sans repasser par tout le devis."""
+
+    def setUp(self):
+        client_tiers = Tiers.objects.create(code="CLI-SOLO", raison_sociale="Client Solo")
+        adresse = Adresse.objects.create(
+            tiers=client_tiers, type_adresse=Adresse.TypeAdresse.FACTURATION,
+            adresse="1 rue A", code_postal="75000", ville="Paris",
+        )
+        self.article_fabrique = Article.objects.create(reference="PIECE-SOLO", nature=Article.Nature.FABRIQUE)
+        self.poste = PosteTravail.objects.create(nom="Poste-Solo", mode_calcul=PosteTravail.ModeCalcul.HORAIRE)
+        TarifPoste.objects.create(poste=self.poste, cout_horaire=30, date_debut=datetime.date(2020, 1, 1))
+        Gamme.objects.create(
+            article=self.article_fabrique, poste=self.poste, ordre=1,
+            temps_fixe=10, temps_variable=1, date_debut=datetime.date(2020, 1, 1),
+        )
+        self.article_mp = Article.objects.create(reference="MP-SOLO", nature=Article.Nature.MATIERE_PREMIERE)
+        devis = Devis.objects.create(
+            numero="DEV-SOLO", client=client_tiers, date_creation=datetime.date(2026, 1, 1),
+        )
+        self.commande = Commande.objects.create(
+            numero="CDE-SOLO", devis=devis, date_commande=datetime.date(2026, 1, 1),
+            adresse_facturation=adresse, adresse_livraison=adresse,
+        )
+
+    def test_cree_of_pour_ligne_ajoutee_apres_coup(self):
+        ligne = CommandeLigne.objects.create(
+            commande=self.commande, article=self.article_fabrique, quantite_commandee=5,
+        )
+        of = lancer_ligne_en_production(ligne)
+        self.assertEqual(of.article, self.article_fabrique)
+        self.assertEqual(of.quantite, 5)
+        operation = of.operations.get(ordre=1)
+        # (10 + 1*5) = 15
+        self.assertAlmostEqual(operation.temps_prevu, 15)
+
+    def test_refuse_si_article_pas_fabrique(self):
+        ligne = CommandeLigne.objects.create(
+            commande=self.commande, article=self.article_mp, quantite_commandee=5,
+        )
+        with self.assertRaises(ChiffrageError):
+            lancer_ligne_en_production(ligne)
+
+    def test_refuse_si_of_deja_existant_pour_cet_article(self):
+        ligne = CommandeLigne.objects.create(
+            commande=self.commande, article=self.article_fabrique, quantite_commandee=5,
+        )
+        lancer_ligne_en_production(ligne)
+        ligne_supplementaire = CommandeLigne.objects.create(
+            commande=self.commande, article=self.article_fabrique, quantite_commandee=2,
+        )
+        with self.assertRaises(ChiffrageError):
+            lancer_ligne_en_production(ligne_supplementaire)
+
+
+class CommandeLigneAuditAdminTests(TestCase):
+    """Traçabilité des surcharges (CommandeLigneModification) et
+    avertissement si la quantité augmente alors qu'un OF existe déjà —
+    posés par CommandeAdmin.save_formset / CommandeLigneAdmin.save_model,
+    qui ont accès à request.user (impossible au niveau du modèle)."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        self.user = User.objects.create_superuser("audit-admin", "au@example.com", "pass1234")
+        self.client.force_login(self.user)
+
+        client_tiers = Tiers.objects.create(code="CLI-AUDIT", raison_sociale="Client Audit")
+        self.adresse = Adresse.objects.create(
+            tiers=client_tiers, type_adresse=Adresse.TypeAdresse.FACTURATION,
+            adresse="1 rue A", code_postal="75000", ville="Paris",
+        )
+        self.article = Article.objects.create(reference="ART-AUDIT", nature=Article.Nature.MATIERE_PREMIERE)
+        self.article_fabrique = Article.objects.create(reference="ART-AUDIT-OF", nature=Article.Nature.FABRIQUE)
+        self.poste = PosteTravail.objects.create(nom="Poste-Audit", mode_calcul=PosteTravail.ModeCalcul.HORAIRE)
+        TarifPoste.objects.create(poste=self.poste, cout_horaire=20, date_debut=datetime.date(2020, 1, 1))
+        Gamme.objects.create(
+            article=self.article_fabrique, poste=self.poste, ordre=1,
+            temps_fixe=5, temps_variable=1, date_debut=datetime.date(2020, 1, 1),
+        )
+        devis = Devis.objects.create(
+            numero="DEV-AUDIT", client=client_tiers, date_creation=datetime.date(2026, 1, 1),
+        )
+        self.commande = Commande.objects.create(
+            numero="CDE-AUDIT", devis=devis, date_commande=datetime.date(2026, 1, 1),
+            adresse_facturation=self.adresse, adresse_livraison=self.adresse,
+        )
+
+    def _payload_ligne_unique(self, ligne, **overrides):
+        payload = {
+            "numero": self.commande.pk,
+            "devis": self.commande.devis_id,
+            "date_commande": "2026-01-01",
+            "statut": "",
+            "adresse_facturation": self.commande.adresse_facturation_id,
+            "adresse_livraison": self.commande.adresse_livraison_id,
+            "lignes-TOTAL_FORMS": "1",
+            "lignes-INITIAL_FORMS": "1",
+            "lignes-MIN_NUM_FORMS": "0",
+            "lignes-MAX_NUM_FORMS": "1000",
+            "lignes-0-id": ligne.pk,
+            "lignes-0-article": ligne.article_id,
+            "lignes-0-designation": ligne.designation,
+            "lignes-0-quantite_commandee": str(ligne.quantite_commandee),
+            "lignes-0-prix_vente_unitaire": "" if ligne.prix_vente_unitaire is None else str(ligne.prix_vente_unitaire),
+            "lignes-0-taux_tva": "",
+            "lignes-0-date_livraison_prevue": "",
+            "_save": "Enregistrer",
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_modification_prix_via_inline_est_tracee(self):
+        ligne = CommandeLigne.objects.create(
+            commande=self.commande, article=self.article, quantite_commandee=10, prix_vente_unitaire=5.0,
+        )
+        payload = self._payload_ligne_unique(ligne, **{"lignes-0-prix_vente_unitaire": "7.5"})
+        response = self.client.post(
+            f"/admin/chiffrage/commande/{self.commande.pk}/change/", data=payload, follow=True
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+
+        modification = CommandeLigneModification.objects.get(commande_ligne=ligne, champ="prix_vente_unitaire")
+        self.assertEqual(modification.ancienne_valeur, "5.0")
+        self.assertEqual(modification.nouvelle_valeur, "7.5")
+        self.assertEqual(modification.utilisateur, self.user)
+
+    def test_aucune_trace_si_rien_ne_change(self):
+        ligne = CommandeLigne.objects.create(
+            commande=self.commande, article=self.article, quantite_commandee=10, prix_vente_unitaire=5.0,
+        )
+        payload = self._payload_ligne_unique(ligne)
+        self.client.post(f"/admin/chiffrage/commande/{self.commande.pk}/change/", data=payload, follow=True)
+        self.assertEqual(CommandeLigneModification.objects.filter(commande_ligne=ligne).count(), 0)
+
+    def test_avertissement_si_augmentation_quantite_avec_of_existant(self):
+        ligne = CommandeLigne.objects.create(
+            commande=self.commande, article=self.article_fabrique, quantite_commandee=5,
+        )
+        lancer_ligne_en_production(ligne)
+        payload = self._payload_ligne_unique(ligne, **{"lignes-0-quantite_commandee": "8"})
+        response = self.client.post(
+            f"/admin/chiffrage/commande/{self.commande.pk}/change/", data=payload, follow=True
+        )
+        self.assertContains(response, "ordre de fabrication existe déjà")
+
+    def test_pas_avertissement_si_diminution_quantite(self):
+        ligne = CommandeLigne.objects.create(
+            commande=self.commande, article=self.article_fabrique, quantite_commandee=5,
+        )
+        lancer_ligne_en_production(ligne)
+        payload = self._payload_ligne_unique(ligne, **{"lignes-0-quantite_commandee": "3"})
+        response = self.client.post(
+            f"/admin/chiffrage/commande/{self.commande.pk}/change/", data=payload, follow=True
+        )
+        self.assertNotContains(response, "ordre de fabrication existe déjà")
+
+    def test_ajout_dune_ligne_via_inline(self):
+        payload = {
+            "numero": self.commande.pk,
+            "devis": self.commande.devis_id,
+            "date_commande": "2026-01-01",
+            "statut": "",
+            "adresse_facturation": self.commande.adresse_facturation_id,
+            "adresse_livraison": self.commande.adresse_livraison_id,
+            "lignes-TOTAL_FORMS": "1",
+            "lignes-INITIAL_FORMS": "0",
+            "lignes-MIN_NUM_FORMS": "0",
+            "lignes-MAX_NUM_FORMS": "1000",
+            "lignes-0-id": "",
+            "lignes-0-article": self.article.pk,
+            "lignes-0-designation": "Complément de commande",
+            "lignes-0-quantite_commandee": "4",
+            "lignes-0-prix_vente_unitaire": "6",
+            "lignes-0-taux_tva": "",
+            "lignes-0-date_livraison_prevue": "",
+            "_save": "Enregistrer",
+        }
+        response = self.client.post(
+            f"/admin/chiffrage/commande/{self.commande.pk}/change/", data=payload, follow=True
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        ligne = self.commande.lignes.get(article=self.article)
+        self.assertEqual(ligne.quantite_commandee, 4)
+        self.assertEqual(ligne.designation, "Complément de commande")
+        self.assertIsNone(ligne.devis_ligne)
+
+    def test_action_lancer_en_production_succes(self):
+        ligne = CommandeLigne.objects.create(
+            commande=self.commande, article=self.article_fabrique, quantite_commandee=5,
+        )
+        response = self.client.post(
+            "/admin/chiffrage/commandeligne/",
+            data={"action": "action_lancer_en_production", "_selected_action": [ligne.pk]},
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(OrdreFabrication.objects.filter(commande=self.commande, article=self.article_fabrique).exists())
+
+    def test_action_lancer_en_production_erreur_affichee(self):
+        ligne = CommandeLigne.objects.create(
+            commande=self.commande, article=self.article, quantite_commandee=5,
+        )
+        response = self.client.post(
+            "/admin/chiffrage/commandeligne/",
+            data={"action": "action_lancer_en_production", "_selected_action": [ligne.pk]},
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(OrdreFabrication.objects.filter(commande=self.commande, article=self.article).exists())

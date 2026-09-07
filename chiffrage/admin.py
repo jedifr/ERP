@@ -20,6 +20,7 @@ from .builder_views import (
 from .models import (
     Commande,
     CommandeLigne,
+    CommandeLigneModification,
     Devis,
     DevisLigne,
     DevisLigneOperation,
@@ -31,7 +32,13 @@ from .models import (
 )
 from .moteur import ChiffrageError, calculer_devis
 from .planning_sync import resynchroniser
-from .production import lancer_en_production, synchroniser_lignes_commande
+from .production import (
+    CHAMPS_SUIVIS_COMMANDE_LIGNE,
+    enregistrer_modification_ligne,
+    lancer_en_production,
+    lancer_ligne_en_production,
+    synchroniser_lignes_commande,
+)
 from .widgets import DelaiWidget
 
 
@@ -225,9 +232,10 @@ class DevisLigneAdmin(ModelAdmin):
 
 
 def taux_tva_display(obj):
-    """Juste le taux (ex. "20%"), sans le libellé du référentiel — la ligne
-    de commande n'est pas un écran de sélection d'un taux, contrairement à
-    la ligne de devis."""
+    """Juste le taux (ex. "20%"), sans le libellé du référentiel — utilisé
+    seulement dans les colonnes de liste (lecture seule) ; le champ éditable
+    "taux_tva" du formulaire, lui, affiche le libellé complet du référentiel
+    (nécessaire pour distinguer les taux entre eux au moment de choisir)."""
     if not obj.taux_tva:
         return "—"
     return f"{obj.taux_tva.taux:g}%"
@@ -243,15 +251,49 @@ def date_livraison_possible_display(obj):
     return date.strftime("%d/%m/%Y") if date else "—"
 
 
+def _logger_modifications_ligne(form, utilisateur):
+    for champ in CHAMPS_SUIVIS_COMMANDE_LIGNE:
+        if champ not in form.changed_data:
+            continue
+        enregistrer_modification_ligne(
+            form.instance, champ, form.initial.get(champ), form.cleaned_data.get(champ), utilisateur
+        )
+
+
+def _avertir_si_augmentation_apres_of(request, ligne, ancienne_quantite):
+    if ancienne_quantite is None or ligne.quantite_commandee <= ancienne_quantite:
+        return
+    if OrdreFabrication.objects.filter(commande=ligne.commande, article=ligne.article).exists():
+        messages.warning(
+            request,
+            f"« {ligne.article} » : quantité augmentée alors qu'un ordre de fabrication existe déjà pour "
+            "cette commande — il ne sera pas recalculé. Ajoutez plutôt une nouvelle ligne pour la quantité "
+            "supplémentaire (elle pourra être lancée en production séparément).",
+        )
+
+
+class CommandeLigneModificationInline(TabularInline):
+    model = CommandeLigneModification
+    extra = 0
+    can_delete = False
+    fields = ["champ", "ancienne_valeur", "nouvelle_valeur", "utilisateur", "date_modification"]
+    readonly_fields = fields
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+
 class CommandeLigneInline(TabularInline):
     model = CommandeLigne
     extra = 0
     can_delete = False
+    autocomplete_fields = ["article"]
     fields = [
         "article",
+        "designation",
         "quantite_commandee",
         "prix_vente_unitaire",
-        "taux_tva_display",
+        "taux_tva",
         "montant_ht",
         "montant_ttc",
         "date_livraison_prevue",
@@ -262,10 +304,6 @@ class CommandeLigneInline(TabularInline):
         "entierement_livree",
     ]
     readonly_fields = [
-        "article",
-        "quantite_commandee",
-        "prix_vente_unitaire",
-        "taux_tva_display",
         "montant_ht",
         "montant_ttc",
         "date_livraison_possible_display",
@@ -275,16 +313,9 @@ class CommandeLigneInline(TabularInline):
         "entierement_livree",
     ]
 
-    @admin.display(description="Taux de TVA")
-    def taux_tva_display(self, obj):
-        return taux_tva_display(obj)
-
     @admin.display(description="Date de livraison possible (appro)")
     def date_livraison_possible_display(self, obj):
         return date_livraison_possible_display(obj)
-
-    def has_add_permission(self, request, obj=None):
-        return False
 
 
 @admin.register(Commande)
@@ -310,12 +341,29 @@ class CommandeAdmin(CodificationInitialeMixin, ModelAdmin):
             request, f"{total_creees} ligne(s) de commande recréée(s).", level=messages.SUCCESS
         )
 
+    def save_formset(self, request, form, formset, change):
+        if formset.model is not CommandeLigne:
+            return super().save_formset(request, form, formset, change)
+
+        # form.initial (pas form.instance : _post_clean() a déjà réécrit
+        # l'instance avec les valeurs soumises au moment de la validation du
+        # formset, bien avant save_formset) donne la valeur telle qu'elle
+        # était en base au moment de l'affichage du formulaire.
+        anciennes_quantites = {f.instance.pk: f.initial.get("quantite_commandee") for f in formset.forms if f.instance.pk}
+        super().save_formset(request, form, formset, change)
+        for f in formset.forms:
+            if not f.has_changed() or f.cleaned_data.get("DELETE"):
+                continue
+            _logger_modifications_ligne(f, request.user)
+            _avertir_si_augmentation_apres_of(request, f.instance, anciennes_quantites.get(f.instance.pk))
+
 
 @admin.register(CommandeLigne)
 class CommandeLigneAdmin(ModelAdmin):
     list_display = [
         "commande",
         "article",
+        "designation",
         "quantite_commandee",
         "prix_vente_unitaire",
         "taux_tva_display",
@@ -326,13 +374,13 @@ class CommandeLigneAdmin(ModelAdmin):
         "entierement_livree",
     ]
     list_filter = ["commande"]
-    search_fields = ["commande__numero", "article__reference"]
+    search_fields = ["commande__numero", "article__reference", "designation"]
     autocomplete_fields = ["commande", "article"]
+    inlines = [CommandeLigneModificationInline]
+    actions = ["action_lancer_en_production"]
     readonly_fields = [
         "devis_ligne",
         "quantite_livree",
-        "prix_vente_unitaire",
-        "taux_tva_display",
         "montant_ht",
         "montant_ttc",
         "date_livraison_possible_display",
@@ -346,6 +394,42 @@ class CommandeLigneAdmin(ModelAdmin):
     @admin.display(description="Date de livraison possible (appro)")
     def date_livraison_possible_display(self, obj):
         return date_livraison_possible_display(obj)
+
+    @admin.action(description="Lancer cette ligne en production (OF)")
+    def action_lancer_en_production(self, request, queryset):
+        for ligne in queryset:
+            try:
+                of = lancer_ligne_en_production(ligne)
+            except ChiffrageError as exc:
+                self.message_user(request, f"{ligne} : {exc}", level=messages.ERROR)
+            else:
+                self.message_user(request, f"{ligne} : ordre de fabrication {of} créé.", level=messages.SUCCESS)
+
+    def save_model(self, request, obj, form, change):
+        ancienne_quantite = None
+        if change:
+            ancienne_quantite = CommandeLigne.objects.get(pk=obj.pk).quantite_commandee
+        super().save_model(request, obj, form, change)
+        if change:
+            _logger_modifications_ligne(form, request.user)
+            _avertir_si_augmentation_apres_of(request, obj, ancienne_quantite)
+
+
+@admin.register(CommandeLigneModification)
+class CommandeLigneModificationAdmin(ModelAdmin):
+    list_display = ["commande_ligne", "champ", "ancienne_valeur", "nouvelle_valeur", "utilisateur", "date_modification"]
+    list_filter = ["champ"]
+    search_fields = ["commande_ligne__commande__numero", "commande_ligne__article__reference"]
+    readonly_fields = ["commande_ligne", "champ", "ancienne_valeur", "nouvelle_valeur", "utilisateur", "date_modification"]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 class LivraisonLigneInline(TabularInline):

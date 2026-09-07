@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from django.utils import timezone
@@ -262,7 +263,14 @@ class CommandeLigne(models.Model):
     """Une ligne par article commandé — créée automatiquement (une par ligne
     de devis, quelle que soit sa nature) au lancement en production
     (`production.lancer_en_production`). Permet une livraison partielle,
-    article par article, indépendante des ordres de fabrication."""
+    article par article, indépendante des ordres de fabrication.
+
+    quantite_commandee, prix_vente_unitaire, taux_tva et designation sont
+    des SURCHARGES : pré-remplies depuis devis_ligne à la création, mais
+    modifiables ensuite sans jamais toucher le devis d'origine (qui garde
+    la valeur réellement quotée). Chaque changement est tracé dans
+    CommandeLigneModification (voir plus bas), posé par les admin (pas ici
+    : il faut request.user, indisponible au niveau du modèle)."""
 
     commande = models.ForeignKey(
         Commande, verbose_name="commande", on_delete=models.CASCADE, related_name="lignes"
@@ -278,12 +286,33 @@ class CommandeLigne(models.Model):
         null=True,
         blank=True,
         help_text=(
-            "Sert uniquement à retrouver prix et taux de TVA sans les dupliquer "
-            "(voir prix_vente_unitaire/taux_tva/montant_ht/montant_ttc) — jamais "
-            "montré tel quel."
+            "Ligne de devis servie de valeur de départ pour les surcharges "
+            "ci-dessous (jamais modifiée elle-même) — vide pour une ligne "
+            "ajoutée directement sur la commande, sans devis correspondant."
         ),
     )
+    designation = models.CharField(
+        "désignation",
+        max_length=255,
+        blank=True,
+        help_text="Libellé propre à cette commande, remplace celui de l'article s'il est renseigné.",
+    )
     quantite_commandee = models.FloatField("quantité commandée")
+    prix_vente_unitaire = models.FloatField(
+        "prix de vente unitaire (HT)",
+        null=True,
+        blank=True,
+        help_text="Pré-rempli depuis le devis à la création de la commande, modifiable ensuite.",
+    )
+    taux_tva = models.ForeignKey(
+        TauxTVA,
+        verbose_name="taux de TVA",
+        on_delete=models.PROTECT,
+        related_name="lignes_commande",
+        null=True,
+        blank=True,
+        help_text="Pré-rempli depuis le devis à la création de la commande, modifiable ensuite.",
+    )
     quantite_livree = models.FloatField(
         "quantité livrée", default=0, editable=False, help_text="Cumul recalculé depuis les livraisons"
     )
@@ -302,43 +331,59 @@ class CommandeLigne(models.Model):
     def __str__(self):
         return f"{self.commande} — {self.article} × {self.quantite_commandee}"
 
+    def clean(self):
+        super().clean()
+        if self.quantite_commandee is not None and self.quantite_commandee < self.quantite_livree:
+            raise ValidationError(
+                {
+                    "quantite_commandee": (
+                        f"Ne peut pas être inférieure à la quantité déjà livrée "
+                        f"({self.quantite_livree}) — annulez plutôt le reliquat en la "
+                        "ramenant à cette valeur."
+                    )
+                }
+            )
+        if self.pk and self.quantite_livree > 0:
+            article_en_base = CommandeLigne.objects.filter(pk=self.pk).values_list("article_id", flat=True).first()
+            if article_en_base is not None and article_en_base != self.article_id:
+                raise ValidationError(
+                    {"article": "Impossible de changer l'article d'une ligne déjà livrée, même partiellement."}
+                )
+
     @property
     def reliquat(self):
-        """Quantité restant à livrer (commandée − déjà livrée)."""
+        """Quantité restant à livrer (commandée − déjà livrée). None tant
+        que quantite_commandee n'est pas renseignée (ligne pas encore
+        enregistrée — ex. la ligne vierge du formulaire d'ajout)."""
+        if self.quantite_commandee is None:
+            return None
         return self.quantite_commandee - self.quantite_livree
 
     reliquat.fget.short_description = "Reliquat"
 
     @property
     def entierement_livree(self):
-        return self.reliquat <= 0
+        return self.reliquat is not None and self.reliquat <= 0
 
     entierement_livree.fget.short_description = "Entièrement livrée"
 
     @property
-    def taux_tva(self):
-        return self.devis_ligne.taux_tva if self.devis_ligne_id else None
-
-    taux_tva.fget.short_description = "Taux de TVA"
-
-    @property
-    def prix_vente_unitaire(self):
-        return self.devis_ligne.prix_vente_unitaire if self.devis_ligne_id else None
-
-    prix_vente_unitaire.fget.short_description = "Prix de vente unitaire (HT)"
-
-    @property
     def montant_ht(self):
-        """Prix de vente total (matière + opérations, HT) de la ligne de devis
-        d'origine — pas recalculé sur quantite_commandee : une commande n'est
-        jamais partiellement chiffrée différemment de son devis."""
-        return self.devis_ligne.prix_vente_total if self.devis_ligne_id else None
+        """Prix de vente unitaire × quantité commandée — recalculé à partir
+        des valeurs courantes de la ligne (surchargeables), pas de celles du
+        devis d'origine."""
+        if self.prix_vente_unitaire is None:
+            return None
+        return self.prix_vente_unitaire * self.quantite_commandee
 
     montant_ht.fget.short_description = "Montant HT"
 
     @property
     def montant_ttc(self):
-        return self.devis_ligne.prix_vente_ttc if self.devis_ligne_id else None
+        if self.montant_ht is None:
+            return None
+        taux = self.taux_tva.taux if self.taux_tva_id else 0
+        return self.montant_ht * (1 + taux / 100)
 
     montant_ttc.fget.short_description = "Montant TTC"
 
@@ -378,6 +423,40 @@ class CommandeLigne(models.Model):
         return f"{fournisseurs} — reçu {recu:g}/{commande:g}"
 
     statut_approvisionnement.fget.short_description = "Statut d'approvisionnement"
+
+
+class CommandeLigneModification(models.Model):
+    """Historique des surcharges sur une ligne de commande (quantité, prix,
+    taux de TVA, désignation) — CommandeLigne ne garde que la valeur
+    courante ; ceci conserve chaque ancienne valeur (pas seulement le nom
+    du champ touché, contrairement au bouton "Historique" générique de
+    l'admin). Peuplé par les ModelAdmin (chiffrage/admin.py), jamais par
+    CommandeLigne elle-même : il faut request.user, indisponible au niveau
+    du modèle."""
+
+    commande_ligne = models.ForeignKey(
+        CommandeLigne, verbose_name="ligne de commande", on_delete=models.CASCADE, related_name="modifications"
+    )
+    champ = models.CharField("champ modifié", max_length=50)
+    ancienne_valeur = models.CharField("ancienne valeur", max_length=255, blank=True)
+    nouvelle_valeur = models.CharField("nouvelle valeur", max_length=255, blank=True)
+    utilisateur = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name="utilisateur",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="modifications_lignes_commande",
+    )
+    date_modification = models.DateTimeField("date de modification", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Modification de ligne de commande"
+        verbose_name_plural = "Modifications de ligne de commande"
+        ordering = ["-date_modification"]
+
+    def __str__(self):
+        return f"{self.commande_ligne} — {self.champ} : « {self.ancienne_valeur} » → « {self.nouvelle_valeur} »"
 
 
 class Livraison(models.Model):

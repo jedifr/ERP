@@ -11,9 +11,25 @@ from django.utils import timezone
 from commercial.models import Adresse
 from technique.models import Article, PosteTravail
 
-from .models import Commande, CommandeLigne, Devis, OperationOF, OrdreFabrication
+from .models import Commande, CommandeLigne, CommandeLigneModification, Devis, OperationOF, OrdreFabrication
 from .moteur import ChiffrageError, gamme_active
 from .planning_sync import tenter_synchronisation
+
+# Champs de CommandeLigne qui sont des surcharges du devis (valeur de départ
+# recopiée à la création, modifiable ensuite) — chaque changement sur l'un
+# d'eux est tracé dans CommandeLigneModification par les ModelAdmin
+# (chiffrage/admin.py, qui a accès à request.user).
+CHAMPS_SUIVIS_COMMANDE_LIGNE = ("quantite_commandee", "prix_vente_unitaire", "taux_tva", "designation")
+
+
+def enregistrer_modification_ligne(commande_ligne, champ, ancienne_valeur, nouvelle_valeur, utilisateur):
+    CommandeLigneModification.objects.create(
+        commande_ligne=commande_ligne,
+        champ=champ,
+        ancienne_valeur="" if ancienne_valeur is None else str(ancienne_valeur),
+        nouvelle_valeur="" if nouvelle_valeur is None else str(nouvelle_valeur),
+        utilisateur=utilisateur,
+    )
 
 
 def _adresse_principale(client, type_adresse):
@@ -32,6 +48,31 @@ def _generer_numero_commande(devis):
 
 def _generer_numero_of(commande, index):
     return f"OF-{commande.numero}-{index}"
+
+
+def _creer_ordre_fabrication(commande, article, quantite, date_reference, index):
+    """Crée l'OF et ses opérations de gamme pour (commande, article,
+    quantite) — factorisé entre lancer_en_production (toutes les lignes
+    d'un coup) et lancer_ligne_en_production (une seule ligne, ajoutée
+    après coup sans repasser par tout le devis)."""
+    of = OrdreFabrication.objects.create(
+        numero=_generer_numero_of(commande, index),
+        commande=commande,
+        article=article,
+        quantite=quantite,
+        date_lancement=timezone.now().date(),
+    )
+    for etape in gamme_active(article, date_reference):
+        temps_prevu = None
+        if etape.poste.mode_calcul == PosteTravail.ModeCalcul.HORAIRE:
+            temps_prevu = (etape.temps_fixe or 0) + (etape.temps_variable or 0) * quantite
+        OperationOF.objects.create(
+            ordre_fabrication=of,
+            poste=etape.poste,
+            ordre=etape.ordre,
+            temps_prevu=temps_prevu,
+        )
+    return of
 
 
 def lancer_en_production(devis):
@@ -56,41 +97,61 @@ def lancer_en_production(devis):
             # nature de l'article : c'est elle qui porte le suivi de
             # livraison (partielle, article par article) — indépendant des
             # ordres de fabrication, qui ne concernent que les FABRIQUE.
+            # prix_vente_unitaire/taux_tva : valeur de départ recopiée du
+            # devis, surchargeable ensuite sur la commande (voir
+            # CommandeLigne) sans jamais modifier la ligne de devis.
             CommandeLigne.objects.create(
                 commande=commande,
                 article=ligne.article,
                 quantite_commandee=ligne.quantite,
                 devis_ligne=ligne,
+                prix_vente_unitaire=ligne.prix_vente_unitaire,
+                taux_tva=ligne.taux_tva,
             )
 
             if ligne.article.nature != Article.Nature.FABRIQUE:
                 continue
 
-            of = OrdreFabrication.objects.create(
-                numero=_generer_numero_of(commande, index),
-                commande=commande,
-                article=ligne.article,
-                quantite=ligne.quantite,
-                date_lancement=timezone.now().date(),
-            )
+            of = _creer_ordre_fabrication(commande, ligne.article, ligne.quantite, devis.date_creation, index)
             index += 1
-
-            for etape in gamme_active(ligne.article, devis.date_creation):
-                temps_prevu = None
-                if etape.poste.mode_calcul == PosteTravail.ModeCalcul.HORAIRE:
-                    temps_prevu = (etape.temps_fixe or 0) + (etape.temps_variable or 0) * ligne.quantite
-                OperationOF.objects.create(
-                    ordre_fabrication=of,
-                    poste=etape.poste,
-                    ordre=etape.ordre,
-                    temps_prevu=temps_prevu,
-                )
             ordres_crees.append(of)
 
     for of in ordres_crees:
         tenter_synchronisation(of)
 
     return commande
+
+
+def lancer_ligne_en_production(commande_ligne):
+    """Crée l'ordre de fabrication d'UNE ligne de commande précise, sans
+    repasser par lancer_en_production (qui traite tout le devis d'un coup).
+    Sert notamment à une ligne ajoutée après coup pour représenter une
+    augmentation de quantité (plutôt que de modifier une ligne dont l'OF a
+    déjà été lancé, qui laisserait ses temps machine basés sur l'ancienne
+    quantité — voir CommandeLigne)."""
+    article = commande_ligne.article
+    if article.nature != Article.Nature.FABRIQUE:
+        raise ChiffrageError(f"« {article} » n'est pas un article fabriqué : pas d'ordre de fabrication à créer.")
+    if OrdreFabrication.objects.filter(commande=commande_ligne.commande, article=article).exists():
+        raise ChiffrageError(
+            f"Un ordre de fabrication existe déjà pour « {article} » sur la commande "
+            f"« {commande_ligne.commande} »."
+        )
+
+    date_reference = (
+        commande_ligne.devis_ligne.devis.date_creation
+        if commande_ligne.devis_ligne_id
+        else commande_ligne.commande.date_commande
+    )
+
+    with transaction.atomic():
+        index = commande_ligne.commande.ordres_fabrication.count() + 1
+        of = _creer_ordre_fabrication(
+            commande_ligne.commande, article, commande_ligne.quantite_commandee, date_reference, index
+        )
+
+    tenter_synchronisation(of)
+    return of
 
 
 def synchroniser_lignes_commande(commande):
@@ -123,6 +184,8 @@ def synchroniser_lignes_commande(commande):
                 article=ligne.article,
                 quantite_commandee=ligne.quantite,
                 devis_ligne=ligne,
+                prix_vente_unitaire=ligne.prix_vente_unitaire,
+                taux_tva=ligne.taux_tva,
             )
         )
     return lignes_creees
