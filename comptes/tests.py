@@ -10,6 +10,22 @@ from stock.models import AlerteStock
 from technique.models import Article
 
 from .dashboard import dashboard_callback
+from .layout import global_callback
+
+
+class ToggleLargeurPleinePageTests(TestCase):
+    def test_global_callback_active_la_pleine_largeur(self):
+        self.assertEqual(global_callback(request=None), {"is_fullwidth": "1"})
+
+    def test_page_admin_sans_conteneur_largeur_plafonnee(self):
+        User = get_user_model()
+        user = User.objects.create_superuser("largeur-admin", "l@example.com", "pass1234")
+        self.client.force_login(user)
+        response = self.client.get(reverse("admin:index"))
+        # Le marqueur Unfold d'un contenu plafonné en largeur (classe Tailwind
+        # "container" autour de #content) ne doit plus apparaître — voir
+        # comptes.layout.global_callback (UNFOLD["GLOBAL_CALLBACK"]).
+        self.assertNotContains(response, 'id="content" class="container')
 
 
 class AjoutUtilisateurAdminTests(TestCase):

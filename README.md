@@ -1046,3 +1046,21 @@ Trois effets, une fois le rattachement fait :
   pour le même article est recherchée et clôturée automatiquement — réutilise
   le mécanisme déjà existant (`alerte_stock_origine`), simplement déclenché
   par ce nouveau rattachement plutôt que par une sélection manuelle.
+
+## Contenu en pleine largeur d'écran
+
+Le contenu de l'admin (`#content`) était plafonné à une largeur maximale
+centrée (classe Tailwind `container` d'Unfold) — gênant sur les fiches à
+tableaux larges (lignes de devis/commande), qui scrollaient horizontalement
+dans un espace réduit alors que l'écran avait de la place de libre à
+droite.
+
+`comptes.layout.global_callback` (branché sur `UNFOLD["GLOBAL_CALLBACK"]`,
+exécuté par Unfold sur *chaque* page admin, contrairement à
+`DASHBOARD_CALLBACK` qui ne concerne que l'accueil) injecte
+`is_fullwidth: "1"` dans le contexte de toutes les pages. Nécessaire pour
+les fiches (`change_view`) : Unfold n'y expose pas
+`ModelAdmin.list_fullwidth` (qui ne fonctionne que sur les listes, où le
+contexte `cl` existe) — `GLOBAL_CALLBACK` est le seul point d'accroche qui
+couvre aussi bien les fiches que les listes, sans avoir à surcharger un
+template par modèle.
