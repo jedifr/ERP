@@ -895,3 +895,34 @@ Ajouté deux liens, pour ne plus avoir à chercher l'article dans le menu
   "Voir la fiche de cet article ↗" apparaît dès qu'un article est
   sélectionné dans la recherche (masqué à nouveau si la recherche est
   modifiée).
+
+## Ajout d'utilisateur simplifié (app `comptes`)
+
+Le formulaire d'ajout d'utilisateur de Django (`auth.User`) n'était pas
+habillé par Unfold : le champ `password1`/`password2` de
+`UserCreationForm` ne passe jamais par `ModelAdmin.formfield_for_dbfield`
+(seul point où Django ajoute la classe CSS `vTextField`/`vPasswordField`
+utilisée par le thème), et Unfold ne fournit pas de secours pour un
+`<input>` sans classe — le CSS d'Unfold réinitialise l'apparence native de
+tous les champs, boîte et bordure comprises. Résultat : sur ce formulaire
+précis, aucun champ ne semblait "cliquable" (ni le mot de passe, ni sa
+confirmation).
+
+Correction et simplification en un seul geste (app `comptes/`) :
+- `comptes.admin.UserAdmin` (Django `UserAdmin` + `unfold.admin.ModelAdmin`)
+  remplace l'enregistrement par défaut de `auth.User` (et `auth.Group`,
+  touché par le même souci sur son propre formulaire) ;
+- `add_form` reprend `unfold.forms.UserCreationForm` (qui, lui, réattribue
+  les bons widgets Unfold à `password1`/`password2`), étendu avec
+  `first_name`/`last_name` (facultatifs) pour saisir un nom dès la
+  création, et sans le choix "Authentification par mot de passe"
+  (Activée/Désactivée) — un ajout de Django 5.1 pensé pour le SSO/LDAP,
+  hors sujet ici ;
+- `add_fieldsets` se limite à : identifiant, prénom, nom, mot de passe (x2)
+  et un seul réglage — "Statut équipe" (`is_staff`), qui conditionne
+  l'accès à l'admin. Le reste (groupes, permissions, statut
+  super-utilisateur...) reste modifiable après coup sur la fiche complète,
+  comme le rappelle le bandeau "After you've created a user...".
+- "Utilisateurs" et "Groupes" apparaissent maintenant dans le menu
+  "Paramétrage" (`UNFOLD["SIDEBAR"]`) — jusque-là non listés, donc
+  seulement accessibles en tapant l'URL ou via la recherche.
