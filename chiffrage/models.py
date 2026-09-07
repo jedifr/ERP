@@ -270,9 +270,28 @@ class CommandeLigne(models.Model):
     article = models.ForeignKey(
         Article, verbose_name="article", on_delete=models.PROTECT, related_name="lignes_commande"
     )
+    devis_ligne = models.ForeignKey(
+        DevisLigne,
+        verbose_name="ligne de devis d'origine",
+        on_delete=models.PROTECT,
+        related_name="lignes_commande",
+        null=True,
+        blank=True,
+        help_text=(
+            "Sert uniquement à retrouver prix et taux de TVA sans les dupliquer "
+            "(voir prix_vente_unitaire/taux_tva/montant_ht/montant_ttc) — jamais "
+            "montré tel quel."
+        ),
+    )
     quantite_commandee = models.FloatField("quantité commandée")
     quantite_livree = models.FloatField(
         "quantité livrée", default=0, editable=False, help_text="Cumul recalculé depuis les livraisons"
+    )
+    date_livraison_prevue = models.DateField(
+        "date de livraison prévue",
+        null=True,
+        blank=True,
+        help_text="Peut différer d'une ligne à l'autre au sein d'une même commande.",
     )
 
     class Meta:
@@ -295,6 +314,33 @@ class CommandeLigne(models.Model):
         return self.reliquat <= 0
 
     entierement_livree.fget.short_description = "Entièrement livrée"
+
+    @property
+    def taux_tva(self):
+        return self.devis_ligne.taux_tva if self.devis_ligne_id else None
+
+    taux_tva.fget.short_description = "Taux de TVA"
+
+    @property
+    def prix_vente_unitaire(self):
+        return self.devis_ligne.prix_vente_unitaire if self.devis_ligne_id else None
+
+    prix_vente_unitaire.fget.short_description = "Prix de vente unitaire (HT)"
+
+    @property
+    def montant_ht(self):
+        """Prix de vente total (matière + opérations, HT) de la ligne de devis
+        d'origine — pas recalculé sur quantite_commandee : une commande n'est
+        jamais partiellement chiffrée différemment de son devis."""
+        return self.devis_ligne.prix_vente_total if self.devis_ligne_id else None
+
+    montant_ht.fget.short_description = "Montant HT"
+
+    @property
+    def montant_ttc(self):
+        return self.devis_ligne.prix_vente_ttc if self.devis_ligne_id else None
+
+    montant_ttc.fget.short_description = "Montant TTC"
 
 
 class Livraison(models.Model):

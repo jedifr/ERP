@@ -980,3 +980,35 @@ réutilise entièrement le constructeur de devis existant :
   via ce même paramètre d'URL, pour l'aller-retour entre les deux écrans.
   Une fois la commande créée, revisiter le constructeur affiche un lien
   direct vers elle à la place du bouton de validation.
+
+## Correctif : lignes invisibles sur la fiche commande + prix/TVA/date de livraison par ligne
+
+Remonté par capture d'écran : une commande existante affichait "Lignes de
+commande" complètement vide. Cause réelle, pas juste cosmétique : cette
+commande avait été créée avant l'ajout du modèle `CommandeLigne`
+(fonctionnalité "Livraisons partielles") — aucune ligne n'existait en
+base, il n'y avait donc rien à afficher.
+
+- **`CommandeLigne.devis_ligne`** (FK vers `DevisLigne`, nullable) relie
+  chaque ligne de commande à sa ligne de devis d'origine — posé
+  automatiquement par `lancer_en_production`. Trois propriétés en
+  lecture seule s'appuient dessus pour afficher **prix de vente unitaire,
+  taux de TVA, montant HT et montant TTC** sans dupliquer ces valeurs (le
+  prix vient toujours du devis, jamais recalculé sur la commande) :
+  `taux_tva`, `prix_vente_unitaire`, `montant_ht`, `montant_ttc` — `None`
+  tant qu'aucune ligne de devis n'est reliée.
+- **`CommandeLigne.date_livraison_prevue`** (date, éditable, facultative) :
+  chaque ligne peut avoir sa propre date, indépendante des autres lignes
+  de la même commande — modifiable directement dans l'inline "Lignes de
+  commande" de la fiche.
+- **`production.synchroniser_lignes_commande(commande)`** : filet de
+  sécurité rejouable sans risque — recrée toute ligne manquante par
+  rapport au devis (le bug remonté) et relie `devis_ligne` sur les lignes
+  qui ne l'ont pas encore, sans jamais toucher une `quantite_commandee`
+  déjà enregistrée (une divergence avec le devis reste une décision
+  manuelle). Exposé comme action d'admin **"Synchroniser les lignes
+  depuis le devis"** sur la liste des commandes.
+- **Migration de données** (`0009_synchroniser_lignes_commande_existantes`) :
+  applique cette même synchronisation à toutes les commandes existantes
+  au `migrate` — corrige automatiquement les commandes déjà en production
+  sans action manuelle (dont celle remontée dans le rapport).

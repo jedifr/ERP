@@ -57,7 +57,10 @@ def lancer_en_production(devis):
             # livraison (partielle, article par article) — indépendant des
             # ordres de fabrication, qui ne concernent que les FABRIQUE.
             CommandeLigne.objects.create(
-                commande=commande, article=ligne.article, quantite_commandee=ligne.quantite
+                commande=commande,
+                article=ligne.article,
+                quantite_commandee=ligne.quantite,
+                devis_ligne=ligne,
             )
 
             if ligne.article.nature != Article.Nature.FABRIQUE:
@@ -88,3 +91,38 @@ def lancer_en_production(devis):
         tenter_synchronisation(of)
 
     return commande
+
+
+def synchroniser_lignes_commande(commande):
+    """Filet de sécurité, rejouable sans risque : recrée toute CommandeLigne
+    manquante par rapport aux lignes du devis d'origine (article absent de la
+    commande — ex. commande créée avant l'ajout de ce mécanisme, ou ligne de
+    devis ajoutée après coup), et relie devis_ligne sur les lignes qui ne
+    l'ont pas encore (pour que taux de TVA / prix redeviennent visibles sans
+    dupliquer ces valeurs). Ne modifie jamais quantite_commandee sur une
+    ligne existante : une divergence avec le devis reste une décision
+    manuelle, pas automatique."""
+    devis_lignes_par_article = {}
+    for ligne in commande.devis.lignes.all():
+        devis_lignes_par_article.setdefault(ligne.article_id, []).append(ligne)
+
+    for commande_ligne in commande.lignes.filter(devis_ligne__isnull=True):
+        candidates = devis_lignes_par_article.get(commande_ligne.article_id) or []
+        if len(candidates) == 1:
+            commande_ligne.devis_ligne = candidates[0]
+            commande_ligne.save(update_fields=["devis_ligne"])
+
+    articles_presents = set(commande.lignes.values_list("article_id", flat=True))
+    lignes_creees = []
+    for ligne in commande.devis.lignes.select_related("article").all():
+        if ligne.article_id in articles_presents:
+            continue
+        lignes_creees.append(
+            CommandeLigne.objects.create(
+                commande=commande,
+                article=ligne.article,
+                quantite_commandee=ligne.quantite,
+                devis_ligne=ligne,
+            )
+        )
+    return lignes_creees

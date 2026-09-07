@@ -22,7 +22,7 @@ from .models import (
 )
 from .moteur import ChiffrageError, calculer_devis, calculer_ligne, cout_matiere_article, previsualiser_ligne
 from .planning_sync import PlanningSyncError, resynchroniser, tenter_synchronisation
-from .production import lancer_en_production
+from .production import lancer_en_production, synchroniser_lignes_commande
 
 
 def _creer_composants_nomenclature(parent):
@@ -337,6 +337,98 @@ class LancerEnProductionTests(TestCase):
         Adresse.objects.filter(tiers=self.client_tiers, type_adresse=Adresse.TypeAdresse.LIVRAISON).delete()
         with self.assertRaises(ChiffrageError):
             lancer_en_production(self.devis)
+
+    def test_ligne_de_commande_reliee_a_sa_ligne_de_devis(self):
+        # Sert à afficher prix de vente unitaire / taux de TVA / montants sur
+        # la commande sans les dupliquer (voir CommandeLigne.taux_tva etc.).
+        commande = lancer_en_production(self.devis)
+        ligne_devis_fabrique = self.devis.lignes.get(article=self.article_fabrique)
+        ligne_commande = commande.lignes.get(article=self.article_fabrique)
+        self.assertEqual(ligne_commande.devis_ligne, ligne_devis_fabrique)
+        self.assertEqual(ligne_commande.taux_tva, ligne_devis_fabrique.taux_tva)
+        self.assertEqual(ligne_commande.prix_vente_unitaire, ligne_devis_fabrique.prix_vente_unitaire)
+        self.assertEqual(ligne_commande.montant_ht, ligne_devis_fabrique.prix_vente_total)
+        self.assertEqual(ligne_commande.montant_ttc, ligne_devis_fabrique.prix_vente_ttc)
+
+
+class CommandeLigneSansDevisLigneTests(TestCase):
+    def test_proprietes_a_none_sans_devis_ligne(self):
+        client_tiers = Tiers.objects.create(code="CLI-SANSDL", raison_sociale="Sans DL")
+        article = Article.objects.create(reference="ART-SANSDL", nature=Article.Nature.MATIERE_PREMIERE)
+        adresse = Adresse.objects.create(
+            tiers=client_tiers, type_adresse=Adresse.TypeAdresse.FACTURATION,
+            adresse="1 rue A", code_postal="75000", ville="Paris",
+        )
+        devis = Devis.objects.create(
+            numero="DEV-SANSDL", client=client_tiers, date_creation=datetime.date(2026, 1, 1),
+        )
+        commande = Commande.objects.create(
+            numero="CDE-SANSDL", devis=devis, date_commande=datetime.date(2026, 1, 1),
+            adresse_facturation=adresse, adresse_livraison=adresse,
+        )
+        ligne = CommandeLigne.objects.create(commande=commande, article=article, quantite_commandee=1)
+        self.assertIsNone(ligne.devis_ligne)
+        self.assertIsNone(ligne.taux_tva)
+        self.assertIsNone(ligne.prix_vente_unitaire)
+        self.assertIsNone(ligne.montant_ht)
+        self.assertIsNone(ligne.montant_ttc)
+
+
+class SynchroniserLignesCommandeTests(TestCase):
+    """synchroniser_lignes_commande() : filet de sécurité pour une commande
+    créée avant l'ajout de CommandeLigne.devis_ligne, ou dont une ligne de
+    commande manquerait par rapport au devis d'origine (le bug remonté :
+    "Lignes de commande" vide sur une commande existante)."""
+
+    def setUp(self):
+        self.client_tiers = Tiers.objects.create(code="CLI-SYNC", raison_sociale="Client Sync")
+        self.adresse = Adresse.objects.create(
+            tiers=self.client_tiers, type_adresse=Adresse.TypeAdresse.FACTURATION,
+            adresse="1 rue A", code_postal="75000", ville="Paris",
+        )
+        self.article = Article.objects.create(reference="ART-SYNC", nature=Article.Nature.MATIERE_PREMIERE)
+        self.devis = Devis.objects.create(
+            numero="DEV-SYNC", client=self.client_tiers, date_creation=datetime.date(2026, 1, 1),
+        )
+        self.devis_ligne = DevisLigne.objects.create(devis=self.devis, article=self.article, quantite=5)
+        self.commande = Commande.objects.create(
+            numero="CDE-SYNC", devis=self.devis, date_commande=datetime.date(2026, 1, 1),
+            adresse_facturation=self.adresse, adresse_livraison=self.adresse,
+        )
+
+    def test_recree_une_ligne_manquante(self):
+        self.assertEqual(self.commande.lignes.count(), 0)
+        creees = synchroniser_lignes_commande(self.commande)
+        self.assertEqual(len(creees), 1)
+        ligne = self.commande.lignes.get()
+        self.assertEqual(ligne.article, self.article)
+        self.assertEqual(ligne.quantite_commandee, 5)
+        self.assertEqual(ligne.devis_ligne, self.devis_ligne)
+
+    def test_relie_devis_ligne_sur_une_ligne_existante_non_reliee(self):
+        ligne = CommandeLigne.objects.create(
+            commande=self.commande, article=self.article, quantite_commandee=5
+        )
+        creees = synchroniser_lignes_commande(self.commande)
+        self.assertEqual(creees, [])
+        ligne.refresh_from_db()
+        self.assertEqual(ligne.devis_ligne, self.devis_ligne)
+
+    def test_idempotent_ne_duplique_rien(self):
+        synchroniser_lignes_commande(self.commande)
+        creees = synchroniser_lignes_commande(self.commande)
+        self.assertEqual(creees, [])
+        self.assertEqual(self.commande.lignes.count(), 1)
+
+    def test_ne_touche_pas_une_quantite_deja_divergente(self):
+        # Une ligne existante avec une quantité différente du devis (décision
+        # manuelle assumée) n'est jamais réécrite par la synchronisation.
+        ligne = CommandeLigne.objects.create(
+            commande=self.commande, article=self.article, quantite_commandee=3
+        )
+        synchroniser_lignes_commande(self.commande)
+        ligne.refresh_from_db()
+        self.assertEqual(ligne.quantite_commandee, 3)
 
 
 class LivraisonPartielleTests(TestCase):
@@ -2133,3 +2225,94 @@ class LivraisonAdminTests(TestCase):
         self.assertEqual(LivraisonLigne.objects.count(), 0)
         self.commande_ligne.refresh_from_db()
         self.assertEqual(self.commande_ligne.quantite_livree, 0)
+
+
+class CommandeLigneInlineAdminTests(TestCase):
+    """Fiche admin Commande : la date de livraison prévue est la seule
+    donnée éditable par ligne (le reste vient du devis) — chaque ligne peut
+    avoir sa propre date, différente des autres lignes de la même commande."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        self.user = User.objects.create_superuser("cligne-admin", "cl@example.com", "pass1234")
+        self.client.force_login(self.user)
+
+        client_tiers = Tiers.objects.create(code="CLI-CLIGNE", raison_sociale="Client CLigne")
+        adresse = Adresse.objects.create(
+            tiers=client_tiers, type_adresse=Adresse.TypeAdresse.FACTURATION,
+            adresse="1 rue A", code_postal="75000", ville="Paris",
+        )
+        article = Article.objects.create(reference="ART-CLIGNE", nature=Article.Nature.MATIERE_PREMIERE)
+        devis = Devis.objects.create(
+            numero="DEV-CLIGNE", client=client_tiers, date_creation=datetime.date(2026, 1, 1),
+        )
+        self.commande = Commande.objects.create(
+            numero="CDE-CLIGNE", devis=devis, date_commande=datetime.date(2026, 1, 1),
+            adresse_facturation=adresse, adresse_livraison=adresse,
+        )
+        self.ligne = CommandeLigne.objects.create(
+            commande=self.commande, article=article, quantite_commandee=4
+        )
+
+    def test_date_livraison_prevue_editable_par_ligne(self):
+        payload = {
+            "numero": self.commande.pk,
+            "devis": self.commande.devis_id,
+            "date_commande": "2026-01-01",
+            "statut": "",
+            "adresse_facturation": self.commande.adresse_facturation_id,
+            "adresse_livraison": self.commande.adresse_livraison_id,
+            "lignes-TOTAL_FORMS": "1",
+            "lignes-INITIAL_FORMS": "1",
+            "lignes-MIN_NUM_FORMS": "0",
+            "lignes-MAX_NUM_FORMS": "1000",
+            "lignes-0-id": self.ligne.pk,
+            "lignes-0-date_livraison_prevue": "15/02/2026",
+            "_save": "Enregistrer",
+        }
+        response = self.client.post(
+            f"/admin/chiffrage/commande/{self.commande.pk}/change/", data=payload, follow=True
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.ligne.refresh_from_db()
+        self.assertEqual(self.ligne.date_livraison_prevue, datetime.date(2026, 2, 15))
+
+
+class ActionSynchroniserLignesAdminTests(TestCase):
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        self.user = User.objects.create_superuser("sync-admin", "s@example.com", "pass1234")
+        self.client.force_login(self.user)
+
+        client_tiers = Tiers.objects.create(code="CLI-SYNCADM", raison_sociale="Client Sync Admin")
+        adresse = Adresse.objects.create(
+            tiers=client_tiers, type_adresse=Adresse.TypeAdresse.FACTURATION,
+            adresse="1 rue A", code_postal="75000", ville="Paris",
+        )
+        article = Article.objects.create(reference="ART-SYNCADM", nature=Article.Nature.MATIERE_PREMIERE)
+        devis = Devis.objects.create(
+            numero="DEV-SYNCADM", client=client_tiers, date_creation=datetime.date(2026, 1, 1),
+        )
+        DevisLigne.objects.create(devis=devis, article=article, quantite=7)
+        self.commande = Commande.objects.create(
+            numero="CDE-SYNCADM", devis=devis, date_commande=datetime.date(2026, 1, 1),
+            adresse_facturation=adresse, adresse_livraison=adresse,
+        )
+
+    def test_action_recree_les_lignes_manquantes(self):
+        self.assertEqual(self.commande.lignes.count(), 0)
+        response = self.client.post(
+            "/admin/chiffrage/commande/",
+            data={
+                "action": "action_synchroniser_lignes",
+                "_selected_action": [self.commande.pk],
+            },
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.commande.lignes.count(), 1)
+        self.assertContains(response, "1 ligne(s) de commande recréée(s)")

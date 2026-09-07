@@ -31,7 +31,7 @@ from .models import (
 )
 from .moteur import ChiffrageError, calculer_devis
 from .planning_sync import resynchroniser
-from .production import lancer_en_production
+from .production import lancer_en_production, synchroniser_lignes_commande
 from .widgets import DelaiWidget
 
 
@@ -228,7 +228,29 @@ class CommandeLigneInline(TabularInline):
     model = CommandeLigne
     extra = 0
     can_delete = False
-    readonly_fields = ["article", "quantite_commandee", "quantite_livree", "reliquat", "entierement_livree"]
+    fields = [
+        "article",
+        "quantite_commandee",
+        "prix_vente_unitaire",
+        "taux_tva",
+        "montant_ht",
+        "montant_ttc",
+        "date_livraison_prevue",
+        "quantite_livree",
+        "reliquat",
+        "entierement_livree",
+    ]
+    readonly_fields = [
+        "article",
+        "quantite_commandee",
+        "prix_vente_unitaire",
+        "taux_tva",
+        "montant_ht",
+        "montant_ttc",
+        "quantite_livree",
+        "reliquat",
+        "entierement_livree",
+    ]
 
     def has_add_permission(self, request, obj=None):
         return False
@@ -242,6 +264,20 @@ class CommandeAdmin(CodificationInitialeMixin, ModelAdmin):
     search_fields = ["numero", "devis__numero"]
     autocomplete_fields = ["devis", "adresse_facturation", "adresse_livraison"]
     inlines = [CommandeLigneInline]
+    actions = ["action_synchroniser_lignes"]
+
+    @admin.action(description="Synchroniser les lignes depuis le devis")
+    def action_synchroniser_lignes(self, request, queryset):
+        # Filet de sécurité : recrée les lignes de commande manquantes par
+        # rapport au devis d'origine (ex. commande créée avant l'ajout de ce
+        # mécanisme) et relie les lignes existantes à leur ligne de devis
+        # quand ce n'est pas encore fait (pour afficher prix/TVA).
+        total_creees = 0
+        for commande in queryset:
+            total_creees += len(synchroniser_lignes_commande(commande))
+        self.message_user(
+            request, f"{total_creees} ligne(s) de commande recréée(s).", level=messages.SUCCESS
+        )
 
 
 @admin.register(CommandeLigne)
@@ -250,6 +286,9 @@ class CommandeLigneAdmin(ModelAdmin):
         "commande",
         "article",
         "quantite_commandee",
+        "prix_vente_unitaire",
+        "taux_tva",
+        "date_livraison_prevue",
         "quantite_livree",
         "reliquat",
         "entierement_livree",
@@ -257,7 +296,14 @@ class CommandeLigneAdmin(ModelAdmin):
     list_filter = ["commande"]
     search_fields = ["commande__numero", "article__reference"]
     autocomplete_fields = ["commande", "article"]
-    readonly_fields = ["quantite_livree"]
+    readonly_fields = [
+        "devis_ligne",
+        "quantite_livree",
+        "prix_vente_unitaire",
+        "taux_tva",
+        "montant_ht",
+        "montant_ttc",
+    ]
 
 
 class LivraisonLigneInline(TabularInline):
