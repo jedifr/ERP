@@ -79,7 +79,7 @@ ROOT_URLCONF = "config.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        "DIRS": [BASE_DIR / "templates"],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -194,9 +194,27 @@ LOGGING = {
 UNFOLD = {
     "SITE_TITLE": "ERP maison",
     "SITE_HEADER": "ERP maison",
+    "SITE_SUBHEADER": "Métallurgie & chaudronnerie",
     "SITE_SYMBOL": "factory",
     "SHOW_HISTORY": True,
     "SHOW_VIEW_ON_SITE": False,
+    "DASHBOARD_CALLBACK": "comptes.dashboard.dashboard_callback",
+    # Identité "atelier" : ambre/acier plutôt que le violet par défaut d'Unfold.
+    "COLORS": {
+        "primary": {
+            "50": "oklch(98.7% .022 95.277)",
+            "100": "oklch(96.2% .059 95.617)",
+            "200": "oklch(92.4% .12 95.746)",
+            "300": "oklch(87.9% .169 91.605)",
+            "400": "oklch(82.8% .189 84.429)",
+            "500": "oklch(76.9% .188 70.08)",
+            "600": "oklch(66.6% .179 58.318)",
+            "700": "oklch(55.5% .163 48.998)",
+            "800": "oklch(47.3% .137 46.201)",
+            "900": "oklch(41.4% .112 45.904)",
+            "950": "oklch(27.9% .077 45.635)",
+        },
+    },
     "SIDEBAR": {
         "show_search": True,
         "show_all_applications": False,

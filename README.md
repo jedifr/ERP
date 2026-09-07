@@ -926,3 +926,24 @@ Correction et simplification en un seul geste (app `comptes/`) :
 - "Utilisateurs" et "Groupes" apparaissent maintenant dans le menu
   "Paramétrage" (`UNFOLD["SIDEBAR"]`) — jusque-là non listés, donc
   seulement accessibles en tapant l'URL ou via la recherche.
+
+## Habillage : palette "atelier" et tableau de bord d'accueil
+
+Deux ajouts purement visuels, sans toucher au fonctionnement de l'admin :
+
+- **Palette** : `UNFOLD["COLORS"]["primary"]` remplace le violet par défaut
+  d'Unfold par une palette ambre/acier (valeurs OKLCH de l'échelle `amber`
+  de Tailwind) — se répercute partout où Unfold utilise sa couleur
+  primaire (boutons, liens actifs, bouton de connexion, icône du logo...).
+  La palette `base` (gris neutre) reste celle par défaut.
+- **Tableau de bord** (`UNFOLD["DASHBOARD_CALLBACK"]` →
+  `comptes.dashboard.dashboard_callback`) : au-dessus de la liste des
+  applications, 5 indicateurs calculés à la volée (aucune table dédiée,
+  comme l'app `pilotage`) — devis en brouillon, devis validés ce mois-ci,
+  CA facturé ce mois-ci (HT), alertes de stock actives (mise en évidence
+  en rouge si > 0) et OF lancés ce mois-ci. Chaque carte est un lien direct
+  vers la liste filtrée correspondante.
+  - `templates/admin/index.html` (nouveau `TEMPLATES["DIRS"]` au niveau du
+    projet, pour que ce template passe avant celui d'Unfold dans l'ordre
+    de résolution) reprend le `admin/index.html` d'Unfold à l'identique et
+    y insère juste la grille de cartes en tête du bloc `content`.
