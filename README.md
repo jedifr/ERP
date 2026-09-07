@@ -1085,7 +1085,14 @@ trois garde-fous discutés et validés avant développement :
     menu déroulant (pas seulement en lecture seule), `CommandeLigneForm`
     (chiffrage/admin.py) déclare `taux_tva` avec un `ModelChoiceField` dont
     `label_from_instance` ne renvoie que le pourcentage — branché sur
-    `CommandeLigneInline` et `CommandeLigneAdmin`.
+    `CommandeLigneInline` et `CommandeLigneAdmin`. Le même correctif
+    (`TauxTVACompactChoiceField`, factorisée pour être réutilisable) est
+    aussi branché côté devis, sur `DevisLigneForm`/`DevisLigneInline`/
+    `DevisLigneAdmin` : `DevisLigne.taux_tva` est un champ distinct de
+    `CommandeLigne.taux_tva`, donc jamais couvert par la première
+    correction — le menu déroulant "Lignes de devis" affichait encore le
+    libellé complet du référentiel tant que ce second branchement n'était
+    pas fait.
 - **Traçabilité complète** (pas seulement le bouton "Historique" générique,
   qui ne liste que les noms de champs) : `CommandeLigneModification`,
   peuplé par `CommandeAdmin.save_formset`/`CommandeLigneAdmin.save_model`

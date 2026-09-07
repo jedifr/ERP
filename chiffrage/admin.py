@@ -43,8 +43,35 @@ from .production import (
 from .widgets import DelaiWidget
 
 
+def taux_tva_display(obj):
+    """Juste le taux (ex. "20%"), sans le libellé du référentiel — utilisé
+    dans les colonnes de liste (lecture seule). Le champ éditable, lui,
+    utilise TauxTVACompactChoiceField ci-dessous pour le même rendu compact
+    jusque dans les options du menu déroulant (gain de place sur la colonne
+    des inlines "Lignes de devis" / "Lignes de commande")."""
+    if not obj.taux_tva:
+        return "—"
+    return f"{obj.taux_tva.taux:g}%"
+
+
+class TauxTVACompactChoiceField(forms.ModelChoiceField):
+    def label_from_instance(self, obj):
+        return f"{obj.taux:g}%"
+
+
+class DevisLigneForm(forms.ModelForm):
+    taux_tva = TauxTVACompactChoiceField(
+        queryset=TauxTVA.objects.all(), required=False, label="Taux de TVA"
+    )
+
+    class Meta:
+        model = DevisLigne
+        fields = "__all__"
+
+
 class DevisLigneInline(TabularInline):
     model = DevisLigne
+    form = DevisLigneForm
     extra = 1
     autocomplete_fields = ["article"]
     readonly_fields = [
@@ -215,6 +242,7 @@ class DevisAdmin(CodificationInitialeMixin, ModelAdmin):
 
 @admin.register(DevisLigne)
 class DevisLigneAdmin(ModelAdmin):
+    form = DevisLigneForm
     list_display = [
         "devis",
         "article",
@@ -224,28 +252,16 @@ class DevisLigneAdmin(ModelAdmin):
         "prix_vente_operations",
         "prix_vente_total",
         "prix_vente_unitaire",
-        "taux_tva",
+        "taux_tva_display",
         "prix_vente_ttc",
     ]
     search_fields = ["devis__numero", "article__reference"]
     autocomplete_fields = ["devis", "article"]
     inlines = [DevisLigneOperationInline]
 
-
-def taux_tva_display(obj):
-    """Juste le taux (ex. "20%"), sans le libellé du référentiel — utilisé
-    dans les colonnes de liste (lecture seule). Le champ éditable, lui,
-    utilise TauxTVACompactChoiceField ci-dessous pour le même rendu compact
-    jusque dans les options du menu déroulant (gain de place sur la colonne
-    de l'inline "Lignes de commande")."""
-    if not obj.taux_tva:
-        return "—"
-    return f"{obj.taux_tva.taux:g}%"
-
-
-class TauxTVACompactChoiceField(forms.ModelChoiceField):
-    def label_from_instance(self, obj):
-        return f"{obj.taux:g}%"
+    @admin.display(description="Taux de TVA")
+    def taux_tva_display(self, obj):
+        return taux_tva_display(obj)
 
 
 class CommandeLigneForm(forms.ModelForm):

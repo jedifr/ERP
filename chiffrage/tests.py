@@ -2476,11 +2476,11 @@ class CommandeLigneAuditAdminTests(TestCase):
             article=self.article_fabrique, poste=self.poste, ordre=1,
             temps_fixe=5, temps_variable=1, date_debut=datetime.date(2020, 1, 1),
         )
-        devis = Devis.objects.create(
+        self.devis = Devis.objects.create(
             numero="DEV-AUDIT", client=client_tiers, date_creation=datetime.date(2026, 1, 1),
         )
         self.commande = Commande.objects.create(
-            numero="CDE-AUDIT", devis=devis, date_commande=datetime.date(2026, 1, 1),
+            numero="CDE-AUDIT", devis=self.devis, date_commande=datetime.date(2026, 1, 1),
             adresse_facturation=self.adresse, adresse_livraison=self.adresse,
         )
 
@@ -2595,6 +2595,22 @@ class CommandeLigneAuditAdminTests(TestCase):
         response = self.client.get(f"/admin/chiffrage/commandeligne/{ligne.pk}/change/")
         self.assertContains(response, ">20%<")
         self.assertNotContains(response, "Taux unique pour ce test")
+
+    def test_options_taux_tva_devis_affichent_uniquement_le_pourcentage(self):
+        # Même correctif que ci-dessus, côté DevisLigne (DevisLigneForm) : la
+        # ligne de devis a son propre champ taux_tva, distinct de celui de
+        # CommandeLigne, jamais touché par la première correction.
+        taux = TauxTVA.objects.create(nom="Taux unique devis pour ce test", taux=20)
+        ligne = DevisLigne.objects.create(
+            devis=self.devis, article=self.article, quantite=1, taux_tva=taux,
+        )
+        response = self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/change/")
+        self.assertContains(response, ">20%<")
+        self.assertNotContains(response, "Taux unique devis pour ce test")
+
+        response = self.client.get(f"/admin/chiffrage/devisligne/{ligne.pk}/change/")
+        self.assertContains(response, ">20%<")
+        self.assertNotContains(response, "Taux unique devis pour ce test")
 
     def test_action_lancer_en_production_succes(self):
         ligne = CommandeLigne.objects.create(
