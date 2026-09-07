@@ -224,6 +224,15 @@ class DevisLigneAdmin(ModelAdmin):
     inlines = [DevisLigneOperationInline]
 
 
+def taux_tva_display(obj):
+    """Juste le taux (ex. "20%"), sans le libellé du référentiel — la ligne
+    de commande n'est pas un écran de sélection d'un taux, contrairement à
+    la ligne de devis."""
+    if not obj.taux_tva:
+        return "—"
+    return f"{obj.taux_tva.taux:g}%"
+
+
 class CommandeLigneInline(TabularInline):
     model = CommandeLigne
     extra = 0
@@ -232,7 +241,7 @@ class CommandeLigneInline(TabularInline):
         "article",
         "quantite_commandee",
         "prix_vente_unitaire",
-        "taux_tva",
+        "taux_tva_display",
         "montant_ht",
         "montant_ttc",
         "date_livraison_prevue",
@@ -244,13 +253,17 @@ class CommandeLigneInline(TabularInline):
         "article",
         "quantite_commandee",
         "prix_vente_unitaire",
-        "taux_tva",
+        "taux_tva_display",
         "montant_ht",
         "montant_ttc",
         "quantite_livree",
         "reliquat",
         "entierement_livree",
     ]
+
+    @admin.display(description="Taux de TVA")
+    def taux_tva_display(self, obj):
+        return taux_tva_display(obj)
 
     def has_add_permission(self, request, obj=None):
         return False
@@ -287,7 +300,7 @@ class CommandeLigneAdmin(ModelAdmin):
         "article",
         "quantite_commandee",
         "prix_vente_unitaire",
-        "taux_tva",
+        "taux_tva_display",
         "date_livraison_prevue",
         "quantite_livree",
         "reliquat",
@@ -300,10 +313,14 @@ class CommandeLigneAdmin(ModelAdmin):
         "devis_ligne",
         "quantite_livree",
         "prix_vente_unitaire",
-        "taux_tva",
+        "taux_tva_display",
         "montant_ht",
         "montant_ttc",
     ]
+
+    @admin.display(description="Taux de TVA")
+    def taux_tva_display(self, obj):
+        return taux_tva_display(obj)
 
 
 class LivraisonLigneInline(TabularInline):
