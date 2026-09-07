@@ -947,3 +947,36 @@ Deux ajouts purement visuels, sans toucher au fonctionnement de l'admin :
     projet, pour que ce template passe avant celui d'Unfold dans l'ordre
     de résolution) reprend le `admin/index.html` d'Unfold à l'identique et
     y insère juste la grille de cartes en tête du bloc `content`.
+
+## Créer une commande directement (sans devis formel)
+
+Certaines ventes n'ont pas de devis à proprement parler : le client
+commande directement. Plutôt que de dupliquer le moteur de chiffrage (qui
+ne calcule que sur `Devis`/`DevisLigne`, jamais sur `CommandeLigne` — voir
+"Livraisons partielles d'une commande" plus haut), cette fonctionnalité
+réutilise entièrement le constructeur de devis existant :
+
+- Sur le formulaire d'AJOUT d'un devis, un second bouton **"Créer une
+  commande directement"** (`_construire_commande`, à côté de "Enregistrer
+  et ouvrir le constructeur") enregistre le devis puis ouvre le même
+  constructeur, avec `?commande_directe=1` dans l'URL.
+- Ce paramètre (lu par `devis_builder_view`, jamais persisté en base — pas
+  de nouveau champ ni de migration) bascule juste l'habillage de l'écran :
+  titre "Constructeur de commande", texte explicatif ("ce devis ne sert
+  que de support de calcul interne, il n'est jamais montré au client"), et
+  un bouton **"Valider et créer la commande →"** à la place du simple lien
+  de retour. Ce bouton POST vers une nouvelle vue,
+  `valider_commande_directe_view` (URL `<numero>/valider-commande/`), qui
+  fait exactement ce que fait déjà l'action d'admin "Lancer en
+  production" sur la liste des devis — passer le devis en `VALIDE` puis
+  appeler `lancer_en_production(devis)` — mais dans une seule transaction
+  (`transaction.atomic()`) : si `lancer_en_production` échoue (ex. client
+  sans adresse principale), le passage en `VALIDE` est annulé avec elle,
+  le devis reste en brouillon et modifiable au lieu de se retrouver
+  verrouillé sans commande créée. Succès -> redirection directe vers la
+  fiche de la commande créée.
+- Le lien "Constructeur de devis" de la fiche devis (object-tool) et le
+  lien "Retour à la fiche devis" du constructeur se souviennent du mode
+  via ce même paramètre d'URL, pour l'aller-retour entre les deux écrans.
+  Une fois la commande créée, revisiter le constructeur affiche un lien
+  direct vers elle à la place du bouton de validation.

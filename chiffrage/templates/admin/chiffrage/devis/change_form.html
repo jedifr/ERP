@@ -4,10 +4,10 @@
 {% block object-tools-items %}
     {% if original %}
         <li>
-            <a href="{% url 'admin:chiffrage_devis_builder' original.pk %}"
+            <a href="{% url 'admin:chiffrage_devis_builder' original.pk %}{% if request.GET.commande_directe %}?commande_directe=1{% endif %}"
                class="cursor-pointer flex grow items-center gap-2 px-3 py-2 text-left whitespace-nowrap">
                 <span class="material-symbols-outlined">construction</span>
-                Constructeur de devis
+                Constructeur de {% if request.GET.commande_directe %}commande{% else %}devis{% endif %}
             </a>
         </li>
     {% endif %}

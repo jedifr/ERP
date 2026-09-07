@@ -2,21 +2,23 @@ import datetime
 import json
 
 from django import forms
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.contrib.admin.views.decorators import staff_member_required
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.http import JsonResponse
-from django.shortcuts import get_object_or_404
+from django.shortcuts import get_object_or_404, redirect
 from django.template.response import TemplateResponse
+from django.urls import reverse
 from django.views.decorators.http import require_http_methods
 
 from commercial.models import Adresse, Contact, TauxTVA, Tiers
 from technique.models import Article, PosteTravail
 
 from .builder import ajouter_ligne_devis, creer_article_fabrique, erreur_lisible
-from .models import Devis, DevisLigne
+from .models import Commande, Devis, DevisLigne
 from .moteur import ChiffrageError, calculer_ligne, previsualiser_ligne
+from .production import lancer_en_production
 
 
 @staff_member_required
@@ -27,17 +29,51 @@ def devis_builder_view(request, numero):
     if request.method == "POST":
         return _traiter_ajout_ligne(request, devis)
 
+    commande_directe = request.GET.get("commande_directe") == "1"
     context = admin.site.each_context(request)
     context.update(
         {
-            "title": f"Constructeur de devis — {devis.numero}",
+            "title": f"Constructeur de {'commande' if commande_directe else 'devis'} — {devis.numero}",
             "devis": devis,
             "lignes": devis.lignes.select_related("article").prefetch_related("operations__poste"),
             "postes": PosteTravail.objects.all().order_by("nom"),
             "opts": Devis._meta,
+            "commande_directe": commande_directe,
+            "commande_existante": Commande.objects.filter(devis=devis).first(),
         }
     )
     return TemplateResponse(request, "chiffrage/devis_builder.html", context)
+
+
+@staff_member_required
+@require_http_methods(["POST"])
+def valider_commande_directe_view(request, numero):
+    """Bouton "Valider et créer la commande" du constructeur en mode
+    "commande directe" : valide le devis-support (jamais montré au client)
+    et enchaîne aussitôt sur lancer_en_production, comme le fait déjà
+    l'action d'admin "Lancer en production" — mais sans repasser par la
+    fiche devis ni la liste."""
+    devis = get_object_or_404(Devis, pk=numero)
+    url_constructeur = reverse("admin:chiffrage_devis_builder", args=[numero]) + "?commande_directe=1"
+
+    if not devis.lignes.exists():
+        messages.error(request, "Ajoutez au moins une ligne avant de créer la commande.")
+        return redirect(url_constructeur)
+    if devis.statut != Devis.Statut.BROUILLON:
+        messages.error(request, f"{devis} n'est plus en brouillon — impossible de le valider à nouveau.")
+        return redirect(url_constructeur)
+
+    try:
+        with transaction.atomic():
+            devis.statut = Devis.Statut.VALIDE
+            devis.save(update_fields=["statut"])
+            commande = lancer_en_production(devis)
+    except ChiffrageError as exc:
+        messages.error(request, str(exc))
+        return redirect(url_constructeur)
+
+    messages.success(request, f"Commande {commande.numero} créée.")
+    return redirect(reverse("admin:chiffrage_commande_change", args=[commande.pk]))
 
 
 def _traiter_ajout_ligne(request, devis):

@@ -15,6 +15,7 @@ from .builder_views import (
     previsualiser_ligne_view,
     recalculer_ligne_view,
     valeurs_defaut_tiers_view,
+    valider_commande_directe_view,
 )
 from .models import (
     Commande,
@@ -128,6 +129,14 @@ class DevisAdmin(CodificationInitialeMixin, ModelAdmin):
         # vers le constructeur au lieu de la liste/fiche par défaut.
         if "_construire" in request.POST:
             return HttpResponseRedirect(reverse("admin:chiffrage_devis_builder", args=[obj.pk]))
+        # Bouton "Créer une commande directement" : même principe, mais le
+        # constructeur s'ouvre en mode "commande directe" (?commande_directe=1)
+        # — ce devis ne sert que de support de calcul interne, jamais montré
+        # au client ; un bouton y permet de le valider et d'enchaîner
+        # aussitôt sur lancer_en_production (voir builder_views.valider_commande_directe_view).
+        if "_construire_commande" in request.POST:
+            url = reverse("admin:chiffrage_devis_builder", args=[obj.pk]) + "?commande_directe=1"
+            return HttpResponseRedirect(url)
         return super().response_add(request, obj, post_url_continue)
 
     def get_urls(self):
@@ -154,6 +163,11 @@ class DevisAdmin(CodificationInitialeMixin, ModelAdmin):
                 "<str:numero>/constructeur/",
                 self.admin_site.admin_view(devis_builder_view),
                 name="chiffrage_devis_builder",
+            ),
+            path(
+                "<str:numero>/valider-commande/",
+                self.admin_site.admin_view(valider_commande_directe_view),
+                name="chiffrage_devis_valider_commande",
             ),
             path(
                 "<str:numero>/lignes/<int:ligne_id>/recalculer/",

@@ -1746,6 +1746,134 @@ class AjoutDevisOuvrirConstructeurTests(TestCase):
         self.assertNotEqual(response.url, "/admin/chiffrage/devis/DEV-CONSTRUIRE-01/constructeur/")
 
 
+class CommandeDirecteTests(TestCase):
+    """Bouton "Créer une commande directement" du formulaire d'ajout de devis
+    et bouton "Valider et créer la commande" du constructeur en mode
+    ?commande_directe=1 : le devis ne sert que de support de calcul interne
+    (jamais montré au client) — on réutilise entièrement le constructeur de
+    devis et la chaîne devis validé -> commande (lancer_en_production)."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        self.user = User.objects.create_superuser("cdirecte-admin", "cd@example.com", "pass1234")
+        self.client.force_login(self.user)
+
+        self.client_tiers = Tiers.objects.create(
+            code="CLI-CDIRECTE", raison_sociale="Client Commande Directe", type_tiers=Tiers.TypeTiers.CLIENT
+        )
+        Adresse.objects.create(
+            tiers=self.client_tiers,
+            type_adresse=Adresse.TypeAdresse.FACTURATION,
+            adresse="1 rue A",
+            code_postal="75000",
+            ville="Paris",
+            est_principale=True,
+        )
+        Adresse.objects.create(
+            tiers=self.client_tiers,
+            type_adresse=Adresse.TypeAdresse.LIVRAISON,
+            adresse="1 rue A",
+            code_postal="75000",
+            ville="Paris",
+            est_principale=True,
+        )
+        self.article = Article.objects.create(
+            reference="ART-CDIRECTE",
+            nature=Article.Nature.MATIERE_PREMIERE,
+            unite_cout=Article.UniteCout.PIECE,
+            cout_unitaire=2.0,
+        )
+
+    def test_bouton_construire_commande_redirige_vers_le_constructeur_en_mode_commande_directe(self):
+        data = {
+            "numero": "DEV-CDIRECTE-01",
+            "client": self.client_tiers.pk,
+            "date_creation": "2026-01-01",
+            "statut": Devis.Statut.BROUILLON,
+            "taux_marge_globale": "",
+            "adresse_facturation": "",
+            "adresse_livraison": "",
+            "contact": "",
+            "lignes-TOTAL_FORMS": "0",
+            "lignes-INITIAL_FORMS": "0",
+            "lignes-MIN_NUM_FORMS": "0",
+            "lignes-MAX_NUM_FORMS": "1000",
+            "_construire_commande": "Créer une commande directement",
+        }
+        response = self.client.post("/admin/chiffrage/devis/add/", data=data, follow=False)
+        self.assertEqual(response.status_code, 302, getattr(response, "context", None))
+        self.assertEqual(
+            response.url, "/admin/chiffrage/devis/DEV-CDIRECTE-01/constructeur/?commande_directe=1"
+        )
+        self.assertEqual(Devis.objects.get(pk="DEV-CDIRECTE-01").statut, Devis.Statut.BROUILLON)
+
+    def _devis_brouillon_avec_ligne(self, numero="DEV-CDIRECTE-VALID"):
+        devis = Devis.objects.create(
+            numero=numero, client=self.client_tiers, date_creation=datetime.date(2026, 1, 1),
+            statut=Devis.Statut.BROUILLON,
+        )
+        DevisLigne.objects.create(devis=devis, article=self.article, quantite=10)
+        return devis
+
+    def test_constructeur_affiche_le_mode_commande_directe(self):
+        devis = self._devis_brouillon_avec_ligne()
+        response = self.client.get(f"/admin/chiffrage/devis/{devis.pk}/constructeur/?commande_directe=1")
+        self.assertContains(response, "Constructeur de commande")
+        self.assertContains(response, "Valider et créer la commande")
+
+    def test_valider_commande_directe_cree_la_commande_et_redirige(self):
+        devis = self._devis_brouillon_avec_ligne()
+        response = self.client.post(
+            f"/admin/chiffrage/devis/{devis.pk}/valider-commande/", follow=False
+        )
+        devis.refresh_from_db()
+        self.assertEqual(devis.statut, Devis.Statut.VALIDE)
+
+        commande = Commande.objects.get(devis=devis)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, f"/admin/chiffrage/commande/{commande.pk}/change/")
+        self.assertEqual(commande.lignes.get().quantite_commandee, 10)
+
+    def test_valider_commande_directe_sans_ligne_refuse(self):
+        devis = Devis.objects.create(
+            numero="DEV-CDIRECTE-VIDE", client=self.client_tiers, date_creation=datetime.date(2026, 1, 1),
+            statut=Devis.Statut.BROUILLON,
+        )
+        response = self.client.post(f"/admin/chiffrage/devis/{devis.pk}/valider-commande/", follow=False)
+        self.assertEqual(
+            response.url, f"/admin/chiffrage/devis/{devis.pk}/constructeur/?commande_directe=1"
+        )
+        devis.refresh_from_db()
+        self.assertEqual(devis.statut, Devis.Statut.BROUILLON)
+        self.assertFalse(Commande.objects.filter(devis=devis).exists())
+
+    def test_valider_commande_directe_devis_deja_valide_refuse(self):
+        devis = self._devis_brouillon_avec_ligne(numero="DEV-CDIRECTE-DEJA")
+        devis.statut = Devis.Statut.VALIDE
+        devis.save()
+        response = self.client.post(f"/admin/chiffrage/devis/{devis.pk}/valider-commande/", follow=False)
+        self.assertEqual(
+            response.url, f"/admin/chiffrage/devis/{devis.pk}/constructeur/?commande_directe=1"
+        )
+        self.assertFalse(Commande.objects.filter(devis=devis).exists())
+
+    def test_valider_commande_directe_echec_restaure_le_statut_brouillon(self):
+        # Pas d'adresse de livraison principale -> lancer_en_production lève
+        # ChiffrageError : le passage en "validé" doit être annulé (transaction
+        # atomique), sinon le devis resterait verrouillé sans commande créée.
+        Adresse.objects.filter(tiers=self.client_tiers, type_adresse=Adresse.TypeAdresse.LIVRAISON).delete()
+        devis = self._devis_brouillon_avec_ligne(numero="DEV-CDIRECTE-ECHEC")
+        response = self.client.post(f"/admin/chiffrage/devis/{devis.pk}/valider-commande/", follow=False)
+        self.assertEqual(
+            response.url, f"/admin/chiffrage/devis/{devis.pk}/constructeur/?commande_directe=1"
+        )
+        devis.refresh_from_db()
+        self.assertEqual(devis.statut, Devis.Statut.BROUILLON)
+        self.assertFalse(Commande.objects.filter(devis=devis).exists())
+
+
 class ValeursDefautTiersViewTests(TestCase):
     """Endpoint GET .../tiers/<code>/valeurs-defaut/ : adresse de facturation,
     adresse de livraison et contact marqués "principal(e)" pour un tiers —
