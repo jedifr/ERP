@@ -2583,6 +2583,19 @@ class CommandeLigneAuditAdminTests(TestCase):
         self.assertEqual(ligne.designation, "Complément de commande")
         self.assertIsNone(ligne.devis_ligne)
 
+    def test_options_taux_tva_affichent_uniquement_le_pourcentage(self):
+        # Le champ est éditable (select), mais ses options ne doivent montrer
+        # que le taux ("20%"), jamais le libellé du référentiel — sinon la
+        # colonne de l'inline s'élargit inutilement (voir
+        # CommandeLigneForm/TauxTVACompactChoiceField).
+        taux = TauxTVA.objects.create(nom="Taux unique pour ce test", taux=20)
+        ligne = CommandeLigne.objects.create(
+            commande=self.commande, article=self.article, quantite_commandee=1, taux_tva=taux,
+        )
+        response = self.client.get(f"/admin/chiffrage/commandeligne/{ligne.pk}/change/")
+        self.assertContains(response, ">20%<")
+        self.assertNotContains(response, "Taux unique pour ce test")
+
     def test_action_lancer_en_production_succes(self):
         ligne = CommandeLigne.objects.create(
             commande=self.commande, article=self.article_fabrique, quantite_commandee=5,

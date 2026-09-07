@@ -7,6 +7,7 @@ from unfold.admin import ModelAdmin, TabularInline
 
 from codification.mixins import CodificationInitialeMixin
 from codification.models import RegleCodification
+from commercial.models import TauxTVA
 
 from .builder_views import (
     contact_associe_adresse_view,
@@ -233,12 +234,28 @@ class DevisLigneAdmin(ModelAdmin):
 
 def taux_tva_display(obj):
     """Juste le taux (ex. "20%"), sans le libellé du référentiel — utilisé
-    seulement dans les colonnes de liste (lecture seule) ; le champ éditable
-    "taux_tva" du formulaire, lui, affiche le libellé complet du référentiel
-    (nécessaire pour distinguer les taux entre eux au moment de choisir)."""
+    dans les colonnes de liste (lecture seule). Le champ éditable, lui,
+    utilise TauxTVACompactChoiceField ci-dessous pour le même rendu compact
+    jusque dans les options du menu déroulant (gain de place sur la colonne
+    de l'inline "Lignes de commande")."""
     if not obj.taux_tva:
         return "—"
     return f"{obj.taux_tva.taux:g}%"
+
+
+class TauxTVACompactChoiceField(forms.ModelChoiceField):
+    def label_from_instance(self, obj):
+        return f"{obj.taux:g}%"
+
+
+class CommandeLigneForm(forms.ModelForm):
+    taux_tva = TauxTVACompactChoiceField(
+        queryset=TauxTVA.objects.all(), required=False, label="Taux de TVA"
+    )
+
+    class Meta:
+        model = CommandeLigne
+        fields = "__all__"
 
 
 def date_livraison_possible_display(obj):
@@ -285,6 +302,7 @@ class CommandeLigneModificationInline(TabularInline):
 
 class CommandeLigneInline(TabularInline):
     model = CommandeLigne
+    form = CommandeLigneForm
     extra = 0
     can_delete = False
     autocomplete_fields = ["article"]
@@ -360,6 +378,7 @@ class CommandeAdmin(CodificationInitialeMixin, ModelAdmin):
 
 @admin.register(CommandeLigne)
 class CommandeLigneAdmin(ModelAdmin):
+    form = CommandeLigneForm
     list_display = [
         "commande",
         "article",

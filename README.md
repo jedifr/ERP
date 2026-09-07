@@ -1080,6 +1080,12 @@ trois garde-fous discutés et validés avant développement :
   valeur d'origine, jamais touché. `montant_ht`/`montant_ttc` restent des
   propriétés, mais recalculées depuis les valeurs courantes de la ligne
   (plus depuis le devis).
+  - `taux_tva`, devenu éditable, est un `<select>` — pour garder l'affichage
+    compact ("20%", pas "Taux normal (20.0%)") jusque dans les options du
+    menu déroulant (pas seulement en lecture seule), `CommandeLigneForm`
+    (chiffrage/admin.py) déclare `taux_tva` avec un `ModelChoiceField` dont
+    `label_from_instance` ne renvoie que le pourcentage — branché sur
+    `CommandeLigneInline` et `CommandeLigneAdmin`.
 - **Traçabilité complète** (pas seulement le bouton "Historique" générique,
   qui ne liste que les noms de champs) : `CommandeLigneModification`,
   peuplé par `CommandeAdmin.save_formset`/`CommandeLigneAdmin.save_model`
