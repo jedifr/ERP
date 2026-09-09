@@ -23,6 +23,9 @@ class Article(models.Model):
     class Nature(models.TextChoices):
         MATIERE_PREMIERE = "matiere_premiere", "Matière première"
         FABRIQUE = "fabrique", "Fabriqué"
+        SERVICE_ACHETE = "service_achete", "Service acheté"
+        CONSOMMABLE = "consommable", "Consommable"
+        COMPOSANT = "composant", "Composant"
 
     class UniteCout(models.TextChoices):
         SURFACE = "surface", "Surface"

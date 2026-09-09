@@ -1,15 +1,87 @@
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models import Q
 from django.utils import timezone
 
 from chiffrage.models import CommandeLigne
 from commercial.models import Tiers
 from stock.models import AlerteStock, Lot, MouvementStock
-from technique.models import Article
+from technique.models import Article, DateRangeHistoriqueMixin
 
 
 class AchatsError(Exception):
     """Donnée de référence manquante ou incohérente empêchant la réception."""
+
+
+class ArticleFournisseur(models.Model):
+    """Un fournisseur pouvant approvisionner un article acheté (matière
+    première, service acheté, consommable ou composant — jamais un
+    fabriqué, qui n'a pas de fournisseur). Porte la référence et la
+    désignation propres à CE fournisseur (distinctes de celles de
+    l'article en interne), et sert de point d'ancrage à l'historique de
+    tarifs (TarifAchatArticle) : plusieurs fournisseurs peuvent proposer
+    le même article, chacun avec sa propre référence et son propre
+    historique de prix."""
+
+    article = models.ForeignKey(
+        Article, verbose_name="article", on_delete=models.CASCADE, related_name="fournisseurs"
+    )
+    fournisseur = models.ForeignKey(
+        Tiers, verbose_name="fournisseur", on_delete=models.CASCADE, related_name="articles_fournis"
+    )
+    reference_fournisseur = models.CharField("référence fournisseur", max_length=100, blank=True)
+    designation_fournisseur = models.CharField("désignation fournisseur", max_length=200, blank=True)
+
+    class Meta:
+        verbose_name = "Fournisseur d'article"
+        verbose_name_plural = "Fournisseurs d'article"
+        ordering = ["article", "fournisseur"]
+        constraints = [
+            models.UniqueConstraint(fields=["article", "fournisseur"], name="unique_article_fournisseur")
+        ]
+
+    def __str__(self):
+        return f"{self.article} — {self.fournisseur}"
+
+    def clean(self):
+        super().clean()
+        if self.article_id and self.article.nature == Article.Nature.FABRIQUE:
+            raise ValidationError(
+                {"article": "Un article fabriqué est produit en interne : il n'a pas de fournisseur."}
+            )
+
+    @property
+    def tarif_actuel(self):
+        aujourdhui = timezone.now().date()
+        return (
+            self.tarifs.filter(date_debut__lte=aujourdhui)
+            .filter(Q(date_fin__isnull=True) | Q(date_fin__gte=aujourdhui))
+            .order_by("-date_debut")
+            .first()
+        )
+
+
+class TarifAchatArticle(DateRangeHistoriqueMixin, models.Model):
+    """Historise le prix d'achat d'un ArticleFournisseur — même principe que
+    TarifPoste (technique.models) : consulter/recalculer le prix à une date
+    donnée, tracer les évolutions tarifaires fournisseur par fournisseur."""
+
+    historique_scope_fields = ("article_fournisseur",)
+
+    article_fournisseur = models.ForeignKey(
+        ArticleFournisseur, verbose_name="fournisseur de l'article", on_delete=models.CASCADE, related_name="tarifs"
+    )
+    prix_unitaire = models.FloatField("prix unitaire", help_text="€, prix d'achat proposé par ce fournisseur")
+    date_debut = models.DateField("date de début")
+    date_fin = models.DateField("date de fin", null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Tarif d'achat"
+        verbose_name_plural = "Tarifs d'achat"
+        ordering = ["article_fournisseur", "-date_debut"]
+
+    def __str__(self):
+        return f"{self.article_fournisseur} : {self.prix_unitaire} € ({self.date_debut} → {self.date_fin or '…'})"
 
 
 class CommandeFournisseur(models.Model):

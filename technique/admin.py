@@ -5,6 +5,8 @@ from django.urls import path
 from django.views.decorators.http import require_http_methods
 from unfold.admin import ModelAdmin, TabularInline
 
+from achats.models import ArticleFournisseur
+
 from .models import Article, Gamme, Matiere, Nomenclature, PosteTravail, TarifPoste
 from .services import DuplicationError, dupliquer_article
 
@@ -20,6 +22,16 @@ class GammeInline(TabularInline):
     model = Gamme
     extra = 1
     autocomplete_fields = ["poste"]
+
+
+class ArticleFournisseurInline(TabularInline):
+    # Ajout rapide des fournisseurs d'un article achetable depuis sa fiche ;
+    # l'historique des tarifs (TarifAchatArticle), lui, se gère sur la fiche
+    # ArticleFournisseur dédiée (achats/admin.py — même principe que
+    # CommandeLigne, inlinée ET dotée de sa propre fiche).
+    model = ArticleFournisseur
+    extra = 0
+    autocomplete_fields = ["fournisseur"]
 
 
 @admin.register(Matiere)
@@ -57,7 +69,7 @@ class ArticleAdmin(ModelAdmin):
     list_filter = ["nature", "unite_cout", "type_profil", "gere_en_stock"]
     search_fields = ["reference", "libelle"]
     autocomplete_fields = ["matiere"]
-    inlines = [NomenclatureInline, GammeInline]
+    inlines = [NomenclatureInline, GammeInline, ArticleFournisseurInline]
 
     class Media:
         js = ["technique/article_admin.js"]

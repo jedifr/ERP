@@ -96,14 +96,17 @@ def cout_composant(nomenclature_ligne):
 
 
 def cout_matiere_article(article, quantite):
-    """Coût matière pour `quantite` unités de `article` (matière première ou fabriqué)."""
-    if article.nature == Article.Nature.MATIERE_PREMIERE:
-        if article.cout_unitaire is None:
-            raise ChiffrageError(f"L'article « {article} » n'a pas de coût unitaire renseigné.")
-        return quantite * article.cout_unitaire
+    """Coût matière pour `quantite` unités de `article`. Seul un article FABRIQUE
+    est décomposé via sa nomenclature ; toute autre nature — matière première,
+    ou achetée telle quelle (service acheté, consommable, composant) — est
+    costée directement depuis son cout_unitaire."""
+    if article.nature == Article.Nature.FABRIQUE:
+        cout_par_unite = sum(cout_composant(n) for n in article.composants.select_related("article_composant"))
+        return cout_par_unite * quantite
 
-    cout_par_unite = sum(cout_composant(n) for n in article.composants.select_related("article_composant"))
-    return cout_par_unite * quantite
+    if article.cout_unitaire is None:
+        raise ChiffrageError(f"L'article « {article} » n'a pas de coût unitaire renseigné.")
+    return quantite * article.cout_unitaire
 
 
 def _taux_marge_matiere(devis, ligne):

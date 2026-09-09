@@ -1120,3 +1120,36 @@ trois garde-fous discutés et validés avant développement :
   `reliquat` côté client ; `CommandeLigne.clean()` refuse de descendre
   en dessous de `quantite_livree` (déjà livré ne peut pas être "délivré"),
   et refuse de changer l'article d'une ligne déjà partiellement livrée.
+
+## Nouvelles natures d'article achetées + fournisseurs multiples avec historique de tarifs
+
+`Article.Nature` comptait deux valeurs (matière première, fabriqué) ; trois
+natures d'articles achetés s'y ajoutent : **service acheté**,
+**consommable**, **composant**. Elles sont costées exactement comme une
+matière première (directement depuis `cout_unitaire`, sans nomenclature) —
+`chiffrage/moteur.cout_matiere_article` ne teste plus `nature ==
+MATIERE_PREMIERE` pour décider du calcul direct, mais `nature == FABRIQUE`
+pour décider de la décomposition via nomenclature (seul un fabriqué en a
+une) ; toute autre nature, existante ou nouvelle, passe par le calcul
+direct — généralisation sans changement de comportement pour les deux
+natures préexistantes.
+
+Nouveau modèle `achats.ArticleFournisseur` : associe un article acheté (donc
+pas fabriqué — `clean()` le refuse, un fabriqué est produit en interne) à un
+fournisseur pouvant le livrer, avec sa **référence** et sa **désignation**
+propres à ce fournisseur (distinctes de celles internes à l'article).
+Plusieurs fournisseurs peuvent être associés au même article (contrainte
+d'unicité seulement sur le *couple* article+fournisseur) — inline "Fournisseurs
+d'article" sur la fiche Article pour les ajouter rapidement, et fiche dédiée
+par association (comme `CommandeLigne` : inlinée ET dotée de sa propre page)
+pour gérer son historique de tarifs.
+
+Traçabilité des tarifs : `achats.TarifAchatArticle`, sur le même principe
+que `technique.TarifPoste` (réutilise le même mixin
+`DateRangeHistoriqueMixin` — refuse le chevauchement de deux tarifs actifs
+sur le même `ArticleFournisseur`). `ArticleFournisseur.tarif_actuel` renvoie
+le tarif dont la période couvre aujourd'hui. Cette traçabilité est purement
+déclarative pour l'instant : elle n'alimente pas automatiquement
+`Article.cout_unitaire` (qui reste saisi manuellement et utilisé tel quel
+par le moteur de chiffrage) — un rapprochement automatique serait une
+évolution ultérieure séparée.

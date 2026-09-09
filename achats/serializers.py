@@ -1,6 +1,25 @@
 from technique.serializers import FullCleanModelSerializer
 
-from .models import CommandeFournisseur, LigneCommandeFournisseur, Reception, ReceptionLigne
+from .models import (
+    ArticleFournisseur,
+    CommandeFournisseur,
+    LigneCommandeFournisseur,
+    Reception,
+    ReceptionLigne,
+    TarifAchatArticle,
+)
+
+
+class ArticleFournisseurSerializer(FullCleanModelSerializer):
+    class Meta:
+        model = ArticleFournisseur
+        fields = "__all__"
+
+
+class TarifAchatArticleSerializer(FullCleanModelSerializer):
+    class Meta:
+        model = TarifAchatArticle
+        fields = "__all__"
 
 
 class CommandeFournisseurSerializer(FullCleanModelSerializer):

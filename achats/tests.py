@@ -1,6 +1,7 @@
 import datetime
 
 from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 
 from chiffrage.models import Commande, CommandeLigne, Devis
@@ -8,7 +9,15 @@ from commercial.models import Adresse, Tiers
 from stock.models import AlerteStock, Emplacement, Lot, MouvementStock
 from technique.models import Article
 
-from .models import AchatsError, CommandeFournisseur, LigneCommandeFournisseur, Reception, ReceptionLigne
+from .models import (
+    AchatsError,
+    ArticleFournisseur,
+    CommandeFournisseur,
+    LigneCommandeFournisseur,
+    Reception,
+    ReceptionLigne,
+    TarifAchatArticle,
+)
 
 
 class ReceptionTests(TestCase):
@@ -251,3 +260,66 @@ class CommandeLigneClientTests(TestCase):
         response = self.client.get(f"/admin/chiffrage/commande/{self.commande_client.pk}/change/")
         self.assertContains(response, "01/02/2026")
         self.assertNotContains(response, "2026-02-01")
+
+
+class ArticleFournisseurTests(TestCase):
+    def setUp(self):
+        self.fournisseur = Tiers.objects.create(
+            code="FOUR-ARF-01", raison_sociale="Fournisseur ARF", type_tiers=Tiers.TypeTiers.FOURNISSEUR
+        )
+        self.autre_fournisseur = Tiers.objects.create(
+            code="FOUR-ARF-02", raison_sociale="Autre Fournisseur ARF", type_tiers=Tiers.TypeTiers.FOURNISSEUR
+        )
+        self.consommable = Article.objects.create(
+            reference="CONSO-ARF-01", nature=Article.Nature.CONSOMMABLE, cout_unitaire=5.0
+        )
+        self.fabrique = Article.objects.create(reference="PIECE-ARF-01", nature=Article.Nature.FABRIQUE)
+
+    def test_article_fabrique_refuse_un_fournisseur(self):
+        lien = ArticleFournisseur(article=self.fabrique, fournisseur=self.fournisseur)
+        with self.assertRaises(ValidationError):
+            lien.full_clean()
+
+    def test_plusieurs_fournisseurs_pour_le_meme_article(self):
+        ArticleFournisseur.objects.create(
+            article=self.consommable, fournisseur=self.fournisseur, reference_fournisseur="REF-A"
+        )
+        ArticleFournisseur.objects.create(
+            article=self.consommable, fournisseur=self.autre_fournisseur, reference_fournisseur="REF-B"
+        )
+        self.assertEqual(self.consommable.fournisseurs.count(), 2)
+
+    def test_meme_couple_article_fournisseur_refuse_en_double(self):
+        ArticleFournisseur.objects.create(article=self.consommable, fournisseur=self.fournisseur)
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                ArticleFournisseur.objects.create(article=self.consommable, fournisseur=self.fournisseur)
+
+    def test_tarif_actuel(self):
+        lien = ArticleFournisseur.objects.create(article=self.consommable, fournisseur=self.fournisseur)
+        self.assertIsNone(lien.tarif_actuel)
+
+        TarifAchatArticle.objects.create(
+            article_fournisseur=lien,
+            prix_unitaire=4.5,
+            date_debut=datetime.date(2025, 1, 1),
+            date_fin=datetime.date(2025, 12, 31),
+        )
+        actuel = TarifAchatArticle.objects.create(
+            article_fournisseur=lien, prix_unitaire=4.8, date_debut=datetime.date(2026, 1, 1)
+        )
+        self.assertEqual(lien.tarif_actuel, actuel)
+
+    def test_chevauchement_tarifs_refuse(self):
+        lien = ArticleFournisseur.objects.create(article=self.consommable, fournisseur=self.fournisseur)
+        TarifAchatArticle.objects.create(
+            article_fournisseur=lien,
+            prix_unitaire=4.5,
+            date_debut=datetime.date(2025, 1, 1),
+            date_fin=datetime.date(2025, 12, 31),
+        )
+        chevauchant = TarifAchatArticle(
+            article_fournisseur=lien, prix_unitaire=4.8, date_debut=datetime.date(2025, 6, 1)
+        )
+        with self.assertRaises(ValidationError):
+            chevauchant.full_clean()

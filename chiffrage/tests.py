@@ -113,6 +113,15 @@ class CoutMatiereTests(TestCase):
         with self.assertRaises(ChiffrageError):
             cout_matiere_article(parent, 1)
 
+    def test_cout_natures_achetees_directes(self):
+        # Service acheté, consommable, composant : achetés tels quels (comme
+        # une matière première), pas décomposés via une nomenclature.
+        for nature in (Article.Nature.SERVICE_ACHETE, Article.Nature.CONSOMMABLE, Article.Nature.COMPOSANT):
+            article = Article.objects.create(
+                reference=f"ART-{nature}", nature=nature, unite_cout=Article.UniteCout.PIECE, cout_unitaire=3.0
+            )
+            self.assertAlmostEqual(cout_matiere_article(article, 4), 12.0)
+
 
 class CalculerDevisTests(TestCase):
     def setUp(self):

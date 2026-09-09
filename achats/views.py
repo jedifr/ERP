@@ -1,13 +1,35 @@
 from rest_framework import status, viewsets
 from rest_framework.exceptions import ValidationError as DRFValidationError
 
-from .models import AchatsError, CommandeFournisseur, LigneCommandeFournisseur, Reception, ReceptionLigne
+from .models import (
+    AchatsError,
+    ArticleFournisseur,
+    CommandeFournisseur,
+    LigneCommandeFournisseur,
+    Reception,
+    ReceptionLigne,
+    TarifAchatArticle,
+)
 from .serializers import (
+    ArticleFournisseurSerializer,
     CommandeFournisseurSerializer,
     LigneCommandeFournisseurSerializer,
     ReceptionLigneSerializer,
     ReceptionSerializer,
+    TarifAchatArticleSerializer,
 )
+
+
+class ArticleFournisseurViewSet(viewsets.ModelViewSet):
+    queryset = ArticleFournisseur.objects.select_related("article", "fournisseur").all()
+    serializer_class = ArticleFournisseurSerializer
+    filterset_fields = ["article", "fournisseur"]
+
+
+class TarifAchatArticleViewSet(viewsets.ModelViewSet):
+    queryset = TarifAchatArticle.objects.select_related("article_fournisseur").all()
+    serializer_class = TarifAchatArticleSerializer
+    filterset_fields = ["article_fournisseur"]
 
 
 class CommandeFournisseurViewSet(viewsets.ModelViewSet):
