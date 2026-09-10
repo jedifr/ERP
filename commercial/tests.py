@@ -1,7 +1,9 @@
+import datetime
+
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 
-from .models import Adresse, Contact, ContactTelephone, ConditionPaiement, DelaiPropose, Pays, TauxTVA, Tiers
+from .models import Adresse, Contact, ContactTelephone, ConditionPaiement, DelaiPropose, Devise, Pays, TauxTVA, Tiers
 
 
 class TiersRegimeFiscalTests(TestCase):
@@ -248,6 +250,88 @@ class ContactAdresseLivraisonTests(TestCase):
         contact = Contact(tiers=self.tiers, nom="Site", adresse_livraison=self.facturation)
         with self.assertRaises(ValidationError):
             contact.full_clean()
+
+
+class TiersIbanTests(TestCase):
+    def test_iban_valide_accepte(self):
+        # IBAN français d'exemple, valide (clé de contrôle correcte).
+        tiers = Tiers(
+            code="FOUR-IBAN-OK", raison_sociale="Fournisseur IBAN OK", type_tiers=Tiers.TypeTiers.FOURNISSEUR,
+            iban="FR7630006000011234567890189",
+        )
+        tiers.full_clean()  # ne doit pas lever
+
+    def test_iban_avec_espaces_accepte(self):
+        tiers = Tiers(
+            code="FOUR-IBAN-ESP", raison_sociale="Fournisseur IBAN Espaces", type_tiers=Tiers.TypeTiers.FOURNISSEUR,
+            iban="FR76 3000 6000 0112 3456 7890 189",
+        )
+        tiers.full_clean()  # ne doit pas lever
+
+    def test_iban_cle_de_controle_invalide_refuse(self):
+        tiers = Tiers(
+            code="FOUR-IBAN-KO", raison_sociale="Fournisseur IBAN KO", type_tiers=Tiers.TypeTiers.FOURNISSEUR,
+            iban="FR7630006000011234567890180",
+        )
+        with self.assertRaises(ValidationError):
+            tiers.full_clean()
+
+    def test_iban_format_invalide_refuse(self):
+        tiers = Tiers(
+            code="FOUR-IBAN-FMT", raison_sociale="Fournisseur IBAN Format", type_tiers=Tiers.TypeTiers.FOURNISSEUR,
+            iban="PAS-UN-IBAN",
+        )
+        with self.assertRaises(ValidationError):
+            tiers.full_clean()
+
+    def test_iban_vide_autorise(self):
+        tiers = Tiers(
+            code="FOUR-IBAN-VIDE", raison_sociale="Fournisseur Sans IBAN", type_tiers=Tiers.TypeTiers.FOURNISSEUR,
+        )
+        tiers.full_clean()  # ne doit pas lever
+
+
+class DeviseTests(TestCase):
+    def test_seed_devises_par_defaut(self):
+        # Migration de données 0013_seed_devise.
+        self.assertTrue(Devise.objects.filter(code="EUR").exists())
+        self.assertTrue(Devise.objects.filter(code="USD").exists())
+
+    def test_tiers_devise(self):
+        eur = Devise.objects.get(code="EUR")
+        tiers = Tiers.objects.create(
+            code="CLI-DEVISE", raison_sociale="Client Devise", type_tiers=Tiers.TypeTiers.CLIENT, devise=eur,
+        )
+        self.assertEqual(tiers.devise.symbole, "€")
+
+    def test_str_avec_et_sans_symbole(self):
+        avec = Devise.objects.get(code="USD")
+        self.assertEqual(str(avec), "USD ($)")
+        sans = Devise.objects.create(code="XXX", nom="Devise sans symbole")
+        self.assertEqual(str(sans), "XXX")
+
+
+class ConditionPaiementEcheanceTests(TestCase):
+    def test_echeance_simple_sans_fin_de_mois(self):
+        condition = ConditionPaiement.objects.create(libelle="30 jours net", nombre_jours=30)
+        echeance = condition.calculer_echeance(datetime.date(2026, 1, 1))
+        self.assertEqual(echeance, datetime.date(2026, 1, 31))
+
+    def test_echeance_reportee_en_fin_de_mois(self):
+        condition = ConditionPaiement.objects.create(libelle="30 jours fin de mois", nombre_jours=30, fin_de_mois=True)
+        echeance = condition.calculer_echeance(datetime.date(2026, 1, 1))
+        # 1er janvier + 30 jours = 31 janvier -> déjà fin de mois de janvier.
+        self.assertEqual(echeance, datetime.date(2026, 1, 31))
+
+    def test_echeance_fin_de_mois_change_de_mois(self):
+        condition = ConditionPaiement.objects.create(libelle="15 jours fin de mois", nombre_jours=15, fin_de_mois=True)
+        echeance = condition.calculer_echeance(datetime.date(2026, 1, 20))
+        # 20 janvier + 15 jours = 4 février -> reporté au dernier jour de février.
+        self.assertEqual(echeance, datetime.date(2026, 2, 28))
+
+    def test_echeance_none_sans_nombre_de_jours(self):
+        condition = ConditionPaiement.objects.create(libelle="À réception, sans délai chiffré")
+        self.assertIsNone(condition.calculer_echeance(datetime.date(2026, 1, 1)))
 
 
 class DelaiProposeTests(TestCase):

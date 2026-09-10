@@ -1,3 +1,5 @@
+import re
+
 from django.core.exceptions import ValidationError
 from django.db import models
 
@@ -81,18 +83,37 @@ class TiersCompteComptable(models.Model):
     Prioritaire sur ParametresComptables.compte_client_defaut lors de la
     génération d'une écriture de vente ; le côté fournisseur reste
     déclaratif pour l'instant (pas de génération d'écriture d'achat, voir
-    ArticleCompteAchat)."""
+    ArticleCompteAchat).
+
+    code_client/code_fournisseur permettent de laisser le compte se générer
+    automatiquement (convention de ce cabinet comptable : "411"/"401" + 5
+    lettres choisies par l'utilisateur) plutôt que de sélectionner un compte
+    existant à la main — évite de devoir créer manuellement un sous-compte
+    dans le plan comptable pour chaque nouveau client/fournisseur.
+    compte_client/compte_fournisseur restent utilisables directement en
+    échappatoire (numérotation différente d'un tiers à l'autre, compte déjà
+    existant, etc.) quand le code à 5 lettres n'est pas renseigné."""
 
     tiers = models.OneToOneField(
         Tiers, verbose_name="tiers", on_delete=models.CASCADE, related_name="comptes_comptables"
     )
+    code_client = models.CharField(
+        "code client (5 lettres)", max_length=5, blank=True,
+        help_text='5 lettres, ex. "DUPON" — génère automatiquement le compte 411 + ces lettres',
+    )
     compte_client = models.ForeignKey(
         CompteComptable, verbose_name="compte client", on_delete=models.PROTECT,
-        null=True, blank=True, related_name="+", help_text="Ex. sous-compte de 411",
+        null=True, blank=True, related_name="+",
+        help_text="Ex. sous-compte de 411 — rempli automatiquement si un code client est renseigné",
+    )
+    code_fournisseur = models.CharField(
+        "code fournisseur (5 lettres)", max_length=5, blank=True,
+        help_text='5 lettres, ex. "DUPON" — génère automatiquement le compte 401 + ces lettres',
     )
     compte_fournisseur = models.ForeignKey(
         CompteComptable, verbose_name="compte fournisseur", on_delete=models.PROTECT,
-        null=True, blank=True, related_name="+", help_text="Ex. sous-compte de 401",
+        null=True, blank=True, related_name="+",
+        help_text="Ex. sous-compte de 401 — rempli automatiquement si un code fournisseur est renseigné",
     )
 
     class Meta:
@@ -105,8 +126,26 @@ class TiersCompteComptable(models.Model):
 
     def clean(self):
         super().clean()
-        if not self.compte_client_id and not self.compte_fournisseur_id:
-            raise ValidationError("Renseignez au moins un compte client ou un compte fournisseur.")
+        for champ, valeur in (("code_client", self.code_client), ("code_fournisseur", self.code_fournisseur)):
+            if valeur and not re.fullmatch(r"[A-Za-z]{5}", valeur):
+                raise ValidationError({champ: "Le code doit comporter exactement 5 lettres."})
+        if not any((self.code_client, self.compte_client_id, self.code_fournisseur, self.compte_fournisseur_id)):
+            raise ValidationError("Renseignez au moins un compte (ou code) client ou fournisseur.")
+
+    @staticmethod
+    def _resoudre_compte(prefixe, code, libelle):
+        compte, _ = CompteComptable.objects.get_or_create(
+            code=f"{prefixe}{code.upper()}",
+            defaults={"libelle": libelle, "systeme": CompteComptable.Systeme.DEVELOPPE},
+        )
+        return compte
+
+    def save(self, *args, **kwargs):
+        if self.code_client:
+            self.compte_client = self._resoudre_compte("411", self.code_client, self.tiers.raison_sociale)
+        if self.code_fournisseur:
+            self.compte_fournisseur = self._resoudre_compte("401", self.code_fournisseur, self.tiers.raison_sociale)
+        super().save(*args, **kwargs)
 
 
 class PosteGestion(models.Model):

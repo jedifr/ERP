@@ -16,6 +16,7 @@ class FactureAdmin(CodificationInitialeMixin, ModelAdmin):
         "numero",
         "commande",
         "date_facturation",
+        "date_echeance_display",
         "montant_ht",
         "montant_ttc",
         "statut_paiement",
@@ -25,6 +26,10 @@ class FactureAdmin(CodificationInitialeMixin, ModelAdmin):
     search_fields = ["numero", "reference_tiime", "commande__numero"]
     autocomplete_fields = ["commande"]
     actions = ["action_generer_ecriture"]
+
+    @admin.display(description="Échéance")
+    def date_echeance_display(self, obj):
+        return obj.date_echeance or "—"
 
     @admin.action(description="Générer l'écriture comptable")
     def action_generer_ecriture(self, request, queryset):

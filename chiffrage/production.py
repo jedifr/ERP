@@ -88,6 +88,7 @@ def lancer_en_production(devis):
             date_commande=timezone.now().date(),
             adresse_facturation=_adresse_principale(devis.client, Adresse.TypeAdresse.FACTURATION),
             adresse_livraison=_adresse_principale(devis.client, Adresse.TypeAdresse.LIVRAISON),
+            devise=devis.client.devise,
         )
 
         ordres_crees = []

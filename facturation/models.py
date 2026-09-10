@@ -35,3 +35,14 @@ class Facture(models.Model):
 
     def __str__(self):
         return self.numero
+
+    @property
+    def date_echeance(self):
+        """Date d'échéance calculée à partir des conditions de paiement du
+        client (délai en jours, éventuellement reporté en fin de mois).
+        None si le client n'a pas de conditions de paiement renseignées, ou
+        si celles-ci sont purement descriptives (pas de délai chiffré)."""
+        conditions = self.commande.devis.client.conditions_paiement
+        if conditions is None:
+            return None
+        return conditions.calculer_echeance(self.date_facturation)

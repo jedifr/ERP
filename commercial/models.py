@@ -1,5 +1,40 @@
+import calendar
+import datetime
+import re
+
 from django.core.exceptions import ValidationError
 from django.db import models
+
+
+def valider_iban(iban):
+    """Vérifie le format et la clé de contrôle (modulo 97, ISO 13616) d'un
+    IBAN — détecte une faute de frappe avant qu'elle ne parte dans un
+    virement."""
+    valeur = iban.replace(" ", "").upper()
+    if not re.fullmatch(r"[A-Z]{2}\d{2}[A-Z0-9]{1,30}", valeur):
+        raise ValidationError("Format d'IBAN invalide.")
+    rearrange = valeur[4:] + valeur[:4]
+    numerique = "".join(str(int(c, 36)) for c in rearrange)
+    if int(numerique) % 97 != 1:
+        raise ValidationError("IBAN invalide (clé de contrôle incorrecte).")
+
+
+class Devise(models.Model):
+    """Référentiel de devises (ISO 4217) — un tiers ou une commande hors
+    zone euro ne facture pas forcément en euros. Jeu de départ limité,
+    l'admin permet d'en ajouter librement."""
+
+    code = models.CharField("code ISO 4217", max_length=3, primary_key=True)
+    nom = models.CharField("nom", max_length=100)
+    symbole = models.CharField("symbole", max_length=5, blank=True, help_text='Ex. "€", "$", "£"')
+
+    class Meta:
+        verbose_name = "Devise"
+        verbose_name_plural = "Devises"
+        ordering = ["code"]
+
+    def __str__(self):
+        return f"{self.code} ({self.symbole})" if self.symbole else self.code
 
 
 class Pays(models.Model):
@@ -51,6 +86,19 @@ class ConditionPaiement(models.Model):
     def __str__(self):
         return self.libelle
 
+    def calculer_echeance(self, date_reference):
+        """Date d'échéance à partir d'une date de référence (ex. date de
+        facturation) : + nombre_jours, puis report en fin de mois si
+        fin_de_mois. Renvoie None si nombre_jours n'est pas renseigné (une
+        condition purement descriptive, sans délai chiffré)."""
+        if self.nombre_jours is None:
+            return None
+        echeance = date_reference + datetime.timedelta(days=self.nombre_jours)
+        if self.fin_de_mois:
+            dernier_jour = calendar.monthrange(echeance.year, echeance.month)[1]
+            echeance = echeance.replace(day=dernier_jour)
+        return echeance
+
 
 class Tiers(models.Model):
     """Entité unique pour client et/ou fournisseur (un même acteur peut être les deux)."""
@@ -94,6 +142,19 @@ class Tiers(models.Model):
         related_name="tiers",
         help_text="Valeur par défaut, reprise sur devis/commande",
     )
+    devise = models.ForeignKey(
+        Devise,
+        verbose_name="devise",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="tiers",
+        help_text="Devise de facturation de ce tiers (un client hors UE ne facture pas forcément en euros)",
+    )
+    iban = models.CharField(
+        "IBAN", max_length=34, blank=True, help_text="En vue d'un virement (fournisseur notamment)"
+    )
+    bic = models.CharField("BIC / SWIFT", max_length=11, blank=True)
 
     class Meta:
         verbose_name = "Tiers"
@@ -102,6 +163,11 @@ class Tiers(models.Model):
 
     def __str__(self):
         return f"{self.code} — {self.raison_sociale}"
+
+    def clean(self):
+        super().clean()
+        if self.iban:
+            valider_iban(self.iban)
 
 
 class Adresse(models.Model):

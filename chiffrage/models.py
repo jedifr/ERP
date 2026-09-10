@@ -3,7 +3,7 @@ from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from django.utils import timezone
 
-from commercial.models import Adresse, Contact, TauxTVA, Tiers
+from commercial.models import Adresse, Contact, Devise, TauxTVA, Tiers
 from stock.models import Lot, MouvementStock
 from technique.models import Article, PosteTravail
 
@@ -244,6 +244,15 @@ class Commande(models.Model):
         verbose_name="adresse de livraison",
         on_delete=models.PROTECT,
         related_name="commandes_livraison",
+    )
+    devise = models.ForeignKey(
+        Devise,
+        verbose_name="devise",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="commandes",
+        help_text="Par défaut celle du client si renseignée",
     )
 
     class Meta:

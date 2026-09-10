@@ -356,9 +356,9 @@ class CommandeLigneInline(TabularInline):
 class CommandeAdmin(CodificationInitialeMixin, ModelAdmin):
     codification_entite = RegleCodification.Entite.COMMANDE
 
-    list_display = ["numero", "devis", "date_commande", "statut"]
+    list_display = ["numero", "devis", "date_commande", "statut", "devise"]
     search_fields = ["numero", "devis__numero"]
-    autocomplete_fields = ["devis", "adresse_facturation", "adresse_livraison"]
+    autocomplete_fields = ["devis", "adresse_facturation", "adresse_livraison", "devise"]
     inlines = [CommandeLigneInline]
     actions = ["action_synchroniser_lignes"]
 

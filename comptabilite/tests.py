@@ -231,6 +231,57 @@ class TiersCompteComptableTests(TestCase):
             TiersCompteComptable(tiers=self.tiers, compte_fournisseur=self.compte_401).full_clean()
 
 
+class TiersCompteComptableCodeAutoGenereTests(TestCase):
+    """code_client/code_fournisseur : convention du cabinet comptable de
+    l'utilisateur — 411/401 + 5 lettres qu'il détermine lui-même, plutôt que
+    de sélectionner un compte du plan comptable à la main."""
+
+    def setUp(self):
+        importer_pcg()
+        self.tiers = Tiers.objects.create(
+            code="CLI-TCC-AUTO", raison_sociale="Client TCC Auto", type_tiers=Tiers.TypeTiers.LES_DEUX
+        )
+        self.compte_411 = CompteComptable.objects.get(code="411")
+
+    def test_code_client_genere_le_compte_411(self):
+        tcc = TiersCompteComptable.objects.create(tiers=self.tiers, code_client="DUPON")
+        self.assertEqual(tcc.compte_client.code, "411DUPON")
+        self.assertEqual(tcc.compte_client.libelle, self.tiers.raison_sociale)
+        self.assertEqual(tcc.compte_client.systeme, CompteComptable.Systeme.DEVELOPPE)
+
+    def test_code_fournisseur_genere_le_compte_401(self):
+        tcc = TiersCompteComptable.objects.create(tiers=self.tiers, code_fournisseur="MARTI")
+        self.assertEqual(tcc.compte_fournisseur.code, "401MARTI")
+
+    def test_code_est_normalise_en_majuscules(self):
+        tcc = TiersCompteComptable.objects.create(tiers=self.tiers, code_client="dupon")
+        self.assertEqual(tcc.compte_client.code, "411DUPON")
+
+    def test_compte_existant_reutilise_sans_doublon(self):
+        tcc1 = TiersCompteComptable.objects.create(tiers=self.tiers, code_client="DUPON")
+        autre_tiers = Tiers.objects.create(
+            code="CLI-TCC-AUTO-2", raison_sociale="Autre Client", type_tiers=Tiers.TypeTiers.CLIENT
+        )
+        tcc2 = TiersCompteComptable.objects.create(tiers=autre_tiers, code_client="DUPON")
+        self.assertEqual(tcc1.compte_client_id, tcc2.compte_client_id)
+
+    def test_code_de_longueur_incorrecte_refuse(self):
+        with self.assertRaises(ValidationError):
+            TiersCompteComptable(tiers=self.tiers, code_client="DUP").full_clean()
+
+    def test_code_avec_chiffres_refuse(self):
+        with self.assertRaises(ValidationError):
+            TiersCompteComptable(tiers=self.tiers, code_client="DUP01").full_clean()
+
+    def test_code_client_satisfait_a_lui_seul_la_validation(self):
+        TiersCompteComptable(tiers=self.tiers, code_client="DUPON").full_clean()  # ne doit pas lever
+
+    def test_compte_manuel_reste_utilisable_sans_code(self):
+        tcc = TiersCompteComptable.objects.create(tiers=self.tiers, compte_client=self.compte_411)
+        self.assertEqual(tcc.compte_client, self.compte_411)
+        self.assertEqual(tcc.code_client, "")
+
+
 class PosteGestionTests(TestCase):
     def setUp(self):
         importer_pcg()

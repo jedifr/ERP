@@ -4,7 +4,7 @@ from unittest.mock import patch
 from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings
 
-from commercial.models import Adresse, Contact, DelaiPropose, TauxTVA, Tiers
+from commercial.models import Adresse, Contact, DelaiPropose, Devise, TauxTVA, Tiers
 from stock.models import Emplacement, Lot, MouvementStock
 from technique.models import Article, Gamme, Matiere, Nomenclature, PosteTravail, TarifPoste
 
@@ -326,6 +326,17 @@ class LancerEnProductionTests(TestCase):
 
         ligne_mp = commande.lignes.get(article=self.article_mp)
         self.assertEqual(ligne_mp.quantite_commandee, 50)
+
+    def test_devise_de_la_commande_reprend_celle_du_client(self):
+        eur = Devise.objects.get(code="EUR")
+        self.client_tiers.devise = eur
+        self.client_tiers.save()
+        commande = lancer_en_production(self.devis)
+        self.assertEqual(commande.devise, eur)
+
+    def test_devise_none_si_client_sans_devise(self):
+        commande = lancer_en_production(self.devis)
+        self.assertIsNone(commande.devise)
 
     def test_of_reste_en_attente_sans_api_planning_configuree(self):
         of = lancer_en_production(self.devis).ordres_fabrication.first()

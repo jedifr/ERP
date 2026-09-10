@@ -1364,3 +1364,40 @@ Lot de six demandes ponctuelles.
 libre à une liste déroulante — toute valeur déjà saisie à la main est
 perdue à la migration (pas de conversion automatique, discuté avec
 l'utilisateur : aucune donnée de production n'en dépendait encore).
+
+## IBAN, échéance calculée, devise, comptes auxiliaires auto-générés
+
+Quatre pistes proposées après le lot précédent, validées une à une par
+l'utilisateur.
+
+- **`Tiers.iban` / `Tiers.bic`** : coordonnées bancaires du tiers (utile
+  côté fournisseur en vue d'un virement). `commercial.models.valider_iban()`
+  vérifie le format et la clé de contrôle (modulo 97, ISO 13616) dans
+  `Tiers.clean()` — une faute de frappe est détectée avant de partir dans
+  un virement, plutôt que de stocker un IBAN invalide tel quel.
+- **`Facture.date_echeance`** (propriété calculée, pas de colonne) :
+  `self.commande.devis.client.conditions_paiement.calculer_echeance(self.date_facturation)`.
+  `ConditionPaiement.calculer_echeance()` ajoute `nombre_jours` à la date de
+  référence puis, si `fin_de_mois`, reporte au dernier jour du mois
+  obtenu. Renvoie `None` si le client n'a pas de conditions de paiement,
+  ou si celles-ci sont purement descriptives (`nombre_jours` vide, ex.
+  "Comptant" sans jour chiffré). Affichée en lecture seule dans la liste
+  des factures.
+- **`commercial.Devise`** (référentiel ISO 4217, jeu de départ EUR/USD/GBP/CHF
+  via migration de données, extensible dans l'admin) + `Tiers.devise` et
+  `Commande.devise` — un tiers hors UE (régime fiscal "Hors UE") ne
+  facture pas forcément en euros, ce que le régime fiscal seul ne dit pas.
+  `Commande.devise` reprend automatiquement celle du client à la création
+  (`chiffrage.production.lancer_en_production()`), sans empêcher de la
+  changer ensuite au cas par cas.
+- **Comptes auxiliaires auto-générés** (`TiersCompteComptable.code_client` /
+  `code_fournisseur`) : convention propre au cabinet comptable de
+  l'utilisateur — 5 lettres qu'il détermine lui-même, concaténées à "411"
+  (compte client) ou "401" (compte fournisseur). `clean()` valide le format
+  (exactement 5 lettres) ; `save()` résout ou crée le `CompteComptable`
+  correspondant (système développé) et l'assigne à `compte_client`/
+  `compte_fournisseur` — pas de doublon si le même code de 5 lettres est
+  réutilisé pour un autre tiers (`get_or_create` sur le code du compte).
+  Les champs `compte_client`/`compte_fournisseur` restent utilisables
+  directement en échappatoire (compte déjà existant, numérotation
+  différente) quand aucun code à 5 lettres n'est renseigné.

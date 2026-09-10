@@ -5,7 +5,17 @@ from codification.mixins import CodificationInitialeMixin
 from codification.models import RegleCodification
 from comptabilite.models import TiersCompteComptable
 
-from .models import Adresse, Contact, ContactTelephone, ConditionPaiement, DelaiPropose, Pays, TauxTVA, Tiers
+from .models import (
+    Adresse,
+    Contact,
+    ContactTelephone,
+    ConditionPaiement,
+    DelaiPropose,
+    Devise,
+    Pays,
+    TauxTVA,
+    Tiers,
+)
 
 
 class AdresseInline(TabularInline):
@@ -31,6 +41,7 @@ class TiersCompteComptableInline(TabularInline):
     # OneToOneField : Django limite automatiquement à un seul formulaire.
     model = TiersCompteComptable
     extra = 1
+    fields = ["code_client", "compte_client", "code_fournisseur", "compte_fournisseur"]
     autocomplete_fields = ["compte_client", "compte_fournisseur"]
 
 
@@ -38,10 +49,15 @@ class TiersCompteComptableInline(TabularInline):
 class TiersAdmin(CodificationInitialeMixin, ModelAdmin):
     codification_entite = RegleCodification.Entite.TIERS
 
-    list_display = ["code", "raison_sociale", "type_tiers", "regime_fiscal", "siret"]
+    list_display = ["code", "raison_sociale", "type_tiers", "regime_fiscal", "devise", "siret"]
     list_filter = ["type_tiers", "regime_fiscal"]
     search_fields = ["code", "raison_sociale", "siret"]
-    autocomplete_fields = ["conditions_paiement"]
+    autocomplete_fields = ["conditions_paiement", "devise"]
+    fieldsets = [
+        (None, {"fields": ["code", "raison_sociale", "type_tiers", "siret"]}),
+        ("Commercial", {"fields": ["regime_fiscal", "devise", "conditions_paiement"]}),
+        ("Coordonnées bancaires", {"fields": ["iban", "bic"], "classes": ["tab"]}),
+    ]
     inlines = [AdresseInline, ContactInline, TiersCompteComptableInline]
 
 
@@ -105,4 +121,10 @@ class ConditionPaiementAdmin(ModelAdmin):
 class PaysAdmin(ModelAdmin):
     list_display = ["code", "nom", "est_ue"]
     list_filter = ["est_ue"]
+    search_fields = ["code", "nom"]
+
+
+@admin.register(Devise)
+class DeviseAdmin(ModelAdmin):
+    list_display = ["code", "nom", "symbole"]
     search_fields = ["code", "nom"]
