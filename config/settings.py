@@ -58,6 +58,7 @@ INSTALLED_APPS = [
     "chiffrage",
     "stock",
     "facturation",
+    "comptabilite",
     "achats",
     "soustraitance",
     "pilotage",
@@ -363,6 +364,22 @@ UNFOLD = {
                         "title": "Factures",
                         "icon": "receipt_long",
                         "link": reverse_lazy("admin:facturation_facture_changelist"),
+                    },
+                ],
+            },
+            {
+                "title": "Comptabilité",
+                "separator": True,
+                "items": [
+                    {
+                        "title": "Plan comptable",
+                        "icon": "account_balance",
+                        "link": reverse_lazy("admin:comptabilite_comptecomptable_changelist"),
+                    },
+                    {
+                        "title": "Journaux comptables",
+                        "icon": "book",
+                        "link": reverse_lazy("admin:comptabilite_journalcomptable_changelist"),
                     },
                 ],
             },

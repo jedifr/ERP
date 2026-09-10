@@ -1153,3 +1153,46 @@ déclarative pour l'instant : elle n'alimente pas automatiquement
 `Article.cout_unitaire` (qui reste saisi manuellement et utilisé tel quel
 par le moteur de chiffrage) — un rapprochement automatique serait une
 évolution ultérieure séparée.
+
+## Nouvelle app comptabilite : plan comptable général français + journaux comptables
+
+Nouvelle app `comptabilite`, sur le principe des dictionnaires Dolibarr
+(cf. capture d'écran fournie "Dictionnaires - Journaux comptables").
+
+- **`CompteComptable`** (plan comptable) : `code` (clé primaire), `libelle`,
+  `classe` (1 à 8, déduite automatiquement du 1er chiffre du code —
+  champ non éditable), `compte_parent` (hiérarchie, ex. 1013 sous 101 sous
+  10 sous 1), `systeme` (Système de base / Système développé — distingue
+  les comptes obligatoires des comptes de détail facultatifs du PCG),
+  `actif`.
+- **`JournalComptable`** (dictionnaire des journaux, même principe que la
+  capture d'écran Dolibarr) : `code`, `libelle`, `nature` (Achats, Ventes,
+  Banque, Caisse, Notes de frais, Opérations diverses, Reports à nouveaux),
+  `actif`. Migration `0002` préremplit le jeu standard (AC, VT, BQ1, CA, ER,
+  OD, AN) — les journaux propres à l'entreprise (un par compte bancaire,
+  ex. BQ2 "BANQUE POPULAIRE") s'ajoutent librement depuis l'admin, comme
+  demandé ("permettre d'en ajouter de nouveaux").
+
+**Import du PCG officiel en un clic** : bouton "Importer le plan comptable
+officiel (PCG *millésime*)" sur la liste des comptes comptables
+(`CompteComptableAdmin.actions_list`, mécanisme Unfold pour une action de
+liste qui n'a pas besoin de sélection — contrairement aux actions
+classiques Django admin). Il déclenche `comptabilite.pcg.importer_pcg()`,
+qui charge le jeu de données embarqué dans l'app
+(`comptabilite/data/pcg_<millésime>.json`) et fait un `update_or_create`
+par compte (idempotent — rejouable sans dupliquer, met à jour un libellé
+modifié entre-temps). Même fonction exposée en CLI (`manage.py
+importer_pcg`, pour un déploiement/CI).
+
+Ce jeu de données est un **instantané embarqué**, pas un téléchargement à
+la volée depuis un site tiers au moment du clic : plus fiable (aucune
+dépendance à la disponibilité d'un service externe en production), et le
+contenu exact importé est versionné dans le dépôt. Source : le plan
+comptable général publié annuellement par l'ANC (Autorité des Normes
+Comptables), au format JSON structuré (`code`, `libellé`, `système`,
+`parent`) republié par
+[github.com/arrhes/PCG](https://github.com/arrhes/PCG) sous licence
+CC0 (domaine public) — millésime 2026, 861 comptes. Pour passer
+à un millésime plus récent : remplacer le fichier JSON embarqué et relancer
+l'import (le `update_or_create` absorbe les libellés modifiés sans
+dupliquer les comptes inchangés).
