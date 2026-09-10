@@ -394,7 +394,9 @@ class ContactTelephone(models.Model):
     type_telephone = models.CharField(
         "type", max_length=20, choices=TypeTelephone.choices, default=TypeTelephone.PORTABLE
     )
-    numero = models.CharField("numéro", max_length=30)
+    numero = models.CharField(
+        "numéro", max_length=30, blank=True, help_text="Optionnel : pas toujours connu"
+    )
 
     class Meta:
         verbose_name = "Numéro de téléphone"
@@ -402,4 +404,6 @@ class ContactTelephone(models.Model):
         ordering = ["contact", "type_telephone"]
 
     def __str__(self):
+        if not self.numero:
+            return self.get_type_telephone_display()
         return f"{self.get_type_telephone_display()} : {self.numero}"

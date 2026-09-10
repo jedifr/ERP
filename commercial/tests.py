@@ -96,6 +96,22 @@ class ContactTelephoneTests(TestCase):
         # numéro" (voir ContactAdresseLivraisonBoutABoutTests).
         self.assertEqual(ContactTelephone._meta.get_field("type_telephone").default, "portable")
 
+    def test_numero_optionnel(self):
+        # Le numéro n'est pas toujours connu au moment de saisir un contact
+        # (signalé par l'utilisateur) : un type renseigné sans numéro doit
+        # rester valide, pas seulement une ligne entièrement vide et ignorée
+        # (voir test_ligne_telephone_vide_ne_bloque_pas_lenregistrement).
+        tiers = Tiers.objects.create(
+            code="CLI-TEL-OPT", raison_sociale="Client Téléphone Optionnel", type_tiers=Tiers.TypeTiers.CLIENT
+        )
+        contact = Contact.objects.create(tiers=tiers, nom="Martin")
+        telephone = ContactTelephone(
+            contact=contact, type_telephone=ContactTelephone.TypeTelephone.BUREAU, numero=""
+        )
+        telephone.full_clean()
+        telephone.save()
+        self.assertEqual(str(telephone), "Bureau")
+
 
 class AdresseTests(TestCase):
     def setUp(self):
@@ -478,9 +494,9 @@ class ContactAdresseAssocieeBoutABoutTests(TestCase):
         contact = tiers.contacts.get()
         self.assertEqual(contact.telephones.count(), 0)
 
-    def test_ligne_telephone_remplie_reste_obligatoire(self):
-        # Le contrôle inverse : une ligne réellement modifiée (numéro
-        # renseigné) doit toujours être validée normalement.
+    def test_ligne_telephone_remplie_enregistree_normalement(self):
+        # Une ligne réellement remplie (numéro renseigné) doit toujours être
+        # validée et enregistrée normalement.
         payload = self._payload(
             **{
                 "contacts-0-telephones-TOTAL_FORMS": "1",
@@ -497,6 +513,29 @@ class ContactAdresseAssocieeBoutABoutTests(TestCase):
         telephone = contact.telephones.get()
         self.assertEqual(telephone.type_telephone, "bureau")
         self.assertEqual(telephone.numero, "0102030405")
+
+    def test_ligne_telephone_type_seul_sans_numero_acceptee(self):
+        # Signalé par l'utilisateur : le numéro n'est pas toujours connu.
+        # Une ligne où seul le type a été changé (donc "modifiée" au sens
+        # du formset, contrairement à la ligne vide du test ci-dessus) doit
+        # maintenant s'enregistrer sans numéro, plutôt que d'exiger un
+        # champ obligatoire qu'on ne peut pas toujours renseigner.
+        payload = self._payload(
+            **{
+                "contacts-0-telephones-TOTAL_FORMS": "1",
+                "contacts-0-telephones-0-id": "",
+                "contacts-0-telephones-0-type_telephone": "bureau",
+                "contacts-0-telephones-0-numero": "",
+            }
+        )
+        response = self.client.post("/admin/commercial/tiers/add/", data=payload, follow=False)
+        self.assertEqual(response.status_code, 302, getattr(response, "context", None))
+
+        tiers = Tiers.objects.get(pk="CLI-ADR-LIV-E2E")
+        contact = tiers.contacts.get()
+        telephone = contact.telephones.get()
+        self.assertEqual(telephone.type_telephone, "bureau")
+        self.assertEqual(telephone.numero, "")
 
 
 class ContactAdminAdresseAssocieeChoicesTests(TestCase):

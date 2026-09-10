@@ -1662,3 +1662,17 @@ raison sociale, sélection remplissant SIRET + adresse (nouvelle ligne
 automatiquement raison sociale + adresse ; non-régression vérifiée dans
 les deux sens quand une raison sociale ou une adresse étaient déjà
 saisies à la main (rien n'est écrasé, aucune ligne fantôme ajoutée).
+
+## Correctif : numéro de téléphone d'un contact rendu optionnel
+
+Signalé : le numéro de téléphone d'un contact n'est pas toujours connu au
+moment de la saisie, mais `ContactTelephone.numero` était un champ
+obligatoire — bloquant dès qu'on choisissait un type (ex. "Bureau") sans
+renseigner de numéro (une ligne réellement vide et non touchée était déjà
+tolérée, voir "Correctif : ligne de téléphone vide bloquant
+l'enregistrement d'un tiers").
+
+`numero` passe à `blank=True`. `ContactTelephone.__str__()` et
+`ContactAdmin.telephones_display` (colonne "Téléphones" de la liste des
+contacts) s'adaptent : un numéro absent affiche simplement le type
+("Bureau") plutôt que "Bureau : " suivi de rien.

@@ -250,7 +250,7 @@ class ContactAdmin(ModelAdmin):
 
     @admin.display(description="Téléphones")
     def telephones_display(self, obj):
-        return ", ".join(f"{t.get_type_telephone_display()} : {t.numero}" for t in obj.telephones.all()) or "—"
+        return ", ".join(str(t) for t in obj.telephones.all()) or "—"
 
     def get_form(self, request, obj=None, **kwargs):
         # Mémorise le contact en cours d'édition (None à la création) pour
