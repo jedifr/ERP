@@ -1477,3 +1477,14 @@ place.
   "Contacts") — Django affiche toujours tous les fieldsets avant tous les
   inlines, cette combinaison est ce qui rapproche le plus les deux blocs
   demandés.
+
+**Correctif après retour utilisateur** : "Adresse de livraison associée"
+(`ContactInline.adresse_livraison`) utilisait `autocomplete_fields`, qui
+interroge `AdresseAdmin` sans aucun filtre — le menu proposait les
+adresses de n'importe quel tiers, et restait incohérent à la création
+d'un tiers (aucune de ses propres adresses n'existe encore en base pour
+y être retrouvée). Remplacé par un `<select>` simple dont le queryset est
+restreint, via `ContactInline.get_formset`/`formfield_for_foreignkey`, aux
+seules adresses de livraison du tiers en cours d'édition — vide (avec un
+`help_text` explicite) tant que le tiers n'a pas été enregistré une
+première fois avec ses adresses.

@@ -252,6 +252,58 @@ class ContactAdresseLivraisonTests(TestCase):
             contact.full_clean()
 
 
+class ContactInlineAdresseLivraisonChoicesTests(TestCase):
+    """Le champ « Adresse de livraison associée » du tableau Contacts, sur
+    la fiche Tiers, ne doit proposer que les adresses de livraison du tiers
+    en cours d'édition — jamais celles d'un autre tiers (l'autocomplete
+    précédent interrogeait tout le référentiel Adresse sans filtre), et
+    aucune adresse tant que le tiers n'a pas encore été enregistré une
+    première fois (ses adresses n'existent pas encore en base à ce
+    moment-là — incohérent de prétendre en proposer une)."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        self.user = User.objects.create_superuser("adresse-livraison-admin", "al@example.com", "pass1234")
+        self.client.force_login(self.user)
+
+        self.tiers = Tiers.objects.create(
+            code="CLI-ADR-LIV", raison_sociale="Client Adresse Livraison", type_tiers=Tiers.TypeTiers.CLIENT
+        )
+        self.contact = Contact.objects.create(tiers=self.tiers, nom="Site")
+        self.livraison = Adresse.objects.create(
+            tiers=self.tiers, type_adresse=Adresse.TypeAdresse.LIVRAISON,
+            libelle="Entrepôt propre", adresse="1 rue", code_postal="75000", ville="Paris",
+        )
+        self.facturation = Adresse.objects.create(
+            tiers=self.tiers, type_adresse=Adresse.TypeAdresse.FACTURATION,
+            libelle="Siège propre", adresse="1 rue", code_postal="75000", ville="Paris",
+        )
+        autre_tiers = Tiers.objects.create(
+            code="CLI-ADR-LIV-AUTRE", raison_sociale="Autre Client", type_tiers=Tiers.TypeTiers.CLIENT
+        )
+        self.livraison_autre_tiers = Adresse.objects.create(
+            tiers=autre_tiers, type_adresse=Adresse.TypeAdresse.LIVRAISON,
+            libelle="Entrepôt autre tiers", adresse="2 rue", code_postal="75000", ville="Paris",
+        )
+
+    def test_formulaire_ajout_ne_propose_aucune_adresse(self):
+        response = self.client.get("/admin/commercial/tiers/add/")
+        self.assertEqual(response.status_code, 200)
+        formset = response.context["inline_admin_formsets"][2].formset
+        self.assertEqual(formset.empty_form.fields["adresse_livraison"].queryset.count(), 0)
+
+    def test_formulaire_modification_ne_propose_que_les_adresses_de_livraison_du_tiers(self):
+        response = self.client.get(f"/admin/commercial/tiers/{self.tiers.pk}/change/")
+        self.assertEqual(response.status_code, 200)
+        formset = response.context["inline_admin_formsets"][2].formset
+        queryset = formset.forms[0].fields["adresse_livraison"].queryset
+        self.assertIn(self.livraison, queryset)
+        self.assertNotIn(self.facturation, queryset)
+        self.assertNotIn(self.livraison_autre_tiers, queryset)
+
+
 class TiersIbanTests(TestCase):
     def test_iban_valide_accepte(self):
         # IBAN français d'exemple, valide (clé de contrôle correcte).

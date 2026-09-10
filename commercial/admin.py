@@ -45,13 +45,38 @@ class ContactTelephoneInline(TabularInline):
 class ContactInline(TabularInline):
     model = Contact
     extra = 0
-    autocomplete_fields = ["adresse_livraison"]
     # Inline imbriqué (unfold.admin.ModelAdmin embarque nativement
     # NestedInlinesModelAdminMixin) : permet de saisir les numéros de
     # téléphone d'un contact directement depuis la fiche Tiers, sans passer
     # par la fiche Contact dédiée — ContactTelephone reste un modèle à part
     # (plusieurs numéros typés par contact), seule sa présentation change.
     inlines = [ContactTelephoneInline]
+
+    def get_formset(self, request, obj=None, **kwargs):
+        # Mémorise le tiers parent (None à la création) pour restreindre le
+        # champ adresse_livraison ci-dessous — voir formfield_for_foreignkey.
+        self.parent_obj = obj
+        return super().get_formset(request, obj, **kwargs)
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == "adresse_livraison":
+            # L'autocomplete Select2 interrogeait AdresseAdmin sans filtre :
+            # le menu proposait les adresses de n'importe quel tiers, et
+            # restait vide de sens à la création d'un tiers (aucune de ses
+            # adresses n'existe encore en base pour être retrouvée). Un
+            # <select> simple, restreint aux adresses de livraison du tiers
+            # en cours (None à la création), remplace l'autocomplete.
+            if self.parent_obj is not None:
+                kwargs["queryset"] = Adresse.objects.filter(
+                    tiers=self.parent_obj, type_adresse=Adresse.TypeAdresse.LIVRAISON
+                )
+            else:
+                kwargs["queryset"] = Adresse.objects.none()
+                kwargs["help_text"] = (
+                    "Non disponible tant que le tiers n'a pas été enregistré une première fois : "
+                    "enregistrez-le avec ses adresses, puis revenez associer ce contact à l'une d'elles."
+                )
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
 
 class TiersCompteComptableInline(TabularInline):
