@@ -1196,3 +1196,44 @@ CC0 (domaine public) — millésime 2026, 861 comptes. Pour passer
 à un millésime plus récent : remplacer le fichier JSON embarqué et relancer
 l'import (le `update_or_create` absorbe les libellés modifiés sans
 dupliquer les comptes inchangés).
+
+## Génération des écritures comptables (depuis les factures de vente)
+
+Périmètre volontairement limité aux **factures de vente** : c'est le seul
+document "comptable" existant dans l'app (`facturation.Facture`, pont vers
+Tiime). Les achats n'ont pas d'équivalent "facture fournisseur" aujourd'hui
+(seulement des commandes/réceptions logistiques dans l'app `achats`) — la
+génération des écritures d'achat serait une évolution ultérieure séparée.
+
+- **`EcritureComptable`** (journal, date, pièce, libellé, `facture`
+  d'origine optionnelle) + **`LigneEcriture`** (compte, libellé, débit,
+  crédit — jamais les deux à la fois, jamais aucun des deux :
+  `LigneEcriture.clean()`). Une écriture peut aussi être saisie
+  entièrement à la main (pas seulement générée).
+- **Équilibre imposé côté admin** : `LigneEcritureFormSet.clean()`
+  (formset personnalisé sur l'inline "Lignes d'écriture") refuse
+  l'enregistrement si total débit ≠ total crédit — la partie double n'est
+  jamais laissée en défaut ne serait-ce que temporairement.
+- **`ParametresComptables`** : ligne de configuration unique (journal des
+  ventes, compte client, compte de vente, compte de TVA collectée par
+  défaut), modifiable dans l'admin (section "Paramètres comptables").
+  Rien n'est figé dans le code : si un compte n'y est pas configuré,
+  `ParametresComptables.charger()` retombe en mémoire (jamais écrit tant
+  que l'utilisateur n'a rien choisi) sur le code PCG usuel correspondant
+  s'il existe en base (411 — Clients, 706 — Prestations de services,
+  44571 — TVA collectée) — fonctionne donc "out of the box" dès que le
+  plan comptable officiel a été importé, sans étape de configuration
+  obligatoire.
+- **Génération** : `comptabilite.generation.generer_ecriture_facture(facture)`
+  — regroupe les lignes de la commande facturée par taux de TVA
+  (`CommandeLigne.montant_ht`/`montant_ttc`, valeurs courantes,
+  surchargeables — pas celles figées du devis) et pose une ligne "Clients"
+  au débit (TTC total) plus, par taux de TVA distinct, une ligne "Ventes"
+  (HT) et une ligne "TVA collectée" (si non nulle) au crédit. Repli sur
+  `Facture.montant_ht`/`montant_ttc` si la commande n'a aucune ligne
+  chiffrée. Idempotent (`OneToOneField` facture ↔ écriture) : ne génère
+  jamais deux écritures pour la même facture, renvoie l'existante.
+  Exposé dans l'admin par l'action **"Générer l'écriture comptable"** sur
+  la liste des factures (action de sélection standard, pas
+  `actions_list` cette fois : contrairement à l'import du PCG, il y a ici
+  une sélection naturelle — les factures cochées).

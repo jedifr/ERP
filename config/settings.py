@@ -381,6 +381,16 @@ UNFOLD = {
                         "icon": "book",
                         "link": reverse_lazy("admin:comptabilite_journalcomptable_changelist"),
                     },
+                    {
+                        "title": "Écritures comptables",
+                        "icon": "receipt",
+                        "link": reverse_lazy("admin:comptabilite_ecriturecomptable_changelist"),
+                    },
+                    {
+                        "title": "Paramètres comptables",
+                        "icon": "settings",
+                        "link": reverse_lazy("admin:comptabilite_parametrescomptables_changelist"),
+                    },
                 ],
             },
             {
