@@ -52,30 +52,31 @@ class ContactTelephoneInline(TabularInline):
 
 
 class ContactInlineForm(forms.ModelForm):
-    """adresse_livraison ne peut pas rester un ModelChoiceField classique
+    """adresse_associee ne peut pas rester un ModelChoiceField classique
     sur cet inline : au moment où Django valide ce formulaire (avant que
     quoi que ce soit soit enregistré), l'adresse qu'on veut associer peut
     être une ligne du tableau Adresses tout juste remplie, sans pk réel —
     un ModelChoiceField rejetterait cette valeur, introuvable en base.
 
     On référence donc la ligne choisie par son indice dans le formset
-    Adresses ("adresse_livraison_ref", ex. "1" pour adresses-1-*) plutôt
+    Adresses ("adresse_associee_ref", ex. "1" pour adresses-1-*) plutôt
     que par un pk, et TiersAdmin.save_related() la résout en instance
     réelle une fois que toutes les adresses ont effectivement été
     enregistrées. Les options du <select> sont construites en JS
     (tiers_admin.js) à partir des lignes du tableau Adresses affichées à
-    l'écran (type Livraison uniquement), jamais interrogées en base."""
+    l'écran (livraison et facturation confondues — Adresse.TypeAdresse n'a
+    que ces deux valeurs), jamais interrogées en base."""
 
-    adresse_livraison_ref = forms.CharField(
-        label="Adresse de livraison associée",
+    adresse_associee_ref = forms.CharField(
+        label="Adresse associée",
         required=False,
         widget=forms.Select(choices=[("", "---------")]),
-        help_text="Uniquement les adresses de livraison déjà saisies dans le tableau ci-dessus.",
+        help_text="Uniquement les adresses déjà saisies dans le tableau ci-dessus.",
     )
 
     class Meta:
         model = Contact
-        exclude = ["adresse_livraison"]
+        exclude = ["adresse_associee"]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -83,8 +84,8 @@ class ContactInlineForm(forms.ModelForm):
         # ligne Adresses correspondant à l'adresse déjà liée (contact
         # existant) — comparée au pk réel de chaque ligne, pas à son indice
         # (qui peut différer d'un rendu à l'autre selon l'ordre du tri).
-        self.fields["adresse_livraison_ref"].widget.attrs["data-adresse-livraison-actuelle"] = (
-            self.instance.adresse_livraison_id or ""
+        self.fields["adresse_associee_ref"].widget.attrs["data-adresse-associee-actuelle"] = (
+            self.instance.adresse_associee_id or ""
         )
 
 
@@ -168,11 +169,11 @@ class TiersAdmin(CodificationInitialeMixin, ModelAdmin):
 
     def save_related(self, request, form, formsets, change):
         super().save_related(request, form, formsets, change)
-        self._resoudre_adresses_livraison(form.instance, formsets)
+        self._resoudre_adresses_associees(form.instance, formsets)
 
-    def _resoudre_adresses_livraison(self, tiers, formsets):
-        """Contact.adresse_livraison ne fait pas partie du formulaire de
-        ContactInline (voir ContactInlineForm.adresse_livraison_ref) : la
+    def _resoudre_adresses_associees(self, tiers, formsets):
+        """Contact.adresse_associee ne fait pas partie du formulaire de
+        ContactInline (voir ContactInlineForm.adresse_associee_ref) : la
         ligne d'adresse choisie n'est résolue en instance réelle qu'ici,
         une fois que toutes les adresses ont vraiment été enregistrées par
         le super().save_related() ci-dessus (y compris celles tout juste
@@ -188,11 +189,11 @@ class TiersAdmin(CodificationInitialeMixin, ModelAdmin):
             if contact.pk is None:
                 continue
             adresse = self._resoudre_reference_adresse(
-                contact_form.cleaned_data.get("adresse_livraison_ref"), tiers, adresse_formset
+                contact_form.cleaned_data.get("adresse_associee_ref"), tiers, adresse_formset
             )
-            if contact.adresse_livraison_id != (adresse.pk if adresse else None):
-                contact.adresse_livraison = adresse
-                contact.save(update_fields=["adresse_livraison"])
+            if contact.adresse_associee_id != (adresse.pk if adresse else None):
+                contact.adresse_associee = adresse
+                contact.save(update_fields=["adresse_associee"])
 
     @staticmethod
     def _resoudre_reference_adresse(ref, tiers, adresse_formset):
@@ -208,7 +209,10 @@ class TiersAdmin(CodificationInitialeMixin, ModelAdmin):
         if adresse_form in adresse_formset.deleted_forms:
             return None
         candidate = adresse_form.instance
-        if candidate.pk and candidate.tiers_id == tiers.pk and candidate.type_adresse == Adresse.TypeAdresse.LIVRAISON:
+        # N'importe quel type d'adresse convient (livraison ou facturation —
+        # Adresse.TypeAdresse n'en compte de toute façon pas d'autre) : seule
+        # l'appartenance au bon tiers compte.
+        if candidate.pk and candidate.tiers_id == tiers.pk:
             return candidate
         return None
 
@@ -234,7 +238,7 @@ class ContactAdmin(ModelAdmin):
         "telephones_display",
         "fonction",
         "est_principal",
-        "adresse_livraison",
+        "adresse_associee",
     ]
     list_filter = ["est_principal"]
     search_fields = ["nom", "prenom", "tiers__code", "tiers__raison_sociale"]
@@ -247,7 +251,7 @@ class ContactAdmin(ModelAdmin):
 
     def get_form(self, request, obj=None, **kwargs):
         # Mémorise le contact en cours d'édition (None à la création) pour
-        # restreindre le champ adresse_livraison ci-dessous — même souci et
+        # restreindre le champ adresse_associee ci-dessous — même souci et
         # même correctif que ContactInline.formfield_for_foreignkey côté
         # fiche Tiers : sans ce filtre, l'autocomplete proposait les
         # adresses de n'importe quel tiers.
@@ -255,12 +259,12 @@ class ContactAdmin(ModelAdmin):
         return super().get_form(request, obj, **kwargs)
 
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
-        if db_field.name == "adresse_livraison":
+        if db_field.name == "adresse_associee":
             obj = getattr(self, "_obj", None)
             if obj is not None and obj.tiers_id:
-                kwargs["queryset"] = Adresse.objects.filter(
-                    tiers_id=obj.tiers_id, type_adresse=Adresse.TypeAdresse.LIVRAISON
-                )
+                # Livraison et facturation conviennent toutes les deux —
+                # Adresse.TypeAdresse n'en compte de toute façon pas d'autre.
+                kwargs["queryset"] = Adresse.objects.filter(tiers_id=obj.tiers_id)
             else:
                 kwargs["queryset"] = Adresse.objects.none()
                 kwargs["help_text"] = (

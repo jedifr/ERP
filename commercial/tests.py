@@ -222,12 +222,12 @@ class TiersInlinesSansLigneVideTests(TestCase):
         self.assertContains(response, 'name="contacts-TOTAL_FORMS" value="1"', html=False)
 
 
-class ContactAdresseLivraisonTests(TestCase):
-    """Contact.adresse_livraison : associe optionnellement un contact à une
-    adresse de livraison précise du tiers (ex. le contact sur place à un
-    site) — doit forcément appartenir au même tiers et être de type
-    Livraison (même esprit que Devis.clean() pour adresse_facturation/
-    adresse_livraison/contact vis-à-vis du client)."""
+class ContactAdresseAssocieeTests(TestCase):
+    """Contact.adresse_associee : associe optionnellement un contact à une
+    adresse précise du tiers, de livraison (ex. le contact sur place à un
+    site) ou de facturation (ex. le contact comptabilité) — doit forcément
+    appartenir au même tiers (même esprit que Devis.clean() pour
+    adresse_facturation/adresse_livraison/contact vis-à-vis du client)."""
 
     def setUp(self):
         self.tiers = Tiers.objects.create(
@@ -248,27 +248,26 @@ class ContactAdresseLivraisonTests(TestCase):
             ville="Paris",
         )
 
-    def test_association_valide(self):
-        contact = Contact(tiers=self.tiers, nom="Site", adresse_livraison=self.livraison)
+    def test_association_a_une_adresse_de_livraison_valide(self):
+        contact = Contact(tiers=self.tiers, nom="Site", adresse_associee=self.livraison)
+        contact.full_clean()  # ne doit pas lever
+
+    def test_association_a_une_adresse_de_facturation_valide(self):
+        contact = Contact(tiers=self.tiers, nom="Comptabilité", adresse_associee=self.facturation)
         contact.full_clean()  # ne doit pas lever
 
     def test_adresse_d_un_autre_tiers_refusee(self):
         autre_tiers = Tiers.objects.create(
             code="CLI-CONTACT-ADRESSE-2", raison_sociale="Autre Client", type_tiers=Tiers.TypeTiers.CLIENT
         )
-        contact = Contact(tiers=autre_tiers, nom="Site", adresse_livraison=self.livraison)
-        with self.assertRaises(ValidationError):
-            contact.full_clean()
-
-    def test_adresse_de_facturation_refusee(self):
-        contact = Contact(tiers=self.tiers, nom="Site", adresse_livraison=self.facturation)
+        contact = Contact(tiers=autre_tiers, nom="Site", adresse_associee=self.livraison)
         with self.assertRaises(ValidationError):
             contact.full_clean()
 
 
 class ResoudreReferenceAdresseTests(TestCase):
     """TiersAdmin._resoudre_reference_adresse() : résout une référence
-    "adresse_livraison_ref" (indice dans le formset Adresses, voir
+    "adresse_associee_ref" (indice dans le formset Adresses, voir
     ContactInlineForm) en instance Adresse réelle — utilisée par
     save_related() une fois toutes les adresses enregistrées. Formset
     factice minimal (juste .forms/.deleted_forms) : inutile de passer par
@@ -327,9 +326,9 @@ class ResoudreReferenceAdresseTests(TestCase):
         formset = self._formset([self.livraison], deleted_indexes=[0])
         self.assertIsNone(self.resoudre("0", self.tiers, formset))
 
-    def test_adresse_de_facturation_refusee(self):
+    def test_adresse_de_facturation_acceptee(self):
         formset = self._formset([self.facturation])
-        self.assertIsNone(self.resoudre("0", self.tiers, formset))
+        self.assertEqual(self.resoudre("0", self.tiers, formset), self.facturation)
 
     def test_adresse_dun_autre_tiers_refusee(self):
         formset = self._formset([self.livraison_autre_tiers])
@@ -342,12 +341,12 @@ class ResoudreReferenceAdresseTests(TestCase):
         self.assertIsNone(self.resoudre("0", self.tiers, formset))
 
 
-class ContactAdresseLivraisonBoutABoutTests(TestCase):
+class ContactAdresseAssocieeBoutABoutTests(TestCase):
     """Bout en bout, via de vraies requêtes admin : associer un contact à
-    une adresse de livraison EN UNE SEULE FOIS, y compris à la création
-    d'un tiers (l'adresse n'a alors pas encore de pk réel au moment où
-    Django valide le formulaire — voir ContactInlineForm et
-    TiersAdmin.save_related). C'est exactement le scénario signalé par
+    une adresse — de livraison ou de facturation — EN UNE SEULE FOIS, y
+    compris à la création d'un tiers (l'adresse n'a alors pas encore de pk
+    réel au moment où Django valide le formulaire — voir ContactInlineForm
+    et TiersAdmin.save_related). C'est exactement le scénario signalé par
     l'utilisateur : avant ce correctif, impossible de faire ce lien sans
     un premier aller-retour d'enregistrement."""
 
@@ -355,7 +354,7 @@ class ContactAdresseLivraisonBoutABoutTests(TestCase):
         from django.contrib.auth import get_user_model
 
         User = get_user_model()
-        self.user = User.objects.create_superuser("adresse-livraison-e2e", "ae@example.com", "pass1234")
+        self.user = User.objects.create_superuser("adresse-associee-e2e", "ae@example.com", "pass1234")
         self.client.force_login(self.user)
 
     def _payload(self, **overrides):
@@ -399,7 +398,7 @@ class ContactAdresseLivraisonBoutABoutTests(TestCase):
             "contacts-0-prenom": "Jean",
             "contacts-0-email": "",
             "contacts-0-fonction": "",
-            "contacts-0-adresse_livraison_ref": "0",
+            "contacts-0-adresse_associee_ref": "0",
             "contacts-0-telephones-TOTAL_FORMS": "0",
             "contacts-0-telephones-INITIAL_FORMS": "0",
             "contacts-0-telephones-MIN_NUM_FORMS": "0",
@@ -416,16 +415,17 @@ class ContactAdresseLivraisonBoutABoutTests(TestCase):
         tiers = Tiers.objects.get(pk="CLI-ADR-LIV-E2E")
         adresse = tiers.adresses.get()
         contact = tiers.contacts.get()
-        self.assertEqual(contact.adresse_livraison, adresse)
+        self.assertEqual(contact.adresse_associee, adresse)
 
-    def test_reference_vers_une_ligne_de_facturation_ignoree(self):
+    def test_reference_vers_une_ligne_de_facturation_acceptee(self):
         payload = self._payload(**{"adresses-0-type_adresse": Adresse.TypeAdresse.FACTURATION})
         response = self.client.post("/admin/commercial/tiers/add/", data=payload, follow=False)
         self.assertEqual(response.status_code, 302, getattr(response, "context", None))
 
         tiers = Tiers.objects.get(pk="CLI-ADR-LIV-E2E")
+        adresse = tiers.adresses.get()
         contact = tiers.contacts.get()
-        self.assertIsNone(contact.adresse_livraison)
+        self.assertEqual(contact.adresse_associee, adresse)
 
     def test_modification_relie_a_une_adresse_deja_existante(self):
         tiers = Tiers.objects.create(
@@ -450,7 +450,7 @@ class ContactAdresseLivraisonBoutABoutTests(TestCase):
         self.assertEqual(response.status_code, 302, getattr(response, "context", None))
 
         contact = tiers.contacts.get()
-        self.assertEqual(contact.adresse_livraison, adresse)
+        self.assertEqual(contact.adresse_associee, adresse)
 
     def test_ligne_telephone_vide_ne_bloque_pas_lenregistrement(self):
         # Régression : ContactTelephoneInline (extra=1) affiche une ligne
@@ -499,9 +499,11 @@ class ContactAdresseLivraisonBoutABoutTests(TestCase):
         self.assertEqual(telephone.numero, "0102030405")
 
 
-class ContactAdminAdresseLivraisonChoicesTests(TestCase):
-    """Même correctif que ContactInlineAdresseLivraisonChoicesTests, mais
-    sur la fiche Contact autonome (/admin/commercial/contact/)."""
+class ContactAdminAdresseAssocieeChoicesTests(TestCase):
+    """Même correctif que ResoudreReferenceAdresseTests/ContactInlineForm,
+    mais sur la fiche Contact autonome (/admin/commercial/contact/) : le
+    menu doit proposer les adresses (livraison et facturation confondues)
+    du tiers du contact, jamais celles d'un autre tiers."""
 
     def setUp(self):
         from django.contrib.auth import get_user_model
@@ -533,14 +535,14 @@ class ContactAdminAdresseLivraisonChoicesTests(TestCase):
     def test_formulaire_ajout_ne_propose_aucune_adresse(self):
         response = self.client.get("/admin/commercial/contact/add/")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.context["adminform"].form.fields["adresse_livraison"].queryset.count(), 0)
+        self.assertEqual(response.context["adminform"].form.fields["adresse_associee"].queryset.count(), 0)
 
-    def test_formulaire_modification_ne_propose_que_les_adresses_de_livraison_du_tiers(self):
+    def test_formulaire_modification_propose_livraison_et_facturation_du_tiers(self):
         response = self.client.get(f"/admin/commercial/contact/{self.contact.pk}/change/")
         self.assertEqual(response.status_code, 200)
-        queryset = response.context["adminform"].form.fields["adresse_livraison"].queryset
+        queryset = response.context["adminform"].form.fields["adresse_associee"].queryset
         self.assertIn(self.livraison, queryset)
-        self.assertNotIn(self.facturation, queryset)
+        self.assertIn(self.facturation, queryset)
         self.assertNotIn(self.livraison_autre_tiers, queryset)
 
 

@@ -328,17 +328,18 @@ class Contact(models.Model):
     est_principal = models.BooleanField(
         "contact principal", default=False, help_text="Contact par défaut proposé pour le tiers"
     )
-    adresse_livraison = models.ForeignKey(
+    adresse_associee = models.ForeignKey(
         Adresse,
-        verbose_name="adresse de livraison associée",
+        verbose_name="adresse associée",
         null=True,
         blank=True,
         on_delete=models.SET_NULL,
         related_name="contacts",
         help_text=(
-            "Optionnel : associe ce contact à une adresse de livraison précise du "
-            "tiers (ex. le contact sur place à un site). Proposé en priorité sur "
-            "cette adresse, avant le contact principal du tiers."
+            "Optionnel : associe ce contact à une adresse précise du tiers — de "
+            "livraison (ex. le contact sur place à un site) ou de facturation (ex. "
+            "le contact comptabilité). Proposé en priorité sur cette adresse, avant "
+            "le contact principal du tiers."
         ),
     )
 
@@ -366,14 +367,12 @@ class Contact(models.Model):
                         )
                     }
                 )
-        if self.adresse_livraison_id and self.tiers_id:
-            if self.adresse_livraison.tiers_id != self.tiers_id:
+        # Les deux types d'adresse (Livraison, Facturation) sont acceptés ici
+        # — Adresse.TypeAdresse n'en compte de toute façon pas d'autre.
+        if self.adresse_associee_id and self.tiers_id:
+            if self.adresse_associee.tiers_id != self.tiers_id:
                 raise ValidationError(
-                    {"adresse_livraison": "Cette adresse n'appartient pas au tiers sélectionné."}
-                )
-            if self.adresse_livraison.type_adresse != Adresse.TypeAdresse.LIVRAISON:
-                raise ValidationError(
-                    {"adresse_livraison": "Seule une adresse de type « Livraison » peut être associée."}
+                    {"adresse_associee": "Cette adresse n'appartient pas au tiers sélectionné."}
                 )
 
 

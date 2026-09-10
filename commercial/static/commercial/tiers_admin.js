@@ -21,7 +21,7 @@
             document.querySelectorAll(`input[name$="-${nomChamp}"]`).forEach(rafraichirApercu);
         });
 
-        initAdresseLivraison();
+        initAdresseAssociee();
     }
 
     function debounce(fn, delay) {
@@ -89,17 +89,17 @@
             });
     }
 
-    // « Adresse de livraison associée » (tableau Contacts) : le <select>
-    // n'est jamais alimenté depuis la base (voir ContactInlineForm côté
-    // Python) — ses options sont reconstruites ici à partir des lignes
-    // actuellement affichées dans le tableau Adresses (type Livraison
-    // uniquement, même non enregistrées), pour pouvoir lier un contact à
+    // « Adresse associée » (tableau Contacts) : le <select> n'est jamais
+    // alimenté depuis la base (voir ContactInlineForm côté Python) — ses
+    // options sont reconstruites ici à partir des lignes actuellement
+    // affichées dans le tableau Adresses (livraison et facturation
+    // confondues, même non enregistrées), pour pouvoir lier un contact à
     // une adresse tout juste ajoutée, dans le même enregistrement.
-    function initAdresseLivraison() {
-        if (!document.querySelector('select[name$="-adresse_livraison_ref"]')) {
+    function initAdresseAssociee() {
+        if (!document.querySelector('select[name$="-adresse_associee_ref"]')) {
             return;
         }
-        const rafraichir = debounce(rafraichirOptionsAdresseLivraison, 300);
+        const rafraichir = debounce(rafraichirOptionsAdresseAssociee, 300);
         document.addEventListener("input", (event) => {
             if (event.target.name && event.target.name.startsWith("adresses-")) {
                 rafraichir();
@@ -110,8 +110,8 @@
                 rafraichir();
             }
         });
-        document.addEventListener("formset:added", () => rafraichirOptionsAdresseLivraison());
-        rafraichirOptionsAdresseLivraison();
+        document.addEventListener("formset:added", () => rafraichirOptionsAdresseAssociee());
+        rafraichirOptionsAdresseAssociee();
     }
 
     function indexDeLigneAdresse(input) {
@@ -124,11 +124,11 @@
         return !!(suppression && suppression.checked);
     }
 
-    function collecterLignesAdresseLivraison() {
+    function collecterLignesAdresseAssociable() {
         const lignes = [];
         document.querySelectorAll("tbody.form-group").forEach((row) => {
             const typeSelect = row.querySelector('select[name^="adresses-"][name$="-type_adresse"]');
-            if (!typeSelect || typeSelect.value !== "livraison" || ligneEstSupprimee(row)) {
+            if (!typeSelect || ligneEstSupprimee(row)) {
                 return;
             }
             const index = indexDeLigneAdresse(typeSelect);
@@ -137,8 +137,10 @@
             }
             const libelleInput = row.querySelector('input[name$="-libelle"]');
             const villeInput = row.querySelector('input[name$="-ville"]');
-            const libelle = (libelleInput && libelleInput.value) || (villeInput && villeInput.value) || `Adresse ${index + 1}`;
-            lignes.push({ index, libelle });
+            const nom = (libelleInput && libelleInput.value) || (villeInput && villeInput.value) || `Adresse ${index + 1}`;
+            const optionType = typeSelect.options[typeSelect.selectedIndex];
+            const typeLabel = optionType ? optionType.text : "";
+            lignes.push({ index, libelle: typeLabel ? `${typeLabel} — ${nom}` : nom });
         });
         return lignes;
     }
@@ -153,9 +155,9 @@
         return trouve;
     }
 
-    function rafraichirOptionsAdresseLivraison() {
-        const lignes = collecterLignesAdresseLivraison();
-        document.querySelectorAll('select[name$="-adresse_livraison_ref"]').forEach((select) => {
+    function rafraichirOptionsAdresseAssociee() {
+        const lignes = collecterLignesAdresseAssociable();
+        document.querySelectorAll('select[name$="-adresse_associee_ref"]').forEach((select) => {
             const valeurActuelle = select.value;
             select.innerHTML = "";
             select.appendChild(new Option("---------", ""));
@@ -176,7 +178,7 @@
                 return;
             }
             select.dataset.preselectionFaite = "1";
-            const pkActuel = select.dataset.adresseLivraisonActuelle;
+            const pkActuel = select.dataset.adresseAssocieeActuelle;
             if (pkActuel) {
                 const index = trouverIndexParPk(pkActuel);
                 if (index !== null && options.includes(String(index))) {

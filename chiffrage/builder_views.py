@@ -358,7 +358,7 @@ def valeurs_defaut_tiers_view(request, code):
     le JS appelant qui décide de ça, pas cette vue).
 
     Le contact suit un ordre de priorité : celui associé à l'adresse de
-    livraison par défaut (Contact.adresse_livraison), sinon le contact
+    livraison par défaut (Contact.adresse_associee), sinon le contact
     principal du tiers (Contact.est_principal) — voir
     contact_associe_adresse_view() pour le même choix quand l'utilisateur
     change l'adresse de livraison après coup, indépendamment du client."""
@@ -373,7 +373,7 @@ def valeurs_defaut_tiers_view(request, code):
 
     contact = None
     if livraison is not None:
-        contact = Contact.objects.filter(adresse_livraison=livraison).first()
+        contact = Contact.objects.filter(adresse_associee=livraison).first()
     if contact is None:
         contact = Contact.objects.filter(tiers=tiers, est_principal=True).first()
 
@@ -392,12 +392,12 @@ def valeurs_defaut_tiers_view(request, code):
 @require_http_methods(["GET"])
 def contact_associe_adresse_view(request, adresse_id):
     """Contact associé à une adresse de livraison précise
-    (Contact.adresse_livraison) — utilisé quand l'utilisateur change
+    (Contact.adresse_associee) — utilisé quand l'utilisateur change
     l'adresse de livraison d'un devis après coup (indépendamment de la
     sélection du client, qui passe par valeurs_defaut_tiers_view ci-dessus)
     : propose alors le contact sur place à cette adresse, s'il y en a un."""
     adresse = get_object_or_404(Adresse, pk=adresse_id)
-    contact = Contact.objects.filter(adresse_livraison=adresse).first()
+    contact = Contact.objects.filter(adresse_associee=adresse).first()
     return JsonResponse({"contact": _contact_json(contact)})
 
 

@@ -2074,7 +2074,7 @@ class ValeursDefautTiersViewTests(TestCase):
         )
         Contact.objects.create(tiers=self.tiers, nom="Principal Tiers", est_principal=True)
         contact_site = Contact.objects.create(
-            tiers=self.tiers, nom="Contact Site", adresse_livraison=livraison
+            tiers=self.tiers, nom="Contact Site", adresse_associee=livraison
         )
 
         response = self.client.get(self._url())
@@ -2099,7 +2099,7 @@ class ValeursDefautTiersViewTests(TestCase):
 
 class ContactAssocieAdresseViewTests(TestCase):
     """Endpoint GET .../adresses/<id>/contact-associe/ : contact associé à
-    une adresse de livraison précise (Contact.adresse_livraison) — utilisé
+    une adresse de livraison précise (Contact.adresse_associee) — utilisé
     quand l'utilisateur change l'adresse de livraison d'un devis après
     coup, indépendamment de la sélection du client."""
 
@@ -2130,7 +2130,7 @@ class ContactAssocieAdresseViewTests(TestCase):
         self.assertIsNone(response.json()["contact"])
 
     def test_contact_associe_renvoye(self):
-        contact = Contact.objects.create(tiers=self.tiers, nom="Site Est", adresse_livraison=self.livraison)
+        contact = Contact.objects.create(tiers=self.tiers, nom="Site Est", adresse_associee=self.livraison)
         response = self.client.get(self._url())
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(response.json()["contact"]["id"], contact.pk)

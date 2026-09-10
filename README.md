@@ -1588,3 +1588,34 @@ session bloque explicitement les appels sortants vers ce domaine
 (politique réseau du bac à sable, sans rapport avec le navigateur réel de
 l'utilisateur, qui appellera l'API directement, sans passer par ce
 même proxy).
+
+## Contact associé à une adresse de facturation (en plus de livraison)
+
+`Contact.adresse_livraison` ne couvrait que les adresses de type
+Livraison (section précédente "Fiche Tiers : téléphones imbriqués...") —
+signalé comme trop restrictif : un contact comptabilité, par exemple, est
+associé à une adresse de facturation, pas de livraison.
+
+Renommé en `Contact.adresse_associee` (migration `RenameField` +
+`AlterField` écrite à la main, pour préserver les données existantes —
+`makemigrations` non interactif aurait par défaut fait un
+`RemoveField`+`AddField`, perdant les liens déjà enregistrés) : accepte
+maintenant indifféremment une adresse de Livraison ou de Facturation du
+même tiers. `Contact.clean()` ne vérifie plus que le type — de toute
+façon `Adresse.TypeAdresse` n'en compte que deux, la restriction n'avait
+plus de sens dès lors que les deux sont acceptés — seule l'appartenance
+au bon tiers reste contrôlée. Même changement côté `ContactInlineForm`/
+`TiersAdmin._resoudre_reference_adresse` (fiche Tiers) et `ContactAdmin.
+formfield_for_foreignkey` (fiche Contact autonome), qui filtraient tous
+les deux sur le type Livraison uniquement.
+
+Le `<select>` "Adresse associée" du tableau Contacts (fiche Tiers)
+préfixe maintenant chaque option par son type ("Livraison — Site
+principal", "Facturation — Service comptabilité") pour les distinguer
+quand un tiers a les deux.
+
+**Vérifié** : création d'un tiers avec une adresse de livraison et une
+adresse de facturation dans le même enregistrement, contact lié à
+l'adresse de facturation dès la création (sans pk pour l'adresse au
+moment de la validation du formulaire — même mécanisme que pour
+livraison) — confirmé en base après enregistrement.
