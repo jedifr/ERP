@@ -392,7 +392,9 @@ class ContactTelephone(models.Model):
     contact = models.ForeignKey(
         Contact, verbose_name="contact", on_delete=models.CASCADE, related_name="telephones"
     )
-    type_telephone = models.CharField("type", max_length=20, choices=TypeTelephone.choices)
+    type_telephone = models.CharField(
+        "type", max_length=20, choices=TypeTelephone.choices, default=TypeTelephone.PORTABLE
+    )
     numero = models.CharField("numéro", max_length=30)
 
     class Meta:

@@ -1550,3 +1550,18 @@ jusqu'ici calculables d'aucune façon depuis les lignes de la commande.
 des règlements (date, montant, rapprochement bancaire) — `statut_paiement`
 reste un texte libre. Chantier plus lourd, à faire séparément le jour où
 Tiime ne suffit plus comme source de vérité sur les encaissements.
+
+## Correctif : ligne de téléphone vide bloquant l'enregistrement d'un tiers
+
+`ContactTelephoneInline` (`extra=1`) affiche une ligne vide sous chaque
+contact. Sans valeur par défaut sur `type_telephone`, le `<select>` du
+navigateur sélectionnait son premier choix ("Portable") même sans qu'on y
+touche — suffisant pour que Django considère la ligne comme modifiée, et
+donc exige un numéro (champ obligatoire) même sur une ligne qu'on ne
+voulait pas remplir. `ContactTelephone.type_telephone` a désormais
+`default=TypeTelephone.PORTABLE` : la valeur par défaut du modèle
+correspond alors exactement à ce que le `<select>` affiche sans
+interaction, et Django détecte correctement qu'une ligne non touchée n'a
+pas changé (elle est simplement ignorée, comme prévu) — sans rien
+affaiblir : une ligne où l'utilisateur renseigne effectivement un numéro
+reste normalement validée.

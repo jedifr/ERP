@@ -88,6 +88,14 @@ class ContactTelephoneTests(TestCase):
         types = set(contact.telephones.values_list("type_telephone", flat=True))
         self.assertEqual(types, {"portable", "bureau"})
 
+    def test_type_telephone_par_defaut_portable(self):
+        # Doit correspondre au premier choix de TypeTelephone : c'est lui
+        # que le <select> du navigateur affiche sans qu'on y touche sur une
+        # ligne vide de l'inline (extra=1) — un défaut différent romprait
+        # l'hypothèse dont dépend le correctif "ligne vide n'exige plus de
+        # numéro" (voir ContactAdresseLivraisonBoutABoutTests).
+        self.assertEqual(ContactTelephone._meta.get_field("type_telephone").default, "portable")
+
 
 class AdresseTests(TestCase):
     def setUp(self):
@@ -443,6 +451,52 @@ class ContactAdresseLivraisonBoutABoutTests(TestCase):
 
         contact = tiers.contacts.get()
         self.assertEqual(contact.adresse_livraison, adresse)
+
+    def test_ligne_telephone_vide_ne_bloque_pas_lenregistrement(self):
+        # Régression : ContactTelephoneInline (extra=1) affiche une ligne
+        # vide par défaut sous chaque contact. Sans valeur par défaut sur
+        # type_telephone, le <select> du navigateur sélectionne son premier
+        # choix ("Portable") même sans y toucher — ce qui suffisait à faire
+        # croire au formset que la ligne avait été modifiée, et donc à
+        # exiger un numéro (obligatoire) même sur une ligne qu'on ne
+        # voulait pas remplir. Reproduit ici l'exacte valeur envoyée par le
+        # navigateur pour une ligne non touchée : type_telephone="portable"
+        # (désormais la valeur par défaut du modèle, cohérente avec ce que
+        # le <select> affiche), numero vide.
+        payload = self._payload(
+            **{
+                "contacts-0-telephones-TOTAL_FORMS": "1",
+                "contacts-0-telephones-0-id": "",
+                "contacts-0-telephones-0-type_telephone": "portable",
+                "contacts-0-telephones-0-numero": "",
+            }
+        )
+        response = self.client.post("/admin/commercial/tiers/add/", data=payload, follow=False)
+        self.assertEqual(response.status_code, 302, getattr(response, "context", None))
+
+        tiers = Tiers.objects.get(pk="CLI-ADR-LIV-E2E")
+        contact = tiers.contacts.get()
+        self.assertEqual(contact.telephones.count(), 0)
+
+    def test_ligne_telephone_remplie_reste_obligatoire(self):
+        # Le contrôle inverse : une ligne réellement modifiée (numéro
+        # renseigné) doit toujours être validée normalement.
+        payload = self._payload(
+            **{
+                "contacts-0-telephones-TOTAL_FORMS": "1",
+                "contacts-0-telephones-0-id": "",
+                "contacts-0-telephones-0-type_telephone": "bureau",
+                "contacts-0-telephones-0-numero": "0102030405",
+            }
+        )
+        response = self.client.post("/admin/commercial/tiers/add/", data=payload, follow=False)
+        self.assertEqual(response.status_code, 302, getattr(response, "context", None))
+
+        tiers = Tiers.objects.get(pk="CLI-ADR-LIV-E2E")
+        contact = tiers.contacts.get()
+        telephone = contact.telephones.get()
+        self.assertEqual(telephone.type_telephone, "bureau")
+        self.assertEqual(telephone.numero, "0102030405")
 
 
 class ContactAdminAdresseLivraisonChoicesTests(TestCase):
