@@ -10,9 +10,25 @@ class Tiers(models.Model):
         FOURNISSEUR = "fournisseur", "Fournisseur"
         LES_DEUX = "les_deux", "Les deux"
 
+    class RegimeFiscal(models.TextChoices):
+        FRANCE = "france", "France"
+        FRANCE_EXONERE = "france_exonere", "France (exonéré de TVA)"
+        INTRA_UE = "intra_ue", "Intracommunautaire (UE)"
+        HORS_UE = "hors_ue", "Hors Union européenne"
+
     code = models.CharField("code", max_length=50, primary_key=True)
     raison_sociale = models.CharField("raison sociale", max_length=200)
     type_tiers = models.CharField("type de tiers", max_length=20, choices=TypeTiers.choices)
+    regime_fiscal = models.CharField(
+        "régime fiscal",
+        max_length=20,
+        choices=RegimeFiscal.choices,
+        default=RegimeFiscal.FRANCE,
+        help_text=(
+            "Détermine, avec le poste de gestion d'un article, quel compte "
+            "d'achat/vente s'applique automatiquement (comptabilite.PosteGestion)."
+        ),
+    )
     siret = models.CharField(
         "SIRET", max_length=14, blank=True, help_text="Obligatoire pour la facturation électronique"
     )

@@ -6,6 +6,7 @@ from django.test import TestCase
 
 from chiffrage.models import Commande, CommandeLigne, Devis
 from commercial.models import Adresse, Tiers
+from comptabilite.models import PosteGestion
 from stock.models import AlerteStock, Emplacement, Lot, MouvementStock
 from technique.models import Article
 
@@ -323,3 +324,55 @@ class ArticleFournisseurTests(TestCase):
         )
         with self.assertRaises(ValidationError):
             chevauchant.full_clean()
+
+
+class LigneCommandeFournisseurSansArticleTests(TestCase):
+    """Une ligne peut porter un poste de gestion seul (charge générale
+    sans article — assurance, abonnement...) plutôt qu'un article."""
+
+    def setUp(self):
+        self.fournisseur = Tiers.objects.create(
+            code="FOUR-POSTE-TEST", raison_sociale="Assureur Test", type_tiers=Tiers.TypeTiers.FOURNISSEUR
+        )
+        self.commande = CommandeFournisseur.objects.create(
+            numero="CF-POSTE-TEST", fournisseur=self.fournisseur, date_commande=datetime.date(2026, 1, 1)
+        )
+        self.poste = PosteGestion.objects.create(code="ASSUR-TEST", libelle="Assurance test")
+        self.article = Article.objects.create(reference="ART-POSTE-TEST", nature=Article.Nature.MATIERE_PREMIERE)
+
+    def test_ni_article_ni_poste_refuse(self):
+        ligne = LigneCommandeFournisseur(
+            commande_fournisseur=self.commande, quantite_commandee=1, prix_unitaire_achat=100
+        )
+        with self.assertRaises(ValidationError):
+            ligne.full_clean()
+
+    def test_article_et_poste_a_la_fois_refuse(self):
+        ligne = LigneCommandeFournisseur(
+            commande_fournisseur=self.commande, article=self.article, poste_gestion=self.poste,
+            quantite_commandee=1, prix_unitaire_achat=100,
+        )
+        with self.assertRaises(ValidationError):
+            ligne.full_clean()
+
+    def test_ligne_poste_seul_valide(self):
+        ligne = LigneCommandeFournisseur.objects.create(
+            commande_fournisseur=self.commande, poste_gestion=self.poste,
+            designation="Assurance RC Pro — T1 2026", quantite_commandee=1, prix_unitaire_achat=450,
+        )
+        self.assertIsNone(ligne.article_id)
+        self.assertIn("ASSUR-TEST", str(ligne))
+
+    def test_reception_dune_ligne_poste_ne_touche_pas_le_stock(self):
+        ligne = LigneCommandeFournisseur.objects.create(
+            commande_fournisseur=self.commande, poste_gestion=self.poste,
+            designation="Assurance", quantite_commandee=1, prix_unitaire_achat=450,
+        )
+        reception = Reception.objects.create(
+            numero="REC-POSTE-TEST", commande_fournisseur=self.commande, date_reception=datetime.date(2026, 1, 15)
+        )
+        ReceptionLigne.objects.create(reception=reception, ligne_commande_fournisseur=ligne, quantite_recue=1)
+
+        ligne.refresh_from_db()
+        self.assertEqual(ligne.quantite_recue, 1)
+        self.assertEqual(MouvementStock.objects.count(), 0)

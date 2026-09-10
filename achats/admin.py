@@ -55,7 +55,7 @@ class TarifAchatArticleAdmin(ModelAdmin):
 class LigneCommandeFournisseurInline(TabularInline):
     model = LigneCommandeFournisseur
     extra = 1
-    autocomplete_fields = ["article", "alerte_stock_origine", "commande_ligne_client"]
+    autocomplete_fields = ["article", "poste_gestion", "alerte_stock_origine", "commande_ligne_client"]
     readonly_fields = ["quantite_recue"]
 
 
@@ -75,13 +75,20 @@ class LigneCommandeFournisseurAdmin(ModelAdmin):
     list_display = [
         "commande_fournisseur",
         "article",
+        "poste_gestion",
         "quantite_commandee",
         "quantite_recue",
         "prix_unitaire_achat",
         "commande_ligne_client",
     ]
-    search_fields = ["commande_fournisseur__numero", "article__reference"]
-    autocomplete_fields = ["commande_fournisseur", "article", "alerte_stock_origine", "commande_ligne_client"]
+    search_fields = ["commande_fournisseur__numero", "article__reference", "poste_gestion__code", "designation"]
+    autocomplete_fields = [
+        "commande_fournisseur",
+        "article",
+        "poste_gestion",
+        "alerte_stock_origine",
+        "commande_ligne_client",
+    ]
     readonly_fields = ["quantite_recue"]
 
 

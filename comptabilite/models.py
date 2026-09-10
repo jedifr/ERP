@@ -1,6 +1,7 @@
 from django.core.exceptions import ValidationError
 from django.db import models
 
+from commercial.models import Tiers
 from facturation.models import Facture
 from technique.models import Article
 
@@ -73,21 +74,129 @@ class CodeAnalytique(models.Model):
         return f"{self.code} — {self.libelle}"
 
 
+class PosteGestion(models.Model):
+    """Poste de gestion : classification d'achat/vente transverse, plus
+    large qu'un article — couvre aussi les charges générales (assurance,
+    abonnements, carburant...) qui ne sont jamais des articles stockés.
+    Un même poste porte, indépendamment, un mapping achat ET un mapping
+    vente (ex. "Matière première" : achetée ET revendue en négoce), chacun
+    décliné par régime fiscal du tiers (Tiers.regime_fiscal) — barème
+    France / France exonérée / intracommunautaire / hors UE, comme l'exige
+    la TVA sur les échanges internationaux. Reproduit le référentiel
+    "poste de gestion" d'un logiciel de gestion existant (import Excel
+    fourni par l'utilisateur — comptabilite.postes_gestion.importer)."""
+
+    class Groupe(models.TextChoices):
+        ACHATS = "AC", "Achats"
+        VENTES = "VE", "Ventes"
+        OPERATIONS = "OP", "Opérations"
+        SOUS_TRAITANCE = "ST", "Sous-traitance"
+
+    code = models.CharField("code", max_length=20, primary_key=True)
+    libelle = models.CharField("libellé", max_length=200)
+    groupe = models.CharField(
+        "groupe", max_length=5, choices=Groupe.choices, blank=True,
+        help_text="Tag informatif hérité de la source — n'importe quel poste peut porter un mapping achat et/ou vente quel que soit son groupe.",
+    )
+
+    compte_achat_france = models.ForeignKey(
+        CompteComptable, verbose_name="compte d'achat — France",
+        on_delete=models.PROTECT, null=True, blank=True, related_name="+",
+    )
+    compte_achat_france_exonere = models.ForeignKey(
+        CompteComptable, verbose_name="compte d'achat — France exonérée de TVA",
+        on_delete=models.PROTECT, null=True, blank=True, related_name="+",
+    )
+    compte_achat_intra_ue = models.ForeignKey(
+        CompteComptable, verbose_name="compte d'achat — intracommunautaire",
+        on_delete=models.PROTECT, null=True, blank=True, related_name="+",
+    )
+    compte_achat_hors_ue = models.ForeignKey(
+        CompteComptable, verbose_name="compte d'achat — hors UE",
+        on_delete=models.PROTECT, null=True, blank=True, related_name="+",
+    )
+
+    compte_vente_france = models.ForeignKey(
+        CompteComptable, verbose_name="compte de vente — France",
+        on_delete=models.PROTECT, null=True, blank=True, related_name="+",
+    )
+    compte_vente_france_exonere = models.ForeignKey(
+        CompteComptable, verbose_name="compte de vente — France exonérée de TVA",
+        on_delete=models.PROTECT, null=True, blank=True, related_name="+",
+    )
+    compte_vente_intra_ue = models.ForeignKey(
+        CompteComptable, verbose_name="compte de vente — intracommunautaire",
+        on_delete=models.PROTECT, null=True, blank=True, related_name="+",
+    )
+    compte_vente_hors_ue = models.ForeignKey(
+        CompteComptable, verbose_name="compte de vente — hors UE",
+        on_delete=models.PROTECT, null=True, blank=True, related_name="+",
+    )
+    compte_vente_tva_majoree = models.ForeignKey(
+        CompteComptable, verbose_name="compte de vente — TVA majorée",
+        on_delete=models.PROTECT, null=True, blank=True, related_name="+",
+        help_text="Cas particulier hérité de la source, indépendant du régime fiscal — non résolu automatiquement, à sélectionner manuellement si besoin.",
+    )
+
+    code_analytique = models.ForeignKey(
+        CodeAnalytique, verbose_name="code analytique par défaut",
+        on_delete=models.PROTECT, null=True, blank=True, related_name="+",
+    )
+    actif = models.BooleanField("actif", default=True)
+
+    class Meta:
+        verbose_name = "Poste de gestion"
+        verbose_name_plural = "Postes de gestion"
+        ordering = ["code"]
+
+    def __str__(self):
+        return f"{self.code} — {self.libelle}"
+
+    _CHAMPS_ACHAT_PAR_REGIME = {
+        Tiers.RegimeFiscal.FRANCE: "compte_achat_france",
+        Tiers.RegimeFiscal.FRANCE_EXONERE: "compte_achat_france_exonere",
+        Tiers.RegimeFiscal.INTRA_UE: "compte_achat_intra_ue",
+        Tiers.RegimeFiscal.HORS_UE: "compte_achat_hors_ue",
+    }
+    _CHAMPS_VENTE_PAR_REGIME = {
+        Tiers.RegimeFiscal.FRANCE: "compte_vente_france",
+        Tiers.RegimeFiscal.FRANCE_EXONERE: "compte_vente_france_exonere",
+        Tiers.RegimeFiscal.INTRA_UE: "compte_vente_intra_ue",
+        Tiers.RegimeFiscal.HORS_UE: "compte_vente_hors_ue",
+    }
+
+    def compte_achat_pour_regime(self, regime_fiscal):
+        champ = self._CHAMPS_ACHAT_PAR_REGIME.get(regime_fiscal)
+        return getattr(self, champ) if champ else None
+
+    def compte_vente_pour_regime(self, regime_fiscal):
+        champ = self._CHAMPS_VENTE_PAR_REGIME.get(regime_fiscal)
+        return getattr(self, champ) if champ else None
+
+
 class ArticleCompteVente(models.Model):
     """Compte de vente spécifique à UN article — surcharge, pour cet
     article seulement, le compte de vente par défaut des Paramètres
     comptables lors de la génération d'une écriture (voir
-    comptabilite.generation). Ex. un article fabriqué facturé en
-    701 "Ventes de produits finis" plutôt que le 706 générique. Un article
-    sans association ici utilise simplement le compte par défaut. Le code
-    analytique associé, s'il est renseigné, est repris sur la ligne de
-    vente de l'écriture générée (jamais sur les lignes Clients/TVA)."""
+    comptabilite.generation). Deux façons de le renseigner : soit un
+    `poste_gestion` (le compte est alors résolu dynamiquement selon le
+    régime fiscal du client — prioritaire), soit un `compte_vente` fixe.
+    Le code analytique associé (le sien, ou à défaut celui du poste de
+    gestion) est repris sur la ligne de vente de l'écriture générée
+    (jamais sur les lignes Clients/TVA)."""
 
     article = models.OneToOneField(
         Article, verbose_name="article", on_delete=models.CASCADE, related_name="compte_vente_override"
     )
+    poste_gestion = models.ForeignKey(
+        PosteGestion, verbose_name="poste de gestion", on_delete=models.PROTECT,
+        null=True, blank=True, related_name="+",
+        help_text="Si renseigné, prioritaire sur le compte de vente fixe ci-dessous : le compte est résolu selon le régime fiscal du client.",
+    )
     compte_vente = models.ForeignKey(
-        CompteComptable, verbose_name="compte de vente", on_delete=models.PROTECT, related_name="+"
+        CompteComptable, verbose_name="compte de vente (fixe)", on_delete=models.PROTECT,
+        null=True, blank=True, related_name="+",
+        help_text="Utilisé seulement si aucun poste de gestion n'est renseigné ci-dessus.",
     )
     code_analytique = models.ForeignKey(
         CodeAnalytique,
@@ -96,6 +205,7 @@ class ArticleCompteVente(models.Model):
         null=True,
         blank=True,
         related_name="+",
+        help_text="Prioritaire sur le code analytique du poste de gestion, s'il y en a un.",
     )
 
     class Meta:
@@ -104,24 +214,47 @@ class ArticleCompteVente(models.Model):
         ordering = ["article"]
 
     def __str__(self):
-        return f"{self.article} → {self.compte_vente}"
+        return f"{self.article} → {self.poste_gestion or self.compte_vente}"
+
+    def clean(self):
+        super().clean()
+        if not self.poste_gestion_id and not self.compte_vente_id:
+            raise ValidationError("Renseignez soit un poste de gestion, soit un compte de vente fixe.")
+
+    def resoudre_compte_vente(self, regime_fiscal):
+        if self.poste_gestion_id:
+            return self.poste_gestion.compte_vente_pour_regime(regime_fiscal)
+        return self.compte_vente
+
+    def resoudre_code_analytique(self):
+        if self.code_analytique_id:
+            return self.code_analytique
+        return self.poste_gestion.code_analytique if self.poste_gestion_id else None
 
 
 class ArticleCompteAchat(models.Model):
     """Compte d'achat (charge) spécifique à UN article acheté — même
-    principe qu'ArticleCompteVente côté vente. Purement déclaratif pour
-    l'instant : il n'existe pas encore de génération automatique
-    d'écriture d'achat (pas de document "facture fournisseur" dans
-    l'app — voir achats/models.py, seulement des commandes/réceptions
-    logistiques). Sert de référence pour la saisie manuelle des écritures
-    d'achat, et de point d'ancrage prêt pour une future génération
-    automatique le jour où un tel document existera."""
+    principe qu'ArticleCompteVente côté vente (poste de gestion résolu par
+    régime fiscal du fournisseur, prioritaire sur un compte fixe).
+    Purement déclaratif pour l'instant : il n'existe pas encore de
+    génération automatique d'écriture d'achat (pas de document "facture
+    fournisseur" dans l'app — voir achats/models.py, seulement des
+    commandes/réceptions logistiques). Sert de référence pour la saisie
+    manuelle des écritures d'achat, et de point d'ancrage prêt pour une
+    future génération automatique le jour où un tel document existera."""
 
     article = models.OneToOneField(
         Article, verbose_name="article", on_delete=models.CASCADE, related_name="compte_achat_override"
     )
+    poste_gestion = models.ForeignKey(
+        PosteGestion, verbose_name="poste de gestion", on_delete=models.PROTECT,
+        null=True, blank=True, related_name="+",
+        help_text="Si renseigné, prioritaire sur le compte d'achat fixe ci-dessous : le compte est résolu selon le régime fiscal du fournisseur.",
+    )
     compte_achat = models.ForeignKey(
-        CompteComptable, verbose_name="compte d'achat", on_delete=models.PROTECT, related_name="+"
+        CompteComptable, verbose_name="compte d'achat (fixe)", on_delete=models.PROTECT,
+        null=True, blank=True, related_name="+",
+        help_text="Utilisé seulement si aucun poste de gestion n'est renseigné ci-dessus.",
     )
     code_analytique = models.ForeignKey(
         CodeAnalytique,
@@ -130,6 +263,7 @@ class ArticleCompteAchat(models.Model):
         null=True,
         blank=True,
         related_name="+",
+        help_text="Prioritaire sur le code analytique du poste de gestion, s'il y en a un.",
     )
 
     class Meta:
@@ -138,7 +272,22 @@ class ArticleCompteAchat(models.Model):
         ordering = ["article"]
 
     def __str__(self):
-        return f"{self.article} → {self.compte_achat}"
+        return f"{self.article} → {self.poste_gestion or self.compte_achat}"
+
+    def clean(self):
+        super().clean()
+        if not self.poste_gestion_id and not self.compte_achat_id:
+            raise ValidationError("Renseignez soit un poste de gestion, soit un compte d'achat fixe.")
+
+    def resoudre_compte_achat(self, regime_fiscal):
+        if self.poste_gestion_id:
+            return self.poste_gestion.compte_achat_pour_regime(regime_fiscal)
+        return self.compte_achat
+
+    def resoudre_code_analytique(self):
+        if self.code_analytique_id:
+            return self.code_analytique
+        return self.poste_gestion.code_analytique if self.poste_gestion_id else None
 
 
 class JournalComptable(models.Model):

@@ -387,6 +387,11 @@ UNFOLD = {
                         "link": reverse_lazy("admin:comptabilite_ecriturecomptable_changelist"),
                     },
                     {
+                        "title": "Postes de gestion",
+                        "icon": "category",
+                        "link": reverse_lazy("admin:comptabilite_postegestion_changelist"),
+                    },
+                    {
                         "title": "Codes analytiques",
                         "icon": "sell",
                         "link": reverse_lazy("admin:comptabilite_codeanalytique_changelist"),

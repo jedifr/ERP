@@ -9,11 +9,13 @@ from .views import (
     JournalComptableViewSet,
     LigneEcritureViewSet,
     ParametresComptablesViewSet,
+    PosteGestionViewSet,
 )
 
 router = DefaultRouter()
 router.register("comptes-comptables", CompteComptableViewSet, basename="compte-comptable")
 router.register("codes-analytiques", CodeAnalytiqueViewSet, basename="code-analytique")
+router.register("postes-gestion", PosteGestionViewSet, basename="poste-gestion")
 router.register("articles-comptes-vente", ArticleCompteVenteViewSet, basename="article-compte-vente")
 router.register("articles-comptes-achat", ArticleCompteAchatViewSet, basename="article-compte-achat")
 router.register("journaux-comptables", JournalComptableViewSet, basename="journal-comptable")

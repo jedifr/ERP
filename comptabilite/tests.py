@@ -19,8 +19,10 @@ from .models import (
     JournalComptable,
     LigneEcriture,
     ParametresComptables,
+    PosteGestion,
 )
 from .pcg import importer_pcg
+from .postes_gestion import importer_postes_gestion
 
 
 class CompteComptableTests(TestCase):
@@ -194,6 +196,57 @@ class ArticleComptesTests(TestCase):
         self.assertEqual(self.article.compte_vente_override.compte_vente, self.compte_701)
         self.assertEqual(self.article.compte_achat_override.compte_achat, self.compte_607)
 
+    def test_ni_poste_ni_compte_refuse(self):
+        with self.assertRaises(ValidationError):
+            ArticleCompteVente(article=self.article).full_clean()
+        with self.assertRaises(ValidationError):
+            ArticleCompteAchat(article=self.article).full_clean()
+
+
+class PosteGestionTests(TestCase):
+    def setUp(self):
+        importer_pcg()
+        self.compte_france = CompteComptable.objects.get(code="701")
+        self.compte_intra_ue = CompteComptable.objects.get(code="706")
+        self.poste = PosteGestion.objects.create(
+            code="PF", libelle="Pièce fabriquée",
+            compte_vente_france=self.compte_france, compte_vente_intra_ue=self.compte_intra_ue,
+        )
+
+    def test_compte_vente_pour_regime_configure(self):
+        self.assertEqual(self.poste.compte_vente_pour_regime(Tiers.RegimeFiscal.FRANCE), self.compte_france)
+        self.assertEqual(self.poste.compte_vente_pour_regime(Tiers.RegimeFiscal.INTRA_UE), self.compte_intra_ue)
+
+    def test_compte_vente_pour_regime_non_configure_renvoie_none(self):
+        self.assertIsNone(self.poste.compte_vente_pour_regime(Tiers.RegimeFiscal.HORS_UE))
+
+    def test_compte_achat_pour_regime_non_configure_renvoie_none(self):
+        self.assertIsNone(self.poste.compte_achat_pour_regime(Tiers.RegimeFiscal.FRANCE))
+
+
+class ImporterPostesGestionTests(TestCase):
+    def test_import_cree_les_postes_et_les_comptes_manquants(self):
+        postes_crees, postes_maj, comptes_crees = importer_postes_gestion()
+        self.assertEqual(postes_crees, 145)
+        self.assertEqual(postes_maj, 0)
+        self.assertGreater(comptes_crees, 100)
+
+        mp = PosteGestion.objects.get(code="MP")
+        self.assertEqual(mp.compte_achat_france.code, "601100")
+        self.assertEqual(mp.compte_achat_france.systeme, CompteComptable.Systeme.DEVELOPPE)
+        self.assertEqual(mp.compte_vente_intra_ue.code, "701101")
+
+    def test_import_idempotent(self):
+        importer_postes_gestion()
+        total_postes = PosteGestion.objects.count()
+        total_comptes = CompteComptable.objects.count()
+
+        postes_crees, postes_maj, comptes_crees = importer_postes_gestion()
+        self.assertEqual(postes_crees, 0)
+        self.assertEqual(postes_maj, total_postes)
+        self.assertEqual(comptes_crees, 0)
+        self.assertEqual(CompteComptable.objects.count(), total_comptes)
+
 
 class CodeAnalytiqueTests(TestCase):
     def test_creation_et_str(self):
@@ -281,6 +334,43 @@ class GenererEcritureFactureTests(TestCase):
         # Le code analytique ne se propage jamais aux lignes Clients/TVA.
         for ligne in ecriture.lignes.filter(compte__code__in=["411", "44571"]):
             self.assertIsNone(ligne.code_analytique)
+
+    def test_generation_resout_le_compte_selon_le_regime_fiscal_du_client(self):
+        compte_france = CompteComptable.objects.get(code="701")
+        compte_intra_ue = CompteComptable.objects.get(code="706")
+        poste = PosteGestion.objects.create(
+            code="PF-TEST", libelle="Pièce fabriquée test",
+            compte_vente_france=compte_france, compte_vente_intra_ue=compte_intra_ue,
+        )
+        ArticleCompteVente.objects.create(article=self.article, poste_gestion=poste)
+
+        client = self.commande.devis.client
+        client.regime_fiscal = Tiers.RegimeFiscal.INTRA_UE
+        client.save()
+
+        CommandeLigne.objects.create(
+            commande=self.commande, article=self.article, quantite_commandee=1,
+            prix_vente_unitaire=100, taux_tva=self.taux20,
+        )
+        ecriture, creee = generer_ecriture_facture(self.facture)
+        self.assertTrue(ecriture.est_equilibree)
+        self.assertTrue(ecriture.lignes.filter(compte__code="706").exists())
+        self.assertFalse(ecriture.lignes.filter(compte__code="701").exists())
+
+    def test_generation_echoue_si_poste_gestion_sans_compte_pour_le_regime(self):
+        poste = PosteGestion.objects.create(code="PF-INCOMPLET", libelle="Sans compte hors UE")
+        ArticleCompteVente.objects.create(article=self.article, poste_gestion=poste)
+
+        client = self.commande.devis.client
+        client.regime_fiscal = Tiers.RegimeFiscal.HORS_UE
+        client.save()
+
+        CommandeLigne.objects.create(
+            commande=self.commande, article=self.article, quantite_commandee=1,
+            prix_vente_unitaire=100, taux_tva=self.taux20,
+        )
+        with self.assertRaises(GenerationEcritureError):
+            generer_ecriture_facture(self.facture)
 
     def test_generation_idempotente(self):
         CommandeLigne.objects.create(

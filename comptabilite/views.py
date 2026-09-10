@@ -9,6 +9,7 @@ from .models import (
     JournalComptable,
     LigneEcriture,
     ParametresComptables,
+    PosteGestion,
 )
 from .serializers import (
     ArticleCompteAchatSerializer,
@@ -19,6 +20,7 @@ from .serializers import (
     JournalComptableSerializer,
     LigneEcritureSerializer,
     ParametresComptablesSerializer,
+    PosteGestionSerializer,
 )
 
 
@@ -33,6 +35,13 @@ class CodeAnalytiqueViewSet(viewsets.ModelViewSet):
     queryset = CodeAnalytique.objects.all()
     serializer_class = CodeAnalytiqueSerializer
     filterset_fields = ["actif"]
+    search_fields = ["code", "libelle"]
+
+
+class PosteGestionViewSet(viewsets.ModelViewSet):
+    queryset = PosteGestion.objects.all()
+    serializer_class = PosteGestionSerializer
+    filterset_fields = ["groupe", "actif"]
     search_fields = ["code", "libelle"]
 
 

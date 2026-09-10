@@ -5,6 +5,7 @@ from django.utils import timezone
 
 from chiffrage.models import CommandeLigne
 from commercial.models import Tiers
+from comptabilite.models import PosteGestion
 from stock.models import AlerteStock, Lot, MouvementStock
 from technique.models import Article, DateRangeHistoriqueMixin
 
@@ -103,6 +104,12 @@ class CommandeFournisseur(models.Model):
 
 
 class LigneCommandeFournisseur(models.Model):
+    """Une ligne peut être rattachée à un article stocké (`article`), ou à
+    une charge générale non stockée — assurance, abonnement, carburant...
+    — via un `poste_gestion` seul (voir comptabilite.PosteGestion) : ces
+    charges n'ont jamais d'équivalent Article dans l'app. clean() impose
+    l'un ou l'autre, jamais les deux ni aucun des deux."""
+
     commande_fournisseur = models.ForeignKey(
         CommandeFournisseur, verbose_name="commande fournisseur", on_delete=models.CASCADE, related_name="lignes"
     )
@@ -110,7 +117,24 @@ class LigneCommandeFournisseur(models.Model):
         Article,
         verbose_name="article",
         on_delete=models.PROTECT,
+        null=True,
+        blank=True,
         related_name="lignes_commande_fournisseur",
+    )
+    poste_gestion = models.ForeignKey(
+        PosteGestion,
+        verbose_name="poste de gestion",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="lignes_commande_fournisseur",
+        help_text="Pour une charge générale sans article (assurance, abonnement...).",
+    )
+    designation = models.CharField(
+        "désignation",
+        max_length=255,
+        blank=True,
+        help_text="Libellé libre pour une ligne sans article (ex. « Assurance RC Pro — T1 2026 »).",
     )
     alerte_stock_origine = models.ForeignKey(
         AlerteStock,
@@ -147,11 +171,22 @@ class LigneCommandeFournisseur(models.Model):
         ordering = ["commande_fournisseur", "id"]
 
     def __str__(self):
-        return f"{self.commande_fournisseur} — {self.article} × {self.quantite_commandee}"
+        objet = self.article or self.poste_gestion or self.designation or "?"
+        return f"{self.commande_fournisseur} — {objet} × {self.quantite_commandee}"
+
+    def clean(self):
+        super().clean()
+        if not self.article_id and not self.poste_gestion_id:
+            raise ValidationError("Renseignez soit un article, soit un poste de gestion (charge générale).")
+        if self.article_id and self.poste_gestion_id:
+            raise ValidationError(
+                "Une ligne ne peut pas porter à la fois un article et un poste de gestion — "
+                "le poste de gestion sert aux charges sans article."
+            )
 
     def save(self, *args, **kwargs):
         creation = self.pk is None
-        if creation and self.commande_ligne_client_id and not self.alerte_stock_origine_id:
+        if creation and self.article_id and self.commande_ligne_client_id and not self.alerte_stock_origine_id:
             # Rattacher cette ligne à une commande client montre qu'elle
             # répond à un besoin identifié : si une alerte de stock active
             # existe déjà pour le même article, on la clôture avec cette
@@ -204,7 +239,7 @@ class ReceptionLigne(models.Model):
         ordering = ["reception", "id"]
 
     def __str__(self):
-        return f"{self.reception} — {self.ligne_commande_fournisseur.article} × {self.quantite_recue}"
+        return f"{self.reception} — {self.ligne_commande_fournisseur} × {self.quantite_recue}"
 
     def clean(self):
         super().clean()
@@ -229,6 +264,12 @@ class ReceptionLigne(models.Model):
         LigneCommandeFournisseur.objects.filter(pk=ligne.pk).update(
             quantite_recue=models.F("quantite_recue") + self.quantite_recue
         )
+
+        if ligne.article_id is None:
+            # Ligne "poste de gestion" (charge générale sans article, ex.
+            # assurance) : pas de stock à mouvementer, seul le cumul
+            # quantite_recue (mis à jour ci-dessus) a un sens ici.
+            return
 
         lot = self._lot_unique_pour_article(ligne.article)
         MouvementStock.objects.create(

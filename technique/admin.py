@@ -41,7 +41,7 @@ class ArticleCompteVenteInline(TabularInline):
     # par la génération des écritures comptables (comptabilite.generation).
     model = ArticleCompteVente
     extra = 1
-    autocomplete_fields = ["compte_vente", "code_analytique"]
+    autocomplete_fields = ["poste_gestion", "compte_vente", "code_analytique"]
 
 
 class ArticleCompteAchatInline(TabularInline):
@@ -50,7 +50,7 @@ class ArticleCompteAchatInline(TabularInline):
     # n'existe encore).
     model = ArticleCompteAchat
     extra = 1
-    autocomplete_fields = ["compte_achat", "code_analytique"]
+    autocomplete_fields = ["poste_gestion", "compte_achat", "code_analytique"]
 
 
 @admin.register(Matiere)

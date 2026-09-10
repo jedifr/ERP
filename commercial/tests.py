@@ -4,6 +4,14 @@ from django.test import TestCase
 from .models import Adresse, Contact, DelaiPropose, TauxTVA, Tiers
 
 
+class TiersRegimeFiscalTests(TestCase):
+    def test_regime_fiscal_par_defaut_france(self):
+        tiers = Tiers.objects.create(
+            code="CLI-REGIME", raison_sociale="Client Régime", type_tiers=Tiers.TypeTiers.CLIENT
+        )
+        self.assertEqual(tiers.regime_fiscal, Tiers.RegimeFiscal.FRANCE)
+
+
 class AdresseTests(TestCase):
     def setUp(self):
         self.client_tiers = Tiers.objects.create(

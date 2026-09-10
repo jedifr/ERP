@@ -14,8 +14,10 @@ from .models import (
     JournalComptable,
     LigneEcriture,
     ParametresComptables,
+    PosteGestion,
 )
 from .pcg import PCG_MILLESIME, importer_pcg
+from .postes_gestion import importer_postes_gestion
 
 
 @admin.register(CompteComptable)
@@ -47,18 +49,76 @@ class JournalComptableAdmin(ModelAdmin):
     search_fields = ["code", "libelle"]
 
 
+@admin.register(PosteGestion)
+class PosteGestionAdmin(ModelAdmin):
+    list_display = ["code", "libelle", "groupe", "actif"]
+    list_filter = ["groupe", "actif"]
+    search_fields = ["code", "libelle"]
+    actions_list = ["action_importer_postes_gestion"]
+
+    @action(description="Importer les postes de gestion (achat/vente)", icon="cloud_download")
+    def action_importer_postes_gestion(self, request):
+        postes_crees, postes_maj, comptes_crees = importer_postes_gestion()
+        self.message_user(
+            request,
+            f"Postes de gestion : {postes_crees} créé(s), {postes_maj} mis à jour "
+            f"({comptes_crees} compte(s) comptable(s) créé(s) au passage).",
+            level=messages.SUCCESS,
+        )
+        return redirect("admin:comptabilite_postegestion_changelist")
+
+    autocomplete_fields = [
+        "compte_achat_france",
+        "compte_achat_france_exonere",
+        "compte_achat_intra_ue",
+        "compte_achat_hors_ue",
+        "compte_vente_france",
+        "compte_vente_france_exonere",
+        "compte_vente_intra_ue",
+        "compte_vente_hors_ue",
+        "compte_vente_tva_majoree",
+        "code_analytique",
+    ]
+    fieldsets = [
+        (None, {"fields": ["code", "libelle", "groupe", "actif", "code_analytique"]}),
+        (
+            "Achat, par régime fiscal du fournisseur",
+            {
+                "fields": [
+                    "compte_achat_france",
+                    "compte_achat_france_exonere",
+                    "compte_achat_intra_ue",
+                    "compte_achat_hors_ue",
+                ]
+            },
+        ),
+        (
+            "Vente, par régime fiscal du client",
+            {
+                "fields": [
+                    "compte_vente_france",
+                    "compte_vente_france_exonere",
+                    "compte_vente_intra_ue",
+                    "compte_vente_hors_ue",
+                    "compte_vente_tva_majoree",
+                ]
+            },
+        ),
+    ]
+
+
 @admin.register(ArticleCompteVente)
 class ArticleCompteVenteAdmin(ModelAdmin):
-    list_display = ["article", "compte_vente", "code_analytique"]
-    search_fields = ["article__reference", "article__libelle", "compte_vente__code"]
-    autocomplete_fields = ["article", "compte_vente", "code_analytique"]
+    list_display = ["article", "poste_gestion", "compte_vente", "code_analytique"]
+    search_fields = ["article__reference", "article__libelle", "compte_vente__code", "poste_gestion__code"]
+    autocomplete_fields = ["article", "poste_gestion", "compte_vente", "code_analytique"]
 
 
 @admin.register(ArticleCompteAchat)
 class ArticleCompteAchatAdmin(ModelAdmin):
-    list_display = ["article", "compte_achat", "code_analytique"]
-    search_fields = ["article__reference", "article__libelle", "compte_achat__code"]
-    autocomplete_fields = ["article", "compte_achat", "code_analytique"]
+    list_display = ["article", "poste_gestion", "compte_achat", "code_analytique"]
+    search_fields = ["article__reference", "article__libelle", "compte_achat__code", "poste_gestion__code"]
+    autocomplete_fields = ["article", "poste_gestion", "compte_achat", "code_analytique"]
 
 
 @admin.register(CodeAnalytique)

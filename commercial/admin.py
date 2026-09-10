@@ -29,8 +29,8 @@ class ContactInline(TabularInline):
 class TiersAdmin(CodificationInitialeMixin, ModelAdmin):
     codification_entite = RegleCodification.Entite.TIERS
 
-    list_display = ["code", "raison_sociale", "type_tiers", "siret"]
-    list_filter = ["type_tiers"]
+    list_display = ["code", "raison_sociale", "type_tiers", "regime_fiscal", "siret"]
+    list_filter = ["type_tiers", "regime_fiscal"]
     search_fields = ["code", "raison_sociale", "siret"]
     inlines = [AdresseInline, ContactInline]
 

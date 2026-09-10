@@ -20,23 +20,37 @@ def _repartition_lignes(facture, parametres):
     """Regroupe les lignes de la commande facturée par (taux de TVA, compte
     de vente, code analytique), en sommant leurs montants HT/TTC courants
     (CommandeLigne.montant_ht/montant_ttc — les surcharges post-devis, pas
-    les valeurs figées du devis d'origine). Compte de vente et code
-    analytique sont ceux d'ArticleCompteVente si l'article en a un, sinon
-    le compte par défaut des paramètres (et aucun code analytique). Repli
-    sur les montants globaux de la facture (compte par défaut, sans détail
-    par article) si la commande n'a aucune ligne chiffrée (ex. facture
-    ancienne, ou lignes sans prix renseigné)."""
+    les valeurs figées du devis d'origine). Le compte de vente est celui
+    d'ArticleCompteVente si l'article en a un — résolu selon le régime
+    fiscal du client (Tiers.regime_fiscal) s'il passe par un poste de
+    gestion, sinon son compte fixe — à défaut le compte par défaut des
+    paramètres. Repli sur les montants globaux de la facture (compte par
+    défaut, sans détail par article) si la commande n'a aucune ligne
+    chiffrée (ex. facture ancienne, ou lignes sans prix renseigné)."""
+    regime_fiscal = facture.commande.devis.client.regime_fiscal
     groupes = {}
     lignes = facture.commande.lignes.select_related(
-        "taux_tva", "article__compte_vente_override__compte_vente", "article__compte_vente_override__code_analytique"
+        "taux_tva",
+        "article__compte_vente_override__compte_vente",
+        "article__compte_vente_override__code_analytique",
+        "article__compte_vente_override__poste_gestion",
     )
     for ligne in lignes.all():
         if ligne.montant_ht is None or ligne.montant_ttc is None:
             continue
         taux = ligne.taux_tva.taux if ligne.taux_tva_id else 0
         override = getattr(ligne.article, "compte_vente_override", None)
-        compte_vente = override.compte_vente if override else parametres.compte_vente_defaut
-        code_analytique = override.code_analytique if override else None
+        if override is not None:
+            compte_vente = override.resoudre_compte_vente(regime_fiscal)
+            if compte_vente is None:
+                raise GenerationEcritureError(
+                    f"« {ligne.article} » : le poste de gestion « {override.poste_gestion} » n'a pas de "
+                    f"compte de vente configuré pour le régime fiscal « {regime_fiscal} »."
+                )
+            code_analytique = override.resoudre_code_analytique()
+        else:
+            compte_vente = parametres.compte_vente_defaut
+            code_analytique = None
         cle = (taux, compte_vente.pk, code_analytique.pk if code_analytique else None)
         groupe = groupes.setdefault(
             cle,
@@ -70,10 +84,11 @@ def generer_ecriture_facture(facture):
     lignes par groupe (taux de TVA, compte de vente, code analytique)
     distinct présent sur la commande facturée — voir ArticleCompteVente
     pour surcharger le compte de vente/code analytique d'un article
-    donné ; le code analytique n'est jamais posé sur les lignes
-    Clients/TVA, seulement sur la ligne de vente). Idempotent — ne génère
-    jamais deux écritures pour la même facture, la renvoie simplement si
-    elle existe déjà. Renvoie (ecriture, creee)."""
+    donné, éventuellement résolu selon le régime fiscal du client via un
+    poste de gestion ; le code analytique n'est jamais posé sur les
+    lignes Clients/TVA, seulement sur la ligne de vente). Idempotent — ne
+    génère jamais deux écritures pour la même facture, la renvoie
+    simplement si elle existe déjà. Renvoie (ecriture, creee)."""
     ecriture_existante = EcritureComptable.objects.filter(facture=facture).first()
     if ecriture_existante is not None:
         return ecriture_existante, False

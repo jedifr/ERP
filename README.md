@@ -1273,3 +1273,53 @@ génération des écritures d'achat serait une évolution ultérieure séparée.
   générée depuis la facture — **jamais** sur les lignes Clients/TVA
   collectée, qui ne portent pas de dimension analytique en pratique
   comptable courante.
+
+## Postes de gestion + régime fiscal du tiers (import d'un référentiel existant)
+
+Fonctionnalité demandée à partir de deux exports Excel fournis par
+l'utilisateur ("poste de gestion achats"/"ventes" d'un logiciel de gestion
+existant) : un même référentiel de 145 codes partagé entre achat et vente,
+chacun avec un compte différent selon que le tiers est français, français
+exonéré de TVA, intracommunautaire ou hors UE — nuance absente jusqu'ici de
+`ArticleCompteVente`/`ArticleCompteAchat` (un seul compte fixe).
+
+- **`Tiers.regime_fiscal`** (`commercial/models.py`) : France / France
+  exonérée / Intracommunautaire (UE) / Hors UE. Détermine, pour une vente,
+  quel compte utiliser parmi ceux du poste de gestion de l'article vendu
+  (le client) ; pour un achat, pareil côté fournisseur.
+- **`PosteGestion`** (`comptabilite/models.py`) : classification achat *et*
+  vente à la fois (ex. "MP" Matière première : achetée ET revendue en
+  négoce), avec 4 comptes d'achat (un par régime fiscal du fournisseur) et
+  5 comptes de vente (un par régime + un "TVA majorée", cas particulier
+  hérité de la source, non rattaché au régime fiscal — à sélectionner à la
+  main si besoin) + un code analytique par défaut. Contrairement à
+  `ArticleCompteVente`/`Achat`, un poste n'est pas limité à un seul
+  article : il couvre aussi les charges générales qui n'en ont jamais
+  (assurance, abonnements, carburant, télécom...).
+- **`ArticleCompteVente`/`ArticleCompteAchat` étendus** : nouveau champ
+  `poste_gestion`, prioritaire sur le compte fixe existant s'il est
+  renseigné — `resoudre_compte_vente(regime_fiscal)`/
+  `resoudre_compte_achat(regime_fiscal)` choisissent alors le bon compte
+  du poste selon le régime fiscal du tiers. `clean()` impose l'un des deux
+  (poste ou compte fixe), jamais aucun. `comptabilite.generation` lit
+  désormais le régime fiscal du client (`facture.commande.devis.client`)
+  pour résoudre le compte de vente de chaque ligne, et lève une erreur
+  claire si le poste n'a pas de compte configuré pour ce régime précis
+  plutôt que de deviner.
+- **Achats sans article** (`achats.LigneCommandeFournisseur`) : `article`
+  devient optionnel, nouveau `poste_gestion` (+ `designation` libre) pour
+  les lignes de charge générale sans équivalent stocké — `clean()` impose
+  l'un des deux. `ReceptionLigne` ne mouvemente plus le stock pour une
+  ligne sans article (rien à réceptionner physiquement), mais continue de
+  cumuler `quantite_recue`.
+- **Import** : `comptabilite/data/postes_gestion.json` (les 145 postes,
+  fusion des deux exports) + `comptabilite.postes_gestion.importer_postes_gestion()`,
+  bouton "Importer les postes de gestion (achat/vente)" sur la liste des
+  postes (même mécanisme `actions_list` que l'import du PCG). Écrit en
+  bulk pour les mêmes raisons que `pcg.importer_pcg` (voir plus haut —
+  leçon du timeout Gunicorn). Les comptes référencés descendent à un
+  niveau de détail (6 chiffres, ex. `602100`) plus fin que le PCG officiel
+  (max 5) : l'import les **crée automatiquement** s'ils manquent, en
+  système développé, avec le libellé du premier poste qui les référence —
+  un point de départ raisonnable, à affiner ensuite dans l'admin au besoin
+  (177 comptes créés ainsi sur le jeu de données fourni).

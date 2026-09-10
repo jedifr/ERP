@@ -9,6 +9,7 @@ from .models import (
     JournalComptable,
     LigneEcriture,
     ParametresComptables,
+    PosteGestion,
 )
 
 
@@ -22,6 +23,12 @@ class CompteComptableSerializer(FullCleanModelSerializer):
 class CodeAnalytiqueSerializer(FullCleanModelSerializer):
     class Meta:
         model = CodeAnalytique
+        fields = "__all__"
+
+
+class PosteGestionSerializer(FullCleanModelSerializer):
+    class Meta:
+        model = PosteGestion
         fields = "__all__"
 
 
