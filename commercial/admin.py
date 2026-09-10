@@ -155,7 +155,10 @@ class TiersAdmin(CodificationInitialeMixin, ModelAdmin):
     inlines = [TiersCompteComptableInline, AdresseInline, ContactInline]
 
     class Media:
-        js = ["commercial/tiers_admin.js"]
+        # tiers_admin.js : aperçu de compte comptable + options "Adresse
+        # associée" des contacts. entreprise_lookup.js : autocomplétion
+        # SIRET/SIREN <-> raison sociale + adresse du siège (voir plus bas).
+        js = ["commercial/tiers_admin.js", "commercial/entreprise_lookup.js"]
 
     def get_urls(self):
         urls = [

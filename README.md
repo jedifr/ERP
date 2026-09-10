@@ -1619,3 +1619,46 @@ adresse de facturation dans le même enregistrement, contact lié à
 l'adresse de facturation dès la création (sans pk pour l'adresse au
 moment de la validation du formulaire — même mécanisme que pour
 livraison) — confirmé en base après enregistrement.
+
+## Autocomplétion SIRET/SIREN <-> raison sociale + adresse du siège
+
+En tapant la raison sociale d'un tiers, l'application propose maintenant
+les entreprises correspondantes (nom, SIRET, adresse du siège) — et
+inversement, en tapant un SIREN ou un SIRET, elle propose de compléter la
+raison sociale et l'adresse. Basé sur **Recherche d'entreprises**
+(`recherche-entreprises.api.gouv.fr`, base SIRENE, service public gratuit
+sans clé, CORS ouvert) : `commercial/static/commercial/
+entreprise_lookup.js`, interrogé en direct depuis le navigateur, sur le
+même principe que l'autocomplétion d'adresse (section précédente).
+Chargé uniquement sur `TiersAdmin` (fiche Tiers), seule fiche portant à
+la fois "Raison sociale" et "SIRET".
+
+- **En tapant "Raison sociale"** (≥ 3 caractères) : une liste déroulante
+  de suggestions apparaît (nom + adresse du siège) ; la sélection remplit
+  "SIRET" et propose l'adresse du siège (voir ci-dessous).
+- **En tapant "SIRET"** (9 chiffres — un SIREN — ou 14 — un SIRET
+  complet) : dès qu'une correspondance exacte est trouvée, complète
+  automatiquement "Raison sociale" (seulement si elle est encore vide, un
+  SIRET ne prouvant pas que le nom déjà saisi est erroné) et, si un
+  SIREN seul avait été tapé, complète le champ en SIRET complet du siège
+  — c'est le sens inverse demandé : « ou l'inverse en tapant le Siren ou
+  le Siret ».
+- **Adresse du siège proposée** : uniquement si le tableau Adresses de la
+  fiche Tiers est encore entièrement vide (`adresses-TOTAL_FORMS == 0`)
+  — dès qu'une adresse existe, impossible de savoir si c'est celle du
+  siège ou une autre, mieux vaut ne rien écraser plutôt que deviner. Le
+  cas échéant, une ligne "Livraison — Siège" est ajoutée et remplie
+  automatiquement, en simulant le même clic sur "Ajouter un objet Adresse
+  supplémentaire" que ferait l'utilisateur (aucun accès direct au DOM
+  interne du formset Django/Unfold) puis en écoutant l'événement
+  `formset:added` qu'Unfold déclenche une fois la ligne effectivement
+  ajoutée et réindexée, pour la remplir au bon indice.
+
+**Vérifié** (appel réseau intercepté — même contrainte réseau du bac à
+sable que pour l'autocomplétion d'adresse, sans rapport avec le
+navigateur réel de l'utilisateur) : suggestions affichées en tapant une
+raison sociale, sélection remplissant SIRET + adresse (nouvelle ligne
+"Livraison — Siège") ; saisie d'un SIRET connu remplissant
+automatiquement raison sociale + adresse ; non-régression vérifiée dans
+les deux sens quand une raison sociale ou une adresse étaient déjà
+saisies à la main (rien n'est écrasé, aucune ligne fantôme ajoutée).
