@@ -168,12 +168,36 @@ class ContactAdmin(ModelAdmin):
     ]
     list_filter = ["est_principal"]
     search_fields = ["nom", "prenom", "tiers__code", "tiers__raison_sociale"]
-    autocomplete_fields = ["tiers", "adresse_livraison"]
+    autocomplete_fields = ["tiers"]
     inlines = [ContactTelephoneInline]
 
     @admin.display(description="Téléphones")
     def telephones_display(self, obj):
         return ", ".join(f"{t.get_type_telephone_display()} : {t.numero}" for t in obj.telephones.all()) or "—"
+
+    def get_form(self, request, obj=None, **kwargs):
+        # Mémorise le contact en cours d'édition (None à la création) pour
+        # restreindre le champ adresse_livraison ci-dessous — même souci et
+        # même correctif que ContactInline.formfield_for_foreignkey côté
+        # fiche Tiers : sans ce filtre, l'autocomplete proposait les
+        # adresses de n'importe quel tiers.
+        self._obj = obj
+        return super().get_form(request, obj, **kwargs)
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == "adresse_livraison":
+            obj = getattr(self, "_obj", None)
+            if obj is not None and obj.tiers_id:
+                kwargs["queryset"] = Adresse.objects.filter(
+                    tiers_id=obj.tiers_id, type_adresse=Adresse.TypeAdresse.LIVRAISON
+                )
+            else:
+                kwargs["queryset"] = Adresse.objects.none()
+                kwargs["help_text"] = (
+                    "Non disponible tant que le contact et son tiers n'ont pas été enregistrés "
+                    "une première fois : enregistrez d'abord, puis revenez associer une adresse."
+                )
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
 
 @admin.register(TauxTVA)

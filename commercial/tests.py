@@ -304,6 +304,51 @@ class ContactInlineAdresseLivraisonChoicesTests(TestCase):
         self.assertNotIn(self.livraison_autre_tiers, queryset)
 
 
+class ContactAdminAdresseLivraisonChoicesTests(TestCase):
+    """Même correctif que ContactInlineAdresseLivraisonChoicesTests, mais
+    sur la fiche Contact autonome (/admin/commercial/contact/)."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        self.user = User.objects.create_superuser("contact-admin-adr", "ca@example.com", "pass1234")
+        self.client.force_login(self.user)
+
+        self.tiers = Tiers.objects.create(
+            code="CLI-CONTACT-ADMIN-ADR", raison_sociale="Client Contact Admin Adr", type_tiers=Tiers.TypeTiers.CLIENT
+        )
+        self.contact = Contact.objects.create(tiers=self.tiers, nom="Site")
+        self.livraison = Adresse.objects.create(
+            tiers=self.tiers, type_adresse=Adresse.TypeAdresse.LIVRAISON,
+            libelle="Entrepôt propre", adresse="1 rue", code_postal="75000", ville="Paris",
+        )
+        self.facturation = Adresse.objects.create(
+            tiers=self.tiers, type_adresse=Adresse.TypeAdresse.FACTURATION,
+            libelle="Siège propre", adresse="1 rue", code_postal="75000", ville="Paris",
+        )
+        autre_tiers = Tiers.objects.create(
+            code="CLI-CONTACT-ADMIN-ADR-AUTRE", raison_sociale="Autre Client", type_tiers=Tiers.TypeTiers.CLIENT
+        )
+        self.livraison_autre_tiers = Adresse.objects.create(
+            tiers=autre_tiers, type_adresse=Adresse.TypeAdresse.LIVRAISON,
+            libelle="Entrepôt autre tiers", adresse="2 rue", code_postal="75000", ville="Paris",
+        )
+
+    def test_formulaire_ajout_ne_propose_aucune_adresse(self):
+        response = self.client.get("/admin/commercial/contact/add/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["adminform"].form.fields["adresse_livraison"].queryset.count(), 0)
+
+    def test_formulaire_modification_ne_propose_que_les_adresses_de_livraison_du_tiers(self):
+        response = self.client.get(f"/admin/commercial/contact/{self.contact.pk}/change/")
+        self.assertEqual(response.status_code, 200)
+        queryset = response.context["adminform"].form.fields["adresse_livraison"].queryset
+        self.assertIn(self.livraison, queryset)
+        self.assertNotIn(self.facturation, queryset)
+        self.assertNotIn(self.livraison_autre_tiers, queryset)
+
+
 class TiersIbanTests(TestCase):
     def test_iban_valide_accepte(self):
         # IBAN français d'exemple, valide (clé de contrôle correcte).
