@@ -46,3 +46,21 @@ class Facture(models.Model):
         if conditions is None:
             return None
         return conditions.calculer_echeance(self.date_facturation)
+
+    @property
+    def montant_ht_calcule(self):
+        """Total HT indicatif recalculé depuis les lignes actuelles de la
+        commande (CommandeLigne.montant_ht) — n'est jamais écrit dans
+        montant_ht, qui reste la valeur saisie à la main depuis la facture
+        réelle (émise dans Tiime, qui fait foi et peut différer :
+        facturation partielle d'une commande sur plusieurs factures,
+        remise, arrondi...). Ignore les lignes sans prix renseigné, comme
+        comptabilite.generation._repartition_lignes. None si la commande
+        n'a aucune ligne chiffrée."""
+        montants = [l.montant_ht for l in self.commande.lignes.all() if l.montant_ht is not None]
+        return sum(montants) if montants else None
+
+    @property
+    def montant_ttc_calcule(self):
+        montants = [l.montant_ttc for l in self.commande.lignes.all() if l.montant_ttc is not None]
+        return sum(montants) if montants else None

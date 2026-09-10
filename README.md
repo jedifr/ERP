@@ -1487,4 +1487,36 @@ y être retrouvée). Remplacé par un `<select>` simple dont le queryset est
 restreint, via `ContactInline.get_formset`/`formfield_for_foreignkey`, aux
 seules adresses de livraison du tiers en cours d'édition — vide (avec un
 `help_text` explicite) tant que le tiers n'a pas été enregistré une
-première fois avec ses adresses.
+première fois avec ses adresses. Même correctif appliqué à la fiche
+Contact autonome (`ContactAdmin`, via `get_form`/`formfield_for_foreignkey`
+— l'un et l'autre ModelAdmin n'exposent pas l'objet en cours d'édition au
+même endroit : `get_formset(request, obj)` pour un inline, `get_form(request,
+obj)` pour un ModelAdmin de premier niveau).
+
+## Facture : montants et échéance calculés à titre indicatif depuis la commande
+
+`montant_ht`/`montant_ttc` restent des champs saisis à la main (la facture
+réelle, émise dans Tiime, fait foi — peut différer : facturation partielle
+d'une commande sur plusieurs factures, remise, arrondi) mais n'étaient
+jusqu'ici calculables d'aucune façon depuis les lignes de la commande.
+
+- **`Facture.montant_ht_calcule`/`montant_ttc_calcule`** (propriétés) :
+  somme des lignes actuelles de la commande (`CommandeLigne.montant_ht`/
+  `montant_ttc`), en ignorant les lignes sans prix renseigné — même
+  logique que `comptabilite.generation._repartition_lignes` côté
+  génération d'écriture. `None` si la commande n'a aucune ligne chiffrée.
+- **Pré-remplissage automatique** sur le formulaire d'ajout d'une facture :
+  dès qu'une commande est choisie, `facturation/facture_admin.js`
+  interroge `montants_calcules_commande_view` (nouvel endpoint AJAX,
+  `facturation/admin.py`) et renseigne `montant_ht`/`montant_ttc` — sans
+  jamais écraser une valeur déjà saisie à la main, même principe que
+  `chiffrage/devis_admin_live.js`.
+- **Rappel en lecture seule** sur la fiche (ajout et modification) :
+  "Montants calculés depuis la commande (indicatif)" — utile pour repérer
+  après coup un écart avec les lignes actuelles de la commande (ex.
+  modifiées depuis la création de la facture).
+
+**Non traité, sur demande explicite de l'utilisateur** : un vrai suivi
+des règlements (date, montant, rapprochement bancaire) — `statut_paiement`
+reste un texte libre. Chantier plus lourd, à faire séparément le jour où
+Tiime ne suffit plus comme source de vérité sur les encaissements.
