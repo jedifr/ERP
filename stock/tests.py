@@ -1,8 +1,10 @@
 import datetime
 
+from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 
+from codification.models import RegleCodification
 from technique.models import Article
 
 from .models import AlerteStock, Emplacement, Lot, MouvementStock, stock_total
@@ -122,3 +124,39 @@ class AlerteStockTests(TestCase):
             lot=autre_lot, type_mouvement=MouvementStock.TypeMouvement.ENTREE, quantite=7
         )
         self.assertEqual(stock_total(self.article), 12)
+
+
+class EmplacementAdminCodificationTests(TestCase):
+    """Emplacement : entité codifiée la plus simple (pas d'inline sur sa
+    fiche admin), utilisée pour vérifier de bout en bout le comportement de
+    CodificationInitialeMixin sur un vrai cycle requête/réponse — voir
+    codification/tests.py pour les tests unitaires du service sous-jacent.
+    Reproduit le scénario signalé par l'utilisateur : un formulaire d'ajout
+    consulté puis abandonné sans être enregistré ne doit plus « sauter » de
+    numéro."""
+
+    def setUp(self):
+        User = get_user_model()
+        self.user = User.objects.create_superuser("emplacement-codif", "e@example.com", "pass1234")
+        self.client.force_login(self.user)
+        RegleCodification.objects.filter(pk=RegleCodification.Entite.EMPLACEMENT).update(
+            prefixe="EMP-", nombre_chiffres=3, compteur_actuel=0
+        )
+
+    def test_visites_successives_sans_enregistrer_ne_sautent_aucun_numero(self):
+        self.client.get("/admin/stock/emplacement/add/")
+        self.client.get("/admin/stock/emplacement/add/")
+        response = self.client.get("/admin/stock/emplacement/add/")
+        self.assertContains(response, "EMP-001")
+
+    def test_enregistrer_fait_avancer_le_compteur_pour_le_prochain_apercu(self):
+        self.client.get("/admin/stock/emplacement/add/")  # aperçu seul, ne doit rien consommer
+        response = self.client.post(
+            "/admin/stock/emplacement/add/",
+            data={"code": "EMP-001", "libelle": "Zone test", "_save": "Enregistrer"},
+        )
+        self.assertEqual(response.status_code, 302, getattr(response, "context", None))
+        self.assertTrue(Emplacement.objects.filter(pk="EMP-001").exists())
+
+        response = self.client.get("/admin/stock/emplacement/add/")
+        self.assertContains(response, "EMP-002")

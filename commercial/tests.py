@@ -169,10 +169,16 @@ class TiersAdminCodificationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "TIERS-00001")
 
-    def test_visites_successives_incrementent_le_compteur(self):
+    def test_visites_successives_sans_enregistrer_ne_sautent_aucun_numero(self):
+        # Un formulaire d'ajout consulté puis abandonné sans être enregistré
+        # ne doit pas faire avancer le compteur — sinon le prochain tiers
+        # réellement créé « saute » un numéro (voir
+        # stock.tests.EmplacementAdminCodificationTests pour la vérification
+        # de bout en bout, y compris après un enregistrement réel, sur une
+        # entité sans inline)."""
         self.client.get("/admin/commercial/tiers/add/")
         response = self.client.get("/admin/commercial/tiers/add/")
-        self.assertContains(response, "TIERS-00002")
+        self.assertContains(response, "TIERS-00001")
 
 
 class TiersInlinesSansLigneVideTests(TestCase):
@@ -433,7 +439,7 @@ class ConditionPaiementEcheanceTests(TestCase):
 
 class ApercuCompteComptableViewTests(TestCase):
     """Endpoint AJAX utilisé par tiers_admin.js pour afficher, dès la frappe
-    du code à 5 lettres, le compte comptable que TiersCompteComptable.save()
+    du code à 5 caractères, le compte comptable que TiersCompteComptable.save()
     résoudrait (voir comptabilite.models) — sans avoir à enregistrer le
     formulaire pour le voir."""
 
@@ -457,6 +463,11 @@ class ApercuCompteComptableViewTests(TestCase):
         response = self.client.get("/admin/commercial/tiers/apercu-compte-comptable/?prefixe=401&code=martl")
         data = response.json()
         self.assertEqual(data, {"valide": True, "code": "401MARTL", "existe": False, "libelle": None})
+
+    def test_code_avec_chiffres_accepte(self):
+        response = self.client.get("/admin/commercial/tiers/apercu-compte-comptable/?prefixe=401&code=dup01")
+        data = response.json()
+        self.assertEqual(data, {"valide": True, "code": "401DUP01", "existe": False, "libelle": None})
 
     def test_code_incomplet_invalide(self):
         response = self.client.get("/admin/commercial/tiers/apercu-compte-comptable/?prefixe=411&code=dup")

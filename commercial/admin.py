@@ -91,13 +91,13 @@ class TiersCompteComptableInline(TabularInline):
 @require_http_methods(["GET"])
 def apercu_compte_comptable_view(request):
     """Aperçu en direct du compte comptable généré par TiersCompteComptable
-    à partir d'un code à 5 lettres (voir TiersCompteComptable.save()) —
+    à partir d'un code à 5 caractères (voir TiersCompteComptable.save()) —
     utilisé par le JS de la fiche Tiers pour afficher, dès la frappe, le
     compte qui sera résolu (existant, avec son libellé, ou à créer) sans
     attendre l'enregistrement du formulaire."""
     prefixe = request.GET.get("prefixe")
     code = (request.GET.get("code") or "").strip()
-    if prefixe not in ("411", "401") or not re.fullmatch(r"[A-Za-z]{5}", code):
+    if prefixe not in ("411", "401") or not re.fullmatch(r"[A-Za-z0-9]{5}", code):
         return JsonResponse({"valide": False})
 
     code_complet = f"{prefixe}{code.upper()}"

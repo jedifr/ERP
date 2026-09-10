@@ -307,24 +307,35 @@ concernée, un préfixe, un nombre de chiffres (largeur du numéro, complété
 par des zéros) et une réinitialisation (jamais, ou chaque année — l'année
 est alors insérée entre le préfixe et le numéro, ex. `FAC-2026-00001`).
 
-10 entités sont couvertes, avec des préfixes par défaut créés par une
-migration de données (`codification/migrations/0002_seed_regles_par_defaut.py`) :
-Devis (`DEV-`), Commande (`CDE-`), Ordre de fabrication (`OF-`), Commande
-fournisseur (`CDEF-`), Réception (`REC-`), Facture (`FAC-`), Envoi
+11 entités sont couvertes, avec des préfixes par défaut créés par des
+migrations de données (`codification/migrations/0002_seed_regles_par_defaut.py`
+et `0006_seed_regle_facture_fournisseur.py`) : Devis (`DEV-`), Commande
+(`CDE-`), Ordre de fabrication (`OF-`), Commande fournisseur (`CDEF-`),
+Réception (`REC-`), Facture (`FAC-`), Facture fournisseur (`FACF-`), Envoi
 sous-traitance (`ENVST-`), Retour sous-traitance (`RETST-`), Tiers
 (`TIERS-`) et Emplacement (`EMP-`). Volontairement exclus : Article,
 Matière, Poste de travail — ce sont des références techniques choisies à la
 main (ex. `TOLE-S235-3MM`), pas des numéros de séquence.
 
-Fonctionnement (`codification/services.py`, `generer_code`) :
-- le code proposé **pré-remplit** le champ numéro/code du formulaire
+Fonctionnement (`codification/services.py`) :
+- `generer_code()` **pré-remplit** le champ numéro/code du formulaire
   d'ajout de l'entité (`codification/mixins.py`, `CodificationInitialeMixin`,
-  branché sur les 10 `ModelAdmin` concernés) ;
+  branché sur les 11 `ModelAdmin` concernés) — un simple aperçu du prochain
+  numéro (`compteur_actuel + 1`), qui ne modifie rien tant que rien n'est
+  enregistré : consulter le formulaire d'ajout plusieurs fois sans jamais
+  sauvegarder renvoie toujours le même code ;
 - il reste un champ texte normal, modifiable avant enregistrement ;
-- le compteur est incrémenté dès l'ouverture du formulaire d'ajout (pas au
-  moment d'enregistrer) — un numéro peut donc être "sauté" si le formulaire
-  est abandonné sans être enregistré. Compromis assumé pour rester simple
-  (pas de réservation temporaire à nettoyer) ;
+- le compteur n'avance réellement qu'à l'enregistrement d'un nouvel objet
+  (`enregistrer_code_utilise()`, appelée par `CodificationInitialeMixin.
+  save_model()`), à partir du code effectivement utilisé — y compris si
+  l'utilisateur a remplacé la suggestion par un numéro plus élevé (le
+  compteur rattrape, pour éviter une collision au prochain aperçu) ; un code
+  qui ne correspond pas au format de la règle est ignoré, rien n'est
+  modifié. **Correctif** : la version initiale incrémentait le compteur dès
+  l'ouverture du formulaire d'ajout, y compris pour un formulaire ensuite
+  abandonné — un numéro pouvait être "sauté" à chaque visite non suivie
+  d'un enregistrement (signalé par l'utilisateur après l'avoir observé sur
+  la fiche Tiers) ;
 - si aucune règle n'est configurée pour une entité, le champ reste vide
   comme avant (comportement additif, jamais bloquant).
 
@@ -1392,15 +1403,16 @@ l'utilisateur.
   changer ensuite au cas par cas.
 - **Comptes auxiliaires auto-générés** (`TiersCompteComptable.code_client` /
   `code_fournisseur`) : convention propre au cabinet comptable de
-  l'utilisateur — 5 lettres qu'il détermine lui-même, concaténées à "411"
-  (compte client) ou "401" (compte fournisseur). `clean()` valide le format
-  (exactement 5 lettres) ; `save()` résout ou crée le `CompteComptable`
+  l'utilisateur — 5 caractères (lettres et/ou chiffres) qu'il détermine
+  lui-même, concaténés à "411" (compte client) ou "401" (compte
+  fournisseur). `clean()` valide le format (exactement 5 caractères
+  alphanumériques) ; `save()` résout ou crée le `CompteComptable`
   correspondant (système développé) et l'assigne à `compte_client`/
-  `compte_fournisseur` — pas de doublon si le même code de 5 lettres est
-  réutilisé pour un autre tiers (`get_or_create` sur le code du compte).
-  Les champs `compte_client`/`compte_fournisseur` restent utilisables
-  directement en échappatoire (compte déjà existant, numérotation
-  différente) quand aucun code à 5 lettres n'est renseigné.
+  `compte_fournisseur` — pas de doublon si le même code est réutilisé pour
+  un autre tiers (`get_or_create` sur le code du compte). Les champs
+  `compte_client`/`compte_fournisseur` restent utilisables directement en
+  échappatoire (compte déjà existant, numérotation différente) quand aucun
+  code à 5 caractères n'est renseigné.
 
 ## Écriture comptable d'achat
 
@@ -1461,8 +1473,8 @@ place.
   rendu par `unfold.admin.ModelAdmin` qui embarque nativement
   `NestedInlinesModelAdminMixin` (pas de nouvelle dépendance, ni de
   changement de modèle).
-- **Aperçu du compte comptable en direct** : dès que 5 lettres valides
-  sont saisies dans "Code client"/"Code fournisseur"
+- **Aperçu du compte comptable en direct** : dès que 5 caractères valides
+  sont saisis dans "Code client"/"Code fournisseur"
   (`TiersCompteComptable`), un texte apparaît sous le champ indiquant le
   compte qui sera utilisé — son libellé s'il existe déjà en base ("→
   411DUPON — Dupont SAS (compte existant)"), ou qu'il sera créé sinon.

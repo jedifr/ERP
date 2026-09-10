@@ -60,7 +60,7 @@
         }
         const el = apercuElement(input);
         const valeur = input.value.trim();
-        if (!/^[A-Za-z]{5}$/.test(valeur)) {
+        if (!/^[A-Za-z0-9]{5}$/.test(valeur)) {
             el.textContent = "";
             return;
         }

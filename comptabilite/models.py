@@ -87,19 +87,20 @@ class TiersCompteComptable(models.Model):
 
     code_client/code_fournisseur permettent de laisser le compte se générer
     automatiquement (convention de ce cabinet comptable : "411"/"401" + 5
-    lettres choisies par l'utilisateur) plutôt que de sélectionner un compte
-    existant à la main — évite de devoir créer manuellement un sous-compte
-    dans le plan comptable pour chaque nouveau client/fournisseur.
-    compte_client/compte_fournisseur restent utilisables directement en
-    échappatoire (numérotation différente d'un tiers à l'autre, compte déjà
-    existant, etc.) quand le code à 5 lettres n'est pas renseigné."""
+    caractères — lettres et/ou chiffres — choisis par l'utilisateur) plutôt
+    que de sélectionner un compte existant à la main — évite de devoir créer
+    manuellement un sous-compte dans le plan comptable pour chaque nouveau
+    client/fournisseur. compte_client/compte_fournisseur restent utilisables
+    directement en échappatoire (numérotation différente d'un tiers à
+    l'autre, compte déjà existant, etc.) quand le code à 5 caractères n'est
+    pas renseigné."""
 
     tiers = models.OneToOneField(
         Tiers, verbose_name="tiers", on_delete=models.CASCADE, related_name="comptes_comptables"
     )
     code_client = models.CharField(
-        "code client (5 lettres)", max_length=5, blank=True,
-        help_text='5 lettres, ex. "DUPON" — génère automatiquement le compte 411 + ces lettres',
+        "code client (5 caractères)", max_length=5, blank=True,
+        help_text='5 lettres et/ou chiffres, ex. "DUP01" — génère automatiquement le compte 411 + ce code',
     )
     compte_client = models.ForeignKey(
         CompteComptable, verbose_name="compte client", on_delete=models.PROTECT,
@@ -107,8 +108,8 @@ class TiersCompteComptable(models.Model):
         help_text="Ex. sous-compte de 411 — rempli automatiquement si un code client est renseigné",
     )
     code_fournisseur = models.CharField(
-        "code fournisseur (5 lettres)", max_length=5, blank=True,
-        help_text='5 lettres, ex. "DUPON" — génère automatiquement le compte 401 + ces lettres',
+        "code fournisseur (5 caractères)", max_length=5, blank=True,
+        help_text='5 lettres et/ou chiffres, ex. "DUP01" — génère automatiquement le compte 401 + ce code',
     )
     compte_fournisseur = models.ForeignKey(
         CompteComptable, verbose_name="compte fournisseur", on_delete=models.PROTECT,
@@ -127,8 +128,8 @@ class TiersCompteComptable(models.Model):
     def clean(self):
         super().clean()
         for champ, valeur in (("code_client", self.code_client), ("code_fournisseur", self.code_fournisseur)):
-            if valeur and not re.fullmatch(r"[A-Za-z]{5}", valeur):
-                raise ValidationError({champ: "Le code doit comporter exactement 5 lettres."})
+            if valeur and not re.fullmatch(r"[A-Za-z0-9]{5}", valeur):
+                raise ValidationError({champ: "Le code doit comporter exactement 5 lettres et/ou chiffres."})
         if not any((self.code_client, self.compte_client_id, self.code_fournisseur, self.compte_fournisseur_id)):
             raise ValidationError("Renseignez au moins un compte (ou code) client ou fournisseur.")
 

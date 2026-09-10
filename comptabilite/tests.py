@@ -233,8 +233,9 @@ class TiersCompteComptableTests(TestCase):
 
 class TiersCompteComptableCodeAutoGenereTests(TestCase):
     """code_client/code_fournisseur : convention du cabinet comptable de
-    l'utilisateur — 411/401 + 5 lettres qu'il détermine lui-même, plutôt que
-    de sélectionner un compte du plan comptable à la main."""
+    l'utilisateur — 411/401 + 5 caractères (lettres et/ou chiffres) qu'il
+    détermine lui-même, plutôt que de sélectionner un compte du plan
+    comptable à la main."""
 
     def setUp(self):
         importer_pcg()
@@ -269,9 +270,13 @@ class TiersCompteComptableCodeAutoGenereTests(TestCase):
         with self.assertRaises(ValidationError):
             TiersCompteComptable(tiers=self.tiers, code_client="DUP").full_clean()
 
-    def test_code_avec_chiffres_refuse(self):
+    def test_code_avec_chiffres_accepte(self):
+        tcc = TiersCompteComptable.objects.create(tiers=self.tiers, code_client="DUP01")
+        self.assertEqual(tcc.compte_client.code, "411DUP01")
+
+    def test_code_avec_caractere_non_alphanumerique_refuse(self):
         with self.assertRaises(ValidationError):
-            TiersCompteComptable(tiers=self.tiers, code_client="DUP01").full_clean()
+            TiersCompteComptable(tiers=self.tiers, code_client="DUP-1").full_clean()
 
     def test_code_client_satisfait_a_lui_seul_la_validation(self):
         TiersCompteComptable(tiers=self.tiers, code_client="DUPON").full_clean()  # ne doit pas lever
