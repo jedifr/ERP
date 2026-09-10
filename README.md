@@ -1179,10 +1179,17 @@ officiel (PCG *millésime*)" sur la liste des comptes comptables
 liste qui n'a pas besoin de sélection — contrairement aux actions
 classiques Django admin). Il déclenche `comptabilite.pcg.importer_pcg()`,
 qui charge le jeu de données embarqué dans l'app
-(`comptabilite/data/pcg_<millésime>.json`) et fait un `update_or_create`
-par compte (idempotent — rejouable sans dupliquer, met à jour un libellé
-modifié entre-temps). Même fonction exposée en CLI (`manage.py
-importer_pcg`, pour un déploiement/CI).
+(`comptabilite/data/pcg_<millésime>.json`) et écrit en `bulk_create`/
+`bulk_update` (idempotent — rejouable sans dupliquer, met à jour un
+libellé modifié entre-temps), le tout dans une transaction unique. Même
+fonction exposée en CLI (`manage.py importer_pcg`, pour un déploiement/CI).
+
+*Historique* : la première version faisait un `update_or_create` par
+compte (~1700 requêtes pour 861 comptes) — sur du matériel modeste (NAS),
+cette volée de petites transactions pouvait dépasser le délai d'un worker
+Gunicorn (30s) et le faire tuer en plein import (`SystemExit` dans
+`connection.commit()`, plan comptable à moitié chargé). Passer en bulk
+(quelques requêtes au total) ramène l'import à une fraction de seconde.
 
 Ce jeu de données est un **instantané embarqué**, pas un téléchargement à
 la volée depuis un site tiers au moment du clic : plus fiable (aucune
