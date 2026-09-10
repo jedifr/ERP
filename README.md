@@ -1490,20 +1490,38 @@ place.
   inlines, cette combinaison est ce qui rapproche le plus les deux blocs
   demandés.
 
-**Correctif après retour utilisateur** : "Adresse de livraison associée"
-(`ContactInline.adresse_livraison`) utilisait `autocomplete_fields`, qui
-interroge `AdresseAdmin` sans aucun filtre — le menu proposait les
-adresses de n'importe quel tiers, et restait incohérent à la création
-d'un tiers (aucune de ses propres adresses n'existe encore en base pour
-y être retrouvée). Remplacé par un `<select>` simple dont le queryset est
-restreint, via `ContactInline.get_formset`/`formfield_for_foreignkey`, aux
-seules adresses de livraison du tiers en cours d'édition — vide (avec un
-`help_text` explicite) tant que le tiers n'a pas été enregistré une
-première fois avec ses adresses. Même correctif appliqué à la fiche
-Contact autonome (`ContactAdmin`, via `get_form`/`formfield_for_foreignkey`
-— l'un et l'autre ModelAdmin n'exposent pas l'objet en cours d'édition au
-même endroit : `get_formset(request, obj)` pour un inline, `get_form(request,
-obj)` pour un ModelAdmin de premier niveau).
+**Correctifs après retours utilisateur** :
+
+- "Adresse de livraison associée" (`ContactAdmin`, fiche Contact autonome)
+  utilisait `autocomplete_fields`, qui interroge `AdresseAdmin` sans aucun
+  filtre — le menu proposait les adresses de n'importe quel tiers.
+  Restreint, via `get_form`/`formfield_for_foreignkey`, aux seules adresses
+  de livraison du tiers du contact — vide (avec un `help_text` explicite)
+  tant que le contact et son tiers n'ont pas été enregistrés une première
+  fois.
+- Le même champ, sur le tableau Contacts de la fiche Tiers
+  (`ContactInline`), avait d'abord reçu la même restriction — mais elle
+  rendait le champ inutilisable à la création d'un tiers : aucune adresse
+  n'existe encore en base tant que le tiers n'a pas été enregistré, donc
+  impossible de lier un contact à une adresse tout juste tapée dans le
+  même formulaire (signalé par l'utilisateur, capture à l'appui). Corrigé
+  différemment ici : `adresse_livraison` est exclu du formulaire
+  (`ContactInlineForm`, `exclude = ["adresse_livraison"]`) et remplacé par
+  un champ `adresse_livraison_ref` qui référence une ligne du tableau
+  Adresses par son indice (ex. `"1"` pour `adresses-1-*`), pas par un pk —
+  une ligne pas encore enregistrée n'en a pas encore au moment où Django
+  valide le formulaire. Les options du `<select>` sont construites en JS
+  (`tiers_admin.js`) à partir des lignes du tableau Adresses affichées à
+  l'écran (type Livraison uniquement, réactif à la frappe et aux lignes
+  ajoutées/supprimées) — jamais interrogées en base. `TiersAdmin.
+  save_related()` résout la référence en instance `Adresse` réelle une
+  fois que toutes les adresses ont vraiment été enregistrées (y compris
+  celles créées dans la même requête), et revalide au passage que
+  l'adresse ciblée appartient bien à ce tiers et est de type Livraison —
+  le contrôle que `Contact.clean()` fait normalement, mais qui n'est plus
+  déclenché pour ce champ puisqu'il est exclu du `ModelForm`.
+  `ContactAdmin` (fiche Contact autonome, sans tableau Adresses à côté)
+  garde la première approche, plus simple, suffisante dans son contexte.
 
 ## Facture : montants et échéance calculés à titre indicatif depuis la commande
 

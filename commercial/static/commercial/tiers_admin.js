@@ -20,6 +20,8 @@
         CHAMPS.forEach(({ nomChamp }) => {
             document.querySelectorAll(`input[name$="-${nomChamp}"]`).forEach(rafraichirApercu);
         });
+
+        initAdresseLivraison();
     }
 
     function debounce(fn, delay) {
@@ -85,5 +87,102 @@
             .catch(() => {
                 el.textContent = "";
             });
+    }
+
+    // « Adresse de livraison associée » (tableau Contacts) : le <select>
+    // n'est jamais alimenté depuis la base (voir ContactInlineForm côté
+    // Python) — ses options sont reconstruites ici à partir des lignes
+    // actuellement affichées dans le tableau Adresses (type Livraison
+    // uniquement, même non enregistrées), pour pouvoir lier un contact à
+    // une adresse tout juste ajoutée, dans le même enregistrement.
+    function initAdresseLivraison() {
+        if (!document.querySelector('select[name$="-adresse_livraison_ref"]')) {
+            return;
+        }
+        const rafraichir = debounce(rafraichirOptionsAdresseLivraison, 300);
+        document.addEventListener("input", (event) => {
+            if (event.target.name && event.target.name.startsWith("adresses-")) {
+                rafraichir();
+            }
+        });
+        document.addEventListener("change", (event) => {
+            if (event.target.name && event.target.name.startsWith("adresses-")) {
+                rafraichir();
+            }
+        });
+        document.addEventListener("formset:added", () => rafraichirOptionsAdresseLivraison());
+        rafraichirOptionsAdresseLivraison();
+    }
+
+    function indexDeLigneAdresse(input) {
+        const m = input.name.match(/^adresses-(\d+)-/);
+        return m ? parseInt(m[1], 10) : null;
+    }
+
+    function ligneEstSupprimee(row) {
+        const suppression = row.querySelector('input[type="checkbox"][name$="-DELETE"]');
+        return !!(suppression && suppression.checked);
+    }
+
+    function collecterLignesAdresseLivraison() {
+        const lignes = [];
+        document.querySelectorAll("tbody.form-group").forEach((row) => {
+            const typeSelect = row.querySelector('select[name^="adresses-"][name$="-type_adresse"]');
+            if (!typeSelect || typeSelect.value !== "livraison" || ligneEstSupprimee(row)) {
+                return;
+            }
+            const index = indexDeLigneAdresse(typeSelect);
+            if (index === null) {
+                return;
+            }
+            const libelleInput = row.querySelector('input[name$="-libelle"]');
+            const villeInput = row.querySelector('input[name$="-ville"]');
+            const libelle = (libelleInput && libelleInput.value) || (villeInput && villeInput.value) || `Adresse ${index + 1}`;
+            lignes.push({ index, libelle });
+        });
+        return lignes;
+    }
+
+    function trouverIndexParPk(pk) {
+        let trouve = null;
+        document.querySelectorAll('input[name^="adresses-"][name$="-id"]').forEach((idInput) => {
+            if (idInput.value && idInput.value === String(pk)) {
+                trouve = indexDeLigneAdresse(idInput);
+            }
+        });
+        return trouve;
+    }
+
+    function rafraichirOptionsAdresseLivraison() {
+        const lignes = collecterLignesAdresseLivraison();
+        document.querySelectorAll('select[name$="-adresse_livraison_ref"]').forEach((select) => {
+            const valeurActuelle = select.value;
+            select.innerHTML = "";
+            select.appendChild(new Option("---------", ""));
+            lignes.forEach(({ index, libelle }) => {
+                select.appendChild(new Option(libelle, String(index)));
+            });
+
+            const options = Array.from(select.options).map((o) => o.value);
+            if (valeurActuelle && options.includes(valeurActuelle)) {
+                select.value = valeurActuelle;
+                return;
+            }
+            // Premier rendu seulement : tente de retrouver la ligne
+            // correspondant à l'adresse déjà liée (édition d'un contact
+            // existant) — comparée par pk, pas par indice (voir
+            // ContactInlineForm côté Python).
+            if (select.dataset.preselectionFaite) {
+                return;
+            }
+            select.dataset.preselectionFaite = "1";
+            const pkActuel = select.dataset.adresseLivraisonActuelle;
+            if (pkActuel) {
+                const index = trouverIndexParPk(pkActuel);
+                if (index !== null && options.includes(String(index))) {
+                    select.value = String(index);
+                }
+            }
+        });
     }
 })();

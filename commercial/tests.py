@@ -258,56 +258,191 @@ class ContactAdresseLivraisonTests(TestCase):
             contact.full_clean()
 
 
-class ContactInlineAdresseLivraisonChoicesTests(TestCase):
-    """Le champ « Adresse de livraison associée » du tableau Contacts, sur
-    la fiche Tiers, ne doit proposer que les adresses de livraison du tiers
-    en cours d'édition — jamais celles d'un autre tiers (l'autocomplete
-    précédent interrogeait tout le référentiel Adresse sans filtre), et
-    aucune adresse tant que le tiers n'a pas encore été enregistré une
-    première fois (ses adresses n'existent pas encore en base à ce
-    moment-là — incohérent de prétendre en proposer une)."""
+class ResoudreReferenceAdresseTests(TestCase):
+    """TiersAdmin._resoudre_reference_adresse() : résout une référence
+    "adresse_livraison_ref" (indice dans le formset Adresses, voir
+    ContactInlineForm) en instance Adresse réelle — utilisée par
+    save_related() une fois toutes les adresses enregistrées. Formset
+    factice minimal (juste .forms/.deleted_forms) : inutile de passer par
+    un vrai formset Django pour tester cette seule fonction."""
+
+    def setUp(self):
+        from types import SimpleNamespace
+
+        from commercial.admin import TiersAdmin
+
+        self.resoudre = TiersAdmin._resoudre_reference_adresse
+        self.SimpleNamespace = SimpleNamespace
+
+        self.tiers = Tiers.objects.create(
+            code="CLI-RESOUDRE-ADR", raison_sociale="Client Résoudre Adresse", type_tiers=Tiers.TypeTiers.CLIENT
+        )
+        self.livraison = Adresse.objects.create(
+            tiers=self.tiers, type_adresse=Adresse.TypeAdresse.LIVRAISON,
+            adresse="1 rue", code_postal="75000", ville="Paris",
+        )
+        self.facturation = Adresse.objects.create(
+            tiers=self.tiers, type_adresse=Adresse.TypeAdresse.FACTURATION,
+            adresse="2 rue", code_postal="75000", ville="Paris",
+        )
+        autre_tiers = Tiers.objects.create(
+            code="CLI-RESOUDRE-ADR-AUTRE", raison_sociale="Autre Client", type_tiers=Tiers.TypeTiers.CLIENT
+        )
+        self.livraison_autre_tiers = Adresse.objects.create(
+            tiers=autre_tiers, type_adresse=Adresse.TypeAdresse.LIVRAISON,
+            adresse="3 rue", code_postal="75000", ville="Paris",
+        )
+
+    def _formset(self, instances, deleted_indexes=()):
+        forms = [self.SimpleNamespace(instance=i) for i in instances]
+        return self.SimpleNamespace(forms=forms, deleted_forms=[forms[i] for i in deleted_indexes])
+
+    def test_reference_vide_renvoie_none(self):
+        formset = self._formset([self.livraison])
+        self.assertIsNone(self.resoudre("", self.tiers, formset))
+        self.assertIsNone(self.resoudre(None, self.tiers, formset))
+
+    def test_reference_valide_renvoie_ladresse(self):
+        formset = self._formset([self.livraison])
+        self.assertEqual(self.resoudre("0", self.tiers, formset), self.livraison)
+
+    def test_indice_hors_limites_renvoie_none(self):
+        formset = self._formset([self.livraison])
+        self.assertIsNone(self.resoudre("5", self.tiers, formset))
+        self.assertIsNone(self.resoudre("-1", self.tiers, formset))
+
+    def test_reference_non_numerique_renvoie_none(self):
+        formset = self._formset([self.livraison])
+        self.assertIsNone(self.resoudre("abc", self.tiers, formset))
+
+    def test_ligne_supprimee_renvoie_none(self):
+        formset = self._formset([self.livraison], deleted_indexes=[0])
+        self.assertIsNone(self.resoudre("0", self.tiers, formset))
+
+    def test_adresse_de_facturation_refusee(self):
+        formset = self._formset([self.facturation])
+        self.assertIsNone(self.resoudre("0", self.tiers, formset))
+
+    def test_adresse_dun_autre_tiers_refusee(self):
+        formset = self._formset([self.livraison_autre_tiers])
+        self.assertIsNone(self.resoudre("0", self.tiers, formset))
+
+    def test_ligne_sans_pk_renvoie_none(self):
+        # Ligne du formset jamais enregistrée (form vide, ex. un "extra"
+        # laissé de côté) : son instance n'a pas de pk.
+        formset = self._formset([Adresse(tiers=self.tiers, type_adresse=Adresse.TypeAdresse.LIVRAISON)])
+        self.assertIsNone(self.resoudre("0", self.tiers, formset))
+
+
+class ContactAdresseLivraisonBoutABoutTests(TestCase):
+    """Bout en bout, via de vraies requêtes admin : associer un contact à
+    une adresse de livraison EN UNE SEULE FOIS, y compris à la création
+    d'un tiers (l'adresse n'a alors pas encore de pk réel au moment où
+    Django valide le formulaire — voir ContactInlineForm et
+    TiersAdmin.save_related). C'est exactement le scénario signalé par
+    l'utilisateur : avant ce correctif, impossible de faire ce lien sans
+    un premier aller-retour d'enregistrement."""
 
     def setUp(self):
         from django.contrib.auth import get_user_model
 
         User = get_user_model()
-        self.user = User.objects.create_superuser("adresse-livraison-admin", "al@example.com", "pass1234")
+        self.user = User.objects.create_superuser("adresse-livraison-e2e", "ae@example.com", "pass1234")
         self.client.force_login(self.user)
 
-        self.tiers = Tiers.objects.create(
-            code="CLI-ADR-LIV", raison_sociale="Client Adresse Livraison", type_tiers=Tiers.TypeTiers.CLIENT
-        )
-        self.contact = Contact.objects.create(tiers=self.tiers, nom="Site")
-        self.livraison = Adresse.objects.create(
-            tiers=self.tiers, type_adresse=Adresse.TypeAdresse.LIVRAISON,
-            libelle="Entrepôt propre", adresse="1 rue", code_postal="75000", ville="Paris",
-        )
-        self.facturation = Adresse.objects.create(
-            tiers=self.tiers, type_adresse=Adresse.TypeAdresse.FACTURATION,
-            libelle="Siège propre", adresse="1 rue", code_postal="75000", ville="Paris",
-        )
-        autre_tiers = Tiers.objects.create(
-            code="CLI-ADR-LIV-AUTRE", raison_sociale="Autre Client", type_tiers=Tiers.TypeTiers.CLIENT
-        )
-        self.livraison_autre_tiers = Adresse.objects.create(
-            tiers=autre_tiers, type_adresse=Adresse.TypeAdresse.LIVRAISON,
-            libelle="Entrepôt autre tiers", adresse="2 rue", code_postal="75000", ville="Paris",
-        )
+    def _payload(self, **overrides):
+        data = {
+            "code": "CLI-ADR-LIV-E2E",
+            "raison_sociale": "Client Adresse Livraison E2E",
+            "type_tiers": Tiers.TypeTiers.CLIENT,
+            "regime_fiscal": Tiers.RegimeFiscal.FRANCE,
+            "siret": "",
+            "numero_tva": "",
+            "conditions_paiement": "",
+            "devise": "",
+            "iban": "",
+            "bic": "",
+            "comptes_comptables-TOTAL_FORMS": "1",
+            "comptes_comptables-INITIAL_FORMS": "0",
+            "comptes_comptables-MIN_NUM_FORMS": "0",
+            "comptes_comptables-MAX_NUM_FORMS": "1",
+            "comptes_comptables-0-id": "",
+            "comptes_comptables-0-code_client": "",
+            "comptes_comptables-0-compte_client": "",
+            "comptes_comptables-0-code_fournisseur": "",
+            "comptes_comptables-0-compte_fournisseur": "",
+            "adresses-TOTAL_FORMS": "1",
+            "adresses-INITIAL_FORMS": "0",
+            "adresses-MIN_NUM_FORMS": "0",
+            "adresses-MAX_NUM_FORMS": "1000",
+            "adresses-0-id": "",
+            "adresses-0-type_adresse": Adresse.TypeAdresse.LIVRAISON,
+            "adresses-0-libelle": "Entrepôt E2E",
+            "adresses-0-adresse": "1 rue E2E",
+            "adresses-0-code_postal": "75000",
+            "adresses-0-ville": "Paris",
+            "adresses-0-pays": "",
+            "contacts-TOTAL_FORMS": "1",
+            "contacts-INITIAL_FORMS": "0",
+            "contacts-MIN_NUM_FORMS": "0",
+            "contacts-MAX_NUM_FORMS": "1000",
+            "contacts-0-id": "",
+            "contacts-0-nom": "Dupont",
+            "contacts-0-prenom": "Jean",
+            "contacts-0-email": "",
+            "contacts-0-fonction": "",
+            "contacts-0-adresse_livraison_ref": "0",
+            "contacts-0-telephones-TOTAL_FORMS": "0",
+            "contacts-0-telephones-INITIAL_FORMS": "0",
+            "contacts-0-telephones-MIN_NUM_FORMS": "0",
+            "contacts-0-telephones-MAX_NUM_FORMS": "1000",
+            "_save": "Enregistrer",
+        }
+        data.update(overrides)
+        return data
 
-    def test_formulaire_ajout_ne_propose_aucune_adresse(self):
-        response = self.client.get("/admin/commercial/tiers/add/")
-        self.assertEqual(response.status_code, 200)
-        formset = response.context["inline_admin_formsets"][2].formset
-        self.assertEqual(formset.empty_form.fields["adresse_livraison"].queryset.count(), 0)
+    def test_lien_contact_adresse_des_la_creation_du_tiers(self):
+        response = self.client.post("/admin/commercial/tiers/add/", data=self._payload(), follow=False)
+        self.assertEqual(response.status_code, 302, getattr(response, "context", None))
 
-    def test_formulaire_modification_ne_propose_que_les_adresses_de_livraison_du_tiers(self):
-        response = self.client.get(f"/admin/commercial/tiers/{self.tiers.pk}/change/")
-        self.assertEqual(response.status_code, 200)
-        formset = response.context["inline_admin_formsets"][2].formset
-        queryset = formset.forms[0].fields["adresse_livraison"].queryset
-        self.assertIn(self.livraison, queryset)
-        self.assertNotIn(self.facturation, queryset)
-        self.assertNotIn(self.livraison_autre_tiers, queryset)
+        tiers = Tiers.objects.get(pk="CLI-ADR-LIV-E2E")
+        adresse = tiers.adresses.get()
+        contact = tiers.contacts.get()
+        self.assertEqual(contact.adresse_livraison, adresse)
+
+    def test_reference_vers_une_ligne_de_facturation_ignoree(self):
+        payload = self._payload(**{"adresses-0-type_adresse": Adresse.TypeAdresse.FACTURATION})
+        response = self.client.post("/admin/commercial/tiers/add/", data=payload, follow=False)
+        self.assertEqual(response.status_code, 302, getattr(response, "context", None))
+
+        tiers = Tiers.objects.get(pk="CLI-ADR-LIV-E2E")
+        contact = tiers.contacts.get()
+        self.assertIsNone(contact.adresse_livraison)
+
+    def test_modification_relie_a_une_adresse_deja_existante(self):
+        tiers = Tiers.objects.create(
+            code="CLI-ADR-LIV-E2E-EDIT", raison_sociale="Client Édition", type_tiers=Tiers.TypeTiers.CLIENT
+        )
+        adresse = Adresse.objects.create(
+            tiers=tiers, type_adresse=Adresse.TypeAdresse.LIVRAISON,
+            libelle="Entrepôt existant", adresse="9 rue", code_postal="69000", ville="Lyon",
+        )
+        payload = self._payload(
+            code=tiers.pk,
+            **{
+                "adresses-INITIAL_FORMS": "1",
+                "adresses-0-id": str(adresse.pk),
+                "adresses-0-libelle": adresse.libelle,
+                "adresses-0-adresse": adresse.adresse,
+                "adresses-0-code_postal": adresse.code_postal,
+                "adresses-0-ville": adresse.ville,
+            },
+        )
+        response = self.client.post(f"/admin/commercial/tiers/{tiers.pk}/change/", data=payload, follow=False)
+        self.assertEqual(response.status_code, 302, getattr(response, "context", None))
+
+        contact = tiers.contacts.get()
+        self.assertEqual(contact.adresse_livraison, adresse)
 
 
 class ContactAdminAdresseLivraisonChoicesTests(TestCase):
