@@ -5,6 +5,7 @@ from .models import (
     AchatsError,
     ArticleFournisseur,
     CommandeFournisseur,
+    FactureFournisseur,
     LigneCommandeFournisseur,
     Reception,
     ReceptionLigne,
@@ -13,6 +14,7 @@ from .models import (
 from .serializers import (
     ArticleFournisseurSerializer,
     CommandeFournisseurSerializer,
+    FactureFournisseurSerializer,
     LigneCommandeFournisseurSerializer,
     ReceptionLigneSerializer,
     ReceptionSerializer,
@@ -62,3 +64,10 @@ class ReceptionLigneViewSet(viewsets.ModelViewSet):
             serializer.save()
         except AchatsError as exc:
             raise DRFValidationError({"detail": str(exc)}, code=status.HTTP_400_BAD_REQUEST)
+
+
+class FactureFournisseurViewSet(viewsets.ModelViewSet):
+    queryset = FactureFournisseur.objects.select_related("commande_fournisseur").all()
+    serializer_class = FactureFournisseurSerializer
+    filterset_fields = ["commande_fournisseur", "statut_paiement"]
+    search_fields = ["numero", "reference_fournisseur"]

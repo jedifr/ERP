@@ -3,6 +3,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     ArticleFournisseurViewSet,
     CommandeFournisseurViewSet,
+    FactureFournisseurViewSet,
     LigneCommandeFournisseurViewSet,
     ReceptionLigneViewSet,
     ReceptionViewSet,
@@ -18,5 +19,6 @@ router.register(
 )
 router.register("receptions", ReceptionViewSet, basename="reception")
 router.register("receptions-lignes", ReceptionLigneViewSet, basename="reception-ligne")
+router.register("factures-fournisseur", FactureFournisseurViewSet, basename="facture-fournisseur")
 
 urlpatterns = router.urls

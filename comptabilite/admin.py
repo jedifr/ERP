@@ -138,8 +138,33 @@ class CodeAnalytiqueAdmin(ModelAdmin):
 
 @admin.register(ParametresComptables)
 class ParametresComptablesAdmin(ModelAdmin):
-    fields = ["journal_ventes", "compte_client_defaut", "compte_vente_defaut", "compte_tva_collectee_defaut"]
-    autocomplete_fields = fields
+    fieldsets = [
+        (
+            "Ventes",
+            {"fields": ["journal_ventes", "compte_client_defaut", "compte_vente_defaut", "compte_tva_collectee_defaut"]},
+        ),
+        (
+            "Achats",
+            {
+                "fields": [
+                    "journal_achats",
+                    "compte_fournisseur_defaut",
+                    "compte_achat_defaut",
+                    "compte_tva_deductible_defaut",
+                ]
+            },
+        ),
+    ]
+    autocomplete_fields = [
+        "journal_ventes",
+        "compte_client_defaut",
+        "compte_vente_defaut",
+        "compte_tva_collectee_defaut",
+        "journal_achats",
+        "compte_fournisseur_defaut",
+        "compte_achat_defaut",
+        "compte_tva_deductible_defaut",
+    ]
 
     def has_add_permission(self, request):
         # Ligne unique (ParametresComptables.charger()) : jamais d'ajout
@@ -180,8 +205,8 @@ class LigneEcritureInline(TabularInline):
 class EcritureComptableAdmin(ModelAdmin):
     list_display = ["piece", "journal", "date_ecriture", "libelle", "total_debit", "total_credit", "est_equilibree"]
     list_filter = ["journal"]
-    search_fields = ["piece", "libelle", "facture__numero"]
-    autocomplete_fields = ["journal", "facture"]
+    search_fields = ["piece", "libelle", "facture__numero", "facture_fournisseur__numero"]
+    autocomplete_fields = ["journal", "facture", "facture_fournisseur"]
     date_hierarchy = "date_ecriture"
     inlines = [LigneEcritureInline]
 

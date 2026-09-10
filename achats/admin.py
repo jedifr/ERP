@@ -4,10 +4,12 @@ from unfold.admin import ModelAdmin, TabularInline
 from codification.mixins import CodificationInitialeMixin
 from codification.models import RegleCodification
 
+from .generation import GenerationEcritureAchatError, generer_ecriture_achat
 from .models import (
     AchatsError,
     ArticleFournisseur,
     CommandeFournisseur,
+    FactureFournisseur,
     LigneCommandeFournisseur,
     Reception,
     ReceptionLigne,
@@ -55,7 +57,7 @@ class TarifAchatArticleAdmin(ModelAdmin):
 class LigneCommandeFournisseurInline(TabularInline):
     model = LigneCommandeFournisseur
     extra = 1
-    autocomplete_fields = ["article", "poste_gestion", "alerte_stock_origine", "commande_ligne_client"]
+    autocomplete_fields = ["article", "poste_gestion", "taux_tva", "alerte_stock_origine", "commande_ligne_client"]
     readonly_fields = ["quantite_recue"]
 
 
@@ -79,6 +81,7 @@ class LigneCommandeFournisseurAdmin(ModelAdmin):
         "quantite_commandee",
         "quantite_recue",
         "prix_unitaire_achat",
+        "taux_tva",
         "commande_ligne_client",
     ]
     search_fields = ["commande_fournisseur__numero", "article__reference", "poste_gestion__code", "designation"]
@@ -86,6 +89,7 @@ class LigneCommandeFournisseurAdmin(ModelAdmin):
         "commande_fournisseur",
         "article",
         "poste_gestion",
+        "taux_tva",
         "alerte_stock_origine",
         "commande_ligne_client",
     ]
@@ -119,3 +123,40 @@ class ReceptionLigneAdmin(ModelAdmin):
     list_display = ["reception", "ligne_commande_fournisseur", "quantite_recue"]
     search_fields = ["reception__numero", "ligne_commande_fournisseur__article__reference"]
     autocomplete_fields = ["reception", "ligne_commande_fournisseur"]
+
+
+@admin.register(FactureFournisseur)
+class FactureFournisseurAdmin(CodificationInitialeMixin, ModelAdmin):
+    codification_entite = RegleCodification.Entite.FACTURE_FOURNISSEUR
+
+    list_display = [
+        "numero",
+        "commande_fournisseur",
+        "reference_fournisseur",
+        "date_facture",
+        "montant_ht",
+        "montant_ttc",
+        "statut_paiement",
+    ]
+    list_filter = ["statut_paiement"]
+    search_fields = ["numero", "reference_fournisseur", "commande_fournisseur__numero"]
+    autocomplete_fields = ["commande_fournisseur"]
+    actions = ["action_generer_ecriture"]
+
+    @admin.action(description="Générer l'écriture comptable")
+    def action_generer_ecriture(self, request, queryset):
+        creees = existantes = 0
+        for facture in queryset:
+            try:
+                _, creee = generer_ecriture_achat(facture)
+            except GenerationEcritureAchatError as exc:
+                self.message_user(request, f"{facture} : {exc}", level=messages.ERROR)
+                continue
+            creees += creee
+            existantes += not creee
+        if creees:
+            self.message_user(request, f"{creees} écriture(s) comptable(s) générée(s).", level=messages.SUCCESS)
+        if existantes:
+            self.message_user(
+                request, f"{existantes} facture(s) fournisseur avaient déjà leur écriture.", level=messages.INFO
+            )

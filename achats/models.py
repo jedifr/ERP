@@ -4,7 +4,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from chiffrage.models import CommandeLigne
-from commercial.models import Tiers
+from commercial.models import TauxTVA, Tiers
 from comptabilite.models import PosteGestion
 from stock.models import AlerteStock, Lot, MouvementStock
 from technique.models import Article, DateRangeHistoriqueMixin
@@ -12,6 +12,14 @@ from technique.models import Article, DateRangeHistoriqueMixin
 
 class AchatsError(Exception):
     """Donnée de référence manquante ou incohérente empêchant la réception."""
+
+
+def _taux_tva_par_defaut():
+    """Valeur par défaut du champ LigneCommandeFournisseur.taux_tva : le taux
+    coché comme « taux par défaut » dans le référentiel, ou aucun s'il n'y
+    en a pas — même principe que chiffrage.models._taux_tva_par_defaut."""
+    defaut = TauxTVA.objects.filter(est_defaut=True).first()
+    return defaut.pk if defaut else None
 
 
 class ArticleFournisseur(models.Model):
@@ -164,6 +172,15 @@ class LigneCommandeFournisseur(models.Model):
     )
     quantite_commandee = models.FloatField("quantité commandée")
     prix_unitaire_achat = models.FloatField("prix unitaire d'achat")
+    taux_tva = models.ForeignKey(
+        TauxTVA,
+        verbose_name="taux de TVA",
+        on_delete=models.PROTECT,
+        related_name="lignes_commande_fournisseur",
+        null=True,
+        blank=True,
+        default=_taux_tva_par_defaut,
+    )
     quantite_recue = models.FloatField(
         "quantité reçue", default=0, editable=False, help_text="Cumul recalculé depuis les réceptions"
     )
@@ -176,6 +193,19 @@ class LigneCommandeFournisseur(models.Model):
     def __str__(self):
         objet = self.article or self.poste_gestion or self.designation or "?"
         return f"{self.commande_fournisseur} — {objet} × {self.quantite_commandee}"
+
+    @property
+    def montant_ht(self):
+        return self.prix_unitaire_achat * self.quantite_commandee
+
+    montant_ht.fget.short_description = "Montant HT"
+
+    @property
+    def montant_ttc(self):
+        taux = self.taux_tva.taux if self.taux_tva_id else 0
+        return self.montant_ht * (1 + taux / 100)
+
+    montant_ttc.fget.short_description = "Montant TTC"
 
     def clean(self):
         super().clean()
@@ -296,3 +326,34 @@ class ReceptionLigne(models.Model):
                 "applicable, mettez à jour le stock manuellement."
             )
         return lots[0]
+
+
+class FactureFournisseur(models.Model):
+    """Facture fournisseur : document de référence côté achat, symétrique de
+    facturation.Facture côté vente — la facture "légale" est reçue du
+    fournisseur (papier/email/PDF), en dehors de l'ERP ; ce modèle en garde
+    la trace (numéro interne + référence fournisseur) et sert de point de
+    départ à la génération de l'écriture comptable d'achat (voir
+    achats.generation.generer_ecriture_achat), maintenant qu'ArticleCompteAchat
+    et PosteGestion.compte_achat_* ont un document pour s'y accrocher."""
+
+    numero = models.CharField("numéro", max_length=50, primary_key=True)
+    commande_fournisseur = models.ForeignKey(
+        CommandeFournisseur, verbose_name="commande fournisseur", on_delete=models.PROTECT, related_name="factures"
+    )
+    reference_fournisseur = models.CharField(
+        "référence fournisseur", max_length=100, blank=True,
+        help_text="Numéro de facture tel qu'indiqué par le fournisseur (distinct du numéro interne ci-dessus)",
+    )
+    date_facture = models.DateField("date de facture")
+    montant_ht = models.FloatField("montant HT", null=True, blank=True)
+    montant_ttc = models.FloatField("montant TTC", null=True, blank=True)
+    statut_paiement = models.CharField("statut de paiement", max_length=50, blank=True)
+
+    class Meta:
+        verbose_name = "Facture fournisseur"
+        verbose_name_plural = "Factures fournisseur"
+        ordering = ["-date_facture", "numero"]
+
+    def __str__(self):
+        return self.numero

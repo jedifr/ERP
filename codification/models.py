@@ -16,6 +16,7 @@ class RegleCodification(models.Model):
         RECEPTION = "reception", "Réception"
         LIVRAISON = "livraison", "Livraison"
         FACTURE = "facture", "Facture"
+        FACTURE_FOURNISSEUR = "facture_fournisseur", "Facture fournisseur"
         ENVOI_SOUS_TRAITANCE = "envoi_sous_traitance", "Envoi sous-traitance"
         RETOUR_SOUS_TRAITANCE = "retour_sous_traitance", "Retour sous-traitance"
         TIERS = "tiers", "Tiers"

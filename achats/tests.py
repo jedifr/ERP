@@ -5,15 +5,25 @@ from django.db import IntegrityError, transaction
 from django.test import TestCase
 
 from chiffrage.models import Commande, CommandeLigne, Devis
-from commercial.models import Adresse, Tiers
-from comptabilite.models import PosteGestion
+from commercial.models import Adresse, TauxTVA, Tiers
+from comptabilite.models import (
+    ArticleCompteAchat,
+    CompteComptable,
+    EcritureComptable,
+    ParametresComptables,
+    PosteGestion,
+    TiersCompteComptable,
+)
+from comptabilite.pcg import importer_pcg
 from stock.models import AlerteStock, Emplacement, Lot, MouvementStock
 from technique.models import Article
 
+from .generation import GenerationEcritureAchatError, generer_ecriture_achat
 from .models import (
     AchatsError,
     ArticleFournisseur,
     CommandeFournisseur,
+    FactureFournisseur,
     LigneCommandeFournisseur,
     Reception,
     ReceptionLigne,
@@ -383,3 +393,175 @@ class LigneCommandeFournisseurSansArticleTests(TestCase):
         ligne.refresh_from_db()
         self.assertEqual(ligne.quantite_recue, 1)
         self.assertEqual(MouvementStock.objects.count(), 0)
+
+
+class LigneCommandeFournisseurMontantsTests(TestCase):
+    def setUp(self):
+        self.fournisseur = Tiers.objects.create(
+            code="FOUR-MONTANTS", raison_sociale="Fournisseur Montants", type_tiers=Tiers.TypeTiers.FOURNISSEUR
+        )
+        self.commande = CommandeFournisseur.objects.create(
+            numero="CF-MONTANTS", fournisseur=self.fournisseur, date_commande=datetime.date(2026, 1, 1)
+        )
+        self.article = Article.objects.create(reference="ART-MONTANTS", nature=Article.Nature.MATIERE_PREMIERE)
+        self.taux20 = TauxTVA.objects.create(nom="Taux normal achats test", taux=20)
+
+    def test_montant_ht_sans_tva(self):
+        ligne = LigneCommandeFournisseur.objects.create(
+            commande_fournisseur=self.commande, article=self.article, quantite_commandee=10,
+            prix_unitaire_achat=5, taux_tva=None,
+        )
+        self.assertEqual(ligne.montant_ht, 50)
+        self.assertEqual(ligne.montant_ttc, 50)
+
+    def test_montant_ttc_avec_tva(self):
+        ligne = LigneCommandeFournisseur.objects.create(
+            commande_fournisseur=self.commande, article=self.article, quantite_commandee=10,
+            prix_unitaire_achat=5, taux_tva=self.taux20,
+        )
+        self.assertEqual(ligne.montant_ht, 50)
+        self.assertAlmostEqual(ligne.montant_ttc, 60)
+
+
+class FactureFournisseurTests(TestCase):
+    def test_creation_et_str(self):
+        fournisseur = Tiers.objects.create(
+            code="FOUR-FACT-TEST", raison_sociale="Fournisseur Facture Test", type_tiers=Tiers.TypeTiers.FOURNISSEUR
+        )
+        commande = CommandeFournisseur.objects.create(
+            numero="CF-FACT-TEST", fournisseur=fournisseur, date_commande=datetime.date(2026, 1, 1)
+        )
+        facture = FactureFournisseur.objects.create(
+            numero="FACF-TEST-0001", commande_fournisseur=commande, date_facture=datetime.date(2026, 1, 15),
+            reference_fournisseur="INV-2026-042",
+        )
+        self.assertEqual(str(facture), "FACF-TEST-0001")
+        self.assertEqual(facture.reference_fournisseur, "INV-2026-042")
+
+
+class GenererEcritureAchatTests(TestCase):
+    def setUp(self):
+        importer_pcg()
+        self.fournisseur = Tiers.objects.create(
+            code="FOUR-COMPTA-TEST", raison_sociale="Fournisseur Compta Test", type_tiers=Tiers.TypeTiers.FOURNISSEUR
+        )
+        self.article = Article.objects.create(reference="ART-ACHAT-COMPTA-TEST", nature=Article.Nature.MATIERE_PREMIERE)
+        self.taux20 = TauxTVA.objects.create(nom="Taux normal achats compta test", taux=20)
+        self.taux10 = TauxTVA.objects.create(nom="Taux intermédiaire achats compta test", taux=10)
+        self.commande = CommandeFournisseur.objects.create(
+            numero="CF-COMPTA-TEST", fournisseur=self.fournisseur, date_commande=datetime.date(2026, 1, 1)
+        )
+        self.facture = FactureFournisseur.objects.create(
+            numero="FACF-COMPTA-TEST", commande_fournisseur=self.commande, date_facture=datetime.date(2026, 2, 1),
+        )
+
+    def test_generation_repartit_par_taux_de_tva_et_equilibre(self):
+        LigneCommandeFournisseur.objects.create(
+            commande_fournisseur=self.commande, article=self.article, quantite_commandee=10,
+            prix_unitaire_achat=100, taux_tva=self.taux20,
+        )
+        LigneCommandeFournisseur.objects.create(
+            commande_fournisseur=self.commande, article=self.article, quantite_commandee=5,
+            prix_unitaire_achat=40, taux_tva=self.taux10,
+        )
+        # HT : 1000 (20%) + 200 (10%) = 1200 ; TVA : 200 + 20 = 220 ; TTC : 1420
+        ecriture, creee = generer_ecriture_achat(self.facture)
+        self.assertTrue(creee)
+        self.assertTrue(ecriture.est_equilibree)
+        self.assertAlmostEqual(ecriture.total_credit, 1420)
+
+        lignes_fournisseur = ecriture.lignes.filter(compte__code="401")
+        self.assertEqual(lignes_fournisseur.count(), 1)
+        self.assertAlmostEqual(lignes_fournisseur.first().credit, 1420)
+
+        self.assertAlmostEqual(
+            sum(l.debit for l in ecriture.lignes.filter(compte__code="601")), 1200
+        )
+        self.assertAlmostEqual(
+            sum(l.debit for l in ecriture.lignes.filter(compte__code="44566")), 220
+        )
+
+    def test_generation_utilise_le_compte_fournisseur_specifique_du_tiers(self):
+        compte_fournisseur_special = CompteComptable.objects.get(code="4011")
+        TiersCompteComptable.objects.create(tiers=self.fournisseur, compte_fournisseur=compte_fournisseur_special)
+        LigneCommandeFournisseur.objects.create(
+            commande_fournisseur=self.commande, article=self.article, quantite_commandee=1,
+            prix_unitaire_achat=100, taux_tva=self.taux20,
+        )
+        ecriture, _ = generer_ecriture_achat(self.facture)
+        self.assertTrue(ecriture.lignes.filter(compte=compte_fournisseur_special).exists())
+
+    def test_generation_utilise_le_compte_achat_specifique_de_larticle_par_regime_fiscal(self):
+        compte_achat_intra = CompteComptable.objects.get(code="601")
+        compte_achat_hors_ue = CompteComptable.objects.get(code="602")
+        poste = PosteGestion.objects.create(
+            code="PG-ACHAT-COMPTA-TEST", libelle="Poste achat compta test",
+            compte_achat_intra_ue=compte_achat_intra, compte_achat_hors_ue=compte_achat_hors_ue,
+        )
+        ArticleCompteAchat.objects.create(article=self.article, poste_gestion=poste)
+        self.fournisseur.regime_fiscal = Tiers.RegimeFiscal.INTRA_UE
+        self.fournisseur.save()
+        LigneCommandeFournisseur.objects.create(
+            commande_fournisseur=self.commande, article=self.article, quantite_commandee=1, prix_unitaire_achat=100,
+        )
+        ecriture, _ = generer_ecriture_achat(self.facture)
+        self.assertTrue(ecriture.lignes.filter(compte=compte_achat_intra).exists())
+
+    def test_generation_leve_erreur_si_poste_non_configure_pour_le_regime(self):
+        poste = PosteGestion.objects.create(
+            code="PG-ACHAT-INCOMPLET", libelle="Poste incomplet",
+            compte_achat_france=CompteComptable.objects.get(code="601"),
+        )
+        ArticleCompteAchat.objects.create(article=self.article, poste_gestion=poste)
+        self.fournisseur.regime_fiscal = Tiers.RegimeFiscal.HORS_UE
+        self.fournisseur.save()
+        LigneCommandeFournisseur.objects.create(
+            commande_fournisseur=self.commande, article=self.article, quantite_commandee=1, prix_unitaire_achat=100,
+        )
+        with self.assertRaises(GenerationEcritureAchatError):
+            generer_ecriture_achat(self.facture)
+
+    def test_generation_ligne_poste_de_gestion_sans_article(self):
+        poste = PosteGestion.objects.create(
+            code="PG-CHARGE-CPTA", libelle="Charge générale compta test",
+            compte_achat_france=CompteComptable.objects.get(code="616"),
+        )
+        LigneCommandeFournisseur.objects.create(
+            commande_fournisseur=self.commande, poste_gestion=poste, designation="Assurance",
+            quantite_commandee=1, prix_unitaire_achat=300,
+        )
+        ecriture, _ = generer_ecriture_achat(self.facture)
+        self.assertTrue(ecriture.lignes.filter(compte__code="616").exists())
+
+    def test_generation_idempotente(self):
+        LigneCommandeFournisseur.objects.create(
+            commande_fournisseur=self.commande, article=self.article, quantite_commandee=1, prix_unitaire_achat=100,
+        )
+        ecriture1, creee1 = generer_ecriture_achat(self.facture)
+        ecriture2, creee2 = generer_ecriture_achat(self.facture)
+        self.assertTrue(creee1)
+        self.assertFalse(creee2)
+        self.assertEqual(ecriture1.pk, ecriture2.pk)
+        self.assertEqual(EcritureComptable.objects.filter(facture_fournisseur=self.facture).count(), 1)
+
+    def test_generation_sans_lignes_utilise_les_montants_globaux(self):
+        self.facture.montant_ht = 500
+        self.facture.montant_ttc = 600
+        self.facture.save()
+        ecriture, creee = generer_ecriture_achat(self.facture)
+        self.assertTrue(creee)
+        self.assertAlmostEqual(ecriture.total_debit, 600)
+        self.assertAlmostEqual(ecriture.total_credit, 600)
+
+    def test_generation_sans_lignes_ni_montants_leve_erreur(self):
+        with self.assertRaises(GenerationEcritureAchatError):
+            generer_ecriture_achat(self.facture)
+
+    def test_generation_sans_parametres_configures_leve_erreur(self):
+        ParametresComptables.objects.filter(pk=1).update(compte_achat_defaut=None)
+        CompteComptable.objects.filter(code="601").delete()
+        LigneCommandeFournisseur.objects.create(
+            commande_fournisseur=self.commande, article=self.article, quantite_commandee=1, prix_unitaire_achat=100,
+        )
+        with self.assertRaises(GenerationEcritureAchatError):
+            generer_ecriture_achat(self.facture)

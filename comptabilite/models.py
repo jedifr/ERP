@@ -436,6 +436,41 @@ class ParametresComptables(models.Model):
         related_name="+",
         help_text="Ex. 44571 — TVA collectée",
     )
+    journal_achats = models.ForeignKey(
+        JournalComptable,
+        verbose_name="journal des achats",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="+",
+    )
+    compte_fournisseur_defaut = models.ForeignKey(
+        CompteComptable,
+        verbose_name="compte fournisseur par défaut",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="+",
+        help_text="Ex. 401 — Fournisseurs",
+    )
+    compte_achat_defaut = models.ForeignKey(
+        CompteComptable,
+        verbose_name="compte d'achat par défaut",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="+",
+        help_text="Ex. 601 — Achats stockés de matières premières",
+    )
+    compte_tva_deductible_defaut = models.ForeignKey(
+        CompteComptable,
+        verbose_name="compte de TVA déductible par défaut",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="+",
+        help_text="Ex. 44566 — TVA déductible sur autres biens et services",
+    )
 
     class Meta:
         verbose_name = "Paramètres comptables"
@@ -460,6 +495,9 @@ class ParametresComptables(models.Model):
             "compte_client_defaut": "411",
             "compte_vente_defaut": "706",
             "compte_tva_collectee_defaut": "44571",
+            "compte_fournisseur_defaut": "401",
+            "compte_achat_defaut": "601",
+            "compte_tva_deductible_defaut": "44566",
         }
         for champ, code in codes_usuels.items():
             if getattr(parametres, f"{champ}_id") is None:
@@ -492,6 +530,20 @@ class EcritureComptable(models.Model):
         blank=True,
         related_name="ecriture_comptable",
         help_text="Renseigné automatiquement pour une écriture générée depuis une facture (empêche sa double génération).",
+    )
+    facture_fournisseur = models.OneToOneField(
+        "achats.FactureFournisseur",
+        verbose_name="facture fournisseur d'origine",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="ecriture_comptable",
+        help_text=(
+            "Renseigné automatiquement pour une écriture générée depuis une facture fournisseur "
+            "(empêche sa double génération). Référencé par nom d'app (« achats.FactureFournisseur ») "
+            "plutôt qu'importé : achats importe déjà comptabilite.models, un import direct créerait "
+            "un cycle."
+        ),
     )
 
     class Meta:

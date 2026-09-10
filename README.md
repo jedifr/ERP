@@ -1401,3 +1401,49 @@ l'utilisateur.
   Les champs `compte_client`/`compte_fournisseur` restent utilisables
   directement en échappatoire (compte déjà existant, numérotation
   différente) quand aucun code à 5 lettres n'est renseigné.
+
+## Écriture comptable d'achat
+
+`comptabilite.generation.generer_ecriture_facture` (vente) avait son
+pendant manquant côté achat : `ArticleCompteAchat` et
+`PosteGestion.compte_achat_*` étaient déjà en place, mais purement
+déclaratifs, faute de document "facture fournisseur" auquel les
+accrocher — l'app achats ne portait que des documents logistiques
+(`CommandeFournisseur`, `Reception`).
+
+- **`achats.FactureFournisseur`** : symétrique de `facturation.Facture`
+  côté vente — la facture "légale" arrive du fournisseur (papier/email/PDF,
+  hors ERP), ce modèle garde une trace interne (numéro généré par
+  codification, `reference_fournisseur` pour le numéro réel donné par le
+  fournisseur, montants HT/TTC, statut de paiement) et sert de point de
+  départ à la génération de l'écriture.
+- **`LigneCommandeFournisseur.taux_tva`** (+ `montant_ht`/`montant_ttc`
+  calculés) : manquait pour pouvoir répartir la TVA déductible par taux,
+  même principe que `CommandeLigne` côté vente.
+- **`achats.generation.generer_ecriture_achat()`** : Fournisseurs (401) au
+  crédit — compte spécifique du fournisseur si `TiersCompteComptable` en a
+  un, sinon le compte par défaut — Achats + TVA déductible au débit, une
+  paire de lignes par groupe (taux de TVA, compte d'achat, code
+  analytique) distinct sur la commande fournisseur facturée. Le compte
+  d'achat est celui d'`ArticleCompteAchat` pour une ligne avec article
+  (résolu selon le régime fiscal du fournisseur), celui du poste de
+  gestion pour une ligne de charge générale sans article, sinon le compte
+  d'achat par défaut. Structure rigoureusement symétrique de
+  `generer_ecriture_facture` (débit/crédit inversés) — mêmes règles de
+  conception (idempotent, repli sur les montants globaux si la commande
+  n'a aucune ligne, code analytique jamais posé sur la ligne
+  Fournisseurs/TVA).
+- **`ParametresComptables`** : quatre nouveaux champs côté achat (journal,
+  compte fournisseur/achat/TVA déductible par défaut), avec repli sur les
+  codes PCG usuels 401/601/44566 comme pour les champs vente existants ;
+  `journal_achats` préconfiguré sur "AC" par migration de données, même
+  principe que `journal_ventes`/"VT".
+- **`EcritureComptable.facture_fournisseur`** : `OneToOneField` référencé
+  par nom d'app (`"achats.FactureFournisseur"`), pas importé directement —
+  `achats` importe déjà `comptabilite.models` (pour `PosteGestion` et
+  maintenant `EcritureComptable`/`LigneEcriture`/`ParametresComptables` via
+  `achats.generation`), un import direct dans l'autre sens créerait un
+  cycle. Django résout la chaîne de caractères après le chargement de
+  toutes les apps — aucun souci d'ordre d'import.
+- **Action admin** "Générer l'écriture comptable" sur la liste des
+  factures fournisseur, même mécanisme que côté facture de vente.

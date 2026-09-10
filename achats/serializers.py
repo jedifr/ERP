@@ -3,6 +3,7 @@ from technique.serializers import FullCleanModelSerializer
 from .models import (
     ArticleFournisseur,
     CommandeFournisseur,
+    FactureFournisseur,
     LigneCommandeFournisseur,
     Reception,
     ReceptionLigne,
@@ -44,4 +45,10 @@ class ReceptionSerializer(FullCleanModelSerializer):
 class ReceptionLigneSerializer(FullCleanModelSerializer):
     class Meta:
         model = ReceptionLigne
+        fields = "__all__"
+
+
+class FactureFournisseurSerializer(FullCleanModelSerializer):
+    class Meta:
+        model = FactureFournisseur
         fields = "__all__"
