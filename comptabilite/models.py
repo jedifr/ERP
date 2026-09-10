@@ -2,6 +2,7 @@ from django.core.exceptions import ValidationError
 from django.db import models
 
 from facturation.models import Facture
+from technique.models import Article
 
 
 class CompteComptable(models.Model):
@@ -47,6 +48,97 @@ class CompteComptable(models.Model):
     def save(self, *args, **kwargs):
         self.classe = int(self.code[0])
         super().save(*args, **kwargs)
+
+
+class CodeAnalytique(models.Model):
+    """Code comptable complémentaire (comptabilité analytique) : axe
+    secondaire optionnel apposé sur une ligne d'écriture (LigneEcriture),
+    en plus du compte du plan comptable général — ex. suivi par atelier,
+    par chantier, par centre de coût. Peut aussi être posé par défaut sur
+    un article (ArticleCompteVente/ArticleCompteAchat) pour être repris
+    automatiquement à la génération d'une écriture. Dictionnaire libre,
+    sur le même principe que JournalComptable : l'admin permet d'en créer
+    autant que nécessaire."""
+
+    code = models.CharField("code", max_length=20, primary_key=True)
+    libelle = models.CharField("libellé", max_length=200)
+    actif = models.BooleanField("actif", default=True)
+
+    class Meta:
+        verbose_name = "Code analytique"
+        verbose_name_plural = "Codes analytiques"
+        ordering = ["code"]
+
+    def __str__(self):
+        return f"{self.code} — {self.libelle}"
+
+
+class ArticleCompteVente(models.Model):
+    """Compte de vente spécifique à UN article — surcharge, pour cet
+    article seulement, le compte de vente par défaut des Paramètres
+    comptables lors de la génération d'une écriture (voir
+    comptabilite.generation). Ex. un article fabriqué facturé en
+    701 "Ventes de produits finis" plutôt que le 706 générique. Un article
+    sans association ici utilise simplement le compte par défaut. Le code
+    analytique associé, s'il est renseigné, est repris sur la ligne de
+    vente de l'écriture générée (jamais sur les lignes Clients/TVA)."""
+
+    article = models.OneToOneField(
+        Article, verbose_name="article", on_delete=models.CASCADE, related_name="compte_vente_override"
+    )
+    compte_vente = models.ForeignKey(
+        CompteComptable, verbose_name="compte de vente", on_delete=models.PROTECT, related_name="+"
+    )
+    code_analytique = models.ForeignKey(
+        CodeAnalytique,
+        verbose_name="code analytique par défaut",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="+",
+    )
+
+    class Meta:
+        verbose_name = "Compte de vente d'article"
+        verbose_name_plural = "Comptes de vente d'article"
+        ordering = ["article"]
+
+    def __str__(self):
+        return f"{self.article} → {self.compte_vente}"
+
+
+class ArticleCompteAchat(models.Model):
+    """Compte d'achat (charge) spécifique à UN article acheté — même
+    principe qu'ArticleCompteVente côté vente. Purement déclaratif pour
+    l'instant : il n'existe pas encore de génération automatique
+    d'écriture d'achat (pas de document "facture fournisseur" dans
+    l'app — voir achats/models.py, seulement des commandes/réceptions
+    logistiques). Sert de référence pour la saisie manuelle des écritures
+    d'achat, et de point d'ancrage prêt pour une future génération
+    automatique le jour où un tel document existera."""
+
+    article = models.OneToOneField(
+        Article, verbose_name="article", on_delete=models.CASCADE, related_name="compte_achat_override"
+    )
+    compte_achat = models.ForeignKey(
+        CompteComptable, verbose_name="compte d'achat", on_delete=models.PROTECT, related_name="+"
+    )
+    code_analytique = models.ForeignKey(
+        CodeAnalytique,
+        verbose_name="code analytique par défaut",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="+",
+    )
+
+    class Meta:
+        verbose_name = "Compte d'achat d'article"
+        verbose_name_plural = "Comptes d'achat d'article"
+        ordering = ["article"]
+
+    def __str__(self):
+        return f"{self.article} → {self.compte_achat}"
 
 
 class JournalComptable(models.Model):
@@ -209,6 +301,15 @@ class LigneEcriture(models.Model):
     )
     compte = models.ForeignKey(
         CompteComptable, verbose_name="compte", on_delete=models.PROTECT, related_name="lignes_ecriture"
+    )
+    code_analytique = models.ForeignKey(
+        CodeAnalytique,
+        verbose_name="code analytique",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="lignes_ecriture",
+        help_text="Axe complémentaire optionnel — atelier, chantier, centre de coût...",
     )
     libelle = models.CharField("libellé", max_length=255, blank=True)
     debit = models.FloatField("débit", default=0)

@@ -5,7 +5,16 @@ from django.shortcuts import redirect
 from unfold.admin import ModelAdmin, TabularInline
 from unfold.decorators import action
 
-from .models import CompteComptable, EcritureComptable, JournalComptable, LigneEcriture, ParametresComptables
+from .models import (
+    ArticleCompteAchat,
+    ArticleCompteVente,
+    CodeAnalytique,
+    CompteComptable,
+    EcritureComptable,
+    JournalComptable,
+    LigneEcriture,
+    ParametresComptables,
+)
 from .pcg import PCG_MILLESIME, importer_pcg
 
 
@@ -35,6 +44,27 @@ class CompteComptableAdmin(ModelAdmin):
 class JournalComptableAdmin(ModelAdmin):
     list_display = ["code", "libelle", "nature", "actif"]
     list_filter = ["nature", "actif"]
+    search_fields = ["code", "libelle"]
+
+
+@admin.register(ArticleCompteVente)
+class ArticleCompteVenteAdmin(ModelAdmin):
+    list_display = ["article", "compte_vente", "code_analytique"]
+    search_fields = ["article__reference", "article__libelle", "compte_vente__code"]
+    autocomplete_fields = ["article", "compte_vente", "code_analytique"]
+
+
+@admin.register(ArticleCompteAchat)
+class ArticleCompteAchatAdmin(ModelAdmin):
+    list_display = ["article", "compte_achat", "code_analytique"]
+    search_fields = ["article__reference", "article__libelle", "compte_achat__code"]
+    autocomplete_fields = ["article", "compte_achat", "code_analytique"]
+
+
+@admin.register(CodeAnalytique)
+class CodeAnalytiqueAdmin(ModelAdmin):
+    list_display = ["code", "libelle", "actif"]
+    list_filter = ["actif"]
     search_fields = ["code", "libelle"]
 
 
@@ -75,7 +105,7 @@ class LigneEcritureInline(TabularInline):
     model = LigneEcriture
     formset = LigneEcritureFormSet
     extra = 2
-    autocomplete_fields = ["compte"]
+    autocomplete_fields = ["compte", "code_analytique"]
 
 
 @admin.register(EcritureComptable)

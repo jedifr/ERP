@@ -6,6 +6,7 @@ from django.views.decorators.http import require_http_methods
 from unfold.admin import ModelAdmin, TabularInline
 
 from achats.models import ArticleFournisseur
+from comptabilite.models import ArticleCompteAchat, ArticleCompteVente
 
 from .models import Article, Gamme, Matiere, Nomenclature, PosteTravail, TarifPoste
 from .services import DuplicationError, dupliquer_article
@@ -32,6 +33,24 @@ class ArticleFournisseurInline(TabularInline):
     model = ArticleFournisseur
     extra = 0
     autocomplete_fields = ["fournisseur"]
+
+
+class ArticleCompteVenteInline(TabularInline):
+    # OneToOneField : Django limite automatiquement à un seul formulaire.
+    # Surcharge, pour cet article, le compte de vente par défaut utilisé
+    # par la génération des écritures comptables (comptabilite.generation).
+    model = ArticleCompteVente
+    extra = 1
+    autocomplete_fields = ["compte_vente", "code_analytique"]
+
+
+class ArticleCompteAchatInline(TabularInline):
+    # Même principe côté achat — purement déclaratif pour l'instant, voir
+    # ArticleCompteAchat (aucune génération d'écriture d'achat automatique
+    # n'existe encore).
+    model = ArticleCompteAchat
+    extra = 1
+    autocomplete_fields = ["compte_achat", "code_analytique"]
 
 
 @admin.register(Matiere)
@@ -69,7 +88,13 @@ class ArticleAdmin(ModelAdmin):
     list_filter = ["nature", "unite_cout", "type_profil", "gere_en_stock"]
     search_fields = ["reference", "libelle"]
     autocomplete_fields = ["matiere"]
-    inlines = [NomenclatureInline, GammeInline, ArticleFournisseurInline]
+    inlines = [
+        NomenclatureInline,
+        GammeInline,
+        ArticleFournisseurInline,
+        ArticleCompteVenteInline,
+        ArticleCompteAchatInline,
+    ]
 
     class Media:
         js = ["technique/article_admin.js"]

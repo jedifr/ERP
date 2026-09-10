@@ -3,7 +3,8 @@
 Pour l'instant : uniquement les factures de vente (facturation.Facture) ->
 journal des ventes. L'app achats n'a pas de document "facture fournisseur"
 (seulement des commandes/réceptions, logistiques) : la génération des
-écritures d'achat serait une évolution ultérieure séparée.
+écritures d'achat serait une évolution ultérieure séparée — voir
+ArticleCompteAchat, purement déclaratif en attendant.
 """
 
 from django.db import transaction
@@ -15,19 +16,32 @@ class GenerationEcritureError(Exception):
     """Donnée manquante ou incohérente empêchant la génération de l'écriture."""
 
 
-def _repartition_par_taux_tva(facture):
-    """Regroupe les lignes de la commande facturée par taux de TVA, en
-    sommant leurs montants HT/TTC courants (CommandeLigne.montant_ht/
-    montant_ttc — les surcharges post-devis, pas les valeurs figées du
-    devis d'origine). Repli sur les montants globaux de la facture si la
-    commande n'a aucune ligne chiffrée (ex. facture ancienne, ou lignes
-    sans prix renseigné)."""
+def _repartition_lignes(facture, parametres):
+    """Regroupe les lignes de la commande facturée par (taux de TVA, compte
+    de vente, code analytique), en sommant leurs montants HT/TTC courants
+    (CommandeLigne.montant_ht/montant_ttc — les surcharges post-devis, pas
+    les valeurs figées du devis d'origine). Compte de vente et code
+    analytique sont ceux d'ArticleCompteVente si l'article en a un, sinon
+    le compte par défaut des paramètres (et aucun code analytique). Repli
+    sur les montants globaux de la facture (compte par défaut, sans détail
+    par article) si la commande n'a aucune ligne chiffrée (ex. facture
+    ancienne, ou lignes sans prix renseigné)."""
     groupes = {}
-    for ligne in facture.commande.lignes.select_related("taux_tva").all():
+    lignes = facture.commande.lignes.select_related(
+        "taux_tva", "article__compte_vente_override__compte_vente", "article__compte_vente_override__code_analytique"
+    )
+    for ligne in lignes.all():
         if ligne.montant_ht is None or ligne.montant_ttc is None:
             continue
         taux = ligne.taux_tva.taux if ligne.taux_tva_id else 0
-        groupe = groupes.setdefault(taux, {"ht": 0.0, "ttc": 0.0})
+        override = getattr(ligne.article, "compte_vente_override", None)
+        compte_vente = override.compte_vente if override else parametres.compte_vente_defaut
+        code_analytique = override.code_analytique if override else None
+        cle = (taux, compte_vente.pk, code_analytique.pk if code_analytique else None)
+        groupe = groupes.setdefault(
+            cle,
+            {"taux": taux, "compte_vente": compte_vente, "code_analytique": code_analytique, "ht": 0.0, "ttc": 0.0},
+        )
         groupe["ht"] += ligne.montant_ht
         groupe["ttc"] += ligne.montant_ttc
 
@@ -39,15 +53,27 @@ def _repartition_par_taux_tva(facture):
             f"« {facture} » n'a ni lignes de commande chiffrées ni montants HT/TTC renseignés : "
             "impossible de générer l'écriture."
         )
-    return {None: {"ht": facture.montant_ht, "ttc": facture.montant_ttc}}
+    return {
+        (None, parametres.compte_vente_defaut.pk, None): {
+            "taux": None,
+            "compte_vente": parametres.compte_vente_defaut,
+            "code_analytique": None,
+            "ht": facture.montant_ht,
+            "ttc": facture.montant_ttc,
+        }
+    }
 
 
 def generer_ecriture_facture(facture):
     """Génère l'écriture comptable d'une facture de vente : Clients au
     débit (montant TTC), Ventes + TVA collectée au crédit (une paire de
-    lignes par taux de TVA distinct présent sur la commande facturée).
-    Idempotent — ne génère jamais deux écritures pour la même facture, la
-    renvoie simplement si elle existe déjà. Renvoie (ecriture, creee)."""
+    lignes par groupe (taux de TVA, compte de vente, code analytique)
+    distinct présent sur la commande facturée — voir ArticleCompteVente
+    pour surcharger le compte de vente/code analytique d'un article
+    donné ; le code analytique n'est jamais posé sur les lignes
+    Clients/TVA, seulement sur la ligne de vente). Idempotent — ne génère
+    jamais deux écritures pour la même facture, la renvoie simplement si
+    elle existe déjà. Renvoie (ecriture, creee)."""
     ecriture_existante = EcritureComptable.objects.filter(facture=facture).first()
     if ecriture_existante is not None:
         return ecriture_existante, False
@@ -66,7 +92,7 @@ def generer_ecriture_facture(facture):
                 "configurez ce compte manuellement."
             )
 
-    groupes = _repartition_par_taux_tva(facture)
+    groupes = _repartition_lignes(facture, parametres)
     total_ttc = sum(g["ttc"] for g in groupes.values())
 
     with transaction.atomic():
@@ -83,11 +109,14 @@ def generer_ecriture_facture(facture):
             libelle=f"Facture {facture.numero}",
             debit=total_ttc,
         )
-        for taux, montants in sorted(groupes.items(), key=lambda kv: (kv[0] is None, kv[0])):
+        for cle in sorted(groupes, key=lambda c: (c[0] is None, c[0] or 0, c[1], c[2] or "")):
+            montants = groupes[cle]
+            taux = montants["taux"]
             libelle = f"Facture {facture.numero} — TVA {taux:g}%" if taux else f"Facture {facture.numero}"
             LigneEcriture.objects.create(
                 ecriture=ecriture,
-                compte=parametres.compte_vente_defaut,
+                compte=montants["compte_vente"],
+                code_analytique=montants["code_analytique"],
                 libelle=libelle,
                 credit=montants["ht"],
             )

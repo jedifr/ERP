@@ -1244,3 +1244,32 @@ génération des écritures d'achat serait une évolution ultérieure séparée.
   la liste des factures (action de sélection standard, pas
   `actions_list` cette fois : contrairement à l'import du PCG, il y a ici
   une sélection naturelle — les factures cochées).
+
+## Compte comptable spécifique par article + codes analytiques
+
+- **`ArticleCompteVente`** (`comptabilite/models.py`) : associe un article à
+  un compte de vente précis (`OneToOneField`), qui prime sur
+  `ParametresComptables.compte_vente_defaut` lors de la génération d'une
+  écriture — ex. un fabriqué facturé en 701 "Ventes de produits finis"
+  plutôt que le 706 générique. `comptabilite.generation._repartition_lignes`
+  regroupe désormais les lignes de la commande facturée par (taux de TVA,
+  **compte de vente**, code analytique) plutôt que par seul taux de TVA :
+  une même facture peut donc poser plusieurs lignes "Ventes" à des comptes
+  différents selon les articles vendus, tout en restant équilibrée.
+  Inline "Compte de vente d'article" sur la fiche Article, fiche dédiée
+  dans `comptabilite/admin.py`.
+- **`ArticleCompteAchat`** : même principe côté achat (compte de charge,
+  ex. 601/607). Purement déclaratif pour l'instant — il n'existe pas de
+  document "facture fournisseur" dans l'app (`achats` n'a que des
+  commandes/réceptions logistiques), donc pas encore de génération
+  automatique d'écriture d'achat ; sert de référence pour une saisie
+  manuelle, et de point d'ancrage prêt pour une future génération.
+- **`CodeAnalytique`** : dictionnaire libre de codes comptables
+  complémentaires (comptabilité analytique — atelier, chantier, centre de
+  coût...), même principe que `JournalComptable`. Optionnel sur
+  `ArticleCompteVente`/`ArticleCompteAchat` (code analytique par défaut de
+  l'article) et sur `LigneEcriture` (posable à la main sur n'importe quelle
+  ligne). Repris automatiquement sur la ligne "Ventes" d'une écriture
+  générée depuis la facture — **jamais** sur les lignes Clients/TVA
+  collectée, qui ne portent pas de dimension analytique en pratique
+  comptable courante.

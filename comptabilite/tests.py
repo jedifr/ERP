@@ -10,7 +10,16 @@ from facturation.models import Facture
 from technique.models import Article
 
 from .generation import GenerationEcritureError, generer_ecriture_facture
-from .models import CompteComptable, EcritureComptable, JournalComptable, LigneEcriture, ParametresComptables
+from .models import (
+    ArticleCompteAchat,
+    ArticleCompteVente,
+    CodeAnalytique,
+    CompteComptable,
+    EcritureComptable,
+    JournalComptable,
+    LigneEcriture,
+    ParametresComptables,
+)
 from .pcg import importer_pcg
 
 
@@ -162,6 +171,37 @@ class ParametresComptablesTests(TestCase):
         self.assertEqual(ParametresComptables.charger().compte_client_defaut.code, "4111")
 
 
+class ArticleComptesTests(TestCase):
+    def setUp(self):
+        importer_pcg()
+        self.article = Article.objects.create(reference="ART-CPT-TEST", nature=Article.Nature.FABRIQUE)
+        self.compte_701 = CompteComptable.objects.get(code="701")
+        self.compte_607 = CompteComptable.objects.get(code="607")
+
+    def test_un_seul_compte_de_vente_par_article(self):
+        ArticleCompteVente.objects.create(article=self.article, compte_vente=self.compte_701)
+        with self.assertRaises(ValidationError):
+            ArticleCompteVente(article=self.article, compte_vente=self.compte_701).full_clean()
+
+    def test_article_sans_override_utilise_related_name_vide(self):
+        self.assertIsNone(getattr(self.article, "compte_vente_override", None))
+        self.assertIsNone(getattr(self.article, "compte_achat_override", None))
+
+    def test_compte_achat_et_vente_independants(self):
+        ArticleCompteVente.objects.create(article=self.article, compte_vente=self.compte_701)
+        ArticleCompteAchat.objects.create(article=self.article, compte_achat=self.compte_607)
+        self.article.refresh_from_db()
+        self.assertEqual(self.article.compte_vente_override.compte_vente, self.compte_701)
+        self.assertEqual(self.article.compte_achat_override.compte_achat, self.compte_607)
+
+
+class CodeAnalytiqueTests(TestCase):
+    def test_creation_et_str(self):
+        code = CodeAnalytique.objects.create(code="CHANTIER-42", libelle="Chantier 42")
+        self.assertEqual(str(code), "CHANTIER-42 — Chantier 42")
+        self.assertTrue(code.actif)
+
+
 class GenererEcritureFactureTests(TestCase):
     def setUp(self):
         importer_pcg()
@@ -209,6 +249,38 @@ class GenererEcritureFactureTests(TestCase):
         self.assertAlmostEqual(
             sum(l.credit for l in ecriture.lignes.filter(compte__code="44571")), 220
         )
+
+    def test_generation_utilise_le_compte_de_vente_specifique_dun_article(self):
+        autre_article = Article.objects.create(reference="ART-COMPTA-TEST-2", nature=Article.Nature.FABRIQUE)
+        compte_701 = CompteComptable.objects.get(code="701")
+        code_atelier = CodeAnalytique.objects.create(code="ATELIER1", libelle="Atelier 1")
+        ArticleCompteVente.objects.create(
+            article=autre_article, compte_vente=compte_701, code_analytique=code_atelier
+        )
+
+        CommandeLigne.objects.create(
+            commande=self.commande, article=self.article, quantite_commandee=1,
+            prix_vente_unitaire=100, taux_tva=self.taux20,
+        )
+        CommandeLigne.objects.create(
+            commande=self.commande, article=autre_article, quantite_commandee=1,
+            prix_vente_unitaire=200, taux_tva=self.taux20,
+        )
+
+        ecriture, creee = generer_ecriture_facture(self.facture)
+        self.assertTrue(ecriture.est_equilibree)
+
+        ligne_701 = ecriture.lignes.get(compte__code="701")
+        self.assertAlmostEqual(ligne_701.credit, 200)
+        self.assertEqual(ligne_701.code_analytique, code_atelier)
+
+        ligne_706 = ecriture.lignes.get(compte__code="706")
+        self.assertAlmostEqual(ligne_706.credit, 100)
+        self.assertIsNone(ligne_706.code_analytique)
+
+        # Le code analytique ne se propage jamais aux lignes Clients/TVA.
+        for ligne in ecriture.lignes.filter(compte__code__in=["411", "44571"]):
+            self.assertIsNone(ligne.code_analytique)
 
     def test_generation_idempotente(self):
         CommandeLigne.objects.create(

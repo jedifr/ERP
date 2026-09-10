@@ -1,7 +1,19 @@
 from rest_framework import viewsets
 
-from .models import CompteComptable, EcritureComptable, JournalComptable, LigneEcriture, ParametresComptables
+from .models import (
+    ArticleCompteAchat,
+    ArticleCompteVente,
+    CodeAnalytique,
+    CompteComptable,
+    EcritureComptable,
+    JournalComptable,
+    LigneEcriture,
+    ParametresComptables,
+)
 from .serializers import (
+    ArticleCompteAchatSerializer,
+    ArticleCompteVenteSerializer,
+    CodeAnalytiqueSerializer,
     CompteComptableSerializer,
     EcritureComptableSerializer,
     JournalComptableSerializer,
@@ -15,6 +27,25 @@ class CompteComptableViewSet(viewsets.ModelViewSet):
     serializer_class = CompteComptableSerializer
     filterset_fields = ["classe", "systeme", "actif", "compte_parent"]
     search_fields = ["code", "libelle"]
+
+
+class CodeAnalytiqueViewSet(viewsets.ModelViewSet):
+    queryset = CodeAnalytique.objects.all()
+    serializer_class = CodeAnalytiqueSerializer
+    filterset_fields = ["actif"]
+    search_fields = ["code", "libelle"]
+
+
+class ArticleCompteVenteViewSet(viewsets.ModelViewSet):
+    queryset = ArticleCompteVente.objects.select_related("article", "compte_vente", "code_analytique").all()
+    serializer_class = ArticleCompteVenteSerializer
+    filterset_fields = ["article", "compte_vente"]
+
+
+class ArticleCompteAchatViewSet(viewsets.ModelViewSet):
+    queryset = ArticleCompteAchat.objects.select_related("article", "compte_achat", "code_analytique").all()
+    serializer_class = ArticleCompteAchatSerializer
+    filterset_fields = ["article", "compte_achat"]
 
 
 class JournalComptableViewSet(viewsets.ModelViewSet):

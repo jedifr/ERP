@@ -387,6 +387,11 @@ UNFOLD = {
                         "link": reverse_lazy("admin:comptabilite_ecriturecomptable_changelist"),
                     },
                     {
+                        "title": "Codes analytiques",
+                        "icon": "sell",
+                        "link": reverse_lazy("admin:comptabilite_codeanalytique_changelist"),
+                    },
+                    {
                         "title": "Paramètres comptables",
                         "icon": "settings",
                         "link": reverse_lazy("admin:comptabilite_parametrescomptables_changelist"),
