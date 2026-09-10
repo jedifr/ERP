@@ -1,9 +1,15 @@
+import re
+
 from django.contrib import admin
+from django.contrib.admin.views.decorators import staff_member_required
+from django.http import JsonResponse
+from django.urls import path
+from django.views.decorators.http import require_http_methods
 from unfold.admin import ModelAdmin, TabularInline
 
 from codification.mixins import CodificationInitialeMixin
 from codification.models import RegleCodification
-from comptabilite.models import TiersCompteComptable
+from comptabilite.models import CompteComptable, TiersCompteComptable
 
 from .models import (
     Adresse,
@@ -31,10 +37,21 @@ class AdresseInline(TabularInline):
     autocomplete_fields = ["pays"]
 
 
+class ContactTelephoneInline(TabularInline):
+    model = ContactTelephone
+    extra = 1
+
+
 class ContactInline(TabularInline):
     model = Contact
     extra = 0
     autocomplete_fields = ["adresse_livraison"]
+    # Inline imbriqué (unfold.admin.ModelAdmin embarque nativement
+    # NestedInlinesModelAdminMixin) : permet de saisir les numéros de
+    # téléphone d'un contact directement depuis la fiche Tiers, sans passer
+    # par la fiche Contact dédiée — ContactTelephone reste un modèle à part
+    # (plusieurs numéros typés par contact), seule sa présentation change.
+    inlines = [ContactTelephoneInline]
 
 
 class TiersCompteComptableInline(TabularInline):
@@ -43,6 +60,31 @@ class TiersCompteComptableInline(TabularInline):
     extra = 1
     fields = ["code_client", "compte_client", "code_fournisseur", "compte_fournisseur"]
     autocomplete_fields = ["compte_client", "compte_fournisseur"]
+
+
+@staff_member_required
+@require_http_methods(["GET"])
+def apercu_compte_comptable_view(request):
+    """Aperçu en direct du compte comptable généré par TiersCompteComptable
+    à partir d'un code à 5 lettres (voir TiersCompteComptable.save()) —
+    utilisé par le JS de la fiche Tiers pour afficher, dès la frappe, le
+    compte qui sera résolu (existant, avec son libellé, ou à créer) sans
+    attendre l'enregistrement du formulaire."""
+    prefixe = request.GET.get("prefixe")
+    code = (request.GET.get("code") or "").strip()
+    if prefixe not in ("411", "401") or not re.fullmatch(r"[A-Za-z]{5}", code):
+        return JsonResponse({"valide": False})
+
+    code_complet = f"{prefixe}{code.upper()}"
+    compte = CompteComptable.objects.filter(code=code_complet).first()
+    return JsonResponse(
+        {
+            "valide": True,
+            "code": code_complet,
+            "existe": compte is not None,
+            "libelle": compte.libelle if compte else None,
+        }
+    )
 
 
 @admin.register(Tiers)
@@ -55,10 +97,28 @@ class TiersAdmin(CodificationInitialeMixin, ModelAdmin):
     autocomplete_fields = ["conditions_paiement", "devise"]
     fieldsets = [
         (None, {"fields": ["code", "raison_sociale", "type_tiers", "siret"]}),
-        ("Commercial", {"fields": ["regime_fiscal", "devise", "conditions_paiement"]}),
         ("Coordonnées bancaires", {"fields": ["iban", "bic"], "classes": ["tab"]}),
+        ("Commercial", {"fields": ["regime_fiscal", "devise", "conditions_paiement"]}),
     ]
-    inlines = [AdresseInline, ContactInline, TiersCompteComptableInline]
+    # Compte comptable de tiers en premier (juste après le fieldset
+    # "Commercial", qui est le dernier bloc de champs) : Django/l'admin
+    # affiche toujours tous les fieldsets avant tous les inlines, donc
+    # l'ordre ci-dessous est ce qui rapproche le plus "Compte comptable de
+    # tiers" du bloc "Commercial".
+    inlines = [TiersCompteComptableInline, AdresseInline, ContactInline]
+
+    class Media:
+        js = ["commercial/tiers_admin.js"]
+
+    def get_urls(self):
+        urls = [
+            path(
+                "apercu-compte-comptable/",
+                self.admin_site.admin_view(apercu_compte_comptable_view),
+                name="commercial_tiers_apercu_compte_comptable",
+            ),
+        ]
+        return urls + super().get_urls()
 
 
 @admin.register(Adresse)
@@ -67,11 +127,6 @@ class AdresseAdmin(ModelAdmin):
     list_filter = ["type_adresse", "est_principale", "pays"]
     search_fields = ["tiers__code", "tiers__raison_sociale", "ville", "libelle"]
     autocomplete_fields = ["tiers", "pays"]
-
-
-class ContactTelephoneInline(TabularInline):
-    model = ContactTelephone
-    extra = 1
 
 
 @admin.register(Contact)

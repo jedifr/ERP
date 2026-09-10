@@ -1447,3 +1447,33 @@ accrocher — l'app achats ne portait que des documents logistiques
   toutes les apps — aucun souci d'ordre d'import.
 - **Action admin** "Générer l'écriture comptable" sur la liste des
   factures fournisseur, même mécanisme que côté facture de vente.
+
+## Fiche Tiers : téléphones imbriqués, aperçu de compte en direct, réorganisation
+
+Trois retours sur la fiche Tiers, après vérification qu'une partie de la
+demande (email et association contact/adresse de livraison) était déjà en
+place.
+
+- **Numéros de téléphone imbriqués** : `ContactTelephone` (plusieurs
+  numéros typés par contact) est maintenant saisissable directement dans
+  le tableau "Contacts" de la fiche Tiers, sans passer par la fiche
+  Contact dédiée — `ContactInline.inlines = [ContactTelephoneInline]`,
+  rendu par `unfold.admin.ModelAdmin` qui embarque nativement
+  `NestedInlinesModelAdminMixin` (pas de nouvelle dépendance, ni de
+  changement de modèle).
+- **Aperçu du compte comptable en direct** : dès que 5 lettres valides
+  sont saisies dans "Code client"/"Code fournisseur"
+  (`TiersCompteComptable`), un texte apparaît sous le champ indiquant le
+  compte qui sera utilisé — son libellé s'il existe déjà en base ("→
+  411DUPON — Dupont SAS (compte existant)"), ou qu'il sera créé sinon.
+  Nouvel endpoint `apercu_compte_comptable_view` (staff uniquement,
+  `commercial/admin.py`) interrogé en AJAX par
+  `commercial/static/commercial/tiers_admin.js` (débounce 300 ms),
+  suivant le même principe que les aperçus déjà en place sur la fiche
+  Devis (`chiffrage/builder_views.py`).
+- **Réorganisation de la fiche** : le fieldset "Commercial" passe en
+  dernière position (après "Coordonnées bancaires") et l'inline "Compte
+  comptable de tiers" passe en tête des tableaux (avant "Adresses" et
+  "Contacts") — Django affiche toujours tous les fieldsets avant tous les
+  inlines, cette combinaison est ce qui rapproche le plus les deux blocs
+  demandés.

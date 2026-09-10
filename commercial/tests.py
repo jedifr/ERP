@@ -334,6 +334,73 @@ class ConditionPaiementEcheanceTests(TestCase):
         self.assertIsNone(condition.calculer_echeance(datetime.date(2026, 1, 1)))
 
 
+class ApercuCompteComptableViewTests(TestCase):
+    """Endpoint AJAX utilisé par tiers_admin.js pour afficher, dès la frappe
+    du code à 5 lettres, le compte comptable que TiersCompteComptable.save()
+    résoudrait (voir comptabilite.models) — sans avoir à enregistrer le
+    formulaire pour le voir."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        from comptabilite.models import CompteComptable
+
+        User = get_user_model()
+        self.user = User.objects.create_superuser("apercu-admin", "a@example.com", "pass1234")
+        self.client.force_login(self.user)
+        self.compte_existant = CompteComptable.objects.create(code="411DUPON", libelle="Client Dupont")
+
+    def test_code_correspondant_a_un_compte_existant(self):
+        response = self.client.get("/admin/commercial/tiers/apercu-compte-comptable/?prefixe=411&code=dupon")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data, {"valide": True, "code": "411DUPON", "existe": True, "libelle": "Client Dupont"})
+
+    def test_code_ne_correspondant_a_aucun_compte(self):
+        response = self.client.get("/admin/commercial/tiers/apercu-compte-comptable/?prefixe=401&code=martl")
+        data = response.json()
+        self.assertEqual(data, {"valide": True, "code": "401MARTL", "existe": False, "libelle": None})
+
+    def test_code_incomplet_invalide(self):
+        response = self.client.get("/admin/commercial/tiers/apercu-compte-comptable/?prefixe=411&code=dup")
+        self.assertEqual(response.json(), {"valide": False})
+
+    def test_prefixe_inconnu_invalide(self):
+        response = self.client.get("/admin/commercial/tiers/apercu-compte-comptable/?prefixe=706&code=dupon")
+        self.assertEqual(response.json(), {"valide": False})
+
+    def test_anonyme_refuse(self):
+        self.client.logout()
+        response = self.client.get("/admin/commercial/tiers/apercu-compte-comptable/?prefixe=411&code=dupon")
+        self.assertNotEqual(response.status_code, 200)
+
+
+class TiersContactTelephoneNestedInlineTests(TestCase):
+    """Les numéros de téléphone d'un contact (ContactTelephone) doivent être
+    saisissables directement depuis la fiche Tiers, sans passer par la fiche
+    Contact dédiée (inline imbriqué, voir commercial/admin.py)."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        self.user = User.objects.create_superuser("nested-admin", "n@example.com", "pass1234")
+        self.client.force_login(self.user)
+
+        self.tiers = Tiers.objects.create(
+            code="CLI-NESTED-TEL", raison_sociale="Client Nested Tel", type_tiers=Tiers.TypeTiers.CLIENT
+        )
+        self.contact = Contact.objects.create(tiers=self.tiers, nom="Dupont")
+        ContactTelephone.objects.create(
+            contact=self.contact, type_telephone=ContactTelephone.TypeTelephone.PORTABLE, numero="0601020304"
+        )
+
+    def test_numero_de_telephone_visible_sur_la_fiche_tiers(self):
+        response = self.client.get(f"/admin/commercial/tiers/{self.tiers.pk}/change/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "0601020304")
+
+
 class DelaiProposeTests(TestCase):
     def test_libelle_unique(self):
         DelaiPropose.objects.create(libelle="2 semaines")
