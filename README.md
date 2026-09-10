@@ -1565,3 +1565,26 @@ interaction, et Django détecte correctement qu'une ligne non touchée n'a
 pas changé (elle est simplement ignorée, comme prévu) — sans rien
 affaiblir : une ligne où l'utilisateur renseigne effectivement un numéro
 reste normalement validée.
+
+## Autocomplétion d'adresse (API Adresse, data.gouv.fr)
+
+Le champ "Adresse" (`Adresse.adresse`) propose désormais des suggestions
+en tapant, via l'**API Adresse** de l'État (Base Adresse Nationale,
+Etalab) : `commercial/static/commercial/adresse_autocomplete.js`,
+interrogée en direct depuis le navigateur (`api-adresse.data.gouv.fr/search/`,
+gratuite, sans clé, CORS ouvert — aucun détour par le backend). Au clic
+sur une suggestion, "Code postal" et "Ville" se remplissent avec elle.
+Fonctionne aussi bien sur la fiche Adresse autonome que sur le tableau
+Adresses imbriqué dans la fiche Tiers (`AdresseInline`) : le script
+détecte tout seul si le champ s'appelle `adresse` (fiche seule) ou
+`adresses-N-adresse` (ligne de tableau), et en déduit le nom des champs
+frères à remplir. Ne couvre que la France (le service lui-même) — une
+adresse hors France reste à saisir à la main, comme avant.
+
+**Vérification** : la construction de la requête, l'affichage des
+suggestions et le remplissage des champs ont été vérifiés avec l'appel
+réseau intercepté (réponse simulée) — l'environnement d'exécution de cette
+session bloque explicitement les appels sortants vers ce domaine
+(politique réseau du bac à sable, sans rapport avec le navigateur réel de
+l'utilisateur, qui appellera l'API directement, sans passer par ce
+même proxy).

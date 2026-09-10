@@ -37,6 +37,14 @@ class AdresseInline(TabularInline):
     extra = 0
     autocomplete_fields = ["pays"]
 
+    class Media:
+        # Autocomplétion de "Adresse" (+ pré-remplissage code postal/ville)
+        # via l'API Adresse de data.gouv.fr — voir adresse_autocomplete.js.
+        # Même script chargé sur AdresseAdmin (fiche autonome) : il détecte
+        # tout seul le nom de champ, imbriqué ("adresses-0-adresse") ou non
+        # ("adresse").
+        js = ["commercial/adresse_autocomplete.js"]
+
 
 class ContactTelephoneInline(TabularInline):
     model = ContactTelephone
@@ -211,6 +219,9 @@ class AdresseAdmin(ModelAdmin):
     list_filter = ["type_adresse", "est_principale", "pays"]
     search_fields = ["tiers__code", "tiers__raison_sociale", "ville", "libelle"]
     autocomplete_fields = ["tiers", "pays"]
+
+    class Media:
+        js = ["commercial/adresse_autocomplete.js"]
 
 
 @admin.register(Contact)
