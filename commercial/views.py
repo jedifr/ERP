@@ -1,7 +1,7 @@
 from rest_framework import viewsets
 
-from .models import Adresse, Contact, Tiers
-from .serializers import AdresseSerializer, ContactSerializer, TiersSerializer
+from .models import Adresse, Contact, ContactTelephone, Tiers
+from .serializers import AdresseSerializer, ContactSerializer, ContactTelephoneSerializer, TiersSerializer
 
 
 class TiersViewSet(viewsets.ModelViewSet):
@@ -22,3 +22,9 @@ class ContactViewSet(viewsets.ModelViewSet):
     serializer_class = ContactSerializer
     filterset_fields = ["tiers"]
     search_fields = ["nom", "prenom", "email"]
+
+
+class ContactTelephoneViewSet(viewsets.ModelViewSet):
+    queryset = ContactTelephone.objects.select_related("contact").all()
+    serializer_class = ContactTelephoneSerializer
+    filterset_fields = ["contact", "type_telephone"]

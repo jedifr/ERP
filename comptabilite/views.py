@@ -10,6 +10,7 @@ from .models import (
     LigneEcriture,
     ParametresComptables,
     PosteGestion,
+    TiersCompteComptable,
 )
 from .serializers import (
     ArticleCompteAchatSerializer,
@@ -21,6 +22,7 @@ from .serializers import (
     LigneEcritureSerializer,
     ParametresComptablesSerializer,
     PosteGestionSerializer,
+    TiersCompteComptableSerializer,
 )
 
 
@@ -55,6 +57,12 @@ class ArticleCompteAchatViewSet(viewsets.ModelViewSet):
     queryset = ArticleCompteAchat.objects.select_related("article", "compte_achat", "code_analytique").all()
     serializer_class = ArticleCompteAchatSerializer
     filterset_fields = ["article", "compte_achat"]
+
+
+class TiersCompteComptableViewSet(viewsets.ModelViewSet):
+    queryset = TiersCompteComptable.objects.select_related("tiers", "compte_client", "compte_fournisseur").all()
+    serializer_class = TiersCompteComptableSerializer
+    filterset_fields = ["tiers"]
 
 
 class JournalComptableViewSet(viewsets.ModelViewSet):

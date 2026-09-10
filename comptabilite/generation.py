@@ -80,7 +80,9 @@ def _repartition_lignes(facture, parametres):
 
 def generer_ecriture_facture(facture):
     """Génère l'écriture comptable d'une facture de vente : Clients au
-    débit (montant TTC), Ventes + TVA collectée au crédit (une paire de
+    débit (montant TTC — compte spécifique du client si TiersCompteComptable
+    en a un, sinon compte client par défaut), Ventes + TVA collectée au
+    crédit (une paire de
     lignes par groupe (taux de TVA, compte de vente, code analytique)
     distinct présent sur la commande facturée — voir ArticleCompteVente
     pour surcharger le compte de vente/code analytique d'un article
@@ -110,6 +112,14 @@ def generer_ecriture_facture(facture):
     groupes = _repartition_lignes(facture, parametres)
     total_ttc = sum(g["ttc"] for g in groupes.values())
 
+    client = facture.commande.devis.client
+    comptes_client = getattr(client, "comptes_comptables", None)
+    compte_client = (
+        comptes_client.compte_client
+        if comptes_client is not None and comptes_client.compte_client_id
+        else parametres.compte_client_defaut
+    )
+
     with transaction.atomic():
         ecriture = EcritureComptable.objects.create(
             journal=parametres.journal_ventes,
@@ -120,7 +130,7 @@ def generer_ecriture_facture(facture):
         )
         LigneEcriture.objects.create(
             ecriture=ecriture,
-            compte=parametres.compte_client_defaut,
+            compte=compte_client,
             libelle=f"Facture {facture.numero}",
             debit=total_ttc,
         )

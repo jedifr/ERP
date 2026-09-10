@@ -74,6 +74,41 @@ class CodeAnalytique(models.Model):
         return f"{self.code} — {self.libelle}"
 
 
+class TiersCompteComptable(models.Model):
+    """Comptes comptables auxiliaires d'un tiers — un compte client (ex.
+    sous-compte de 411) et/ou un compte fournisseur (ex. sous-compte de
+    401), un tiers "les deux" pouvant avoir besoin des deux à la fois.
+    Prioritaire sur ParametresComptables.compte_client_defaut lors de la
+    génération d'une écriture de vente ; le côté fournisseur reste
+    déclaratif pour l'instant (pas de génération d'écriture d'achat, voir
+    ArticleCompteAchat)."""
+
+    tiers = models.OneToOneField(
+        Tiers, verbose_name="tiers", on_delete=models.CASCADE, related_name="comptes_comptables"
+    )
+    compte_client = models.ForeignKey(
+        CompteComptable, verbose_name="compte client", on_delete=models.PROTECT,
+        null=True, blank=True, related_name="+", help_text="Ex. sous-compte de 411",
+    )
+    compte_fournisseur = models.ForeignKey(
+        CompteComptable, verbose_name="compte fournisseur", on_delete=models.PROTECT,
+        null=True, blank=True, related_name="+", help_text="Ex. sous-compte de 401",
+    )
+
+    class Meta:
+        verbose_name = "Compte comptable de tiers"
+        verbose_name_plural = "Comptes comptables de tiers"
+        ordering = ["tiers"]
+
+    def __str__(self):
+        return f"{self.tiers} — {self.compte_client or ''} {self.compte_fournisseur or ''}".strip()
+
+    def clean(self):
+        super().clean()
+        if not self.compte_client_id and not self.compte_fournisseur_id:
+            raise ValidationError("Renseignez au moins un compte client ou un compte fournisseur.")
+
+
 class PosteGestion(models.Model):
     """Poste de gestion : classification d'achat/vente transverse, plus
     large qu'un article — couvre aussi les charges générales (assurance,

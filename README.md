@@ -1323,3 +1323,44 @@ exonéré de TVA, intracommunautaire ou hors UE — nuance absente jusqu'ici de
   système développé, avec le libellé du premier poste qui les référence —
   un point de départ raisonnable, à affiner ensuite dans l'admin au besoin
   (177 comptes créés ainsi sur le jeu de données fourni).
+
+## Enrichissement Tiers/Article : comptes par tiers, bibliothèque de paiement, pays, téléphones typés, gamme conditionnelle
+
+Lot de six demandes ponctuelles.
+
+- **`comptabilite.TiersCompteComptable`** : compte client et/ou compte
+  fournisseur propres à un tiers (`OneToOneField`, les deux à la fois pour
+  un tiers "les deux"), prioritaire sur
+  `ParametresComptables.compte_client_defaut` — même principe que
+  `ArticleCompteVente`. Le côté fournisseur reste déclaratif (pas de
+  génération d'écriture d'achat, comme `ArticleCompteAchat`).
+- **`commercial.ConditionPaiement`** : bibliothèque (remplace le texte
+  libre `Tiers.conditions_paiement`, devenu une FK), avec `nombre_jours` +
+  `fin_de_mois` plutôt qu'un simple libellé — exploitable plus tard pour
+  calculer une échéance, contrairement à `DelaiPropose` qui n'est qu'une
+  suggestion de texte.
+- **`commercial.Pays`** (code ISO2, `est_ue`) + `Adresse.pays` : dès que
+  l'adresse de livraison principale d'un tiers (repli sur la facturation
+  principale si pas de livraison) a un pays renseigné,
+  `Adresse.save()` recalcule automatiquement `Tiers.regime_fiscal` — France
+  si le pays est la France, intracommunautaire si `est_ue`, hors UE sinon.
+  Ne touche jamais un régime positionné manuellement sur "France exonérée"
+  (indécidable depuis le seul pays). Jeu de départ : UE-27 + quelques
+  partenaires courants, extensible dans l'admin.
+- **`commercial.ContactTelephone`** : remplace l'ancien champ unique
+  `Contact.telephone` — plusieurs numéros typés par contact (portable **et**
+  bureau **et** fax en même temps), `ContactAdmin` en fiche dédiée avec
+  l'inline (`Contact` était déjà enregistré seul, donc pas de limite
+  d'inline imbriqué).
+- **Gamme masquée si non fabriqué** : `technique/static/technique/article_admin.js`,
+  `initGammeToggle()` — cache la section "Gammes" (`#gamme_etapes-group`)
+  tant que `Nature ≠ Fabriqué`, sur le même principe que les autres
+  toggles déjà en place sur la fiche Article.
+- **`achats.TarifAchatArticle.frais_port`** : champ optionnel ajouté à
+  l'historique de tarif déjà existant (voir plus haut, "Nouvelles natures
+  d'article achetées + fournisseurs multiples").
+
+**Changement cassant assumé** : `Tiers.conditions_paiement` passe de texte
+libre à une liste déroulante — toute valeur déjà saisie à la main est
+perdue à la migration (pas de conversion automatique, discuté avec
+l'utilisateur : aucune donnée de production n'en dépendait encore).

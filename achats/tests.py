@@ -311,6 +311,13 @@ class ArticleFournisseurTests(TestCase):
         )
         self.assertEqual(lien.tarif_actuel, actuel)
 
+    def test_frais_port_facultatif(self):
+        lien = ArticleFournisseur.objects.create(article=self.consommable, fournisseur=self.fournisseur)
+        tarif = TarifAchatArticle.objects.create(
+            article_fournisseur=lien, prix_unitaire=4.5, frais_port=12.0, date_debut=datetime.date(2026, 1, 1)
+        )
+        self.assertEqual(tarif.frais_port, 12.0)
+
     def test_chevauchement_tarifs_refuse(self):
         lien = ArticleFournisseur.objects.create(article=self.consommable, fournisseur=self.fournisseur)
         TarifAchatArticle.objects.create(

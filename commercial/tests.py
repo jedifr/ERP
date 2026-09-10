@@ -1,7 +1,7 @@
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 
-from .models import Adresse, Contact, DelaiPropose, TauxTVA, Tiers
+from .models import Adresse, Contact, ContactTelephone, ConditionPaiement, DelaiPropose, Pays, TauxTVA, Tiers
 
 
 class TiersRegimeFiscalTests(TestCase):
@@ -10,6 +10,81 @@ class TiersRegimeFiscalTests(TestCase):
             code="CLI-REGIME", raison_sociale="Client Régime", type_tiers=Tiers.TypeTiers.CLIENT
         )
         self.assertEqual(tiers.regime_fiscal, Tiers.RegimeFiscal.FRANCE)
+
+
+class RegimeFiscalAutoDepuisPaysTests(TestCase):
+    def setUp(self):
+        self.tiers = Tiers.objects.create(
+            code="CLI-PAYS", raison_sociale="Client Pays", type_tiers=Tiers.TypeTiers.CLIENT
+        )
+        # FR/DE/US sont déjà en base via la migration de seed (0011_seed_pays).
+        self.france = Pays.objects.get(code="FR")
+        self.allemagne = Pays.objects.get(code="DE")
+        self.etats_unis = Pays.objects.get(code="US")
+
+    def _adresse_livraison_principale(self, pays):
+        return Adresse.objects.create(
+            tiers=self.tiers, type_adresse=Adresse.TypeAdresse.LIVRAISON,
+            adresse="1 rue", code_postal="00000", ville="Ville", pays=pays, est_principale=True,
+        )
+
+    def test_pays_france_donne_regime_france(self):
+        self._adresse_livraison_principale(self.france)
+        self.tiers.refresh_from_db()
+        self.assertEqual(self.tiers.regime_fiscal, Tiers.RegimeFiscal.FRANCE)
+
+    def test_pays_ue_donne_regime_intra_ue(self):
+        self._adresse_livraison_principale(self.allemagne)
+        self.tiers.refresh_from_db()
+        self.assertEqual(self.tiers.regime_fiscal, Tiers.RegimeFiscal.INTRA_UE)
+
+    def test_pays_hors_ue_donne_regime_hors_ue(self):
+        self._adresse_livraison_principale(self.etats_unis)
+        self.tiers.refresh_from_db()
+        self.assertEqual(self.tiers.regime_fiscal, Tiers.RegimeFiscal.HORS_UE)
+
+    def test_france_exoneree_jamais_ecrasee_automatiquement(self):
+        self.tiers.regime_fiscal = Tiers.RegimeFiscal.FRANCE_EXONERE
+        self.tiers.save()
+        self._adresse_livraison_principale(self.allemagne)
+        self.tiers.refresh_from_db()
+        self.assertEqual(self.tiers.regime_fiscal, Tiers.RegimeFiscal.FRANCE_EXONERE)
+
+    def test_repli_sur_adresse_facturation_si_pas_de_livraison(self):
+        Adresse.objects.create(
+            tiers=self.tiers, type_adresse=Adresse.TypeAdresse.FACTURATION,
+            adresse="1 rue", code_postal="00000", ville="Ville", pays=self.allemagne, est_principale=True,
+        )
+        self.tiers.refresh_from_db()
+        self.assertEqual(self.tiers.regime_fiscal, Tiers.RegimeFiscal.INTRA_UE)
+
+
+class ConditionPaiementTests(TestCase):
+    def test_creation_et_str(self):
+        condition = ConditionPaiement.objects.create(libelle="30 jours fin de mois", nombre_jours=30, fin_de_mois=True)
+        self.assertEqual(str(condition), "30 jours fin de mois")
+
+    def test_tiers_utilise_une_condition_de_la_bibliotheque(self):
+        condition = ConditionPaiement.objects.create(libelle="Comptant", nombre_jours=0)
+        tiers = Tiers.objects.create(
+            code="CLI-CDT", raison_sociale="Client Condition", type_tiers=Tiers.TypeTiers.CLIENT,
+            conditions_paiement=condition,
+        )
+        self.assertEqual(tiers.conditions_paiement.nombre_jours, 0)
+
+
+class ContactTelephoneTests(TestCase):
+    def test_plusieurs_numeros_types_par_contact(self):
+        tiers = Tiers.objects.create(
+            code="CLI-TEL", raison_sociale="Client Téléphone", type_tiers=Tiers.TypeTiers.CLIENT
+        )
+        contact = Contact.objects.create(tiers=tiers, nom="Dupont")
+        ContactTelephone.objects.create(contact=contact, type_telephone=ContactTelephone.TypeTelephone.PORTABLE, numero="0601020304")
+        ContactTelephone.objects.create(contact=contact, type_telephone=ContactTelephone.TypeTelephone.BUREAU, numero="0102030405")
+
+        self.assertEqual(contact.telephones.count(), 2)
+        types = set(contact.telephones.values_list("type_telephone", flat=True))
+        self.assertEqual(types, {"portable", "bureau"})
 
 
 class AdresseTests(TestCase):

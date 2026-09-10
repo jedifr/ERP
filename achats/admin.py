@@ -46,7 +46,7 @@ class ArticleFournisseurAdmin(ModelAdmin):
 
 @admin.register(TarifAchatArticle)
 class TarifAchatArticleAdmin(ModelAdmin):
-    list_display = ["article_fournisseur", "prix_unitaire", "date_debut", "date_fin"]
+    list_display = ["article_fournisseur", "prix_unitaire", "frais_port", "date_debut", "date_fin"]
     list_filter = ["article_fournisseur__fournisseur"]
     search_fields = ["article_fournisseur__article__reference", "article_fournisseur__fournisseur__raison_sociale"]
     autocomplete_fields = ["article_fournisseur"]

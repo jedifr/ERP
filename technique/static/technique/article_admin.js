@@ -2,6 +2,25 @@
     "use strict";
 
     document.addEventListener("DOMContentLoaded", init);
+    document.addEventListener("DOMContentLoaded", initGammeToggle);
+
+    // La gamme (étapes d'opérations) n'a de sens que pour un article
+    // fabriqué : pour toute autre nature, la section "Gammes" de la fiche
+    // Article est masquée plutôt que laissée vide et déroutante.
+    function initGammeToggle() {
+        const natureField = document.getElementById("id_nature");
+        const gammeGroup = document.getElementById("gamme_etapes-group");
+        if (!natureField || !gammeGroup) {
+            return;
+        }
+
+        function refreshGammeVisibility() {
+            gammeGroup.hidden = natureField.value !== "fabrique";
+        }
+
+        natureField.addEventListener("change", refreshGammeVisibility);
+        refreshGammeVisibility();
+    }
 
     function init() {
         const natureField = document.getElementById("id_nature");

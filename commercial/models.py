@@ -2,6 +2,56 @@ from django.core.exceptions import ValidationError
 from django.db import models
 
 
+class Pays(models.Model):
+    """Référentiel de pays — sert à déduire automatiquement le régime
+    fiscal d'un tiers depuis le pays de son adresse de livraison/facturation
+    (voir Adresse.save()) : plus robuste qu'un champ texte libre pour
+    décider si un pays est membre de l'UE (ça change dans le temps —
+    Brexit — et une faute de frappe sur un nom de pays casserait la
+    détection). Jeu de départ limité (UE + quelques partenaires courants),
+    l'admin permet d'en ajouter librement."""
+
+    code = models.CharField("code ISO 3166-1 alpha-2", max_length=2, primary_key=True)
+    nom = models.CharField("nom", max_length=100)
+    est_ue = models.BooleanField("membre de l'Union européenne", default=False)
+
+    class Meta:
+        verbose_name = "Pays"
+        verbose_name_plural = "Pays"
+        ordering = ["nom"]
+
+    def __str__(self):
+        return self.nom
+
+
+class ConditionPaiement(models.Model):
+    """Bibliothèque des conditions de paiement (ex. "30 jours fin de
+    mois", "Comptant"), reprises sur Tiers.conditions_paiement. Porte un
+    nombre de jours + une option "fin de mois" — pas seulement un libellé
+    — pour rester exploitable plus tard dans un calcul de date
+    d'échéance, contrairement à DelaiPropose qui n'est qu'une suggestion
+    de texte libre."""
+
+    libelle = models.CharField(
+        "libellé", max_length=100, unique=True, help_text='Ex. "30 jours fin de mois", "Comptant"'
+    )
+    nombre_jours = models.PositiveIntegerField(
+        "nombre de jours", null=True, blank=True, help_text="Délai avant échéance, en jours"
+    )
+    fin_de_mois = models.BooleanField(
+        "fin de mois", default=False, help_text="Échéance reportée en fin de mois"
+    )
+    ordre = models.PositiveIntegerField("ordre d'affichage", default=0)
+
+    class Meta:
+        verbose_name = "Condition de paiement"
+        verbose_name_plural = "Conditions de paiement"
+        ordering = ["ordre", "libelle"]
+
+    def __str__(self):
+        return self.libelle
+
+
 class Tiers(models.Model):
     """Entité unique pour client et/ou fournisseur (un même acteur peut être les deux)."""
 
@@ -35,10 +85,13 @@ class Tiers(models.Model):
     numero_tva = models.CharField(
         "numéro de TVA", max_length=20, blank=True, help_text="TVA intracommunautaire"
     )
-    conditions_paiement = models.CharField(
-        "conditions de paiement",
-        max_length=200,
+    conditions_paiement = models.ForeignKey(
+        ConditionPaiement,
+        verbose_name="conditions de paiement",
+        on_delete=models.PROTECT,
+        null=True,
         blank=True,
+        related_name="tiers",
         help_text="Valeur par défaut, reprise sur devis/commande",
     )
 
@@ -68,6 +121,15 @@ class Adresse(models.Model):
     adresse = models.CharField("adresse", max_length=255)
     code_postal = models.CharField("code postal", max_length=20)
     ville = models.CharField("ville", max_length=100)
+    pays = models.ForeignKey(
+        Pays,
+        verbose_name="pays",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="adresses",
+        help_text="Détermine automatiquement le régime fiscal du tiers si c'est l'adresse principale (livraison en priorité, sinon facturation).",
+    )
     est_principale = models.BooleanField(
         "adresse principale", default=False, help_text="Adresse par défaut proposée"
     )
@@ -97,6 +159,38 @@ class Adresse(models.Model):
                         )
                     }
                 )
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        if self.est_principale and self.pays_id and self.type_adresse == self.TypeAdresse.LIVRAISON:
+            self._appliquer_regime_fiscal_au_tiers()
+        elif (
+            self.est_principale
+            and self.pays_id
+            and self.type_adresse == self.TypeAdresse.FACTURATION
+            and not self.tiers.adresses.filter(
+                type_adresse=self.TypeAdresse.LIVRAISON, est_principale=True, pays_id__isnull=False
+            ).exists()
+        ):
+            # Repli sur l'adresse de facturation principale seulement si le
+            # tiers n'a pas d'adresse de livraison principale avec un pays
+            # renseigné (la livraison prime pour la territorialité de TVA).
+            self._appliquer_regime_fiscal_au_tiers()
+
+    def _appliquer_regime_fiscal_au_tiers(self):
+        pays = self.pays
+        if pays.code == "FR":
+            regime = Tiers.RegimeFiscal.FRANCE
+        elif pays.est_ue:
+            regime = Tiers.RegimeFiscal.INTRA_UE
+        else:
+            regime = Tiers.RegimeFiscal.HORS_UE
+
+        # Jamais d'écrasement automatique du cas "France exonérée" : ça ne
+        # se déduit pas du pays, c'est une décision manuelle.
+        Tiers.objects.filter(pk=self.tiers_id).exclude(
+            regime_fiscal=Tiers.RegimeFiscal.FRANCE_EXONERE
+        ).update(regime_fiscal=regime)
 
 
 class TauxTVA(models.Model):
@@ -164,7 +258,6 @@ class Contact(models.Model):
     nom = models.CharField("nom", max_length=100)
     prenom = models.CharField("prénom", max_length=100, blank=True)
     email = models.EmailField("email", blank=True)
-    telephone = models.CharField("téléphone", max_length=30, blank=True)
     fonction = models.CharField("fonction", max_length=100, blank=True)
     est_principal = models.BooleanField(
         "contact principal", default=False, help_text="Contact par défaut proposé pour le tiers"
@@ -216,3 +309,30 @@ class Contact(models.Model):
                 raise ValidationError(
                     {"adresse_livraison": "Seule une adresse de type « Livraison » peut être associée."}
                 )
+
+
+class ContactTelephone(models.Model):
+    """Un contact peut avoir plusieurs numéros classés par type (portable
+    ET bureau ET fax en même temps) — remplace l'ancien champ unique
+    Contact.telephone, trop rigide pour ce cas courant."""
+
+    class TypeTelephone(models.TextChoices):
+        PORTABLE = "portable", "Portable"
+        BUREAU = "bureau", "Bureau"
+        FIXE = "fixe", "Fixe"
+        FAX = "fax", "Fax"
+        AUTRE = "autre", "Autre"
+
+    contact = models.ForeignKey(
+        Contact, verbose_name="contact", on_delete=models.CASCADE, related_name="telephones"
+    )
+    type_telephone = models.CharField("type", max_length=20, choices=TypeTelephone.choices)
+    numero = models.CharField("numéro", max_length=30)
+
+    class Meta:
+        verbose_name = "Numéro de téléphone"
+        verbose_name_plural = "Numéros de téléphone"
+        ordering = ["contact", "type_telephone"]
+
+    def __str__(self):
+        return f"{self.get_type_telephone_display()} : {self.numero}"

@@ -15,6 +15,7 @@ from .models import (
     LigneEcriture,
     ParametresComptables,
     PosteGestion,
+    TiersCompteComptable,
 )
 from .pcg import PCG_MILLESIME, importer_pcg
 from .postes_gestion import importer_postes_gestion
@@ -119,6 +120,13 @@ class ArticleCompteAchatAdmin(ModelAdmin):
     list_display = ["article", "poste_gestion", "compte_achat", "code_analytique"]
     search_fields = ["article__reference", "article__libelle", "compte_achat__code", "poste_gestion__code"]
     autocomplete_fields = ["article", "poste_gestion", "compte_achat", "code_analytique"]
+
+
+@admin.register(TiersCompteComptable)
+class TiersCompteComptableAdmin(ModelAdmin):
+    list_display = ["tiers", "compte_client", "compte_fournisseur"]
+    search_fields = ["tiers__code", "tiers__raison_sociale", "compte_client__code", "compte_fournisseur__code"]
+    autocomplete_fields = ["tiers", "compte_client", "compte_fournisseur"]
 
 
 @admin.register(CodeAnalytique)

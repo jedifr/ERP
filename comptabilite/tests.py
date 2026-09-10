@@ -20,6 +20,7 @@ from .models import (
     LigneEcriture,
     ParametresComptables,
     PosteGestion,
+    TiersCompteComptable,
 )
 from .pcg import importer_pcg
 from .postes_gestion import importer_postes_gestion
@@ -203,6 +204,33 @@ class ArticleComptesTests(TestCase):
             ArticleCompteAchat(article=self.article).full_clean()
 
 
+class TiersCompteComptableTests(TestCase):
+    def setUp(self):
+        importer_pcg()
+        self.tiers = Tiers.objects.create(
+            code="CLI-TCC-TEST", raison_sociale="Client TCC Test", type_tiers=Tiers.TypeTiers.LES_DEUX
+        )
+        self.compte_411 = CompteComptable.objects.get(code="411")
+        self.compte_401 = CompteComptable.objects.get(code="401")
+
+    def test_ni_client_ni_fournisseur_refuse(self):
+        with self.assertRaises(ValidationError):
+            TiersCompteComptable(tiers=self.tiers).full_clean()
+
+    def test_compte_client_et_fournisseur_independants(self):
+        tcc = TiersCompteComptable.objects.create(
+            tiers=self.tiers, compte_client=self.compte_411, compte_fournisseur=self.compte_401
+        )
+        self.assertEqual(self.tiers.comptes_comptables, tcc)
+        self.assertEqual(tcc.compte_client, self.compte_411)
+        self.assertEqual(tcc.compte_fournisseur, self.compte_401)
+
+    def test_un_seul_par_tiers(self):
+        TiersCompteComptable.objects.create(tiers=self.tiers, compte_client=self.compte_411)
+        with self.assertRaises(ValidationError):
+            TiersCompteComptable(tiers=self.tiers, compte_fournisseur=self.compte_401).full_clean()
+
+
 class PosteGestionTests(TestCase):
     def setUp(self):
         importer_pcg()
@@ -302,6 +330,20 @@ class GenererEcritureFactureTests(TestCase):
         self.assertAlmostEqual(
             sum(l.credit for l in ecriture.lignes.filter(compte__code="44571")), 220
         )
+
+    def test_generation_utilise_le_compte_client_specifique_du_tiers(self):
+        compte_client_special = CompteComptable.objects.get(code="4111")
+        TiersCompteComptable.objects.create(
+            tiers=self.commande.devis.client, compte_client=compte_client_special
+        )
+        CommandeLigne.objects.create(
+            commande=self.commande, article=self.article, quantite_commandee=1,
+            prix_vente_unitaire=100, taux_tva=self.taux20,
+        )
+        ecriture, creee = generer_ecriture_facture(self.facture)
+        self.assertTrue(ecriture.est_equilibree)
+        self.assertTrue(ecriture.lignes.filter(compte__code="4111").exists())
+        self.assertFalse(ecriture.lignes.filter(compte__code="411").exists())
 
     def test_generation_utilise_le_compte_de_vente_specifique_dun_article(self):
         autre_article = Article.objects.create(reference="ART-COMPTA-TEST-2", nature=Article.Nature.FABRIQUE)

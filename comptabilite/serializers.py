@@ -10,6 +10,7 @@ from .models import (
     LigneEcriture,
     ParametresComptables,
     PosteGestion,
+    TiersCompteComptable,
 )
 
 
@@ -41,6 +42,12 @@ class ArticleCompteVenteSerializer(FullCleanModelSerializer):
 class ArticleCompteAchatSerializer(FullCleanModelSerializer):
     class Meta:
         model = ArticleCompteAchat
+        fields = "__all__"
+
+
+class TiersCompteComptableSerializer(FullCleanModelSerializer):
+    class Meta:
+        model = TiersCompteComptable
         fields = "__all__"
 
 

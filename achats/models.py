@@ -73,6 +73,9 @@ class TarifAchatArticle(DateRangeHistoriqueMixin, models.Model):
         ArticleFournisseur, verbose_name="fournisseur de l'article", on_delete=models.CASCADE, related_name="tarifs"
     )
     prix_unitaire = models.FloatField("prix unitaire", help_text="€, prix d'achat proposé par ce fournisseur")
+    frais_port = models.FloatField(
+        "frais de port", null=True, blank=True, help_text="€, forfait de livraison associé à ce tarif (facultatif)"
+    )
     date_debut = models.DateField("date de début")
     date_fin = models.DateField("date de fin", null=True, blank=True)
 
