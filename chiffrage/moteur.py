@@ -7,6 +7,7 @@ ligne de devis -> coût matière (article + composants via nomenclature)
 
 from django.db.models import Q
 
+from commercial.models import TauxTVA, Tiers
 from technique.models import Article, Gamme, PosteTravail, TarifPoste
 
 from .models import DevisLigne, DevisLigneOperation
@@ -224,4 +225,52 @@ def previsualiser_ligne(
         "prix_vente_total": prix_vente_total,
         "prix_vente_unitaire": (prix_vente_total / quantite) if quantite else None,
         "prix_vente_ttc": prix_vente_total * (1 + taux_tva_valeur / 100),
+    }
+
+
+def resoudre_taux_tva(article, client):
+    """Taux de TVA applicable à `article` vendu à `client`, selon son régime
+    fiscal (Tiers.regime_fiscal) : un client non soumis à la TVA française
+    (exonéré, intracommunautaire, hors UE) applique toujours 0 %, quel que
+    soit l'article — sinon le taux "normal" configuré sur l'article
+    (Article.taux_tva), ou le taux par défaut du référentiel si l'article
+    n'en a pas de spécifique."""
+    if client.regime_fiscal != Tiers.RegimeFiscal.FRANCE:
+        taux = TauxTVA.objects.filter(taux=0).first()
+        if taux is None:
+            raise ChiffrageError("Aucun taux de TVA à 0 % dans le référentiel (client non soumis à la TVA française).")
+        return taux
+
+    if article.taux_tva_id:
+        return article.taux_tva
+
+    taux = TauxTVA.objects.filter(est_defaut=True).first()
+    if taux is None:
+        raise ChiffrageError("Aucun taux de TVA par défaut dans le référentiel.")
+    return taux
+
+
+def previsualiser_ligne_commande(article, quantite, date_reference):
+    """Prix de vente d'une ligne de commande à partir de la quantité, du
+    coût matière (nomenclature pour un article FABRIQUE, coût unitaire
+    sinon) et du coût des opérations de gamme — même principe que
+    previsualiser_ligne (devis), mais sans les surcharges de marge par
+    ligne/devis : CommandeLigne n'a ni taux_marge_matiere_applique ni
+    prix_vente_unitaire_force, donc les marges par défaut de
+    l'article/poste s'appliquent toujours."""
+    cout_matiere = cout_matiere_article(article, quantite)
+    taux_matiere = article.taux_marge_defaut or 0
+    prix_matiere = cout_matiere * (1 + taux_matiere / 100)
+
+    prix_operations = 0
+    if article.nature == Article.Nature.FABRIQUE:
+        for etape in gamme_active(article, date_reference):
+            cout_etape = cout_etape_gamme(etape, quantite, date_reference)
+            taux_operation = etape.poste.taux_marge_defaut or 0
+            prix_operations += cout_etape * (1 + taux_operation / 100)
+
+    prix_total = prix_matiere + prix_operations
+    return {
+        "prix_vente_unitaire": (prix_total / quantite) if quantite else None,
+        "montant_ht": prix_total,
     }

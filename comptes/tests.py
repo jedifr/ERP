@@ -104,7 +104,7 @@ class DashboardCallbackTests(TestCase):
         )
 
         commande = Commande.objects.create(
-            numero="CDE-DASH", devis=devis_valide, date_commande=aujourdhui,
+            numero="CDE-DASH", devis=devis_valide, client=devis_valide.client, date_commande=aujourdhui,
             adresse_facturation=self.adresse, adresse_livraison=self.adresse,
         )
         Facture.objects.create(

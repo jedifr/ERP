@@ -22,7 +22,7 @@ class FactureDateEcheanceTests(TestCase):
             numero="DEV-ECHEANCE", client=self.client_tiers, date_creation=datetime.date(2026, 1, 1)
         )
         self.commande = Commande.objects.create(
-            numero="CDE-ECHEANCE", devis=devis, date_commande=datetime.date(2026, 1, 1),
+            numero="CDE-ECHEANCE", devis=devis, client=devis.client, date_commande=datetime.date(2026, 1, 1),
             adresse_facturation=adresse, adresse_livraison=adresse,
         )
 
@@ -71,7 +71,7 @@ class FactureMontantsCalculesTests(TestCase):
             numero="DEV-MONTANTS-CALC", client=self.client_tiers, date_creation=datetime.date(2026, 1, 1)
         )
         self.commande = Commande.objects.create(
-            numero="CDE-MONTANTS-CALC", devis=devis, date_commande=datetime.date(2026, 1, 1),
+            numero="CDE-MONTANTS-CALC", devis=devis, client=devis.client, date_commande=datetime.date(2026, 1, 1),
             adresse_facturation=adresse, adresse_livraison=adresse,
         )
         self.article = Article.objects.create(reference="ART-MONTANTS-CALC", nature=Article.Nature.MATIERE_PREMIERE)
@@ -142,7 +142,7 @@ class MontantsCalculesCommandeViewTests(TestCase):
             numero="DEV-MONTANTS-VIEW", client=client_tiers, date_creation=datetime.date(2026, 1, 1)
         )
         self.commande = Commande.objects.create(
-            numero="CDE-MONTANTS-VIEW", devis=devis, date_commande=datetime.date(2026, 1, 1),
+            numero="CDE-MONTANTS-VIEW", devis=devis, client=devis.client, date_commande=datetime.date(2026, 1, 1),
             adresse_facturation=adresse, adresse_livraison=adresse,
         )
         article = Article.objects.create(reference="ART-MONTANTS-VIEW", nature=Article.Nature.MATIERE_PREMIERE)

@@ -138,7 +138,7 @@ class CommandeLigneClientTests(TestCase):
             numero="DEV-APPRO", client=self.client_tiers, date_creation=datetime.date(2026, 1, 1),
         )
         self.commande_client = Commande.objects.create(
-            numero="CDE-APPRO", devis=devis, date_commande=datetime.date(2026, 1, 1),
+            numero="CDE-APPRO", devis=devis, client=devis.client, date_commande=datetime.date(2026, 1, 1),
             adresse_facturation=self.adresse, adresse_livraison=self.adresse,
         )
         self.ligne_client = CommandeLigne.objects.create(

@@ -1,4 +1,5 @@
 import datetime
+import json
 from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
@@ -21,7 +22,15 @@ from .models import (
     LivraisonLigne,
     OrdreFabrication,
 )
-from .moteur import ChiffrageError, calculer_devis, calculer_ligne, cout_matiere_article, previsualiser_ligne
+from .moteur import (
+    ChiffrageError,
+    calculer_devis,
+    calculer_ligne,
+    cout_matiere_article,
+    previsualiser_ligne,
+    previsualiser_ligne_commande,
+    resoudre_taux_tva,
+)
 from .planning_sync import PlanningSyncError, resynchroniser, tenter_synchronisation
 from .production import lancer_en_production, lancer_ligne_en_production, synchroniser_lignes_commande
 
@@ -243,6 +252,95 @@ class CalculerDevisTests(TestCase):
         self.assertAlmostEqual(self.devis.montant_matiere_ht, 133.7112, places=3)
         self.assertAlmostEqual(self.devis.montant_operations_ht, operation_attendue)
         self.assertAlmostEqual(self.devis.montant_total_ht, 133.7112 + operation_attendue, places=3)
+
+
+class ResoudreTauxTvaTests(TestCase):
+    """Taux de TVA = combinaison Article/Client (signalé par l'utilisateur) :
+    un client soumis à la TVA française applique le taux "normal" de
+    l'article (ou le taux par défaut du référentiel s'il n'en a pas), un
+    client exonéré/intracommunautaire/hors UE applique toujours 0 %."""
+
+    def setUp(self):
+        self.taux_normal = TauxTVA.objects.create(nom="Taux normal Résoudre", taux=20, est_defaut=False)
+        self.taux_reduit = TauxTVA.objects.create(nom="Taux réduit Résoudre", taux=5.5)
+        self.article_sans_taux = Article.objects.create(
+            reference="ART-TVA-SANS", nature=Article.Nature.MATIERE_PREMIERE
+        )
+        self.article_avec_taux = Article.objects.create(
+            reference="ART-TVA-AVEC", nature=Article.Nature.MATIERE_PREMIERE, taux_tva=self.taux_reduit
+        )
+
+    def _client(self, regime_fiscal, code):
+        return Tiers.objects.create(
+            code=code, raison_sociale=f"Client {regime_fiscal}",
+            type_tiers=Tiers.TypeTiers.CLIENT, regime_fiscal=regime_fiscal,
+        )
+
+    def test_client_france_sans_taux_article_prend_le_defaut_referentiel(self):
+        client = self._client(Tiers.RegimeFiscal.FRANCE, "CLI-TVA-1")
+        taux = resoudre_taux_tva(self.article_sans_taux, client)
+        self.assertEqual(taux, TauxTVA.objects.get(est_defaut=True))
+
+    def test_client_france_avec_taux_article_prend_celui_de_larticle(self):
+        client = self._client(Tiers.RegimeFiscal.FRANCE, "CLI-TVA-2")
+        taux = resoudre_taux_tva(self.article_avec_taux, client)
+        self.assertEqual(taux, self.taux_reduit)
+
+    def test_client_france_exoneree_taux_zero(self):
+        client = self._client(Tiers.RegimeFiscal.FRANCE_EXONERE, "CLI-TVA-3")
+        taux = resoudre_taux_tva(self.article_avec_taux, client)
+        self.assertEqual(taux.taux, 0)
+
+    def test_client_intra_ue_taux_zero(self):
+        client = self._client(Tiers.RegimeFiscal.INTRA_UE, "CLI-TVA-4")
+        taux = resoudre_taux_tva(self.article_avec_taux, client)
+        self.assertEqual(taux.taux, 0)
+
+    def test_client_hors_ue_taux_zero(self):
+        client = self._client(Tiers.RegimeFiscal.HORS_UE, "CLI-TVA-5")
+        taux = resoudre_taux_tva(self.article_avec_taux, client)
+        self.assertEqual(taux.taux, 0)
+
+
+class PrevisualiserLigneCommandeTests(TestCase):
+    """Prix d'une ligne de commande calculé depuis quantité/gamme/nomenclature
+    (signalé par l'utilisateur) — mêmes règles que le devis, mais toujours
+    avec les marges par défaut (CommandeLigne n'a pas de surcharge de marge)."""
+
+    def setUp(self):
+        self.matiere = Article.objects.create(
+            reference="MP-CDE-CALC", nature=Article.Nature.MATIERE_PREMIERE,
+            unite_cout=Article.UniteCout.PIECE, cout_unitaire=10, taux_marge_defaut=20,
+        )
+        self.fabrique = Article.objects.create(
+            reference="FAB-CDE-CALC", nature=Article.Nature.FABRIQUE, taux_marge_defaut=25,
+        )
+        Nomenclature.objects.create(article_parent=self.fabrique, article_composant=self.matiere, quantite=2)
+        self.poste = PosteTravail.objects.create(
+            nom="Poste-CDE-CALC", mode_calcul=PosteTravail.ModeCalcul.HORAIRE, taux_marge_defaut=10,
+        )
+        TarifPoste.objects.create(poste=self.poste, cout_horaire=60, date_debut=datetime.date(2020, 1, 1))
+        Gamme.objects.create(
+            article=self.fabrique, poste=self.poste, ordre=1,
+            temps_fixe=0, temps_variable=6, date_debut=datetime.date(2020, 1, 1),
+        )
+
+    def test_article_matiere_premiere(self):
+        # coût = 10 * 3 = 30 ; prix = 30 * 1.20 = 36 ; unitaire = 36 / 3 = 12
+        resultat = previsualiser_ligne_commande(self.matiere, 3, datetime.date(2026, 1, 1))
+        self.assertAlmostEqual(resultat["montant_ht"], 36)
+        self.assertAlmostEqual(resultat["prix_vente_unitaire"], 12)
+
+    def test_article_fabrique_matiere_et_operations(self):
+        # matière : coût = (2*10)*2 = 40 ; prix = 40*1.25 = 50
+        # opération : 6 min/pièce * 2 pièces = 12 min -> 12/60*60 = 12 ; prix = 12*1.10 = 13.2
+        resultat = previsualiser_ligne_commande(self.fabrique, 2, datetime.date(2026, 1, 1))
+        self.assertAlmostEqual(resultat["montant_ht"], 50 + 13.2)
+        self.assertAlmostEqual(resultat["prix_vente_unitaire"], (50 + 13.2) / 2)
+
+    def test_quantite_nulle_prix_unitaire_none(self):
+        resultat = previsualiser_ligne_commande(self.matiere, 0, datetime.date(2026, 1, 1))
+        self.assertIsNone(resultat["prix_vente_unitaire"])
 
 
 class LancerEnProductionTests(TestCase):
@@ -484,6 +582,85 @@ class ReordonnerLignesDevisAdminTests(TestCase):
         self.assertEqual(list(self.devis.lignes.all()), [self.ligne_b, self.ligne_a])
 
 
+class CommandeModelTests(TestCase):
+    """Commande.devis facultatif + Commande.client/reference_client
+    (signalé par l'utilisateur : pouvoir créer une commande directement,
+    sans devis d'origine)."""
+
+    def setUp(self):
+        self.tiers = Tiers.objects.create(
+            code="CLI-CDE-MODEL", raison_sociale="Client Commande Modèle", type_tiers=Tiers.TypeTiers.CLIENT
+        )
+        self.adresse = Adresse.objects.create(
+            tiers=self.tiers, est_facturation=True, est_livraison=True,
+            adresse="1 rue", code_postal="75000", ville="Paris",
+        )
+        self.autre_tiers = Tiers.objects.create(
+            code="CLI-CDE-AUTRE", raison_sociale="Autre Client", type_tiers=Tiers.TypeTiers.CLIENT
+        )
+        self.adresse_autre_tiers = Adresse.objects.create(
+            tiers=self.autre_tiers, est_facturation=True,
+            adresse="2 rue", code_postal="75000", ville="Paris",
+        )
+
+    def test_creation_sans_devis(self):
+        commande = Commande.objects.create(
+            numero="CDE-SANS-DEVIS",
+            client=self.tiers,
+            reference_client="PO-12345",
+            date_commande=datetime.date(2026, 1, 1),
+            adresse_facturation=self.adresse,
+            adresse_livraison=self.adresse,
+        )
+        self.assertIsNone(commande.devis)
+
+    def test_client_requis(self):
+        commande = Commande(
+            numero="CDE-SANS-CLIENT",
+            reference_client="PO-1",
+            date_commande=datetime.date(2026, 1, 1),
+            adresse_facturation=self.adresse,
+            adresse_livraison=self.adresse,
+        )
+        with self.assertRaises(ValidationError):
+            commande.full_clean()
+
+    def test_reference_client_requise(self):
+        commande = Commande(
+            numero="CDE-SANS-REF",
+            client=self.tiers,
+            date_commande=datetime.date(2026, 1, 1),
+            adresse_facturation=self.adresse,
+            adresse_livraison=self.adresse,
+        )
+        with self.assertRaises(ValidationError):
+            commande.full_clean()
+
+    def test_adresse_facturation_dun_autre_client_refusee(self):
+        commande = Commande(
+            numero="CDE-ADR-AUTRE",
+            client=self.tiers,
+            reference_client="PO-2",
+            date_commande=datetime.date(2026, 1, 1),
+            adresse_facturation=self.adresse_autre_tiers,
+            adresse_livraison=self.adresse,
+        )
+        with self.assertRaises(ValidationError):
+            commande.full_clean()
+
+    def test_adresse_livraison_dun_autre_client_refusee(self):
+        commande = Commande(
+            numero="CDE-ADR-AUTRE-2",
+            client=self.tiers,
+            reference_client="PO-3",
+            date_commande=datetime.date(2026, 1, 1),
+            adresse_facturation=self.adresse,
+            adresse_livraison=self.adresse_autre_tiers,
+        )
+        with self.assertRaises(ValidationError):
+            commande.full_clean()
+
+
 class CommandeLigneSansDevisLigneTests(TestCase):
     def test_proprietes_a_none_sans_devis_ligne(self):
         client_tiers = Tiers.objects.create(code="CLI-SANSDL", raison_sociale="Sans DL")
@@ -496,7 +673,7 @@ class CommandeLigneSansDevisLigneTests(TestCase):
             numero="DEV-SANSDL", client=client_tiers, date_creation=datetime.date(2026, 1, 1),
         )
         commande = Commande.objects.create(
-            numero="CDE-SANSDL", devis=devis, date_commande=datetime.date(2026, 1, 1),
+            numero="CDE-SANSDL", devis=devis, client=devis.client, date_commande=datetime.date(2026, 1, 1),
             adresse_facturation=adresse, adresse_livraison=adresse,
         )
         ligne = CommandeLigne.objects.create(commande=commande, article=article, quantite_commandee=1)
@@ -525,7 +702,7 @@ class SynchroniserLignesCommandeTests(TestCase):
         )
         self.devis_ligne = DevisLigne.objects.create(devis=self.devis, article=self.article, quantite=5)
         self.commande = Commande.objects.create(
-            numero="CDE-SYNC", devis=self.devis, date_commande=datetime.date(2026, 1, 1),
+            numero="CDE-SYNC", devis=self.devis, client=self.devis.client, date_commande=datetime.date(2026, 1, 1),
             adresse_facturation=self.adresse, adresse_livraison=self.adresse,
         )
 
@@ -705,7 +882,7 @@ class PlanningSyncTests(TestCase):
         )
         commande = Commande.objects.create(
             numero="CDE-200",
-            devis=commande_devis,
+            devis=commande_devis, client=commande_devis.client,
             date_commande=datetime.date(2026, 1, 1),
             adresse_facturation=adresse,
             adresse_livraison=adresse,
@@ -1971,134 +2148,6 @@ class AjoutDevisOuvrirConstructeurTests(TestCase):
         self.assertNotEqual(response.url, "/admin/chiffrage/devis/DEV-CONSTRUIRE-01/constructeur/")
 
 
-class CommandeDirecteTests(TestCase):
-    """Bouton "Créer une commande directement" du formulaire d'ajout de devis
-    et bouton "Valider et créer la commande" du constructeur en mode
-    ?commande_directe=1 : le devis ne sert que de support de calcul interne
-    (jamais montré au client) — on réutilise entièrement le constructeur de
-    devis et la chaîne devis validé -> commande (lancer_en_production)."""
-
-    def setUp(self):
-        from django.contrib.auth import get_user_model
-
-        User = get_user_model()
-        self.user = User.objects.create_superuser("cdirecte-admin", "cd@example.com", "pass1234")
-        self.client.force_login(self.user)
-
-        self.client_tiers = Tiers.objects.create(
-            code="CLI-CDIRECTE", raison_sociale="Client Commande Directe", type_tiers=Tiers.TypeTiers.CLIENT
-        )
-        Adresse.objects.create(
-            tiers=self.client_tiers,
-            est_facturation=True,
-            adresse="1 rue A",
-            code_postal="75000",
-            ville="Paris",
-            est_principale=True,
-        )
-        Adresse.objects.create(
-            tiers=self.client_tiers,
-            est_livraison=True,
-            adresse="1 rue A",
-            code_postal="75000",
-            ville="Paris",
-            est_principale=True,
-        )
-        self.article = Article.objects.create(
-            reference="ART-CDIRECTE",
-            nature=Article.Nature.MATIERE_PREMIERE,
-            unite_cout=Article.UniteCout.PIECE,
-            cout_unitaire=2.0,
-        )
-
-    def test_bouton_construire_commande_redirige_vers_le_constructeur_en_mode_commande_directe(self):
-        data = {
-            "numero": "DEV-CDIRECTE-01",
-            "client": self.client_tiers.pk,
-            "date_creation": "2026-01-01",
-            "statut": Devis.Statut.BROUILLON,
-            "taux_marge_globale": "",
-            "adresse_facturation": "",
-            "adresse_livraison": "",
-            "contact": "",
-            "lignes-TOTAL_FORMS": "0",
-            "lignes-INITIAL_FORMS": "0",
-            "lignes-MIN_NUM_FORMS": "0",
-            "lignes-MAX_NUM_FORMS": "1000",
-            "_construire_commande": "Créer une commande directement",
-        }
-        response = self.client.post("/admin/chiffrage/devis/add/", data=data, follow=False)
-        self.assertEqual(response.status_code, 302, getattr(response, "context", None))
-        self.assertEqual(
-            response.url, "/admin/chiffrage/devis/DEV-CDIRECTE-01/constructeur/?commande_directe=1"
-        )
-        self.assertEqual(Devis.objects.get(pk="DEV-CDIRECTE-01").statut, Devis.Statut.BROUILLON)
-
-    def _devis_brouillon_avec_ligne(self, numero="DEV-CDIRECTE-VALID"):
-        devis = Devis.objects.create(
-            numero=numero, client=self.client_tiers, date_creation=datetime.date(2026, 1, 1),
-            statut=Devis.Statut.BROUILLON,
-        )
-        DevisLigne.objects.create(devis=devis, article=self.article, quantite=10)
-        return devis
-
-    def test_constructeur_affiche_le_mode_commande_directe(self):
-        devis = self._devis_brouillon_avec_ligne()
-        response = self.client.get(f"/admin/chiffrage/devis/{devis.pk}/constructeur/?commande_directe=1")
-        self.assertContains(response, "Constructeur de commande")
-        self.assertContains(response, "Valider et créer la commande")
-
-    def test_valider_commande_directe_cree_la_commande_et_redirige(self):
-        devis = self._devis_brouillon_avec_ligne()
-        response = self.client.post(
-            f"/admin/chiffrage/devis/{devis.pk}/valider-commande/", follow=False
-        )
-        devis.refresh_from_db()
-        self.assertEqual(devis.statut, Devis.Statut.VALIDE)
-
-        commande = Commande.objects.get(devis=devis)
-        self.assertEqual(response.status_code, 302)
-        self.assertEqual(response.url, f"/admin/chiffrage/commande/{commande.pk}/change/")
-        self.assertEqual(commande.lignes.get().quantite_commandee, 10)
-
-    def test_valider_commande_directe_sans_ligne_refuse(self):
-        devis = Devis.objects.create(
-            numero="DEV-CDIRECTE-VIDE", client=self.client_tiers, date_creation=datetime.date(2026, 1, 1),
-            statut=Devis.Statut.BROUILLON,
-        )
-        response = self.client.post(f"/admin/chiffrage/devis/{devis.pk}/valider-commande/", follow=False)
-        self.assertEqual(
-            response.url, f"/admin/chiffrage/devis/{devis.pk}/constructeur/?commande_directe=1"
-        )
-        devis.refresh_from_db()
-        self.assertEqual(devis.statut, Devis.Statut.BROUILLON)
-        self.assertFalse(Commande.objects.filter(devis=devis).exists())
-
-    def test_valider_commande_directe_devis_deja_valide_refuse(self):
-        devis = self._devis_brouillon_avec_ligne(numero="DEV-CDIRECTE-DEJA")
-        devis.statut = Devis.Statut.VALIDE
-        devis.save()
-        response = self.client.post(f"/admin/chiffrage/devis/{devis.pk}/valider-commande/", follow=False)
-        self.assertEqual(
-            response.url, f"/admin/chiffrage/devis/{devis.pk}/constructeur/?commande_directe=1"
-        )
-        self.assertFalse(Commande.objects.filter(devis=devis).exists())
-
-    def test_valider_commande_directe_echec_restaure_le_statut_brouillon(self):
-        # Pas d'adresse de livraison principale -> lancer_en_production lève
-        # ChiffrageError : le passage en "validé" doit être annulé (transaction
-        # atomique), sinon le devis resterait verrouillé sans commande créée.
-        Adresse.objects.filter(tiers=self.client_tiers, est_livraison=True).delete()
-        devis = self._devis_brouillon_avec_ligne(numero="DEV-CDIRECTE-ECHEC")
-        response = self.client.post(f"/admin/chiffrage/devis/{devis.pk}/valider-commande/", follow=False)
-        self.assertEqual(
-            response.url, f"/admin/chiffrage/devis/{devis.pk}/constructeur/?commande_directe=1"
-        )
-        devis.refresh_from_db()
-        self.assertEqual(devis.statut, Devis.Statut.BROUILLON)
-        self.assertFalse(Commande.objects.filter(devis=devis).exists())
-
-
 class ConvertirEnCommandeViewTests(TestCase):
     """Bouton "Convertir en commande" (object-tools de la fiche Devis) :
     permet de convertir un devis validé en commande en un clic, sans passer
@@ -2189,6 +2238,223 @@ class ConvertirEnCommandeViewTests(TestCase):
         response = self.client.get(f"/admin/chiffrage/devis/{devis.pk}/change/")
         self.assertContains(response, f"Voir la commande {commande}")
         self.assertNotContains(response, "Convertir en commande")
+
+
+class CommandeDirecteSupprimeeTests(TestCase):
+    """Le bouton "Créer une commande directement" et son flux dédié sont
+    supprimés (confirmé par l'utilisateur, remplacés par la création
+    directe d'une commande + le calcul en direct par ligne)."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        self.user = User.objects.create_superuser("cdirecte-gone", "cdg@example.com", "pass1234")
+        self.client.force_login(self.user)
+
+    def test_bouton_absent_du_formulaire_dajout_devis(self):
+        response = self.client.get("/admin/chiffrage/devis/add/")
+        self.assertNotContains(response, "Créer une commande directement")
+
+    def test_url_valider_commande_nexiste_plus(self):
+        # Cette URL ne correspond plus à aucune route dédiée : elle retombe
+        # sur le fallback générique de l'admin (<path:object_id>/, qui
+        # redirige vers .../change/, puis vers la liste des devis faute
+        # d'objet de cet id) plutôt que de convertir quoi que ce soit.
+        devis = Devis.objects.create(
+            numero="DEV-VALIDER-GONE", client=Tiers.objects.create(code="CLI-VALIDER-GONE", raison_sociale="X"),
+            date_creation=datetime.date(2026, 1, 1), statut=Devis.Statut.VALIDE,
+        )
+        response = self.client.post(f"/admin/chiffrage/devis/{devis.pk}/valider-commande/", follow=True)
+        self.assertFalse(Commande.objects.filter(devis=devis).exists())
+        self.assertNotContains(response, "créée")
+
+
+class LigneCommandeLiveCalcViewTests(TestCase):
+    """Calcul automatique du prix d'une ligne de commande depuis la
+    quantité/gamme/nomenclature (signalé par l'utilisateur), et suggestion
+    du taux de TVA (article + régime fiscal du client) — endpoints AJAX
+    utilisés par commande_admin_live.js."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        self.user = User.objects.create_superuser("cde-live-admin", "cl@example.com", "pass1234")
+        self.client.force_login(self.user)
+
+        self.tiers = Tiers.objects.create(
+            code="CLI-CDE-LIVE", raison_sociale="Client Commande Live", type_tiers=Tiers.TypeTiers.CLIENT,
+            regime_fiscal=Tiers.RegimeFiscal.FRANCE,
+        )
+        self.adresse = Adresse.objects.create(
+            tiers=self.tiers, est_facturation=True, est_livraison=True,
+            adresse="1 rue", code_postal="75000", ville="Paris",
+        )
+        self.taux_reduit = TauxTVA.objects.create(nom="Taux réduit CDE Live", taux=5.5)
+        self.article = Article.objects.create(
+            reference="ART-CDE-LIVE", nature=Article.Nature.MATIERE_PREMIERE,
+            unite_cout=Article.UniteCout.PIECE, cout_unitaire=10, taux_marge_defaut=10,
+            taux_tva=self.taux_reduit,
+        )
+        self.devis = Devis.objects.create(
+            numero="DEV-CDE-LIVE", client=self.tiers, date_creation=datetime.date(2026, 1, 1),
+            statut=Devis.Statut.VALIDE,
+        )
+        self.devis_ligne = DevisLigne.objects.create(devis=self.devis, article=self.article, quantite=3)
+        self.commande = Commande.objects.create(
+            numero="CDE-LIVE", devis=self.devis, client=self.tiers, reference_client="PO-LIVE",
+            date_commande=datetime.date(2026, 1, 1),
+            adresse_facturation=self.adresse, adresse_livraison=self.adresse,
+        )
+
+    def test_recalcul_calcule_le_prix_pour_une_ligne_sans_devis_ligne(self):
+        ligne = CommandeLigne.objects.create(
+            commande=self.commande, article=self.article, quantite_commandee=2,
+        )
+        response = self.client.post(
+            f"/admin/chiffrage/commande/{self.commande.pk}/lignes/{ligne.pk}/recalculer/",
+            data=json.dumps({"quantite_commandee": "5"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        data = response.json()
+        # coût = 10*5=50 ; prix = 50*1.10 = 55 ; unitaire = 11
+        self.assertAlmostEqual(data["prix_vente_unitaire"], 11)
+        self.assertEqual(data["taux_tva_suggere"]["id"], self.taux_reduit.pk)
+
+        ligne.refresh_from_db()
+        self.assertAlmostEqual(ligne.prix_vente_unitaire, 11)
+        self.assertEqual(ligne.quantite_commandee, 5)
+
+    def test_recalcul_ne_touche_pas_le_prix_dune_ligne_avec_devis_ligne(self):
+        # Ligne "surchargée" (héritée d'un devis) : un changement de quantité
+        # ne doit jamais recalculer automatiquement le prix — c'est une
+        # décision manuelle, comme documenté sur CommandeLigne.
+        ligne = CommandeLigne.objects.create(
+            commande=self.commande, article=self.article, devis_ligne=self.devis_ligne,
+            quantite_commandee=3, prix_vente_unitaire=99.0,
+        )
+        response = self.client.post(
+            f"/admin/chiffrage/commande/{self.commande.pk}/lignes/{ligne.pk}/recalculer/",
+            data=json.dumps({"quantite_commandee": "8"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        ligne.refresh_from_db()
+        self.assertEqual(ligne.quantite_commandee, 8)
+        self.assertAlmostEqual(ligne.prix_vente_unitaire, 99.0)
+
+    def test_recalcul_avec_prix_explicite_ne_recalcule_pas(self):
+        ligne = CommandeLigne.objects.create(
+            commande=self.commande, article=self.article, quantite_commandee=2,
+        )
+        response = self.client.post(
+            f"/admin/chiffrage/commande/{self.commande.pk}/lignes/{ligne.pk}/recalculer/",
+            data=json.dumps({"quantite_commandee": "5", "prix_vente_unitaire": "42"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        ligne.refresh_from_db()
+        self.assertAlmostEqual(ligne.prix_vente_unitaire, 42)
+
+    def test_previsualiser_ligne_commande_existante(self):
+        response = self.client.post(
+            f"/admin/chiffrage/commande/{self.commande.pk}/lignes/previsualiser/",
+            data=json.dumps({"article": self.article.pk, "quantite": "4"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        data = response.json()
+        # coût = 10*4=40 ; prix = 40*1.10=44 ; unitaire = 11
+        self.assertAlmostEqual(data["prix_vente_unitaire"], 11)
+        self.assertEqual(data["taux_tva_suggere"]["id"], self.taux_reduit.pk)
+        self.assertFalse(CommandeLigne.objects.filter(commande=self.commande, quantite_commandee=4).exists())
+
+    def test_previsualiser_ligne_nouvelle_commande(self):
+        response = self.client.post(
+            "/admin/chiffrage/commande/nouvelle-commande/previsualiser-ligne/",
+            data=json.dumps(
+                {
+                    "article": self.article.pk,
+                    "quantite": "2",
+                    "date_commande": "2026-01-01",
+                    "client": self.tiers.pk,
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        data = response.json()
+        # coût = 10*2=20 ; prix = 20*1.10=22 ; unitaire = 11
+        self.assertAlmostEqual(data["prix_vente_unitaire"], 11)
+        self.assertEqual(data["taux_tva_suggere"]["id"], self.taux_reduit.pk)
+
+    def test_previsualiser_ligne_nouvelle_commande_sans_client_pas_de_suggestion_tva(self):
+        response = self.client.post(
+            "/admin/chiffrage/commande/nouvelle-commande/previsualiser-ligne/",
+            data=json.dumps({"article": self.article.pk, "quantite": "2"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertIsNone(response.json()["taux_tva_suggere"])
+
+
+class CreerCommandeDirectementAdminTests(TestCase):
+    """Une commande peut désormais être créée directement depuis son propre
+    formulaire d'admin, sans devis d'origine (signalé par l'utilisateur)."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        self.user = User.objects.create_superuser("cde-directe-admin", "cda@example.com", "pass1234")
+        self.client.force_login(self.user)
+
+        self.tiers = Tiers.objects.create(
+            code="CLI-CDE-DIRECTE", raison_sociale="Client Commande Directe Admin",
+            type_tiers=Tiers.TypeTiers.CLIENT,
+        )
+        self.adresse = Adresse.objects.create(
+            tiers=self.tiers, est_facturation=True, est_livraison=True,
+            adresse="1 rue", code_postal="75000", ville="Paris",
+        )
+        self.article = Article.objects.create(
+            reference="ART-CDE-DIRECTE", nature=Article.Nature.MATIERE_PREMIERE,
+            unite_cout=Article.UniteCout.PIECE, cout_unitaire=5,
+        )
+
+    def test_creation_sans_devis_via_le_formulaire_dadmin(self):
+        payload = {
+            "numero": "CDE-DIRECTE-01",
+            "devis": "",
+            "client": self.tiers.pk,
+            "reference_client": "PO-ADMIN-01",
+            "date_commande": "2026-01-01",
+            "statut": "",
+            "adresse_facturation": self.adresse.pk,
+            "adresse_livraison": self.adresse.pk,
+            "lignes-TOTAL_FORMS": "1",
+            "lignes-INITIAL_FORMS": "0",
+            "lignes-MIN_NUM_FORMS": "0",
+            "lignes-MAX_NUM_FORMS": "1000",
+            "lignes-0-id": "",
+            "lignes-0-article": self.article.pk,
+            "lignes-0-designation": "",
+            "lignes-0-quantite_commandee": "10",
+            "lignes-0-prix_vente_unitaire": "8",
+            "lignes-0-taux_tva": "",
+            "lignes-0-date_livraison_prevue": "",
+            "_save": "Enregistrer",
+        }
+        response = self.client.post("/admin/chiffrage/commande/add/", data=payload, follow=False)
+        self.assertEqual(response.status_code, 302, getattr(response, "context", None))
+
+        commande = Commande.objects.get(pk="CDE-DIRECTE-01")
+        self.assertIsNone(commande.devis)
+        self.assertEqual(commande.client, self.tiers)
+        self.assertEqual(commande.reference_client, "PO-ADMIN-01")
+        self.assertEqual(commande.lignes.get().quantite_commandee, 10)
 
 
 class ValeursDefautTiersViewTests(TestCase):
@@ -2474,7 +2740,7 @@ class CommandeLigneInlineAdminTests(TestCase):
             numero="DEV-CLIGNE", client=client_tiers, date_creation=datetime.date(2026, 1, 1),
         )
         self.commande = Commande.objects.create(
-            numero="CDE-CLIGNE", devis=devis, date_commande=datetime.date(2026, 1, 1),
+            numero="CDE-CLIGNE", devis=devis, client=devis.client, date_commande=datetime.date(2026, 1, 1),
             adresse_facturation=adresse, adresse_livraison=adresse,
         )
         self.ligne = CommandeLigne.objects.create(
@@ -2485,6 +2751,8 @@ class CommandeLigneInlineAdminTests(TestCase):
         payload = {
             "numero": self.commande.pk,
             "devis": self.commande.devis_id,
+            "client": self.commande.client_id,
+            "reference_client": self.commande.reference_client or "REF-TEST",
             "date_commande": "2026-01-01",
             "statut": "",
             "adresse_facturation": self.commande.adresse_facturation_id,
@@ -2529,7 +2797,7 @@ class ActionSynchroniserLignesAdminTests(TestCase):
         )
         DevisLigne.objects.create(devis=devis, article=article, quantite=7)
         self.commande = Commande.objects.create(
-            numero="CDE-SYNCADM", devis=devis, date_commande=datetime.date(2026, 1, 1),
+            numero="CDE-SYNCADM", devis=devis, client=devis.client, date_commande=datetime.date(2026, 1, 1),
             adresse_facturation=adresse, adresse_livraison=adresse,
         )
 
@@ -2565,7 +2833,7 @@ class SurchargesCommandeLigneTests(TestCase):
             numero="DEV-SURCH", client=client_tiers, date_creation=datetime.date(2026, 1, 1),
         )
         self.commande = Commande.objects.create(
-            numero="CDE-SURCH", devis=devis, date_commande=datetime.date(2026, 1, 1),
+            numero="CDE-SURCH", devis=devis, client=devis.client, date_commande=datetime.date(2026, 1, 1),
             adresse_facturation=adresse, adresse_livraison=adresse,
         )
         self.taux = TauxTVA.objects.create(nom="Taux Surch", taux=10)
@@ -2640,7 +2908,7 @@ class LancerLigneEnProductionTests(TestCase):
             numero="DEV-SOLO", client=client_tiers, date_creation=datetime.date(2026, 1, 1),
         )
         self.commande = Commande.objects.create(
-            numero="CDE-SOLO", devis=devis, date_commande=datetime.date(2026, 1, 1),
+            numero="CDE-SOLO", devis=devis, client=devis.client, date_commande=datetime.date(2026, 1, 1),
             adresse_facturation=adresse, adresse_livraison=adresse,
         )
 
@@ -2704,7 +2972,7 @@ class CommandeLigneAuditAdminTests(TestCase):
             numero="DEV-AUDIT", client=client_tiers, date_creation=datetime.date(2026, 1, 1),
         )
         self.commande = Commande.objects.create(
-            numero="CDE-AUDIT", devis=self.devis, date_commande=datetime.date(2026, 1, 1),
+            numero="CDE-AUDIT", devis=self.devis, client=self.devis.client, date_commande=datetime.date(2026, 1, 1),
             adresse_facturation=self.adresse, adresse_livraison=self.adresse,
         )
 
@@ -2712,6 +2980,8 @@ class CommandeLigneAuditAdminTests(TestCase):
         payload = {
             "numero": self.commande.pk,
             "devis": self.commande.devis_id,
+            "client": self.commande.client_id,
+            "reference_client": self.commande.reference_client or "REF-TEST",
             "date_commande": "2026-01-01",
             "statut": "",
             "adresse_facturation": self.commande.adresse_facturation_id,
@@ -2781,6 +3051,8 @@ class CommandeLigneAuditAdminTests(TestCase):
         payload = {
             "numero": self.commande.pk,
             "devis": self.commande.devis_id,
+            "client": self.commande.client_id,
+            "reference_client": self.commande.reference_client or "REF-TEST",
             "date_commande": "2026-01-01",
             "statut": "",
             "adresse_facturation": self.commande.adresse_facturation_id,

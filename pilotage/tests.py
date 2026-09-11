@@ -100,7 +100,7 @@ class TauxChargeTests(TestCase):
             numero="DEV-TC", client=client_tiers, date_creation=datetime.date(2026, 1, 1), statut="valide"
         )
         commande = Commande.objects.create(
-            numero="CDE-TC", devis=devis, date_commande=datetime.date(2026, 1, 1),
+            numero="CDE-TC", devis=devis, client=devis.client, date_commande=datetime.date(2026, 1, 1),
             adresse_facturation=adresse, adresse_livraison=adresse,
         )
         article = Article.objects.create(reference="PIECE-TC", nature=Article.Nature.FABRIQUE)

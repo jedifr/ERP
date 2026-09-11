@@ -27,7 +27,7 @@ class SousTraitanceTests(TestCase):
         )
         commande = Commande.objects.create(
             numero="CDE-ST",
-            devis=devis,
+            devis=devis, client=devis.client,
             date_commande=datetime.date(2026, 1, 1),
             adresse_facturation=adresse,
             adresse_livraison=adresse,

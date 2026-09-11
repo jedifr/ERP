@@ -1735,3 +1735,75 @@ ordre soit repris sur la commande une fois convertie.
 enregistrement — l'ordre persiste après rechargement ; conversion d'un
 devis validé en un clic, redirection vers la commande créée avec ses
 lignes dans le même ordre que le devis.
+
+## Fiche Commande : création directe, calcul en direct, TVA automatique
+
+Sept demandes liées, toutes centrées sur la fiche Commande — jusqu'ici
+uniquement modifiable après coup (créée par `lancer_en_production` depuis
+un devis), sans les conforts déjà en place côté Devis.
+
+- **Devis facultatif** (`Commande.devis` passe à `null=True, blank=True`) :
+  une commande peut désormais être créée directement depuis
+  `/admin/chiffrage/commande/add/`, sans passer par un devis. Migration en
+  3 temps (`AddField` du nouveau `client` sans contrainte -> report des
+  données depuis `devis.client` pour les commandes existantes ->
+  `AlterField` non-nullable) pour ne rien perdre.
+- **`Commande.client`** (nouveau, obligatoire) : jusqu'ici le client
+  n'était accessible que via `commande.devis.client` — impossible dès lors
+  que le devis devient facultatif. Pré-rempli depuis `devis.client` par
+  `lancer_en_production`/le "Convertir en commande" de la section
+  précédente, mais toujours modifiable ensuite (demandé explicitement).
+- **`Commande.reference_client`** (nouveau, obligatoire) : la référence
+  que le client donne à sa propre commande (numéro de bon de commande...).
+  Comme cette référence n'est jamais connue au moment de la conversion
+  d'un devis, `lancer_en_production` la laisse vide à la création — à
+  compléter ensuite à la main, la fiche l'exigera dès le premier
+  enregistrement.
+- **Adresses filtrées par client** : dès que "Client" est choisi (ajout
+  comme modification), "Adresse de facturation"/"Adresse de livraison" se
+  pré-remplissent avec les adresses principales de ce client — réutilise
+  l'endpoint déjà exposé côté Devis (`valeurs_defaut_tiers_view`), sans
+  jamais écraser un choix déjà fait (même principe que partout ailleurs
+  dans ce projet).
+- **Bouton "Créer une commande directement" supprimé** (et son détour par
+  un devis-support jamais montré au client, `?commande_directe=1`) : les
+  points ci-dessus le rendent inutile, la commande se crée maintenant
+  directement avec les mêmes conforts.
+- **Taux de TVA = Article × régime fiscal du client**, automatique mais
+  modifiable : nouveau `Article.taux_tva` (taux "normal", régime France)
+  et `chiffrage.moteur.resoudre_taux_tva(article, client)` — un client au
+  régime France applique le taux de l'article (ou le taux par défaut du
+  référentiel s'il n'en a pas), un client exonéré/intracommunautaire/hors
+  UE applique toujours 0 % (nouveau taux "Taux zéro" ajouté au
+  référentiel). Simplement suggéré : le `<select>` "Taux de TVA" n'est
+  rempli que s'il est encore vide, jamais écrasé une fois modifié à la
+  main.
+- **Calcul automatique du prix** (quantité / gamme / nomenclature), comme
+  pour le devis : nouvelle fonction `previsualiser_ligne_commande` et
+  endpoints dédiés (`recalculer_ligne_commande_view`,
+  `previsualiser_ligne_commande_view`,
+  `previsualiser_ligne_nouvelle_commande_view`), mêmes règles que
+  `previsualiser_ligne` mais toujours avec les marges par défaut de
+  l'article/poste — `CommandeLigne` n'a pas de champ de surcharge de marge
+  par ligne. Ne s'applique **que** sur une ligne sans devis d'origine
+  (`devis_ligne` vide) : une ligne héritée d'un devis reste une
+  *surcharge* au sens du modèle, jamais recalculée toute seule — changer
+  sa quantité ne touche que la quantité, pas le prix, jusqu'à ce qu'on le
+  retouche explicitement.
+- **Date de livraison copiée de la ligne précédente** : à l'ajout d'une
+  nouvelle ligne dans le tableau, sa date de livraison prévue reprend
+  celle de la dernière ligne déjà présente (signalé comme le cas le plus
+  courant — plusieurs lignes saisies à la suite pour la même livraison) —
+  seulement si la nouvelle ligne n'en a pas encore.
+
+`commande_admin_live.js` (nouveau) regroupe ces quatre derniers
+comportements ; `commande_admin_live.js`/`devis_admin_live.js` partagent
+le même formset "lignes" (`CommandeLigne.commande` et `DevisLigne.devis`
+ont toutes deux `related_name="lignes"`) mais s'exécutent sur des pages
+différentes, sans conflit.
+
+**Vérifié** : création d'une commande sans devis avec calcul de prix et
+suggestion de TVA en direct sur une ligne fraîchement ajoutée ; adresses
+pré-remplies dès le choix du client ; date de livraison copiée sur une
+deuxième ligne ; bouton "Créer une commande directement" bien absent du
+formulaire d'ajout d'un devis.

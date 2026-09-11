@@ -84,6 +84,7 @@ def lancer_en_production(devis):
         commande = Commande.objects.create(
             numero=_generer_numero_commande(devis),
             devis=devis,
+            client=devis.client,
             date_commande=timezone.now().date(),
             adresse_facturation=_adresse_principale(devis.client, "est_facturation", "facturation"),
             adresse_livraison=_adresse_principale(devis.client, "est_livraison", "livraison"),

@@ -354,7 +354,7 @@ class GenererEcritureFactureTests(TestCase):
         self.taux10 = TauxTVA.objects.create(nom="Taux intermédiaire compta test", taux=10)
         devis = Devis.objects.create(numero="DEV-COMPTA-TEST", client=client, date_creation=datetime.date(2026, 1, 1))
         self.commande = Commande.objects.create(
-            numero="CDE-COMPTA-TEST", devis=devis, date_commande=datetime.date(2026, 1, 1),
+            numero="CDE-COMPTA-TEST", devis=devis, client=devis.client, date_commande=datetime.date(2026, 1, 1),
             adresse_facturation=adresse, adresse_livraison=adresse,
         )
         self.facture = Facture.objects.create(
@@ -568,7 +568,7 @@ class FactureAdminGenererEcritureTests(TestCase):
         taux20 = TauxTVA.objects.create(nom="Taux normal compta admin", taux=20)
         devis = Devis.objects.create(numero="DEV-COMPTA-ADM", client=client_tiers, date_creation=datetime.date(2026, 1, 1))
         commande = Commande.objects.create(
-            numero="CDE-COMPTA-ADM", devis=devis, date_commande=datetime.date(2026, 1, 1),
+            numero="CDE-COMPTA-ADM", devis=devis, client=devis.client, date_commande=datetime.date(2026, 1, 1),
             adresse_facturation=adresse, adresse_livraison=adresse,
         )
         CommandeLigne.objects.create(

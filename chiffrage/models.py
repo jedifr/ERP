@@ -235,7 +235,29 @@ class DevisLigneOperation(models.Model):
 
 class Commande(models.Model):
     numero = models.CharField("numéro", max_length=50, primary_key=True)
-    devis = models.ForeignKey(Devis, verbose_name="devis", on_delete=models.PROTECT, related_name="commandes")
+    devis = models.ForeignKey(
+        Devis,
+        verbose_name="devis",
+        on_delete=models.PROTECT,
+        related_name="commandes",
+        null=True,
+        blank=True,
+        help_text="Optionnel : une commande peut être créée directement, sans devis d'origine.",
+    )
+    client = models.ForeignKey(
+        Tiers,
+        verbose_name="client",
+        on_delete=models.PROTECT,
+        related_name="commandes",
+        help_text="Pré-rempli depuis le devis s'il y en a un, modifiable ensuite.",
+    )
+    reference_client = models.CharField(
+        "réf. commande client",
+        max_length=100,
+        blank=False,
+        default="",
+        help_text="Référence donnée par le client à sa propre commande (numéro de bon de commande, etc.).",
+    )
     date_commande = models.DateField("date de commande")
     statut = models.CharField("statut", max_length=50, blank=True)
     adresse_facturation = models.ForeignKey(
@@ -267,6 +289,19 @@ class Commande(models.Model):
 
     def __str__(self):
         return self.numero
+
+    def clean(self):
+        super().clean()
+        if self.adresse_facturation_id and self.client_id:
+            if self.adresse_facturation.tiers_id != self.client_id:
+                raise ValidationError(
+                    {"adresse_facturation": "Cette adresse n'appartient pas au client sélectionné."}
+                )
+        if self.adresse_livraison_id and self.client_id:
+            if self.adresse_livraison.tiers_id != self.client_id:
+                raise ValidationError(
+                    {"adresse_livraison": "Cette adresse n'appartient pas au client sélectionné."}
+                )
 
 
 class LivraisonError(Exception):

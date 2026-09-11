@@ -4,7 +4,7 @@
 {% block content %}
 <div class="mb-6">
     <h1 class="text-xl font-semibold text-font-important-light dark:text-font-important-dark">
-        {% if commande_directe %}Constructeur de commande{% else %}Constructeur de devis{% endif %} — {{ devis.numero }}
+        Constructeur de devis — {{ devis.numero }}
     </h1>
     <p class="text-font-subtle-light dark:text-font-subtle-dark">
         Client : {{ devis.client }} · Statut : {{ devis.get_statut_display }}
@@ -12,34 +12,11 @@
             <span class="text-red-600 dark:text-red-500 font-medium">— devis non modifiable (pas en brouillon)</span>
         {% endif %}
     </p>
-    {% if commande_directe %}
-    <p class="text-font-subtle-light dark:text-font-subtle-dark text-sm mt-1">
-        Commande directe : ce devis ne sert que de support de calcul interne, il n'est jamais montré au
-        client. Composez les lignes ci-dessous puis validez pour créer la commande immédiatement.
-    </p>
-    {% endif %}
     <p class="mt-2 flex flex-wrap items-center gap-4">
-        <a href="{% url 'admin:chiffrage_devis_change' devis.pk %}{% if commande_directe %}?commande_directe=1{% endif %}"
+        <a href="{% url 'admin:chiffrage_devis_change' devis.pk %}"
            class="text-primary-600 dark:text-primary-500 underline">
             ← Retour à la fiche devis
         </a>
-        {% if commande_directe %}
-            {% if commande_existante %}
-                <a href="{% url 'admin:chiffrage_commande_change' commande_existante.pk %}"
-                   class="text-primary-600 dark:text-primary-500 underline font-medium">
-                    Voir la commande {{ commande_existante.numero }} ↗
-                </a>
-            {% elif devis.statut == "brouillon" %}
-                <form method="post" action="{% url 'admin:chiffrage_devis_valider_commande' devis.pk %}">
-                    {% csrf_token %}
-                    <button type="submit"
-                            {% if not lignes %}disabled title="Ajoutez au moins une ligne d'abord"{% endif %}
-                            class="bg-primary-600 hover:bg-primary-600/80 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-default px-4 py-2 font-medium text-sm">
-                        Valider et créer la commande →
-                    </button>
-                </form>
-            {% endif %}
-        {% endif %}
     </p>
 </div>
 

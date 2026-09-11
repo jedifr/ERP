@@ -76,6 +76,19 @@ class Article(models.Model):
         blank=True,
         help_text="Marge par défaut sur le coût matière (articles fabriqués)",
     )
+    taux_tva = models.ForeignKey(
+        "commercial.TauxTVA",
+        verbose_name="taux de TVA (régime France)",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="articles",
+        help_text=(
+            "Taux normal appliqué à un client soumis à la TVA française. Un client "
+            "exonéré, intracommunautaire ou hors UE applique automatiquement 0 %, quel "
+            "que soit ce taux (voir chiffrage.moteur.resoudre_taux_tva)."
+        ),
+    )
     gere_en_stock = models.BooleanField(
         "géré en stock",
         null=True,

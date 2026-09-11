@@ -13,11 +13,13 @@ from .builder_views import (
     contact_associe_adresse_view,
     convertir_en_commande_view,
     devis_builder_view,
+    previsualiser_ligne_commande_view,
     previsualiser_ligne_nouveau_devis_view,
+    previsualiser_ligne_nouvelle_commande_view,
     previsualiser_ligne_view,
+    recalculer_ligne_commande_view,
     recalculer_ligne_view,
     valeurs_defaut_tiers_view,
-    valider_commande_directe_view,
 )
 from .models import (
     Commande,
@@ -176,14 +178,6 @@ class DevisAdmin(CodificationInitialeMixin, ModelAdmin):
         # vers le constructeur au lieu de la liste/fiche par défaut.
         if "_construire" in request.POST:
             return HttpResponseRedirect(reverse("admin:chiffrage_devis_builder", args=[obj.pk]))
-        # Bouton "Créer une commande directement" : même principe, mais le
-        # constructeur s'ouvre en mode "commande directe" (?commande_directe=1)
-        # — ce devis ne sert que de support de calcul interne, jamais montré
-        # au client ; un bouton y permet de le valider et d'enchaîner
-        # aussitôt sur lancer_en_production (voir builder_views.valider_commande_directe_view).
-        if "_construire_commande" in request.POST:
-            url = reverse("admin:chiffrage_devis_builder", args=[obj.pk]) + "?commande_directe=1"
-            return HttpResponseRedirect(url)
         return super().response_add(request, obj, post_url_continue)
 
     def get_urls(self):
@@ -210,11 +204,6 @@ class DevisAdmin(CodificationInitialeMixin, ModelAdmin):
                 "<str:numero>/constructeur/",
                 self.admin_site.admin_view(devis_builder_view),
                 name="chiffrage_devis_builder",
-            ),
-            path(
-                "<str:numero>/valider-commande/",
-                self.admin_site.admin_view(valider_commande_directe_view),
-                name="chiffrage_devis_valider_commande",
             ),
             path(
                 "<str:numero>/convertir-commande/",
@@ -373,11 +362,35 @@ class CommandeLigneInline(TabularInline):
 class CommandeAdmin(CodificationInitialeMixin, ModelAdmin):
     codification_entite = RegleCodification.Entite.COMMANDE
 
-    list_display = ["numero", "devis", "date_commande", "statut", "devise"]
-    search_fields = ["numero", "devis__numero"]
-    autocomplete_fields = ["devis", "adresse_facturation", "adresse_livraison", "devise"]
+    list_display = ["numero", "client", "reference_client", "devis", "date_commande", "statut", "devise"]
+    search_fields = ["numero", "reference_client", "client__raison_sociale", "devis__numero"]
+    autocomplete_fields = ["devis", "client", "adresse_facturation", "adresse_livraison", "devise"]
     inlines = [CommandeLigneInline]
     actions = ["action_synchroniser_lignes"]
+
+    class Media:
+        js = ["chiffrage/commande_admin_live.js"]
+
+    def get_urls(self):
+        urls = [
+            # Chemin fixe : formulaire d'AJOUT (pas encore de numéro).
+            path(
+                "nouvelle-commande/previsualiser-ligne/",
+                self.admin_site.admin_view(previsualiser_ligne_nouvelle_commande_view),
+                name="chiffrage_commandeligne_previsualiser_nouvelle_commande",
+            ),
+            path(
+                "<str:numero>/lignes/<int:ligne_id>/recalculer/",
+                self.admin_site.admin_view(recalculer_ligne_commande_view),
+                name="chiffrage_commandeligne_recalculer",
+            ),
+            path(
+                "<str:numero>/lignes/previsualiser/",
+                self.admin_site.admin_view(previsualiser_ligne_commande_view),
+                name="chiffrage_commandeligne_previsualiser",
+            ),
+        ]
+        return urls + super().get_urls()
 
     @admin.action(description="Synchroniser les lignes depuis le devis")
     def action_synchroniser_lignes(self, request, queryset):

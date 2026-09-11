@@ -16,8 +16,8 @@ from commercial.models import Adresse, Contact, TauxTVA, Tiers
 from technique.models import Article, PosteTravail
 
 from .builder import ajouter_ligne_devis, creer_article_fabrique, erreur_lisible
-from .models import Commande, Devis, DevisLigne
-from .moteur import ChiffrageError, calculer_ligne, previsualiser_ligne
+from .models import Commande, CommandeLigne, Devis, DevisLigne
+from .moteur import ChiffrageError, calculer_ligne, previsualiser_ligne, previsualiser_ligne_commande, resoudre_taux_tva
 from .production import lancer_en_production
 
 
@@ -29,51 +29,17 @@ def devis_builder_view(request, numero):
     if request.method == "POST":
         return _traiter_ajout_ligne(request, devis)
 
-    commande_directe = request.GET.get("commande_directe") == "1"
     context = admin.site.each_context(request)
     context.update(
         {
-            "title": f"Constructeur de {'commande' if commande_directe else 'devis'} — {devis.numero}",
+            "title": f"Constructeur de devis — {devis.numero}",
             "devis": devis,
             "lignes": devis.lignes.select_related("article").prefetch_related("operations__poste"),
             "postes": PosteTravail.objects.all().order_by("nom"),
             "opts": Devis._meta,
-            "commande_directe": commande_directe,
-            "commande_existante": Commande.objects.filter(devis=devis).first(),
         }
     )
     return TemplateResponse(request, "chiffrage/devis_builder.html", context)
-
-
-@staff_member_required
-@require_http_methods(["POST"])
-def valider_commande_directe_view(request, numero):
-    """Bouton "Valider et créer la commande" du constructeur en mode
-    "commande directe" : valide le devis-support (jamais montré au client)
-    et enchaîne aussitôt sur lancer_en_production, comme le fait déjà
-    l'action d'admin "Lancer en production" — mais sans repasser par la
-    fiche devis ni la liste."""
-    devis = get_object_or_404(Devis, pk=numero)
-    url_constructeur = reverse("admin:chiffrage_devis_builder", args=[numero]) + "?commande_directe=1"
-
-    if not devis.lignes.exists():
-        messages.error(request, "Ajoutez au moins une ligne avant de créer la commande.")
-        return redirect(url_constructeur)
-    if devis.statut != Devis.Statut.BROUILLON:
-        messages.error(request, f"{devis} n'est plus en brouillon — impossible de le valider à nouveau.")
-        return redirect(url_constructeur)
-
-    try:
-        with transaction.atomic():
-            devis.statut = Devis.Statut.VALIDE
-            devis.save(update_fields=["statut"])
-            commande = lancer_en_production(devis)
-    except ChiffrageError as exc:
-        messages.error(request, str(exc))
-        return redirect(url_constructeur)
-
-    messages.success(request, f"Commande {commande.numero} créée.")
-    return redirect(reverse("admin:chiffrage_commande_change", args=[commande.pk]))
 
 
 @staff_member_required
@@ -475,3 +441,164 @@ def previsualiser_ligne_nouveau_devis_view(request):
         return JsonResponse({"detail": str(exc)}, status=400)
 
     return JsonResponse({"ok": True, **resultat})
+
+
+def _taux_tva_suggere_json(article, client):
+    """Suggestion de taux de TVA (article + régime fiscal du client),
+    jamais appliquée d'autorité : le JS ne la propose que si le champ
+    "Taux de TVA" de la ligne est encore vide (voir commande_admin_live.js),
+    exactement comme les autres valeurs par défaut de ce projet."""
+    if client is None:
+        return None
+    try:
+        taux = resoudre_taux_tva(article, client)
+    except ChiffrageError:
+        return None
+    return {"id": taux.pk, "texte": str(taux), "taux": taux.taux}
+
+
+@staff_member_required
+@require_http_methods(["POST"])
+def recalculer_ligne_commande_view(request, numero, ligne_id):
+    """Met à jour une ligne de commande (quantité / prix unitaire / taux de
+    TVA) — utilisé par le JS de la fiche Commande pour le recalcul en
+    temps réel. Le prix n'est recalculé automatiquement depuis la
+    quantité/gamme/nomenclature que pour une ligne SANS devis d'origine :
+    une ligne héritée d'un devis (devis_ligne renseigné) est une surcharge
+    (voir CommandeLigne), jamais réécrite toute seule — seule une valeur
+    explicitement envoyée par l'utilisateur y est appliquée."""
+    commande = get_object_or_404(Commande, pk=numero)
+    ligne = get_object_or_404(CommandeLigne, pk=ligne_id, commande=commande)
+
+    try:
+        payload = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"detail": "JSON invalide."}, status=400)
+
+    try:
+        quantite, fourni = _parse_float_optionnel(payload, "quantite_commandee", "Quantité invalide.")
+        if fourni:
+            ligne.quantite_commandee = quantite
+
+        prix, prix_fourni = _parse_float_optionnel(
+            payload, "prix_vente_unitaire", "Prix unitaire invalide."
+        )
+        if prix_fourni:
+            ligne.prix_vente_unitaire = prix
+
+        taux_tva, fourni = _parse_fk_optionnel(
+            payload, "taux_tva", TauxTVA.objects.all(), "Taux de TVA introuvable."
+        )
+        if fourni:
+            ligne.taux_tva = taux_tva
+    except _ValeurInvalide as exc:
+        return JsonResponse({"detail": exc.message}, status=400)
+
+    if ligne.devis_ligne_id is None and not prix_fourni and ligne.quantite_commandee:
+        try:
+            resultat = previsualiser_ligne_commande(
+                ligne.article, ligne.quantite_commandee, commande.date_commande
+            )
+        except ChiffrageError as exc:
+            return JsonResponse({"detail": str(exc)}, status=400)
+        ligne.prix_vente_unitaire = resultat["prix_vente_unitaire"]
+
+    try:
+        ligne.full_clean()
+    except Exception as exc:
+        return JsonResponse({"detail": erreur_lisible(exc)}, status=400)
+    ligne.save()
+
+    ligne.refresh_from_db()
+    return JsonResponse(
+        {
+            "ok": True,
+            "prix_vente_unitaire": ligne.prix_vente_unitaire,
+            "montant_ht": ligne.montant_ht,
+            "montant_ttc": ligne.montant_ttc,
+            "taux_tva_suggere": _taux_tva_suggere_json(ligne.article, commande.client),
+        }
+    )
+
+
+@staff_member_required
+@require_http_methods(["POST"])
+def previsualiser_ligne_commande_view(request, numero):
+    """Aperçu du prix d'une ligne de commande pas encore enregistrée (article
+    + quantité tout juste saisis dans une nouvelle ligne de l'inline, sur la
+    fiche d'une commande déjà enregistrée) — ne persiste rien. Pour une
+    commande elle-même pas encore enregistrée (formulaire d'ajout), voir
+    previsualiser_ligne_nouvelle_commande_view."""
+    commande = get_object_or_404(Commande, pk=numero)
+
+    try:
+        payload = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"detail": "JSON invalide."}, status=400)
+
+    reference = payload.get("article")
+    try:
+        article = Article.objects.get(pk=reference)
+    except Article.DoesNotExist:
+        return JsonResponse({"detail": f"Article « {reference} » introuvable."}, status=400)
+
+    try:
+        quantite = float(payload["quantite"])
+    except (KeyError, TypeError, ValueError):
+        return JsonResponse({"detail": "Quantité invalide."}, status=400)
+
+    try:
+        resultat = previsualiser_ligne_commande(article, quantite, commande.date_commande)
+    except ChiffrageError as exc:
+        return JsonResponse({"detail": str(exc)}, status=400)
+
+    return JsonResponse(
+        {"ok": True, "taux_tva_suggere": _taux_tva_suggere_json(article, commande.client), **resultat}
+    )
+
+
+@staff_member_required
+@require_http_methods(["POST"])
+def previsualiser_ligne_nouvelle_commande_view(request):
+    """Même aperçu que previsualiser_ligne_commande_view, mais pour une
+    commande PAS ENCORE enregistrée (formulaire d'ajout) : ni `numero`, ni
+    objet Commande en base — date de commande et client sont lus
+    directement dans le payload (valeurs actuelles du formulaire)."""
+    try:
+        payload = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"detail": "JSON invalide."}, status=400)
+
+    reference = payload.get("article")
+    try:
+        article = Article.objects.get(pk=reference)
+    except Article.DoesNotExist:
+        return JsonResponse({"detail": f"Article « {reference} » introuvable."}, status=400)
+
+    try:
+        quantite = float(payload["quantite"])
+    except (KeyError, TypeError, ValueError):
+        return JsonResponse({"detail": "Quantité invalide."}, status=400)
+
+    date_commande_str = payload.get("date_commande")
+    if date_commande_str:
+        try:
+            date_commande = forms.DateField().clean(date_commande_str.strip())
+        except ValidationError:
+            return JsonResponse({"detail": "Date de commande invalide."}, status=400)
+    else:
+        date_commande = datetime.date.today()
+
+    client = None
+    client_code = payload.get("client")
+    if client_code:
+        client = Tiers.objects.filter(pk=client_code).first()
+
+    try:
+        resultat = previsualiser_ligne_commande(article, quantite, date_commande)
+    except ChiffrageError as exc:
+        return JsonResponse({"detail": str(exc)}, status=400)
+
+    return JsonResponse(
+        {"ok": True, "taux_tva_suggere": _taux_tva_suggere_json(article, client), **resultat}
+    )
