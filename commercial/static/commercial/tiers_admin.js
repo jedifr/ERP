@@ -127,19 +127,30 @@
     function collecterLignesAdresseAssociable() {
         const lignes = [];
         document.querySelectorAll("tbody.form-group").forEach((row) => {
-            const typeSelect = row.querySelector('select[name^="adresses-"][name$="-type_adresse"]');
-            if (!typeSelect || ligneEstSupprimee(row)) {
+            // adresse (plutôt que l'ancien <select> type_adresse, remplacé
+            // par deux cases à cocher indépendantes Livraison/Facturation)
+            // identifie de façon stable une ligne du tableau Adresses.
+            const adresseInput = row.querySelector('input[name^="adresses-"][name$="-adresse"]');
+            if (!adresseInput || ligneEstSupprimee(row)) {
                 return;
             }
-            const index = indexDeLigneAdresse(typeSelect);
+            const index = indexDeLigneAdresse(adresseInput);
             if (index === null) {
                 return;
             }
             const libelleInput = row.querySelector('input[name$="-libelle"]');
             const villeInput = row.querySelector('input[name$="-ville"]');
             const nom = (libelleInput && libelleInput.value) || (villeInput && villeInput.value) || `Adresse ${index + 1}`;
-            const optionType = typeSelect.options[typeSelect.selectedIndex];
-            const typeLabel = optionType ? optionType.text : "";
+            const livraisonCoche = row.querySelector('input[name$="-est_livraison"]');
+            const facturationCoche = row.querySelector('input[name$="-est_facturation"]');
+            const types = [];
+            if (livraisonCoche && livraisonCoche.checked) {
+                types.push("Livraison");
+            }
+            if (facturationCoche && facturationCoche.checked) {
+                types.push("Facturation");
+            }
+            const typeLabel = types.join(" + ");
             lignes.push({ index, libelle: typeLabel ? `${typeLabel} — ${nom}` : nom });
         });
         return lignes;

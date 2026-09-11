@@ -207,16 +207,15 @@
     }
 
     function remplirLigneAdresseSiege(adresse) {
-        const typeSelect = document.querySelector('select[name="adresses-0-type_adresse"]');
+        const livraisonCoche = document.querySelector('input[name="adresses-0-est_livraison"]');
         const libelleInput = document.querySelector('input[name="adresses-0-libelle"]');
         const adresseInput = document.querySelector('input[name="adresses-0-adresse"]');
         const codePostalInput = document.querySelector('input[name="adresses-0-code_postal"]');
         const villeInput = document.querySelector('input[name="adresses-0-ville"]');
-        if (!typeSelect || !adresseInput) {
+        if (!adresseInput) {
             return;
         }
 
-        typeSelect.value = "livraison";
         if (libelleInput) {
             libelleInput.value = "Siège";
         }
@@ -231,7 +230,10 @@
         // tiers_admin.js reconstruit les options "Adresse associée" des
         // contacts sur ces mêmes événements (délégués au document) — cette
         // ligne vient d'apparaître hors de toute frappe utilisateur.
-        typeSelect.dispatchEvent(new Event("input", { bubbles: true }));
-        typeSelect.dispatchEvent(new Event("change", { bubbles: true }));
+        if (livraisonCoche) {
+            livraisonCoche.checked = true;
+            livraisonCoche.dispatchEvent(new Event("input", { bubbles: true }));
+            livraisonCoche.dispatchEvent(new Event("change", { bubbles: true }));
+        }
     }
 })();

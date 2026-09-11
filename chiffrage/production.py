@@ -8,7 +8,6 @@ coup, voir planning_sync.py).
 from django.db import transaction
 from django.utils import timezone
 
-from commercial.models import Adresse
 from technique.models import Article, PosteTravail
 
 from .models import Commande, CommandeLigne, CommandeLigneModification, Devis, OperationOF, OrdreFabrication
@@ -32,11 +31,11 @@ def enregistrer_modification_ligne(commande_ligne, champ, ancienne_valeur, nouve
     )
 
 
-def _adresse_principale(client, type_adresse):
-    adresse = client.adresses.filter(type_adresse=type_adresse, est_principale=True).first()
+def _adresse_principale(client, champ_type, libelle):
+    adresse = client.adresses.filter(**{champ_type: True}, est_principale=True).first()
     if adresse is None:
         raise ChiffrageError(
-            f"Aucune adresse de {type_adresse} principale pour le client « {client} ». "
+            f"Aucune adresse de {libelle} principale pour le client « {client} ». "
             "Ajoutez-en une avant de lancer en production."
         )
     return adresse
@@ -86,8 +85,8 @@ def lancer_en_production(devis):
             numero=_generer_numero_commande(devis),
             devis=devis,
             date_commande=timezone.now().date(),
-            adresse_facturation=_adresse_principale(devis.client, Adresse.TypeAdresse.FACTURATION),
-            adresse_livraison=_adresse_principale(devis.client, Adresse.TypeAdresse.LIVRAISON),
+            adresse_facturation=_adresse_principale(devis.client, "est_facturation", "facturation"),
+            adresse_livraison=_adresse_principale(devis.client, "est_livraison", "livraison"),
             devise=devis.client.devise,
         )
 

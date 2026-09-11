@@ -88,7 +88,7 @@ class DashboardCallbackTests(TestCase):
         self.client_tiers = Tiers.objects.create(code="CLI-DASH", raison_sociale="Client Dashboard")
         self.adresse = Adresse.objects.create(
             tiers=self.client_tiers,
-            type_adresse=Adresse.TypeAdresse.FACTURATION,
+            est_facturation=True,
             adresse="1 rue Test",
             code_postal="75000",
             ville="Paris",

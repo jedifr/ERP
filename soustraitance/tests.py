@@ -17,7 +17,7 @@ class SousTraitanceTests(TestCase):
         )
         adresse = Adresse.objects.create(
             tiers=client_tiers,
-            type_adresse=Adresse.TypeAdresse.FACTURATION,
+            est_facturation=True,
             adresse="1 rue",
             code_postal="75000",
             ville="Paris",

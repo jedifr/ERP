@@ -10,6 +10,28 @@
                 Constructeur de {% if request.GET.commande_directe %}commande{% else %}devis{% endif %}
             </a>
         </li>
+        {% with commande=original.commandes.first %}
+            {% if commande %}
+                <li>
+                    <a href="{% url 'admin:chiffrage_commande_change' commande.pk %}"
+                       class="cursor-pointer flex grow items-center gap-2 px-3 py-2 text-left whitespace-nowrap">
+                        <span class="material-symbols-outlined">shopping_cart</span>
+                        Voir la commande {{ commande }}
+                    </a>
+                </li>
+            {% elif original.statut == "valide" %}
+                <li>
+                    <form method="post" action="{% url 'admin:chiffrage_devis_convertir_commande' original.pk %}">
+                        {% csrf_token %}
+                        <button type="submit"
+                                class="cursor-pointer flex grow items-center gap-2 px-3 py-2 text-left whitespace-nowrap w-full">
+                            <span class="material-symbols-outlined">shopping_cart_checkout</span>
+                            Convertir en commande
+                        </button>
+                    </form>
+                </li>
+            {% endif %}
+        {% endwith %}
     {% endif %}
     {{ block.super }}
 {% endblock %}

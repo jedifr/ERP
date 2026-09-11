@@ -252,7 +252,7 @@ class LancerEnProductionTests(TestCase):
         )
         Adresse.objects.create(
             tiers=self.client_tiers,
-            type_adresse=Adresse.TypeAdresse.FACTURATION,
+            est_facturation=True,
             adresse="1 rue A",
             code_postal="75000",
             ville="Paris",
@@ -260,7 +260,7 @@ class LancerEnProductionTests(TestCase):
         )
         Adresse.objects.create(
             tiers=self.client_tiers,
-            type_adresse=Adresse.TypeAdresse.LIVRAISON,
+            est_livraison=True,
             adresse="1 rue A",
             code_postal="75000",
             ville="Paris",
@@ -355,9 +355,29 @@ class LancerEnProductionTests(TestCase):
             lancer_en_production(self.devis)
 
     def test_sans_adresse_principale_refuse(self):
-        Adresse.objects.filter(tiers=self.client_tiers, type_adresse=Adresse.TypeAdresse.LIVRAISON).delete()
+        Adresse.objects.filter(tiers=self.client_tiers, est_livraison=True).delete()
         with self.assertRaises(ChiffrageError):
             lancer_en_production(self.devis)
+
+    def test_ordre_des_lignes_de_commande_suit_celui_des_lignes_de_devis(self):
+        # Signalé par l'utilisateur : l'ordre des lignes doit être préservé
+        # à la conversion en commande — pas seulement l'ordre de création
+        # des DevisLigne (créées ici mp puis fabrique, ordre 0/1 inversé
+        # ensuite pour simuler un glisser-déposer sur la fiche devis).
+        ligne_fabrique = self.devis.lignes.get(article=self.article_fabrique)
+        ligne_mp = self.devis.lignes.get(article=self.article_mp)
+        ligne_fabrique.ordre = 1
+        ligne_fabrique.save(update_fields=["ordre"])
+        ligne_mp.ordre = 0
+        ligne_mp.save(update_fields=["ordre"])
+
+        self.assertEqual(list(self.devis.lignes.all()), [ligne_mp, ligne_fabrique])
+
+        commande = lancer_en_production(self.devis)
+        self.assertEqual(
+            [ligne.article for ligne in commande.lignes.all()],
+            [self.article_mp, self.article_fabrique],
+        )
 
     def test_ligne_de_commande_reliee_a_sa_ligne_de_devis(self):
         # Sert à afficher prix de vente unitaire / taux de TVA / montants sur
@@ -372,12 +392,104 @@ class LancerEnProductionTests(TestCase):
         self.assertEqual(ligne_commande.montant_ttc, ligne_devis_fabrique.prix_vente_ttc)
 
 
+class ReordonnerLignesDevisAdminTests(TestCase):
+    """DevisLigne.ordre (glisser-déposer côté JS, devisligne_reorder.js) :
+    régression Python de bout en bout sur le POST équivalent à un
+    réordonnancement — la ligne "extra" (jamais remplie) de l'inline ne
+    doit jamais recevoir d'ordre, sous peine d'être considérée comme
+    modifiée par Django et donc exiger d'être intégralement remplie
+    (article, quantité), ce qui faisait échouer tout l'enregistrement."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        self.user = User.objects.create_superuser("reorder-admin", "reorder@example.com", "pass1234")
+        self.client.force_login(self.user)
+
+        self.tiers = Tiers.objects.create(
+            code="CLI-REORDER", raison_sociale="Client Reorder", type_tiers=Tiers.TypeTiers.CLIENT
+        )
+        self.article = Article.objects.create(
+            reference="ART-REORDER",
+            nature=Article.Nature.MATIERE_PREMIERE,
+            unite_cout=Article.UniteCout.PIECE,
+            cout_unitaire=1.0,
+        )
+        self.devis = Devis.objects.create(
+            numero="DEV-REORDER",
+            client=self.tiers,
+            date_creation=datetime.date(2026, 1, 1),
+            statut=Devis.Statut.BROUILLON,
+        )
+        self.ligne_a = DevisLigne.objects.create(devis=self.devis, article=self.article, quantite=1, ordre=0)
+        self.ligne_b = DevisLigne.objects.create(devis=self.devis, article=self.article, quantite=2, ordre=1)
+
+    def _payload(self, ordre_a, ordre_b):
+        # Reproduit exactement ce qu'envoie le navigateur après un
+        # glisser-déposer (voir devisligne_reorder.js : renumeroter() ne
+        # touche jamais la ligne "extra" lignes-2-* tant qu'aucun article
+        # n'y est choisi — son champ ordre reste donc vide ici aussi).
+        return {
+            "numero": "DEV-REORDER",
+            "client": self.tiers.pk,
+            "date_creation": "01/01/2026",
+            "statut": Devis.Statut.BROUILLON,
+            "taux_marge_globale": "",
+            "adresse_facturation": "",
+            "adresse_livraison": "",
+            "contact": "",
+            "delai": "",
+            "lignes-TOTAL_FORMS": "3",
+            "lignes-INITIAL_FORMS": "2",
+            "lignes-MIN_NUM_FORMS": "0",
+            "lignes-MAX_NUM_FORMS": "1000",
+            "lignes-0-id": str(self.ligne_a.pk),
+            "lignes-0-devis": "DEV-REORDER",
+            "lignes-0-ordre": str(ordre_a),
+            "lignes-0-article": self.article.pk,
+            "lignes-0-quantite": "1.0",
+            "lignes-0-taux_marge_matiere_applique": "",
+            "lignes-0-prix_vente_unitaire_force": "",
+            "lignes-0-taux_tva": "",
+            "lignes-1-id": str(self.ligne_b.pk),
+            "lignes-1-devis": "DEV-REORDER",
+            "lignes-1-ordre": str(ordre_b),
+            "lignes-1-article": self.article.pk,
+            "lignes-1-quantite": "2.0",
+            "lignes-1-taux_marge_matiere_applique": "",
+            "lignes-1-prix_vente_unitaire_force": "",
+            "lignes-1-taux_tva": "",
+            # Ligne "extra" jamais touchée : ordre laissé vide, comme le
+            # ferait devisligne_reorder.js.
+            "lignes-2-ordre": "",
+            "lignes-2-quantite": "",
+            "lignes-2-taux_marge_matiere_applique": "",
+            "lignes-2-prix_vente_unitaire_force": "",
+            "lignes-2-taux_tva": "",
+            "_continue": "Enregistrer et continuer les modifications",
+        }
+
+    def test_inversion_de_deux_lignes_persiste_sans_toucher_la_ligne_vide(self):
+        payload = self._payload(ordre_a=1, ordre_b=0)
+        response = self.client.post(
+            f"/admin/chiffrage/devis/{self.devis.pk}/change/", data=payload, follow=False
+        )
+        self.assertEqual(response.status_code, 302, getattr(response, "context", None))
+
+        self.ligne_a.refresh_from_db()
+        self.ligne_b.refresh_from_db()
+        self.assertEqual(self.ligne_a.ordre, 1)
+        self.assertEqual(self.ligne_b.ordre, 0)
+        self.assertEqual(list(self.devis.lignes.all()), [self.ligne_b, self.ligne_a])
+
+
 class CommandeLigneSansDevisLigneTests(TestCase):
     def test_proprietes_a_none_sans_devis_ligne(self):
         client_tiers = Tiers.objects.create(code="CLI-SANSDL", raison_sociale="Sans DL")
         article = Article.objects.create(reference="ART-SANSDL", nature=Article.Nature.MATIERE_PREMIERE)
         adresse = Adresse.objects.create(
-            tiers=client_tiers, type_adresse=Adresse.TypeAdresse.FACTURATION,
+            tiers=client_tiers, est_facturation=True,
             adresse="1 rue A", code_postal="75000", ville="Paris",
         )
         devis = Devis.objects.create(
@@ -404,7 +516,7 @@ class SynchroniserLignesCommandeTests(TestCase):
     def setUp(self):
         self.client_tiers = Tiers.objects.create(code="CLI-SYNC", raison_sociale="Client Sync")
         self.adresse = Adresse.objects.create(
-            tiers=self.client_tiers, type_adresse=Adresse.TypeAdresse.FACTURATION,
+            tiers=self.client_tiers, est_facturation=True,
             adresse="1 rue A", code_postal="75000", ville="Paris",
         )
         self.article = Article.objects.create(reference="ART-SYNC", nature=Article.Nature.MATIERE_PREMIERE)
@@ -462,14 +574,14 @@ class LivraisonPartielleTests(TestCase):
         self.client_tiers = Tiers.objects.create(
             code="CLI-LIV", raison_sociale="Client Livraison", type_tiers=Tiers.TypeTiers.CLIENT
         )
-        for type_adresse in [Adresse.TypeAdresse.FACTURATION, Adresse.TypeAdresse.LIVRAISON]:
+        for champ_type in ["est_facturation", "est_livraison"]:
             Adresse.objects.create(
                 tiers=self.client_tiers,
-                type_adresse=type_adresse,
                 adresse="1 rue",
                 code_postal="75000",
                 ville="Paris",
                 est_principale=True,
+                **{champ_type: True},
             )
 
         self.article = Article.objects.create(
@@ -586,7 +698,7 @@ class PlanningSyncTests(TestCase):
         )
         adresse = Adresse.objects.create(
             tiers=tiers,
-            type_adresse=Adresse.TypeAdresse.FACTURATION,
+            est_facturation=True,
             adresse="1 rue",
             code_postal="75000",
             ville="Paris",
@@ -1235,14 +1347,14 @@ class DevisAdressesContactTests(TestCase):
         )
         self.adresse_facturation = Adresse.objects.create(
             tiers=self.client_tiers,
-            type_adresse=Adresse.TypeAdresse.FACTURATION,
+            est_facturation=True,
             adresse="1 rue de la Facture",
             code_postal="75000",
             ville="Paris",
         )
         self.adresse_livraison = Adresse.objects.create(
             tiers=self.client_tiers,
-            type_adresse=Adresse.TypeAdresse.LIVRAISON,
+            est_livraison=True,
             adresse="2 rue de la Livraison",
             code_postal="75000",
             ville="Paris",
@@ -1273,7 +1385,7 @@ class DevisAdressesContactTests(TestCase):
     def test_adresse_facturation_dun_autre_tiers_refusee(self):
         adresse_autre = Adresse.objects.create(
             tiers=self.autre_tiers,
-            type_adresse=Adresse.TypeAdresse.FACTURATION,
+            est_facturation=True,
             adresse="3 rue Ailleurs",
             code_postal="69000",
             ville="Lyon",
@@ -1878,7 +1990,7 @@ class CommandeDirecteTests(TestCase):
         )
         Adresse.objects.create(
             tiers=self.client_tiers,
-            type_adresse=Adresse.TypeAdresse.FACTURATION,
+            est_facturation=True,
             adresse="1 rue A",
             code_postal="75000",
             ville="Paris",
@@ -1886,7 +1998,7 @@ class CommandeDirecteTests(TestCase):
         )
         Adresse.objects.create(
             tiers=self.client_tiers,
-            type_adresse=Adresse.TypeAdresse.LIVRAISON,
+            est_livraison=True,
             adresse="1 rue A",
             code_postal="75000",
             ville="Paris",
@@ -1976,7 +2088,7 @@ class CommandeDirecteTests(TestCase):
         # Pas d'adresse de livraison principale -> lancer_en_production lève
         # ChiffrageError : le passage en "validé" doit être annulé (transaction
         # atomique), sinon le devis resterait verrouillé sans commande créée.
-        Adresse.objects.filter(tiers=self.client_tiers, type_adresse=Adresse.TypeAdresse.LIVRAISON).delete()
+        Adresse.objects.filter(tiers=self.client_tiers, est_livraison=True).delete()
         devis = self._devis_brouillon_avec_ligne(numero="DEV-CDIRECTE-ECHEC")
         response = self.client.post(f"/admin/chiffrage/devis/{devis.pk}/valider-commande/", follow=False)
         self.assertEqual(
@@ -1985,6 +2097,98 @@ class CommandeDirecteTests(TestCase):
         devis.refresh_from_db()
         self.assertEqual(devis.statut, Devis.Statut.BROUILLON)
         self.assertFalse(Commande.objects.filter(devis=devis).exists())
+
+
+class ConvertirEnCommandeViewTests(TestCase):
+    """Bouton "Convertir en commande" (object-tools de la fiche Devis) :
+    permet de convertir un devis validé en commande en un clic, sans passer
+    par l'action d'admin "Lancer en production" de la liste des devis —
+    signalé par l'utilisateur."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        self.user = User.objects.create_superuser("convertir-admin", "cv@example.com", "pass1234")
+        self.client.force_login(self.user)
+
+        self.client_tiers = Tiers.objects.create(
+            code="CLI-CONVERTIR", raison_sociale="Client Convertir", type_tiers=Tiers.TypeTiers.CLIENT
+        )
+        Adresse.objects.create(
+            tiers=self.client_tiers,
+            est_facturation=True,
+            adresse="1 rue A",
+            code_postal="75000",
+            ville="Paris",
+            est_principale=True,
+        )
+        Adresse.objects.create(
+            tiers=self.client_tiers,
+            est_livraison=True,
+            adresse="1 rue A",
+            code_postal="75000",
+            ville="Paris",
+            est_principale=True,
+        )
+        self.article = Article.objects.create(
+            reference="ART-CONVERTIR",
+            nature=Article.Nature.MATIERE_PREMIERE,
+            unite_cout=Article.UniteCout.PIECE,
+            cout_unitaire=2.0,
+        )
+
+    def _devis_valide_avec_ligne(self, numero="DEV-CONVERTIR-01"):
+        devis = Devis.objects.create(
+            numero=numero, client=self.client_tiers, date_creation=datetime.date(2026, 1, 1),
+            statut=Devis.Statut.VALIDE,
+        )
+        DevisLigne.objects.create(devis=devis, article=self.article, quantite=5)
+        return devis
+
+    def test_convertit_et_redirige_vers_la_commande(self):
+        devis = self._devis_valide_avec_ligne()
+        response = self.client.post(f"/admin/chiffrage/devis/{devis.pk}/convertir-commande/", follow=False)
+
+        commande = Commande.objects.get(devis=devis)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, f"/admin/chiffrage/commande/{commande.pk}/change/")
+        self.assertEqual(commande.lignes.get().quantite_commandee, 5)
+
+    def test_devis_non_valide_refuse_et_redirige_vers_le_devis(self):
+        devis = self._devis_valide_avec_ligne(numero="DEV-CONVERTIR-BROUILLON")
+        devis.statut = Devis.Statut.BROUILLON
+        devis.save()
+        response = self.client.post(f"/admin/chiffrage/devis/{devis.pk}/convertir-commande/", follow=False)
+        self.assertEqual(response.url, f"/admin/chiffrage/devis/{devis.pk}/change/")
+        self.assertFalse(Commande.objects.filter(devis=devis).exists())
+
+    def test_deja_converti_refuse(self):
+        devis = self._devis_valide_avec_ligne(numero="DEV-CONVERTIR-DEJA")
+        lancer_en_production(devis)
+        response = self.client.post(f"/admin/chiffrage/devis/{devis.pk}/convertir-commande/", follow=False)
+        self.assertEqual(response.url, f"/admin/chiffrage/devis/{devis.pk}/change/")
+        self.assertEqual(Commande.objects.filter(devis=devis).count(), 1)
+
+    def test_bouton_absent_sur_devis_brouillon(self):
+        devis = Devis.objects.create(
+            numero="DEV-CONVERTIR-VUE", client=self.client_tiers, date_creation=datetime.date(2026, 1, 1),
+            statut=Devis.Statut.BROUILLON,
+        )
+        response = self.client.get(f"/admin/chiffrage/devis/{devis.pk}/change/")
+        self.assertNotContains(response, "Convertir en commande")
+
+    def test_bouton_present_sur_devis_valide(self):
+        devis = self._devis_valide_avec_ligne(numero="DEV-CONVERTIR-VUE2")
+        response = self.client.get(f"/admin/chiffrage/devis/{devis.pk}/change/")
+        self.assertContains(response, "Convertir en commande")
+
+    def test_lien_vers_la_commande_existante_apres_conversion(self):
+        devis = self._devis_valide_avec_ligne(numero="DEV-CONVERTIR-VUE3")
+        commande = lancer_en_production(devis)
+        response = self.client.get(f"/admin/chiffrage/devis/{devis.pk}/change/")
+        self.assertContains(response, f"Voir la commande {commande}")
+        self.assertNotContains(response, "Convertir en commande")
 
 
 class ValeursDefautTiersViewTests(TestCase):
@@ -2018,7 +2222,7 @@ class ValeursDefautTiersViewTests(TestCase):
     def test_adresses_et_contact_principaux_renvoyes(self):
         facturation = Adresse.objects.create(
             tiers=self.tiers,
-            type_adresse=Adresse.TypeAdresse.FACTURATION,
+            est_facturation=True,
             adresse="1 rue de la Facture",
             code_postal="75000",
             ville="Paris",
@@ -2027,7 +2231,7 @@ class ValeursDefautTiersViewTests(TestCase):
         # Une adresse de livraison non principale ne doit jamais être renvoyée.
         Adresse.objects.create(
             tiers=self.tiers,
-            type_adresse=Adresse.TypeAdresse.LIVRAISON,
+            est_livraison=True,
             adresse="2 rue Secondaire",
             code_postal="75000",
             ville="Paris",
@@ -2035,7 +2239,7 @@ class ValeursDefautTiersViewTests(TestCase):
         )
         livraison = Adresse.objects.create(
             tiers=self.tiers,
-            type_adresse=Adresse.TypeAdresse.LIVRAISON,
+            est_livraison=True,
             adresse="3 rue de la Livraison",
             code_postal="75000",
             ville="Paris",
@@ -2066,7 +2270,7 @@ class ValeursDefautTiersViewTests(TestCase):
         # préféré au contact principal du tiers, s'il y en a un.
         livraison = Adresse.objects.create(
             tiers=self.tiers,
-            type_adresse=Adresse.TypeAdresse.LIVRAISON,
+            est_livraison=True,
             adresse="Site Nord",
             code_postal="59000",
             ville="Lille",
@@ -2084,7 +2288,7 @@ class ValeursDefautTiersViewTests(TestCase):
     def test_contact_replie_sur_le_principal_du_tiers_si_aucun_lie_a_l_adresse(self):
         Adresse.objects.create(
             tiers=self.tiers,
-            type_adresse=Adresse.TypeAdresse.LIVRAISON,
+            est_livraison=True,
             adresse="Site Sud",
             code_postal="13000",
             ville="Marseille",
@@ -2115,7 +2319,7 @@ class ContactAssocieAdresseViewTests(TestCase):
         )
         self.livraison = Adresse.objects.create(
             tiers=self.tiers,
-            type_adresse=Adresse.TypeAdresse.LIVRAISON,
+            est_livraison=True,
             adresse="Site Est",
             code_postal="67000",
             ville="Strasbourg",
@@ -2184,14 +2388,14 @@ class LivraisonAdminTests(TestCase):
         self.client_tiers = Tiers.objects.create(
             code="CLI-LIV-ADMIN", raison_sociale="Client Livraison Admin", type_tiers=Tiers.TypeTiers.CLIENT
         )
-        for type_adresse in [Adresse.TypeAdresse.FACTURATION, Adresse.TypeAdresse.LIVRAISON]:
+        for champ_type in ["est_facturation", "est_livraison"]:
             Adresse.objects.create(
                 tiers=self.client_tiers,
-                type_adresse=type_adresse,
                 adresse="1 rue",
                 code_postal="75000",
                 ville="Paris",
                 est_principale=True,
+                **{champ_type: True},
             )
         self.article = Article.objects.create(
             reference="VIS-LIV-ADMIN",
@@ -2262,7 +2466,7 @@ class CommandeLigneInlineAdminTests(TestCase):
 
         client_tiers = Tiers.objects.create(code="CLI-CLIGNE", raison_sociale="Client CLigne")
         adresse = Adresse.objects.create(
-            tiers=client_tiers, type_adresse=Adresse.TypeAdresse.FACTURATION,
+            tiers=client_tiers, est_facturation=True,
             adresse="1 rue A", code_postal="75000", ville="Paris",
         )
         article = Article.objects.create(reference="ART-CLIGNE", nature=Article.Nature.MATIERE_PREMIERE)
@@ -2316,7 +2520,7 @@ class ActionSynchroniserLignesAdminTests(TestCase):
 
         client_tiers = Tiers.objects.create(code="CLI-SYNCADM", raison_sociale="Client Sync Admin")
         adresse = Adresse.objects.create(
-            tiers=client_tiers, type_adresse=Adresse.TypeAdresse.FACTURATION,
+            tiers=client_tiers, est_facturation=True,
             adresse="1 rue A", code_postal="75000", ville="Paris",
         )
         article = Article.objects.create(reference="ART-SYNCADM", nature=Article.Nature.MATIERE_PREMIERE)
@@ -2353,7 +2557,7 @@ class SurchargesCommandeLigneTests(TestCase):
     def setUp(self):
         client_tiers = Tiers.objects.create(code="CLI-SURCH", raison_sociale="Client Surcharge")
         adresse = Adresse.objects.create(
-            tiers=client_tiers, type_adresse=Adresse.TypeAdresse.FACTURATION,
+            tiers=client_tiers, est_facturation=True,
             adresse="1 rue A", code_postal="75000", ville="Paris",
         )
         self.article = Article.objects.create(reference="ART-SURCH", nature=Article.Nature.MATIERE_PREMIERE)
@@ -2421,7 +2625,7 @@ class LancerLigneEnProductionTests(TestCase):
     def setUp(self):
         client_tiers = Tiers.objects.create(code="CLI-SOLO", raison_sociale="Client Solo")
         adresse = Adresse.objects.create(
-            tiers=client_tiers, type_adresse=Adresse.TypeAdresse.FACTURATION,
+            tiers=client_tiers, est_facturation=True,
             adresse="1 rue A", code_postal="75000", ville="Paris",
         )
         self.article_fabrique = Article.objects.create(reference="PIECE-SOLO", nature=Article.Nature.FABRIQUE)
@@ -2485,7 +2689,7 @@ class CommandeLigneAuditAdminTests(TestCase):
 
         client_tiers = Tiers.objects.create(code="CLI-AUDIT", raison_sociale="Client Audit")
         self.adresse = Adresse.objects.create(
-            tiers=client_tiers, type_adresse=Adresse.TypeAdresse.FACTURATION,
+            tiers=client_tiers, est_facturation=True,
             adresse="1 rue A", code_postal="75000", ville="Paris",
         )
         self.article = Article.objects.create(reference="ART-AUDIT", nature=Article.Nature.MATIERE_PREMIERE)

@@ -16,14 +16,14 @@ class MargeReelleTests(TestCase):
         client_tiers = Tiers.objects.create(
             code="CLI-PIL", raison_sociale="Client Pilotage", type_tiers=Tiers.TypeTiers.CLIENT
         )
-        for type_adresse in [Adresse.TypeAdresse.FACTURATION, Adresse.TypeAdresse.LIVRAISON]:
+        for champ_type in ["est_facturation", "est_livraison"]:
             Adresse.objects.create(
                 tiers=client_tiers,
-                type_adresse=type_adresse,
                 adresse="1 rue",
                 code_postal="75000",
                 ville="Paris",
                 est_principale=True,
+                **{champ_type: True},
             )
 
         composant = Article.objects.create(
@@ -93,7 +93,7 @@ class TauxChargeTests(TestCase):
             code="CLI-TC", raison_sociale="Client TC", type_tiers=Tiers.TypeTiers.CLIENT
         )
         adresse = Adresse.objects.create(
-            tiers=client_tiers, type_adresse=Adresse.TypeAdresse.FACTURATION,
+            tiers=client_tiers, est_facturation=True,
             adresse="1 rue", code_postal="75000", ville="Paris",
         )
         devis = Devis.objects.create(

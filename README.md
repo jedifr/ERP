@@ -1676,3 +1676,62 @@ l'enregistrement d'un tiers").
 `ContactAdmin.telephones_display` (colonne "Téléphones" de la liste des
 contacts) s'adaptent : un numéro absent affiche simplement le type
 ("Bureau") plutôt que "Bureau : " suivi de rien.
+
+## Adresse : livraison et facturation à la fois
+
+`Adresse.type_adresse` (un choix unique, Livraison OU Facturation) est
+remplacé par deux cases à cocher indépendantes, `est_livraison` et
+`est_facturation` — une même adresse peut donc être les deux en même
+temps (ex. un client dont le siège reçoit aussi bien les marchandises que
+les factures), plutôt que de devoir la dupliquer en deux lignes
+identiques. Migration `RenameField`-style écrite à la main (`AddField` ×2
+→ report des données existantes → `RemoveField`) pour ne perdre aucune
+donnée. Au moins une case doit être cochée (`Adresse.clean()`).
+
+Tout ce qui filtrait ou affichait par `type_adresse` est adapté :
+`Adresse.__str__`/nouvelle propriété `types_affiches` ("Livraison",
+"Facturation" ou "Livraison + Facturation"), unicité de l'adresse
+principale (désormais vérifiée indépendamment par type, une adresse
+cochée pour les deux devant être unique sur chacun des deux volets),
+application du régime fiscal (même priorité livraison puis repli
+facturation qu'avant), recherche de l'adresse principale par type
+(`chiffrage.production._adresse_principale`, `valeurs_defaut_tiers_view`),
+et le JS (`tiers_admin.js`, `entreprise_lookup.js`) qui construisait le
+libellé "Livraison — Nom" du sélecteur "Adresse associée" d'un contact.
+
+## Glisser-déposer des lignes de devis + conversion en commande en un clic
+
+Deux demandes liées : pouvoir réordonner les lignes d'un devis, et que cet
+ordre soit repris sur la commande une fois convertie.
+
+- **`DevisLigne.ordre`** (nouveau champ, entier) pilote désormais l'ordre
+  d'affichage (`Meta.ordering = ["devis", "ordre", "id"]`) — et, de fait,
+  l'ordre des `CommandeLigne` créées par `lancer_en_production` (qui
+  itère `devis.lignes.all()`, donc déjà trié).
+- **Glisser-déposer natif** (HTML5 `draggable`, pas de librairie externe) :
+  `chiffrage/static/chiffrage/devisligne_reorder.js`, une poignée "⠿"
+  ajoutée devant chaque ligne du tableau "Lignes de devis". Au dépôt,
+  renumérote le champ caché `ordre` de chaque ligne selon sa nouvelle
+  position DOM — jamais affiché ni saisi à la main, persisté au prochain
+  "Enregistrer" comme le reste du formulaire.
+  **Piège rencontré et corrigé** : la ligne "extra" toujours vide du
+  tableau (`DevisLigneInline.extra = 1`) ne doit *jamais* recevoir de
+  valeur d'ordre tant qu'aucun article n'y est choisi — sinon Django la
+  considère comme "modifiée" et exige qu'elle soit intégralement remplie
+  (article, quantité), bloquant tout l'enregistrement. Même classe de bug
+  que le correctif précédent sur les lignes de téléphone/adresse vides ;
+  couverte par un test de régression Python de bout en bout
+  (`ReordonnerLignesDevisAdminTests`) qui rejoue le POST équivalent.
+- **"Convertir en commande" en un clic** : la conversion existait déjà
+  comme action d'admin sur la liste des devis ("Lancer en production",
+  `lancer_en_production`) — désormais aussi accessible directement
+  depuis la fiche d'un devis validé (menu d'outils de la fiche, à côté de
+  "Constructeur de devis"), sans repasser par la liste. Nouvelle vue
+  `convertir_en_commande_view` (POST, même logique que l'action
+  existante) ; si une commande existe déjà pour ce devis, le bouton est
+  remplacé par un lien direct vers elle.
+
+**Vérifié** : glisser-déposer d'une ligne en tête de tableau puis
+enregistrement — l'ordre persiste après rechargement ; conversion d'un
+devis validé en un clic, redirection vers la commande créée avec ses
+lignes dans le même ordre que le devis.

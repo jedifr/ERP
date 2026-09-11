@@ -130,7 +130,7 @@ class CommandeLigneClientTests(TestCase):
         )
         self.client_tiers = Tiers.objects.create(code="CLI-APPRO", raison_sociale="Client Appro")
         self.adresse = Adresse.objects.create(
-            tiers=self.client_tiers, type_adresse=Adresse.TypeAdresse.FACTURATION,
+            tiers=self.client_tiers, est_facturation=True,
             adresse="1 rue A", code_postal="75000", ville="Paris",
         )
         self.article = Article.objects.create(reference="TOLE-APPRO", nature=Article.Nature.MATIERE_PREMIERE)

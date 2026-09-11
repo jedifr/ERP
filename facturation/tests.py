@@ -15,7 +15,7 @@ class FactureDateEcheanceTests(TestCase):
             code="CLI-ECHEANCE", raison_sociale="Client Échéance", type_tiers=Tiers.TypeTiers.CLIENT
         )
         adresse = Adresse.objects.create(
-            tiers=self.client_tiers, type_adresse=Adresse.TypeAdresse.FACTURATION,
+            tiers=self.client_tiers, est_facturation=True,
             adresse="1 rue", code_postal="75000", ville="Paris",
         )
         devis = Devis.objects.create(
@@ -64,7 +64,7 @@ class FactureMontantsCalculesTests(TestCase):
             code="CLI-MONTANTS-CALC", raison_sociale="Client Montants Calc", type_tiers=Tiers.TypeTiers.CLIENT
         )
         adresse = Adresse.objects.create(
-            tiers=self.client_tiers, type_adresse=Adresse.TypeAdresse.FACTURATION,
+            tiers=self.client_tiers, est_facturation=True,
             adresse="1 rue", code_postal="75000", ville="Paris",
         )
         devis = Devis.objects.create(
@@ -135,7 +135,7 @@ class MontantsCalculesCommandeViewTests(TestCase):
             code="CLI-MONTANTS-VIEW", raison_sociale="Client Montants Vue", type_tiers=Tiers.TypeTiers.CLIENT
         )
         adresse = Adresse.objects.create(
-            tiers=client_tiers, type_adresse=Adresse.TypeAdresse.FACTURATION,
+            tiers=client_tiers, est_facturation=True,
             adresse="1 rue", code_postal="75000", ville="Paris",
         )
         devis = Devis.objects.create(

@@ -26,7 +26,7 @@ class RegimeFiscalAutoDepuisPaysTests(TestCase):
 
     def _adresse_livraison_principale(self, pays):
         return Adresse.objects.create(
-            tiers=self.tiers, type_adresse=Adresse.TypeAdresse.LIVRAISON,
+            tiers=self.tiers, est_livraison=True,
             adresse="1 rue", code_postal="00000", ville="Ville", pays=pays, est_principale=True,
         )
 
@@ -54,7 +54,7 @@ class RegimeFiscalAutoDepuisPaysTests(TestCase):
 
     def test_repli_sur_adresse_facturation_si_pas_de_livraison(self):
         Adresse.objects.create(
-            tiers=self.tiers, type_adresse=Adresse.TypeAdresse.FACTURATION,
+            tiers=self.tiers, est_facturation=True,
             adresse="1 rue", code_postal="00000", ville="Ville", pays=self.allemagne, est_principale=True,
         )
         self.tiers.refresh_from_db()
@@ -122,7 +122,7 @@ class AdresseTests(TestCase):
     def test_une_seule_adresse_principale_par_type(self):
         Adresse.objects.create(
             tiers=self.client_tiers,
-            type_adresse=Adresse.TypeAdresse.FACTURATION,
+            est_facturation=True,
             adresse="1 rue A",
             code_postal="75000",
             ville="Paris",
@@ -130,7 +130,7 @@ class AdresseTests(TestCase):
         )
         deuxieme = Adresse(
             tiers=self.client_tiers,
-            type_adresse=Adresse.TypeAdresse.FACTURATION,
+            est_facturation=True,
             adresse="2 rue B",
             code_postal="75000",
             ville="Paris",
@@ -142,7 +142,7 @@ class AdresseTests(TestCase):
     def test_principale_facturation_et_livraison_coexistent(self):
         Adresse.objects.create(
             tiers=self.client_tiers,
-            type_adresse=Adresse.TypeAdresse.FACTURATION,
+            est_facturation=True,
             adresse="1 rue A",
             code_postal="75000",
             ville="Paris",
@@ -150,13 +150,63 @@ class AdresseTests(TestCase):
         )
         livraison = Adresse(
             tiers=self.client_tiers,
-            type_adresse=Adresse.TypeAdresse.LIVRAISON,
+            est_livraison=True,
             adresse="1 rue A",
             code_postal="75000",
             ville="Paris",
             est_principale=True,
         )
         livraison.full_clean()  # ne doit pas lever d'exception
+
+    def test_une_adresse_peut_etre_livraison_et_facturation_a_la_fois(self):
+        # Signalé par l'utilisateur : une même adresse doit pouvoir servir
+        # aux deux usages, pas seulement l'un ou l'autre.
+        adresse = Adresse(
+            tiers=self.client_tiers,
+            est_livraison=True,
+            est_facturation=True,
+            adresse="1 rue A",
+            code_postal="75000",
+            ville="Paris",
+        )
+        adresse.full_clean()  # ne doit pas lever d'exception
+        adresse.save()
+        self.assertEqual(adresse.types_affiches, "Livraison + Facturation")
+
+    def test_au_moins_un_type_requis(self):
+        adresse = Adresse(
+            tiers=self.client_tiers,
+            adresse="1 rue A",
+            code_postal="75000",
+            ville="Paris",
+        )
+        with self.assertRaises(ValidationError):
+            adresse.full_clean()
+
+    def test_principale_facturation_livraison_conflit_meme_si_lautre_est_cochee_aussi(self):
+        # Une adresse principale de facturation existe déjà (livraison=False) ;
+        # une deuxième adresse cochée facturation ET livraison entre quand
+        # même en conflit sur le volet facturation, même si son volet
+        # livraison, lui, ne pose pas de problème.
+        Adresse.objects.create(
+            tiers=self.client_tiers,
+            est_facturation=True,
+            adresse="1 rue A",
+            code_postal="75000",
+            ville="Paris",
+            est_principale=True,
+        )
+        les_deux = Adresse(
+            tiers=self.client_tiers,
+            est_livraison=True,
+            est_facturation=True,
+            adresse="2 rue B",
+            code_postal="75000",
+            ville="Paris",
+            est_principale=True,
+        )
+        with self.assertRaises(ValidationError):
+            les_deux.full_clean()
 
 
 class TauxTVATests(TestCase):
@@ -224,7 +274,7 @@ class TiersInlinesSansLigneVideTests(TestCase):
         )
         Adresse.objects.create(
             tiers=self.tiers,
-            type_adresse=Adresse.TypeAdresse.FACTURATION,
+            est_facturation=True,
             adresse="1 rue Test",
             code_postal="75000",
             ville="Paris",
@@ -251,14 +301,14 @@ class ContactAdresseAssocieeTests(TestCase):
         )
         self.livraison = Adresse.objects.create(
             tiers=self.tiers,
-            type_adresse=Adresse.TypeAdresse.LIVRAISON,
+            est_livraison=True,
             adresse="1 rue de la Livraison",
             code_postal="75000",
             ville="Paris",
         )
         self.facturation = Adresse.objects.create(
             tiers=self.tiers,
-            type_adresse=Adresse.TypeAdresse.FACTURATION,
+            est_facturation=True,
             adresse="2 rue de la Facture",
             code_postal="75000",
             ville="Paris",
@@ -301,18 +351,18 @@ class ResoudreReferenceAdresseTests(TestCase):
             code="CLI-RESOUDRE-ADR", raison_sociale="Client Résoudre Adresse", type_tiers=Tiers.TypeTiers.CLIENT
         )
         self.livraison = Adresse.objects.create(
-            tiers=self.tiers, type_adresse=Adresse.TypeAdresse.LIVRAISON,
+            tiers=self.tiers, est_livraison=True,
             adresse="1 rue", code_postal="75000", ville="Paris",
         )
         self.facturation = Adresse.objects.create(
-            tiers=self.tiers, type_adresse=Adresse.TypeAdresse.FACTURATION,
+            tiers=self.tiers, est_facturation=True,
             adresse="2 rue", code_postal="75000", ville="Paris",
         )
         autre_tiers = Tiers.objects.create(
             code="CLI-RESOUDRE-ADR-AUTRE", raison_sociale="Autre Client", type_tiers=Tiers.TypeTiers.CLIENT
         )
         self.livraison_autre_tiers = Adresse.objects.create(
-            tiers=autre_tiers, type_adresse=Adresse.TypeAdresse.LIVRAISON,
+            tiers=autre_tiers, est_livraison=True,
             adresse="3 rue", code_postal="75000", ville="Paris",
         )
 
@@ -353,7 +403,7 @@ class ResoudreReferenceAdresseTests(TestCase):
     def test_ligne_sans_pk_renvoie_none(self):
         # Ligne du formset jamais enregistrée (form vide, ex. un "extra"
         # laissé de côté) : son instance n'a pas de pk.
-        formset = self._formset([Adresse(tiers=self.tiers, type_adresse=Adresse.TypeAdresse.LIVRAISON)])
+        formset = self._formset([Adresse(tiers=self.tiers, est_livraison=True)])
         self.assertIsNone(self.resoudre("0", self.tiers, formset))
 
 
@@ -399,7 +449,7 @@ class ContactAdresseAssocieeBoutABoutTests(TestCase):
             "adresses-MIN_NUM_FORMS": "0",
             "adresses-MAX_NUM_FORMS": "1000",
             "adresses-0-id": "",
-            "adresses-0-type_adresse": Adresse.TypeAdresse.LIVRAISON,
+            "adresses-0-est_livraison": "on",
             "adresses-0-libelle": "Entrepôt E2E",
             "adresses-0-adresse": "1 rue E2E",
             "adresses-0-code_postal": "75000",
@@ -434,7 +484,7 @@ class ContactAdresseAssocieeBoutABoutTests(TestCase):
         self.assertEqual(contact.adresse_associee, adresse)
 
     def test_reference_vers_une_ligne_de_facturation_acceptee(self):
-        payload = self._payload(**{"adresses-0-type_adresse": Adresse.TypeAdresse.FACTURATION})
+        payload = self._payload(**{"adresses-0-est_livraison": "", "adresses-0-est_facturation": "on"})
         response = self.client.post("/admin/commercial/tiers/add/", data=payload, follow=False)
         self.assertEqual(response.status_code, 302, getattr(response, "context", None))
 
@@ -448,7 +498,7 @@ class ContactAdresseAssocieeBoutABoutTests(TestCase):
             code="CLI-ADR-LIV-E2E-EDIT", raison_sociale="Client Édition", type_tiers=Tiers.TypeTiers.CLIENT
         )
         adresse = Adresse.objects.create(
-            tiers=tiers, type_adresse=Adresse.TypeAdresse.LIVRAISON,
+            tiers=tiers, est_livraison=True,
             libelle="Entrepôt existant", adresse="9 rue", code_postal="69000", ville="Lyon",
         )
         payload = self._payload(
@@ -556,18 +606,18 @@ class ContactAdminAdresseAssocieeChoicesTests(TestCase):
         )
         self.contact = Contact.objects.create(tiers=self.tiers, nom="Site")
         self.livraison = Adresse.objects.create(
-            tiers=self.tiers, type_adresse=Adresse.TypeAdresse.LIVRAISON,
+            tiers=self.tiers, est_livraison=True,
             libelle="Entrepôt propre", adresse="1 rue", code_postal="75000", ville="Paris",
         )
         self.facturation = Adresse.objects.create(
-            tiers=self.tiers, type_adresse=Adresse.TypeAdresse.FACTURATION,
+            tiers=self.tiers, est_facturation=True,
             libelle="Siège propre", adresse="1 rue", code_postal="75000", ville="Paris",
         )
         autre_tiers = Tiers.objects.create(
             code="CLI-CONTACT-ADMIN-ADR-AUTRE", raison_sociale="Autre Client", type_tiers=Tiers.TypeTiers.CLIENT
         )
         self.livraison_autre_tiers = Adresse.objects.create(
-            tiers=autre_tiers, type_adresse=Adresse.TypeAdresse.LIVRAISON,
+            tiers=autre_tiers, est_livraison=True,
             libelle="Entrepôt autre tiers", adresse="2 rue", code_postal="75000", ville="Paris",
         )
 

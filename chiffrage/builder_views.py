@@ -76,6 +76,28 @@ def valider_commande_directe_view(request, numero):
     return redirect(reverse("admin:chiffrage_commande_change", args=[commande.pk]))
 
 
+@staff_member_required
+@require_http_methods(["POST"])
+def convertir_en_commande_view(request, numero):
+    """Bouton "Convertir en commande" (object-tools de la fiche Devis) :
+    appelle lancer_en_production directement depuis la fiche déjà ouverte,
+    en un clic — même logique que l'action d'admin "Lancer en production"
+    de la liste des devis, juste plus directe. L'ordre des lignes de la
+    commande créée reprend celui des lignes du devis (DevisLigne.ordre,
+    modifiable par glisser-déposer sur cette même fiche)."""
+    devis = get_object_or_404(Devis, pk=numero)
+    url_devis = reverse("admin:chiffrage_devis_change", args=[numero])
+
+    try:
+        commande = lancer_en_production(devis)
+    except ChiffrageError as exc:
+        messages.error(request, str(exc))
+        return redirect(url_devis)
+
+    messages.success(request, f"Commande {commande.numero} créée.")
+    return redirect(reverse("admin:chiffrage_commande_change", args=[commande.pk]))
+
+
 def _traiter_ajout_ligne(request, devis):
     try:
         payload = json.loads(request.body)
@@ -364,12 +386,8 @@ def valeurs_defaut_tiers_view(request, code):
     change l'adresse de livraison après coup, indépendamment du client."""
     tiers = get_object_or_404(Tiers, pk=code)
 
-    facturation = Adresse.objects.filter(
-        tiers=tiers, type_adresse=Adresse.TypeAdresse.FACTURATION, est_principale=True
-    ).first()
-    livraison = Adresse.objects.filter(
-        tiers=tiers, type_adresse=Adresse.TypeAdresse.LIVRAISON, est_principale=True
-    ).first()
+    facturation = Adresse.objects.filter(tiers=tiers, est_facturation=True, est_principale=True).first()
+    livraison = Adresse.objects.filter(tiers=tiers, est_livraison=True, est_principale=True).first()
 
     contact = None
     if livraison is not None:

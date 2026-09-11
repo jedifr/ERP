@@ -118,6 +118,11 @@ class DevisLigne(models.Model):
     article = models.ForeignKey(
         Article, verbose_name="article", on_delete=models.PROTECT, related_name="devis_lignes"
     )
+    ordre = models.PositiveIntegerField(
+        "ordre",
+        default=0,
+        help_text="Ordre d'affichage (glisser-déposer sur la fiche devis) — repris tel quel sur la commande.",
+    )
     quantite = models.FloatField("quantité")
     cout_matiere_calcule = models.FloatField(
         "coût matière calculé", null=True, blank=True, editable=False
@@ -154,7 +159,7 @@ class DevisLigne(models.Model):
     class Meta:
         verbose_name = "Ligne de devis"
         verbose_name_plural = "Lignes de devis"
-        ordering = ["devis", "id"]
+        ordering = ["devis", "ordre", "id"]
 
     def __str__(self):
         return f"{self.devis} — {self.article} × {self.quantite}"

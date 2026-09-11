@@ -171,16 +171,15 @@ class Tiers(models.Model):
 
 
 class Adresse(models.Model):
-    """Un tiers peut avoir plusieurs adresses de facturation et plusieurs adresses de livraison."""
-
-    class TypeAdresse(models.TextChoices):
-        FACTURATION = "facturation", "Facturation"
-        LIVRAISON = "livraison", "Livraison"
+    """Un tiers peut avoir plusieurs adresses de facturation et plusieurs
+    adresses de livraison — une même adresse peut d'ailleurs servir aux
+    deux à la fois (est_livraison et est_facturation ne s'excluent pas)."""
 
     tiers = models.ForeignKey(
         Tiers, verbose_name="tiers", on_delete=models.CASCADE, related_name="adresses"
     )
-    type_adresse = models.CharField("type d'adresse", max_length=20, choices=TypeAdresse.choices)
+    est_livraison = models.BooleanField("livraison", default=False)
+    est_facturation = models.BooleanField("facturation", default=False)
     libelle = models.CharField(
         "libellé", max_length=100, blank=True, help_text='Ex. "Siège", "Entrepôt Nord"'
     )
@@ -203,39 +202,55 @@ class Adresse(models.Model):
     class Meta:
         verbose_name = "Adresse"
         verbose_name_plural = "Adresses"
-        ordering = ["tiers", "type_adresse"]
+        ordering = ["tiers", "id"]
 
     def __str__(self):
-        return f"{self.tiers} — {self.get_type_adresse_display()} ({self.libelle or self.ville})"
+        return f"{self.tiers} — {self.types_affiches} ({self.libelle or self.ville})"
+
+    @property
+    def types_affiches(self):
+        types = []
+        if self.est_livraison:
+            types.append("Livraison")
+        if self.est_facturation:
+            types.append("Facturation")
+        return " + ".join(types) or "—"
+
+    types_affiches.fget.short_description = "Type(s) d'adresse"
 
     def clean(self):
         super().clean()
-        if self.est_principale and self.tiers_id and self.type_adresse:
-            qs = Adresse.objects.filter(
-                tiers_id=self.tiers_id, type_adresse=self.type_adresse, est_principale=True
+        if not self.est_livraison and not self.est_facturation:
+            raise ValidationError(
+                {"est_livraison": "Cochez au moins un type d'adresse (livraison et/ou facturation)."}
             )
-            if self.pk is not None:
-                qs = qs.exclude(pk=self.pk)
-            if qs.exists():
-                raise ValidationError(
-                    {
-                        "est_principale": (
-                            "Une adresse principale existe déjà pour ce tiers et ce type "
-                            "d'adresse. Décochez-la d'abord si vous voulez la remplacer."
-                        )
-                    }
-                )
+        if self.est_principale and self.tiers_id:
+            for champ, nom in (("est_livraison", "livraison"), ("est_facturation", "facturation")):
+                if not getattr(self, champ):
+                    continue
+                qs = Adresse.objects.filter(tiers_id=self.tiers_id, est_principale=True, **{champ: True})
+                if self.pk is not None:
+                    qs = qs.exclude(pk=self.pk)
+                if qs.exists():
+                    raise ValidationError(
+                        {
+                            "est_principale": (
+                                f"Une adresse principale de {nom} existe déjà pour ce tiers. "
+                                "Décochez-la d'abord si vous voulez la remplacer."
+                            )
+                        }
+                    )
 
     def save(self, *args, **kwargs):
         super().save(*args, **kwargs)
-        if self.est_principale and self.pays_id and self.type_adresse == self.TypeAdresse.LIVRAISON:
+        if self.est_principale and self.pays_id and self.est_livraison:
             self._appliquer_regime_fiscal_au_tiers()
         elif (
             self.est_principale
             and self.pays_id
-            and self.type_adresse == self.TypeAdresse.FACTURATION
+            and self.est_facturation
             and not self.tiers.adresses.filter(
-                type_adresse=self.TypeAdresse.LIVRAISON, est_principale=True, pays_id__isnull=False
+                est_livraison=True, est_principale=True, pays_id__isnull=False
             ).exists()
         ):
             # Repli sur l'adresse de facturation principale seulement si le
@@ -367,8 +382,8 @@ class Contact(models.Model):
                         )
                     }
                 )
-        # Les deux types d'adresse (Livraison, Facturation) sont acceptés ici
-        # — Adresse.TypeAdresse n'en compte de toute façon pas d'autre.
+        # Livraison, facturation, ou une adresse cochée pour les deux à la
+        # fois : tous conviennent ici, seule l'appartenance au tiers compte.
         if self.adresse_associee_id and self.tiers_id:
             if self.adresse_associee.tiers_id != self.tiers_id:
                 raise ValidationError(

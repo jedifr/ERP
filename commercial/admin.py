@@ -64,8 +64,8 @@ class ContactInlineForm(forms.ModelForm):
     réelle une fois que toutes les adresses ont effectivement été
     enregistrées. Les options du <select> sont construites en JS
     (tiers_admin.js) à partir des lignes du tableau Adresses affichées à
-    l'écran (livraison et facturation confondues — Adresse.TypeAdresse n'a
-    que ces deux valeurs), jamais interrogées en base."""
+    l'écran (livraison et/ou facturation, une même ligne pouvant être les
+    deux à la fois), jamais interrogées en base."""
 
     adresse_associee_ref = forms.CharField(
         label="Adresse associée",
@@ -212,9 +212,8 @@ class TiersAdmin(CodificationInitialeMixin, ModelAdmin):
         if adresse_form in adresse_formset.deleted_forms:
             return None
         candidate = adresse_form.instance
-        # N'importe quel type d'adresse convient (livraison ou facturation —
-        # Adresse.TypeAdresse n'en compte de toute façon pas d'autre) : seule
-        # l'appartenance au bon tiers compte.
+        # N'importe quel type d'adresse convient (livraison, facturation, ou
+        # les deux à la fois) : seule l'appartenance au bon tiers compte.
         if candidate.pk and candidate.tiers_id == tiers.pk:
             return candidate
         return None
@@ -222,8 +221,8 @@ class TiersAdmin(CodificationInitialeMixin, ModelAdmin):
 
 @admin.register(Adresse)
 class AdresseAdmin(ModelAdmin):
-    list_display = ["tiers", "type_adresse", "libelle", "ville", "pays", "est_principale"]
-    list_filter = ["type_adresse", "est_principale", "pays"]
+    list_display = ["tiers", "types_affiches", "libelle", "ville", "pays", "est_principale"]
+    list_filter = ["est_livraison", "est_facturation", "est_principale", "pays"]
     search_fields = ["tiers__code", "tiers__raison_sociale", "ville", "libelle"]
     autocomplete_fields = ["tiers", "pays"]
 
@@ -265,8 +264,8 @@ class ContactAdmin(ModelAdmin):
         if db_field.name == "adresse_associee":
             obj = getattr(self, "_obj", None)
             if obj is not None and obj.tiers_id:
-                # Livraison et facturation conviennent toutes les deux —
-                # Adresse.TypeAdresse n'en compte de toute façon pas d'autre.
+                # Livraison et facturation conviennent toutes les deux, y
+                # compris une adresse cochée pour les deux à la fois.
                 kwargs["queryset"] = Adresse.objects.filter(tiers_id=obj.tiers_id)
             else:
                 kwargs["queryset"] = Adresse.objects.none()

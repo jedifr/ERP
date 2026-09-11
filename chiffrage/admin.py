@@ -11,6 +11,7 @@ from commercial.models import TauxTVA
 
 from .builder_views import (
     contact_associe_adresse_view,
+    convertir_en_commande_view,
     devis_builder_view,
     previsualiser_ligne_nouveau_devis_view,
     previsualiser_ligne_view,
@@ -63,10 +64,21 @@ class DevisLigneForm(forms.ModelForm):
     taux_tva = TauxTVACompactChoiceField(
         queryset=TauxTVA.objects.all(), required=False, label="Taux de TVA"
     )
+    # Rempli en JS (devisligne_reorder.js) au glisser-déposer d'une ligne —
+    # jamais affiché ni saisi à la main. required=False + repli sur 0 dans
+    # clean_ordre() : un POST qui ne le fournit pas (JS désactivé, ou tout
+    # code déjà existant qui poste ce formulaire sans le connaître) reste
+    # accepté normalement, avec un ordre par défaut plutôt qu'une erreur
+    # "champ obligatoire" qui n'a pas lieu d'être pour un simple confort
+    # d'affichage.
+    ordre = forms.IntegerField(required=False, widget=forms.HiddenInput())
 
     class Meta:
         model = DevisLigne
         fields = "__all__"
+
+    def clean_ordre(self):
+        return self.cleaned_data.get("ordre") or 0
 
 
 class DevisLigneInline(TabularInline):
@@ -131,7 +143,7 @@ class DevisAdmin(CodificationInitialeMixin, ModelAdmin):
     actions = ["action_recalculer", "action_lancer_en_production"]
 
     class Media:
-        js = ["chiffrage/devis_admin_live.js"]
+        js = ["chiffrage/devis_admin_live.js", "chiffrage/devisligne_reorder.js"]
         css = {"all": ["chiffrage/devis_admin_live.css"]}
 
     def get_queryset(self, request):
@@ -203,6 +215,11 @@ class DevisAdmin(CodificationInitialeMixin, ModelAdmin):
                 "<str:numero>/valider-commande/",
                 self.admin_site.admin_view(valider_commande_directe_view),
                 name="chiffrage_devis_valider_commande",
+            ),
+            path(
+                "<str:numero>/convertir-commande/",
+                self.admin_site.admin_view(convertir_en_commande_view),
+                name="chiffrage_devis_convertir_commande",
             ),
             path(
                 "<str:numero>/lignes/<int:ligne_id>/recalculer/",

@@ -14,7 +14,7 @@ class TiersViewSet(viewsets.ModelViewSet):
 class AdresseViewSet(viewsets.ModelViewSet):
     queryset = Adresse.objects.select_related("tiers").all()
     serializer_class = AdresseSerializer
-    filterset_fields = ["tiers", "type_adresse", "est_principale"]
+    filterset_fields = ["tiers", "est_livraison", "est_facturation", "est_principale"]
 
 
 class ContactViewSet(viewsets.ModelViewSet):

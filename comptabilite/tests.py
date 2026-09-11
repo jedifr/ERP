@@ -346,7 +346,7 @@ class GenererEcritureFactureTests(TestCase):
             code="CLI-COMPTA-TEST", raison_sociale="Client Compta Test", type_tiers=Tiers.TypeTiers.CLIENT
         )
         adresse = Adresse.objects.create(
-            tiers=client, type_adresse=Adresse.TypeAdresse.FACTURATION,
+            tiers=client, est_facturation=True,
             adresse="1 rue", code_postal="75000", ville="Paris",
         )
         self.article = Article.objects.create(reference="ART-COMPTA-TEST", nature=Article.Nature.MATIERE_PREMIERE)
@@ -561,7 +561,7 @@ class FactureAdminGenererEcritureTests(TestCase):
             code="CLI-COMPTA-ADM", raison_sociale="Client Compta Admin", type_tiers=Tiers.TypeTiers.CLIENT
         )
         adresse = Adresse.objects.create(
-            tiers=client_tiers, type_adresse=Adresse.TypeAdresse.FACTURATION,
+            tiers=client_tiers, est_facturation=True,
             adresse="1 rue", code_postal="75000", ville="Paris",
         )
         article = Article.objects.create(reference="ART-COMPTA-ADM", nature=Article.Nature.MATIERE_PREMIERE)
