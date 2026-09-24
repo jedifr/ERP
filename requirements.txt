@@ -5,3 +5,5 @@ psycopg2-binary==2.9.12
 python-dotenv==1.2.3
 ezdxf==1.4.4
 shapely==2.1.2
+gunicorn==23.0.0
+whitenoise==6.9.0

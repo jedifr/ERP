@@ -16,9 +16,9 @@ Including another URLconf
 """
 
 from django.conf import settings
-from django.conf.urls.static import static
 from django.contrib import admin
-from django.urls import include, path
+from django.urls import include, path, re_path
+from django.views.static import serve as serve_static
 
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -27,5 +27,11 @@ urlpatterns = [
     path("api-auth/", include("rest_framework.urls")),
 ]
 
-if settings.DEBUG:
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+if settings.SERVE_MEDIA:
+    # `django.conf.urls.static.static()` refuse de servir les fichiers hors DEBUG (c'est
+    # voulu pour un vrai déploiement Internet) ; on appelle donc la vue directement, ce qui
+    # est un choix assumé pour cet ERP interne au réseau local (voir `SERVE_MEDIA` dans
+    # `config/settings.py`).
+    urlpatterns += [
+        re_path(r"^media/(?P<path>.*)$", serve_static, {"document_root": settings.MEDIA_ROOT}),
+    ]

@@ -53,6 +53,57 @@ python manage.py runserver
 python manage.py test
 ```
 
+## Déploiement sur un NAS Synology (Docker / Container Manager)
+
+Le dépôt fournit un `Dockerfile` (multi-étapes, robuste aux NAS ARM qui n'ont pas toujours de
+roue Python précompilée pour Shapely) et un `docker-compose.yml` (app + PostgreSQL, volumes
+persistants pour la base et les fichiers déposés).
+
+1. **Récupérer le projet sur le NAS**, par exemple via `git clone` en SSH (App Git Server
+   ou `git` installé via Entware/SynoCommunity), ou en copiant le dossier via File Station.
+2. **Créer le fichier d'environnement** : `cp .env.example .env`, puis éditer :
+   - `DJANGO_SECRET_KEY` : une vraie valeur aléatoire (ne jamais garder la valeur par défaut)
+   - `DJANGO_DEBUG=False`
+   - `DJANGO_ALLOWED_HOSTS` : l'IP LAN du NAS (et/ou son nom DSM), ex.
+     `192.168.1.50,mon-nas.local`
+   - `DJANGO_CSRF_TRUSTED_ORIGINS` : `http://192.168.1.50:8000` (même host que ci-dessus,
+     avec le schéma) — nécessaire pour que l'admin accepte les formulaires hors `localhost`
+   - `DB_PASSWORD` : un mot de passe PostgreSQL choisi (pas besoin de créer la base à la main,
+     le conteneur `db` s'en charge au premier démarrage)
+3. **Lancer via Container Manager** : DSM 7.2+ → *Container Manager* → *Projet* → *Créer* →
+   pointer sur le dossier du projet (qui contient `docker-compose.yml`) → DSM détecte le
+   compose et propose de builder + démarrer les deux services. En ligne de commande (SSH) :
+   ```bash
+   docker compose up -d --build
+   ```
+   Le premier démarrage construit l'image (peut prendre plusieurs minutes sur un NAS ARM s'il
+   doit compiler Shapely depuis les sources), applique les migrations automatiquement
+   (`docker-entrypoint.sh`), puis démarre Gunicorn sur le port `8000` (configurable via
+   `ERP_PORT` dans `.env`).
+4. **Créer un compte admin** :
+   ```bash
+   docker compose exec web python manage.py createsuperuser
+   ```
+
+**Tester depuis un PC :** une fois les conteneurs démarrés, l'ERP est joignable depuis
+n'importe quel appareil du **même réseau local** (ou via VPN si le NAS y est accessible à
+distance) à l'adresse `http://<ip-du-nas>:8000/admin/` — pas besoin d'être sur le NAS
+lui-même. Vérifier que :
+- le pare-feu DSM autorise le port choisi (Panneau de configuration → Sécurité → Pare-feu) ;
+- l'IP/nom d'hôte utilisé dans le navigateur figure bien dans `DJANGO_ALLOWED_HOSTS`.
+
+Cet ERP est pensé comme un outil interne au réseau de l'atelier (pas d'exposition Internet
+directe) : par simplicité, les fichiers déposés (DXF/DWG) sont servis directement par Django
+même hors `DEBUG` (voir `SERVE_MEDIA` dans `config/settings.py`), sans reverse proxy
+obligatoire. Le trafic reste donc en HTTP simple sur le LAN, sauf à ajouter soi-même un
+reverse proxy HTTPS (ex. via le proxy inversé intégré à DSM) devant le port `8000`.
+
+**Sauvegardes :** les données persistantes vivent dans deux volumes Docker nommés (`db_data`
+pour PostgreSQL, `media_data` pour les fichiers DXF/DWG) — à inclure dans la stratégie de
+sauvegarde du NAS (Hyper Backup peut sauvegarder les dossers de volumes Docker sous
+`/volume1/@docker/volumes/`), ou remplacer les volumes nommés par des montages liés vers un
+dossier partagé DSM si vous préférez les parcourir directement dans File Station.
+
 ## Phase 1 — Socle technique
 
 App `technique`. Modélise :

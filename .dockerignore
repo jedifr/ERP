@@ -1,0 +1,12 @@
+.git/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.sqlite3
+.env
+media/
+staticfiles/
+.pytest_cache/
+docs/
+decoupe/exemples/
