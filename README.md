@@ -7,7 +7,9 @@ Cahier des charges complet : [`docs/ERP_Specification_Complete_4_Phases.md`](doc
 
 - **Backend** : Django 5.2 + Django REST Framework
 - **Base de données** : PostgreSQL
-- **Admin** : interface d'administration Django (CRUD des référentiels)
+- **Admin** : interface d'administration Django habillée avec
+  [django-unfold](https://github.com/unfoldadmin/django-unfold) (thème,
+  navigation latérale par module, dashboard)
 - **API** : REST (DRF), destinée notamment à la synchronisation avec l'outil de
   planification d'atelier (fraisage/tournage) hébergé sur le NAS Synology
 
@@ -15,16 +17,41 @@ Cahier des charges complet : [`docs/ERP_Specification_Complete_4_Phases.md`](doc
 
 - [x] **Phase 1 — Socle technique** (`technique/`) : Matière, Article, Poste de
       travail, Tarif de poste, Nomenclature, Gamme
-- [ ] **Phase 2 — Chiffrage et planning** : devis, ordre de fabrication,
-      synchronisation avec le planning atelier
+- [x] **Phase 2 — Chiffrage et planning** (`chiffrage/`) : moteur de
+      chiffrage, devis, commande, ordre de fabrication, synchronisation avec
+      le planning atelier
   - [x] **Chiffrage découpe laser / jet d'eau** (`decoupe/`) : import DXF/DWG
         d'une pièce et imbrication dans une surface de tôle donnée
-- [ ] **Phase 3 — Commercial et stock** : tiers, adresses, stock, pont de
-      facturation vers Tiime
-- [ ] **Phase 4 — Achats et pilotage** : achats fournisseurs, sous-traitance,
-      indicateurs
+- [x] **Phase 3 — Commercial et stock** (`commercial/`, `stock/`,
+      `facturation/`) : contacts, emplacements, lots, mouvements de stock,
+      alertes de seuil, pont de facturation vers Tiime
+- [x] **Phase 4 — Achats et pilotage** (`achats/`, `soustraitance/`,
+      `pilotage/`) : commandes fournisseur et réceptions, envois/retours de
+      sous-traitance, marge réelle vs prévue, taux de charge des postes
 
-## Démarrage local
+Les 4 phases du cahier des charges sont posées. Reste, hors périmètre des 4
+phases : une interface plus soignée que l'admin Django (voir plus bas,
+décision volontairement reportée), la synchronisation retour du planning
+atelier (Planning → ERP), et les points listés dans « Points encore ouverts »
+du cahier des charges.
+
+## Tester sur le Synology NAS (Docker)
+
+Un `Dockerfile` + `docker-compose.yml` sont fournis pour tester l'ERP
+directement sur le NAS via Container Manager. Voir le guide détaillé :
+[`docs/DEPLOIEMENT_SYNOLOGY.md`](docs/DEPLOIEMENT_SYNOLOGY.md).
+
+Résumé express (en SSH sur le NAS, depuis le dossier du projet) :
+
+```bash
+cp .env.example .env   # ajuster DJANGO_SECRET_KEY, DJANGO_ALLOWED_HOSTS, DB_PASSWORD
+docker compose up -d --build
+docker compose exec web python manage.py createsuperuser
+```
+
+Puis ouvrir `http://<ip-du-nas>:8000/admin/`.
+
+## Démarrage local (sans Docker)
 
 ```bash
 python3 -m venv .venv
@@ -43,66 +70,19 @@ python manage.py runserver
 ```
 
 - Admin : http://127.0.0.1:8000/admin/
-- API Phase 1 : http://127.0.0.1:8000/api/v1/ (articles, matieres,
-  postes-travail, tarifs-poste, nomenclatures, gammes)
-- API découpe : http://127.0.0.1:8000/api/v1/ (pieces-decoupe, imbrications)
+- API : http://127.0.0.1:8000/api/v1/ (articles, matieres, postes-travail,
+  tarifs-poste, nomenclatures, gammes, pieces-decoupe, imbrications, tiers,
+  adresses, contacts, devis, devis-lignes, commandes, ordres-fabrication,
+  emplacements, lots, mouvements-stock, alertes-stock, factures,
+  commandes-fournisseur, receptions, envois-sous-traitance,
+  retours-sous-traitance, pilotage/marge-reelle/{numero_of}/,
+  pilotage/taux-charge/{poste}/...)
 
 ## Tests
 
 ```bash
 python manage.py test
 ```
-
-## Déploiement sur un NAS Synology (Docker / Container Manager)
-
-Le dépôt fournit un `Dockerfile` (multi-étapes, robuste aux NAS ARM qui n'ont pas toujours de
-roue Python précompilée pour Shapely) et un `docker-compose.yml` (app + PostgreSQL, volumes
-persistants pour la base et les fichiers déposés).
-
-1. **Récupérer le projet sur le NAS**, par exemple via `git clone` en SSH (App Git Server
-   ou `git` installé via Entware/SynoCommunity), ou en copiant le dossier via File Station.
-2. **Créer le fichier d'environnement** : `cp .env.example .env`, puis éditer :
-   - `DJANGO_SECRET_KEY` : une vraie valeur aléatoire (ne jamais garder la valeur par défaut)
-   - `DJANGO_DEBUG=False`
-   - `DJANGO_ALLOWED_HOSTS` : l'IP LAN du NAS (et/ou son nom DSM), ex.
-     `192.168.1.50,mon-nas.local`
-   - `DJANGO_CSRF_TRUSTED_ORIGINS` : `http://192.168.1.50:8000` (même host que ci-dessus,
-     avec le schéma) — nécessaire pour que l'admin accepte les formulaires hors `localhost`
-   - `DB_PASSWORD` : un mot de passe PostgreSQL choisi (pas besoin de créer la base à la main,
-     le conteneur `db` s'en charge au premier démarrage)
-3. **Lancer via Container Manager** : DSM 7.2+ → *Container Manager* → *Projet* → *Créer* →
-   pointer sur le dossier du projet (qui contient `docker-compose.yml`) → DSM détecte le
-   compose et propose de builder + démarrer les deux services. En ligne de commande (SSH) :
-   ```bash
-   docker compose up -d --build
-   ```
-   Le premier démarrage construit l'image (peut prendre plusieurs minutes sur un NAS ARM s'il
-   doit compiler Shapely depuis les sources), applique les migrations automatiquement
-   (`docker-entrypoint.sh`), puis démarre Gunicorn sur le port `8000` (configurable via
-   `ERP_PORT` dans `.env`).
-4. **Créer un compte admin** :
-   ```bash
-   docker compose exec web python manage.py createsuperuser
-   ```
-
-**Tester depuis un PC :** une fois les conteneurs démarrés, l'ERP est joignable depuis
-n'importe quel appareil du **même réseau local** (ou via VPN si le NAS y est accessible à
-distance) à l'adresse `http://<ip-du-nas>:8000/admin/` — pas besoin d'être sur le NAS
-lui-même. Vérifier que :
-- le pare-feu DSM autorise le port choisi (Panneau de configuration → Sécurité → Pare-feu) ;
-- l'IP/nom d'hôte utilisé dans le navigateur figure bien dans `DJANGO_ALLOWED_HOSTS`.
-
-Cet ERP est pensé comme un outil interne au réseau de l'atelier (pas d'exposition Internet
-directe) : par simplicité, les fichiers déposés (DXF/DWG) sont servis directement par Django
-même hors `DEBUG` (voir `SERVE_MEDIA` dans `config/settings.py`), sans reverse proxy
-obligatoire. Le trafic reste donc en HTTP simple sur le LAN, sauf à ajouter soi-même un
-reverse proxy HTTPS (ex. via le proxy inversé intégré à DSM) devant le port `8000`.
-
-**Sauvegardes :** les données persistantes vivent dans deux volumes Docker nommés (`db_data`
-pour PostgreSQL, `media_data` pour les fichiers DXF/DWG) — à inclure dans la stratégie de
-sauvegarde du NAS (Hyper Backup peut sauvegarder les dossers de volumes Docker sous
-`/volume1/@docker/volumes/`), ou remplacer les volumes nommés par des montages liés vers un
-dossier partagé DSM si vous préférez les parcourir directement dans File Station.
 
 ## Phase 1 — Socle technique
 
@@ -167,3 +147,1710 @@ Points ouverts, comme pour les chutes de tôle en phase 2 : l'imbrication par
 rectangle englobant est une approximation (pas de No-Fit-Polygon), et un
 fichier contenant plusieurs contours fermés disjoints ne retient que le plus
 grand comme silhouette de la pièce (avertissement sur les autres).
+
+## Phase 2 — Chiffrage et planning
+
+App `chiffrage`, plus un socle minimal de l'app `commercial` (Tiers, Adresse
+— nécessaire à `Devis.client` et `Commande.adresse_*`, complété en Phase 3).
+
+- **Moteur de chiffrage** (`chiffrage/moteur.py`) : calcule le coût matière
+  d'une ligne de devis (directement pour une matière première, via la
+  nomenclature pour un article fabriqué — toutes les formules `unite_cout`
+  du cahier des charges), le coût de chaque étape de gamme (tarif de poste
+  valide à la date du devis), et applique la hiérarchie des marges (globale
+  devis > défaut poste/article > éditée ligne à ligne). Déclenché par
+  l'action admin/API **« Recalculer le chiffrage »**.
+- **Lancer en production** (`chiffrage/production.py`) : transforme un devis
+  validé en `Commande` + un `OrdreFabrication` par ligne d'article fabriqué
+  (gamme et temps figés à cet instant), toujours créés localement même si le
+  planning atelier est indisponible.
+- **Synchronisation avec le planning atelier** (`chiffrage/planning_sync.py`) :
+  aucune API n'étant encore définie côté planning, ce module est le point
+  d'intégration unique à brancher plus tard (`PLANNING_API_URL`). En
+  attendant, les OF restent `statut_synchro=en_attente` sans jamais bloquer
+  leur création. Voir
+  [`docs/SYNCHRONISATION_PLANNING.md`](docs/SYNCHRONISATION_PLANNING.md)
+  pour la configuration et les tentatives automatiques.
+
+## Phase 3 — Commercial et stock
+
+- **commercial** (complété) : `Contact` s'ajoute à `Tiers`/`Adresse` posés en
+  Phase 2.
+- **stock** : `Emplacement`, `Lot`, `MouvementStock`, `AlerteStock`. Un
+  `MouvementStock` (entrée/sortie) met à jour la quantité de son `Lot` à la
+  création (jamais réappliqué sur une édition ultérieure — les mouvements
+  sont des écritures de journal, pas des enregistrements modifiables), puis
+  réévalue l'alerte de seuil de l'article (`Article.stock_mini`) : ouverture
+  automatique si le stock total (tous lots confondus) passe sous le seuil,
+  clôture automatique s'il repasse au-dessus — une seule alerte active à la
+  fois par article (contrainte base de données). Seuls les articles
+  `gere_en_stock=vrai` peuvent avoir des lots.
+- **facturation** : `Facture`, simple trace côté ERP liée à une `Commande`
+  (`chiffrage`) — la facture légale est créée manuellement dans Tiime, sa
+  référence renseignée ensuite ici (`mode_creation=manuel`). Passage à une
+  création automatique via API Tiime non implémenté (aucune API publique
+  documentée à ce jour, cf. cahier des charges).
+
+## Phase 4 — Achats et pilotage
+
+- **achats** : `CommandeFournisseur`, `LigneCommandeFournisseur`,
+  `Reception`, `ReceptionLigne`. Une ligne de commande liée à une
+  `AlerteStock` (`alerte_stock_origine`) la clôture automatiquement à sa
+  création. Une `ReceptionLigne` met à jour le cumul `quantite_recue` de sa
+  ligne de commande et génère un `MouvementStock` en entrée — sur le lot
+  unique de l'article (convention actuelle du module stock) : une erreur
+  explicite est levée s'il n'existe aucun lot, ou plusieurs (réception
+  automatique non applicable dans ce cas, à traiter manuellement).
+- **soustraitance** : `EnvoiSousTraitance`, `RetourSousTraitance` — distincts
+  du chiffrage (poste "Sous-Traitance" en mode forfaitaire, Phase 1). Un
+  retour alimente `quantite_bonne`/`quantite_rebut` sur l'`OperationOF`
+  correspondante (retours partiels cumulables) ; une fois la quantité
+  envoyée intégralement retournée, l'opération passe au statut `terminee`
+  et l'OF peut être considéré comme prêt pour l'étape suivante.
+- **pilotage** : aucune nouvelle table (cahier des charges) — fonctions de
+  service dans `pilotage/services.py`, exposées en lecture seule via l'API :
+  - `marge_reelle_ordre_fabrication(of)` — recalcule le coût réel à partir
+    des données remontées sur `OperationOF` (`temps_reel` pour les postes
+    horaires, coût figé au devis pour les postes forfaitaires dont le prix
+    ne varie pas), comparé à la marge prévue au devis (prix de vente resté
+    figé). `donnees_completes=False` tant que toutes les opérations
+    horaires n'ont pas remonté leur `temps_reel`.
+  - `taux_charge_poste(poste, date_debut, date_fin)` — temps réel cumulé
+    rapporté à la capacité disponible (`nombre_machines` × jours ouvrés ×
+    heures/jour/machine). Le cahier des charges ne précise pas la base de
+    calcul de la capacité (jours ouvrés, heures/jour) : approximation
+    lundi-vendredi à 7h/jour/machine, ajustable par appel de la fonction.
+
+## Interface — habillage de l'admin
+
+L'admin Django est thémé avec **django-unfold** (`config/settings.py`, clé
+`UNFOLD`) : navigation latérale groupée par module (Socle technique,
+Commercial, Chiffrage et production, Stock, Achats, Sous-traitance,
+Facturation), icônes, dashboard, recherche globale. Tous les `ModelAdmin` et
+`TabularInline` du projet utilisent `unfold.admin.ModelAdmin` /
+`unfold.admin.TabularInline` au lieu des classes Django standard — aucun
+changement de logique, uniquement la classe de base.
+
+Tous les libellés de champs portent un `verbose_name` explicite (français,
+avec accents).
+
+## Constructeur de devis (création à la volée)
+
+Depuis la fiche d'un devis en brouillon (admin), le bouton **"Constructeur
+de devis"** (en haut à droite) ouvre une page dédiée
+(`chiffrage/builder_views.py`, `chiffrage/templates/chiffrage/devis_builder.html`)
+permettant d'ajouter une ligne :
+
+- soit avec un **article existant** (recherche par référence) ;
+- soit avec un **nouvel article fabriqué**, créé à la volée avec sa
+  nomenclature (composants) et sa gamme (étapes), en une seule transaction
+  (`chiffrage/builder.py`, `creer_article_fabrique` — réutilise
+  `full_clean()` sur chaque objet, donc les mêmes règles métier que partout
+  ailleurs dans l'admin).
+
+Pour un composant matière première, la quantité consommée se saisit selon
+l'unité de coût de l'article :
+- **Pièce** : juste une quantité.
+- **Longueur** (profilé) : longueur (mm) — et si l'article a un poids
+  linéique, un champ **poids (kg)** apparaît, synchronisé dans les deux sens
+  instantanément (un seul inconnu, conversion sans ambiguïté).
+- **Surface**/**Poids** (tôle) : longueur × largeur restent la saisie de
+  référence (ce sont les dimensions réelles de découpe — une surface ou un
+  poids seuls ne suffisent pas à déterminer deux dimensions), avec surface
+  et poids **affichés en direct** à côté au fur et à mesure de la saisie.
+
+Le coût matière et le prix de vente de la ligne sont calculés
+**automatiquement dès l'ajout** (le constructeur appelle `calculer_devis()`
+juste après avoir créé la ligne — pas besoin de repasser par l'action admin
+"Recalculer le chiffrage"). Si le calcul échoue pour une autre ligne du
+devis (ex. donnée de référence manquante sur un autre article), la ligne est
+tout de même créée et un message d'avertissement explique ce qui bloque le
+calcul, sans empêcher l'ajout.
+
+## Conversion poids/surface/unité sur la fiche Article
+
+Sur la fiche d'un article matière première (admin), un champ d'aide
+apparaît sous "Coût unitaire" selon l'unité de coût choisie
+(`technique/static/technique/article_admin.js`) :
+- **Poids** → "Prix équivalent au m²" (calculé via épaisseur × densité)
+- **Surface** → "Prix équivalent au kg"
+- **Longueur** avec poids linéique renseigné → "Prix équivalent au mètre"
+
+Ce champ est bidirectionnel : le modifier met à jour `cout_unitaire` (le
+seul champ réellement enregistré) instantanément, sans recharger la page.
+
+## Recalcul en direct des lignes de devis
+
+Sur la fiche standard d'un devis (admin), modifier la **quantité** ou le
+**taux de marge matière appliqué** d'une ligne déjà enregistrée déclenche
+un recalcul automatique (délai de 400ms après la dernière frappe), sans
+recharger la page ni cliquer sur "Recalculer le chiffrage" :
+`chiffrage/static/chiffrage/devis_admin_live.js` envoie la nouvelle valeur à
+`POST /admin/chiffrage/devis/<numero>/lignes/<id>/recalculer/`
+(`chiffrage/builder_views.py`, `recalculer_ligne_view`), qui réutilise
+`calculer_devis()` — une seule implémentation du calcul, côté serveur,
+jamais dupliquée en JavaScript.
+
+Limite assumée : une ligne pas encore enregistrée (ajoutée mais devis non
+sauvegardé) n'a pas encore d'identifiant, donc pas de recalcul live tant
+qu'elle n'a pas été enregistrée une première fois (normalement, via
+"Enregistrer" ou le constructeur de devis).
+
+## Montant total HT (matière + opérations / temps machine)
+
+Le moteur de chiffrage calculait déjà le coût des opérations de gamme
+(temps machine, main d'œuvre — `DevisLigneOperation.cout_calcule`/
+`prix_vente`), mais rien n'additionnait ce montant au prix matière pour
+donner un total exploitable : chaque ligne n'affichait que son prix de
+vente matière.
+
+Trois niveaux de total sont maintenant disponibles, tous dérivés des mêmes
+données déjà stockées (aucune nouvelle table) :
+
+- `DevisLigne.prix_vente_operations` / `prix_vente_total` (matière +
+  opérations, pour une ligne) ;
+- `Devis.montant_matiere_ht` / `montant_operations_ht` / `montant_total_ht`
+  (mêmes montants, cumulés sur tout le devis).
+
+Ces totaux apparaissent :
+- sur la fiche Devis (admin), au-dessus des lignes, et se mettent à jour en
+  direct avec le recalcul live (quantité/taux de marge d'une ligne) ;
+- sur chaque ligne de l'inline Devis et sur la liste `DevisLigne` ;
+- dans la liste des devis (colonnes "Montant matière/opérations/total HT") ;
+- sur la page Constructeur de devis, avec un total en pied de tableau.
+
+Note technique : Unfold ne pose pas de classe `field-<nom>` sur les champs
+readonly de premier niveau d'un ModelAdmin (contrairement à ses tableaux
+inline) ; les trois totaux du haut de la fiche Devis sont donc rendus via
+des méthodes d'admin (`montant_*_ht_display`) qui les enveloppent dans un
+`<span id="...">` pour donner un point d'accroche stable au JS de recalcul
+en direct.
+
+## Dupliquer et modifier un article
+
+Sur la fiche d'un article existant (admin), le bouton **"Dupliquer et
+modifier"** (en haut à droite, à côté de "Historique") crée une copie de
+l'article — tous les champs sauf la référence, qui est générée
+automatiquement (`<référence>-COPIE`, puis `-COPIE-2`, `-COPIE-3`... si déjà
+prise) — et redirige directement vers la fiche de la copie pour édition.
+
+Pour un article **fabriqué**, sa nomenclature (composants) et sa gamme
+(étapes) sont dupliquées avec lui (`technique/services.py`,
+`dupliquer_article`) ; le stock (lots/mouvements) n'est jamais dupliqué, la
+copie en démarre à zéro. Toute la logique passe par `full_clean()` sur
+chaque objet créé, comme partout ailleurs dans l'admin.
+
+Implémentation : même schéma que le "Constructeur de devis" — une vue admin
+dédiée (`POST /admin/technique/article/<référence>/dupliquer/`) protégée
+par `staff_member_required`, et un override de template
+(`admin/technique/article/change_form.html`) ajoutant le bouton dans
+`object-tools-items`, visible uniquement sur un article déjà enregistré.
+
+## Codification paramétrable (préfixe + numéro)
+
+Nouvelle app `codification` : un modèle `RegleCodification` (menu
+**Paramétrage → Règles de codification**) définit, pour chaque entité
+concernée, un préfixe, un nombre de chiffres (largeur du numéro, complété
+par des zéros) et une réinitialisation (jamais, ou chaque année — l'année
+est alors insérée entre le préfixe et le numéro, ex. `FAC-2026-00001`).
+
+11 entités sont couvertes, avec des préfixes par défaut créés par des
+migrations de données (`codification/migrations/0002_seed_regles_par_defaut.py`
+et `0006_seed_regle_facture_fournisseur.py`) : Devis (`DEV-`), Commande
+(`CDE-`), Ordre de fabrication (`OF-`), Commande fournisseur (`CDEF-`),
+Réception (`REC-`), Facture (`FAC-`), Facture fournisseur (`FACF-`), Envoi
+sous-traitance (`ENVST-`), Retour sous-traitance (`RETST-`), Tiers
+(`TIERS-`) et Emplacement (`EMP-`). Volontairement exclus : Article,
+Matière, Poste de travail — ce sont des références techniques choisies à la
+main (ex. `TOLE-S235-3MM`), pas des numéros de séquence.
+
+Fonctionnement (`codification/services.py`) :
+- `generer_code()` **pré-remplit** le champ numéro/code du formulaire
+  d'ajout de l'entité (`codification/mixins.py`, `CodificationInitialeMixin`,
+  branché sur les 11 `ModelAdmin` concernés) — un simple aperçu du prochain
+  numéro (`compteur_actuel + 1`), qui ne modifie rien tant que rien n'est
+  enregistré : consulter le formulaire d'ajout plusieurs fois sans jamais
+  sauvegarder renvoie toujours le même code ;
+- il reste un champ texte normal, modifiable avant enregistrement ;
+- le compteur n'avance réellement qu'à l'enregistrement d'un nouvel objet
+  (`enregistrer_code_utilise()`, appelée par `CodificationInitialeMixin.
+  save_model()`), à partir du code effectivement utilisé — y compris si
+  l'utilisateur a remplacé la suggestion par un numéro plus élevé (le
+  compteur rattrape, pour éviter une collision au prochain aperçu) ; un code
+  qui ne correspond pas au format de la règle est ignoré, rien n'est
+  modifié. **Correctif** : la version initiale incrémentait le compteur dès
+  l'ouverture du formulaire d'ajout, y compris pour un formulaire ensuite
+  abandonné — un numéro pouvait être "sauté" à chaque visite non suivie
+  d'un enregistrement (signalé par l'utilisateur après l'avoir observé sur
+  la fiche Tiers) ;
+- si aucune règle n'est configurée pour une entité, le champ reste vide
+  comme avant (comportement additif, jamais bloquant).
+
+Pour reprendre une numérotation existante, ajuster `compteur_actuel`
+directement sur la règle (le prochain code utilisera `compteur + 1`).
+
+## Adresse de livraison, adresse de facturation et contact sur le devis
+
+En plus du client, un devis peut porter une **adresse de facturation**, une
+**adresse de livraison** et un **contact** (tous optionnels — comme le
+client est déjà là dès le brouillon, ces informations peuvent être
+complétées plus tard). Ces trois champs se comportent comme sur `Commande`
+(mêmes modèles `Adresse`/`Contact` de l'app `commercial`) : `Devis.clean()`
+vérifie que l'adresse ou le contact choisi appartient bien au client
+sélectionné, sinon la validation échoue avec un message explicite.
+
+## Calcul live dès l'ajout d'une ligne, prix unitaire forcé, libellés HT
+
+Trois compléments au chiffrage d'un devis :
+
+**Aperçu live sur une ligne pas encore enregistrée** — jusqu'ici, le
+recalcul en direct (voir plus haut) ne fonctionnait que sur une ligne déjà
+sauvegardée. Désormais, choisir un article et une quantité sur une ligne
+*neuve* de l'inline (la ligne vide par défaut, ou une ligne ajoutée via
+"Ajouter un objet Ligne de devis supplémentaire") déclenche aussi un calcul
+en direct — coût matière, prix de vente matière/opérations/total. Différence
+avec le recalcul d'une ligne existante : cet aperçu ne persiste rien en base
+(`POST .../lignes/previsualiser/`, `chiffrage/moteur.py::previsualiser_ligne`,
+qui réutilise exactement les mêmes règles que `calculer_devis`) et ne met
+donc pas à jour les totaux du devis, qui ne reflètent que les lignes
+réellement enregistrées.
+
+Point technique notable : une ligne ajoutée dynamiquement est un clone DOM
+(bouton "Ajouter..."), et Django déclenche l'évènement `formset:added` sur
+la ligne insérée pour permettre de la câbler en JS — mais dans le rendu
+Unfold, cet évènement est émis sur le `<tr>` interne, pas sur le `<tbody
+class="form-group">` qui l'englobe (celui que cible le reste du script) :
+`devis_admin_live.js` remonte donc au `<tbody>` ancêtre via `closest()`. Un
+second écueil : le clonage DOM copie les attributs (dont un éventuel
+`data-*` marqueur "déjà câblée") mais jamais les écouteurs JS attachés en
+`addEventListener` — poser ce marqueur sur le gabarit caché utilisé pour le
+clonage aurait donc fait que chaque ligne ajoutée dynamiquement se retrouve
+marquée "câblée" sans qu'aucun écouteur n'y soit réellement attaché ; ce
+gabarit (`name` contenant `__prefix__`) est donc explicitement exclu du
+câblage.
+
+Erreur de calcul (ex. article sans coût unitaire renseigné) : le message
+d'erreur du serveur s'affiche directement dans la ligne, en rouge, à la
+place des "-" (colonne "Prix de vente total", avec le détail complet en
+infobulle). Avant ce correctif, une erreur de calcul restait invisible
+(uniquement loguée dans la console du navigateur) — la ligne affichait des
+"-" sans aucune explication, ce qui pouvait laisser croire que le calcul
+en direct ne fonctionnait pas du tout.
+
+Deux correctifs supplémentaires sur ce même calcul en direct, trouvés en
+creusant un signalement "ça ne calcule toujours pas" sur des lignes déjà
+enregistrées et déjà remplies :
+
+- **Calcul déclenché aussi au chargement de la page**, pas seulement sur
+  modification. Une ligne déjà enregistrée a par définition déjà un
+  article et une quantité ; sans un premier calcul automatique, elle
+  affichait des "-" jusqu'à ce que quelqu'un retouche un champ — ce qui,
+  vu de l'utilisateur, ressemble exactement à "le calcul ne marche pas".
+  `wireRowExistante`/`wireRowNouvelle` appellent maintenant la fonction de
+  calcul une première fois immédiatement après le câblage de la ligne (en
+  plus de l'appeler à chaque modification).
+- **Une ligne à problème ne bloque plus les autres.** `calculer_devis()`
+  s'arrête à la *première* ligne en erreur (comportement volontairement
+  conservé pour l'action admin "Recalculer le chiffrage", en bloc) — mais
+  `recalculer_ligne_view` l'appelait quand même pour recalculer une seule
+  ligne, si bien qu'une ligne à problème empêchait le calcul en direct de
+  **toutes** les autres lignes du même devis, y compris parfaitement
+  valides. Nouvelle fonction `chiffrage/moteur.py::calculer_ligne(devis,
+  ligne)` qui calcule une seule ligne en isolation ; `recalculer_ligne_view`
+  l'utilise à la place de `calculer_devis()`.
+
+Combinés, ces deux bugs expliquaient un signalement où deux lignes
+affichaient toutes les deux des "-" au chargement de la page, alors qu'une
+seule des deux avait réellement un problème (article sans coût unitaire) —
+le calcul ne s'était jamais déclenché pour aucune des deux, et même en le
+déclenchant, la ligne valide aurait échoué à cause de l'autre.
+
+**Prix de vente unitaire forcé** — `DevisLigne.prix_vente_unitaire_force`
+(optionnel) permet de fixer directement le prix de vente matière d'une
+ligne (`= quantité × ce prix`), en remplacement du calcul automatique
+(coût matière × marge). Le coût matière calculé reste affiché à titre
+informatif. Pris en compte par `calculer_devis`, le recalcul en direct et
+l'aperçu d'une ligne neuve.
+
+**Libellés "(HT)"** — les champs de prix de vente (ligne, opérations,
+total, et le nouveau prix forcé) précisent maintenant "(HT)" dans leur
+libellé, sur la fiche Devis comme sur la page Constructeur. Les montants
+"Montant matière/opérations/total HT" du haut de la fiche Devis l'indiquaient
+déjà.
+
+## En-têtes de colonnes sur 2 lignes (fiche Devis)
+
+Le tableau des lignes de devis (admin) partait en scroll horizontal : Unfold
+force `white-space: nowrap` sur les en-têtes de colonnes, et plusieurs
+libellés sont volontairement descriptifs ("Prix de vente unitaire forcé
+(HT)"...). `chiffrage/static/chiffrage/devis_admin_live.css` (chargé par
+`DevisAdmin.Media.css`) autorise le retour à la ligne et plafonne la largeur
+des colonnes (`#lignes-data th { white-space: normal; max-width: 130px; }`)
+pour que les en-têtes tiennent sur 2 lignes plutôt que d'élargir le tableau.
+
+## Taux de TVA par ligne et prix TTC
+
+Référentiel `commercial.TauxTVA` (menu **Commercial → Taux de TVA**) : nom,
+taux (%), et un indicateur "taux par défaut" (un seul à la fois — même
+validation que "adresse principale" sur `Adresse`). Pré-rempli par une
+migration de données avec les taux français courants (normal 20 % par
+défaut, intermédiaire 10 %, réduit 5,5 %, particulier 2,1 %) ; librement
+modifiable ou complétable dans l'admin.
+
+Chaque `DevisLigne` a son propre `taux_tva` (optionnel), pré-rempli
+automatiquement avec le taux par défaut du référentiel
+(`default=_taux_tva_par_defaut`, une fonction évaluée à la création de
+l'instance — donc aussi bien sur une nouvelle ligne de l'inline que sur une
+ligne créée par le Constructeur). Un `prix_vente_ttc` (propriété, comme
+`prix_vente_total`) applique ce taux au prix de vente total HT de la ligne ;
+`Devis.montant_total_ttc` additionne le TTC de chaque ligne — donc correct
+même avec des taux différents d'une ligne à l'autre.
+
+Le taux de TVA et le prix TTC suivent le calcul en temps réel déjà en place
+(ligne existante comme ligne neuve) et s'affichent aussi sur la page
+Constructeur.
+
+## Calcul live sur le formulaire d'AJOUT d'un devis
+
+Troisième cause, plus fondamentale, du même signalement "le calcul en
+direct ne marche pas" : sur le formulaire d'**ajout** d'un nouveau devis
+(`/admin/chiffrage/devis/add/`), le calcul en direct ne se déclenchait tout
+simplement jamais, quoi qu'on saisisse dans les lignes.
+
+En cause : `devis_admin_live.js` déduit le numéro du devis depuis l'URL
+(`.../devis/<numéro>/change/`) pour construire les appels de recalcul/
+aperçu — mais tant que le devis n'a pas été enregistré une première fois,
+l'URL est `.../devis/add/` : il n'y a pas de numéro à en extraire (même si
+le champ "Numéro" affiche déjà un code proposé par la codification
+automatique — ce n'est qu'une valeur de formulaire, pas encore un objet
+Devis en base). `init()` détectait cette absence de numéro et abandonnait
+immédiatement, sans câbler aucune ligne.
+
+Comme les endpoints existants (`.../lignes/previsualiser/`,
+`.../lignes/<id>/recalculer/`) exigent tous les deux un Devis déjà en base
+(ne serait-ce que pour construire leur URL), il fallait un chemin
+spécifique pour ce cas : `POST /admin/chiffrage/devis/nouveau-devis/previsualiser-ligne/`
+(`previsualiser_ligne_nouveau_devis_view`) ne dépend d'aucun numéro ni
+d'aucun objet Devis en base. `previsualiser_ligne()` n'a besoin de l'objet
+`devis` que pour lire deux attributs simples (`date_creation`,
+`taux_marge_globale`) — jamais une requête qui exigerait qu'il soit
+persisté — donc un `Devis(...)` construit en mémoire, jamais enregistré,
+avec les valeurs actuelles du formulaire (lues en direct par le JS au
+moment du calcul) suffit comme contexte.
+
+Avec ce correctif, remplir article + quantité sur une ligne du formulaire
+d'ajout calcule désormais le prix instantanément, avant même d'enregistrer
+le devis — exactement le scénario initialement demandé.
+
+## Correctif : date de création au format français rejetée par le calcul live
+
+Régression introduite par la fonctionnalité précédente : sur le formulaire
+d'ajout d'un devis, le calcul en direct échouait avec le message « Date de
+création invalide. » dès que le champ "Date de création" contenait une
+valeur — ce qui est pourtant systématiquement le cas (le widget de date de
+l'admin le pré-remplit avec la date du jour).
+
+En cause : `previsualiser_ligne_nouveau_devis_view` lisait cette date avec
+`datetime.date.fromisoformat(...)`, qui n'accepte que le format ISO strict
+`AAAA-MM-JJ`. Or le projet est configuré en `LANGUAGE_CODE = "fr-fr"`, et
+le widget de date de l'admin (Unfold comme Django standard) affiche et
+soumet sa valeur au format local `JJ/MM/AAAA` (ex. `"02/09/2026"`) — un
+format qu'`fromisoformat()` rejette purement et simplement avec une
+`ValueError`, capturée et renvoyée telle quelle comme erreur 400.
+
+Corrigé en remplaçant l'appel par `django.forms.DateField().clean(...)` :
+ce champ de formulaire Django connaît nativement `DATE_INPUT_FORMATS` (donc
+le format local actif) et accepte aussi bien l'ISO, ce qui couvre les deux
+cas sans dépendre d'un format codé en dur. Une `ValidationError` (date
+réellement incompréhensible) est traduite en la même erreur 400 qu'avant.
+
+Point technique notable : ce bug n'avait aucune chance d'être détecté par
+le test existant (`test_date_creation_invalide_400`), qui envoyait une
+chaîne délibérément absurde (`"pas-une-date"`) — un cas qui doit rester en
+erreur avec les deux approches. Un nouveau test dédié envoie une date au
+format français valide (`"02/09/2026"`) et vérifie que le calcul aboutit,
+pour couvrir spécifiquement ce format.
+
+## Constructeur de devis dès la création (devis pas encore enregistré)
+
+Le "Constructeur de devis" (page dédiée pour ajouter des lignes, y compris
+des articles fabriqués créés à la volée avec leur nomenclature/gamme)
+n'était accessible que depuis la fiche d'un devis **déjà enregistré**,
+puisqu'il crée réellement des enregistrements (Article, Nomenclature,
+Gamme, DevisLigne) rattachés à un `Devis` existant en base — il a donc
+besoin d'un numéro de devis valide dans son URL.
+
+Plutôt que de réécrire le constructeur pour fonctionner entièrement en
+mémoire (ce qui aurait exigé de repenser en profondeur sa logique, conçue
+pour écrire directement en base à chaque ajout de ligne), le formulaire
+d'ajout de devis propose désormais un bouton supplémentaire à côté
+d'"Enregistrer" : **"Enregistrer et ouvrir le constructeur"**. Il
+enregistre le devis normalement (avec les lignes déjà saisies dans
+l'inline, le cas échéant), puis redirige directement vers le constructeur
+au lieu de retourner sur la fiche — sans étape intermédiaire.
+
+Implémentation :
+- `chiffrage/templates/admin/chiffrage/devis/submit_line.html` étend le
+  `admin/submit_line.html` d'Unfold et ajoute ce bouton (nommé
+  `_construire`) uniquement quand `not original`, c'est-à-dire seulement
+  sur le formulaire d'ajout — il n'a pas de sens une fois le devis créé
+  (le bouton "Constructeur de devis" en haut de la fiche prend le relais).
+- `DevisAdmin.response_add()` détecte `"_construire" in request.POST` une
+  fois le devis effectivement enregistré par Django (l'admin a déjà
+  appelé `save_model`/`save_related` à ce stade — les lignes de l'inline
+  sont donc déjà en base) et redirige vers
+  `admin:chiffrage_devis_builder` avec le numéro du nouvel objet, au lieu
+  du comportement par défaut.
+
+Point technique notable : Unfold expose un mécanisme dédié pour ajouter
+des boutons à la barre de validation (`actions_submit_line`), mais celui-ci
+n'est peuplé par `ActionModelAdminMixin.changeform_view()` que lorsque
+`object_id` est fourni — donc jamais sur le formulaire d'ajout. Il a donc
+fallu passer par la surcharge de template `submit_line.html` (mécanisme
+standard de Django, résolu par app/modèle avant le fallback générique),
+plutôt que par cette API, pour couvrir spécifiquement ce cas.
+
+## Adresse et contact par défaut, pré-remplis à la sélection du client
+
+Un tiers peut avoir plusieurs adresses de facturation/livraison et
+plusieurs contacts ; `Adresse.est_principale` existait déjà comme repère
+"adresse par défaut", mais rien ne l'exploitait automatiquement : il
+fallait toujours re-sélectionner manuellement l'adresse de facturation,
+l'adresse de livraison et le contact sur chaque nouveau devis, alors même
+que c'est presque toujours la même pour un client donné.
+
+Deux ajouts :
+- `Contact` gagne un champ `est_principal` (même principe et même
+  garde-fou "un seul par tiers" — via `clean()` — que
+  `Adresse.est_principale`, qui existait déjà) : le contact par défaut
+  proposé pour ce tiers.
+- Sur la fiche Devis (ajout comme modification), sélectionner un client
+  déclenche automatiquement un appel à
+  `GET /admin/chiffrage/devis/tiers/<code>/valeurs-defaut/`
+  (`valeurs_defaut_tiers_view`), qui renvoie l'adresse de facturation,
+  l'adresse de livraison et le contact marqués principal/principale pour
+  ce tiers (`null` si aucun n'est défini). Le JS les injecte alors dans
+  les champs correspondants — mais seulement s'ils sont encore vides : un
+  champ déjà rempli (choix explicite de l'utilisateur, ou valeur restaurée
+  après un changement de client) n'est jamais écrasé.
+
+Point technique notable : les champs `adresse_facturation`,
+`adresse_livraison` et `contact` sont des widgets `autocomplete_fields`
+(select2 alimentés en Ajax, sans options préchargées). Poser une valeur
+dessus par JavaScript ne peut donc pas se faire en modifiant `value` sur le
+`<select>` sous-jacent — il faut construire une `Option` avec le texte et
+l'identifiant reçus du serveur, l'ajouter au select, puis déclencher
+`change` sur l'instance select2 elle-même (API standard de select2 pour ce
+cas). Comme ces widgets sont initialisés par le script `autocomplete.js` de
+l'admin Django via `django.jQuery`, c'est ce même espace de noms
+(`django.jQuery`, pas un `$` global) qu'utilise le JS de la fiche Devis
+pour rester compatible.
+
+## Correctif : ligne vide "obligatoire" sur les inlines Adresse/Contact d'un tiers
+
+Signalé : modifier un tiers qui a déjà (par exemple) une adresse affichait
+systématiquement une deuxième ligne, vide, sous la vraie — avec des
+astérisques rouges "obligatoire" sur adresse/code postal/ville (champs
+réellement obligatoires sur le modèle `Adresse`) alors que l'utilisateur
+n'avait pas l'intention d'en ajouter une. Idem pour les contacts.
+
+En cause : `AdresseInline`/`ContactInline` utilisaient `extra = 1` — le
+réglage standard Django/Unfold qui ajoute toujours une ligne vide
+supplémentaire "prête à remplir" à la fin d'un inline, en plus des objets
+déjà enregistrés. Pratique quand les champs sont optionnels, gênant ici
+puisque la plupart sont obligatoires : la ligne fantôme n'a jamais été
+voulue mais a l'air de l'être.
+
+Corrigé en passant `extra = 0` sur les deux inlines : plus aucune ligne
+n'est ajoutée automatiquement, seuls les objets déjà enregistrés sont
+affichés. Le lien "Ajouter un objet Adresse/Contact supplémentaire" reste
+disponible pour en ajouter une volontairement — le comportement standard
+d'un inline Django, juste sans son ajout automatique.
+
+## Contact associé à une adresse de livraison précise
+
+Le contact par défaut d'un tiers (`Contact.est_principal`, section
+précédente) est une propriété globale du tiers — mais un client avec
+plusieurs sites de livraison a souvent un interlocuteur différent par
+site. `Contact` gagne donc un champ optionnel `adresse_livraison` (FK vers
+`commercial.Adresse`, forcément de type Livraison et du même tiers que le
+contact — vérifié dans `Contact.clean()`, même esprit que la validation
+déjà en place sur `Devis.clean()` pour adresse_facturation/adresse_livraison/
+contact vis-à-vis du client).
+
+Le pré-remplissage automatique du contact sur la fiche Devis en tient
+compte, avec un ordre de priorité clair :
+1. le contact associé à l'adresse de livraison retenue, s'il y en a un ;
+2. sinon le contact principal du tiers (`est_principal`).
+
+Ce choix est fait à deux moments distincts :
+- **à la sélection du client** : `valeurs_defaut_tiers_view` calcule
+  d'abord l'adresse de livraison par défaut du tiers, puis applique cet
+  ordre de priorité pour choisir le contact — une seule requête, un choix
+  atomique et cohérent (évite toute course entre "adresse de livraison
+  remplie" et "contact déjà rempli avec le mauvais choix" côté JS).
+- **quand l'adresse de livraison est changée après coup**, indépendamment
+  du client (nouveau site sélectionné manuellement) : un nouvel endpoint
+  dédié, `GET /admin/chiffrage/devis/adresses/<id>/contact-associe/`
+  (`contact_associe_adresse_view`), renvoie le contact associé à cette
+  adresse précise ; le JS (`wireContactParAdresseLivraison()`) l'appelle à
+  chaque changement du champ "Adresse de livraison" et propose ce contact
+  — toujours sans écraser un contact déjà choisi.
+
+## Unité des temps dans le constructeur de devis
+
+Les champs "Temps fixe" et "Temps variable" d'une étape de gamme (mode de
+calcul horaire) n'affichaient aucune unité — ambigu sans connaître la
+convention du projet. Les temps sont exprimés en minutes dans toute
+l'application (`OperationOF.temps_prevu`/`temps_reel`, `Gamme.temps_fixe`/
+`temps_variable`) ; les libellés du constructeur l'indiquent maintenant
+explicitement : "Temps fixe (min)" et "Temps variable (min/pièce)" — ce
+second suffixe précise en plus qu'il s'applique par pièce produite (il est
+multiplié par la quantité de la ligne de devis dans `moteur.py` :
+`temps_fixe + temps_variable × quantité`), pas seulement son unité.
+
+## Constructeur de devis : impossible de valider une ligne dont le prix ne se calcule pas
+
+Signalé : ajouter une ligne dans le constructeur avec une matière sans
+coût unitaire renseigné (ou, côté "nouvel article fabriqué", un composant
+de nomenclature dans le même cas) créait quand même l'article, sa
+nomenclature/gamme éventuelle et la ligne de devis — seul un avertissement
+("le chiffrage n'a pas pu être recalculé") signalait le problème, mais
+tout restait enregistré avec un prix inconnu. Le test qui couvrait ce
+comportement s'appelait d'ailleurs très explicitement
+`test_post_article_sans_cout_unitaire_avertit_sans_bloquer`.
+
+Corrigé : `_traiter_ajout_ligne` (`chiffrage/builder_views.py`) enchaîne
+maintenant la création de l'article (le cas échéant), l'ajout de la ligne
+de devis et le calcul de son prix (`calculer_ligne`, pas `calculer_devis`
+— pour ne juger que la ligne qu'on ajoute, indépendamment de l'état
+d'éventuelles autres lignes déjà présentes sur ce devis) **dans une seule
+transaction atomique**. Si le prix ne peut pas être calculé, tout est
+annulé — article, nomenclature, gamme, ligne de devis — et la réponse
+devient une erreur 400 avec le message explicatif, exactement comme un
+autre champ invalide ; il n'y a plus d'état intermédiaire "ligne créée
+mais non chiffrée". Côté JS (`devis_builder.js`), le message d'erreur
+s'affiche en rouge sans recharger la page (au lieu du recharge-avec-
+avertissement précédent), pour laisser le formulaire tel quel et permettre
+de corriger sans tout ressaisir.
+
+## Correctif majeur : le coût des opérations horaires était 60 fois trop élevé
+
+Signalé par l'utilisateur, avec un calcul manuel de référence : pour une
+étape de gamme au poste LASER (150 €/h), avec 10 min de temps fixe + 1 min
+de temps variable par pièce, le coût attendu pour 1 pièce est
+`(10 + 1) / 60 × 150 = 27,50 €` — le prix affiché ne correspondait pas.
+
+En cause : `cout_etape_gamme()` (`chiffrage/moteur.py`) calculait
+`temps × tarif.cout_horaire` directement. Or `Gamme.temps_fixe`/
+`temps_variable` sont exprimés en **minutes** (voir la section précédente
+sur l'unité des temps du constructeur) alors que `TarifPoste.cout_horaire`
+est un tarif en **€/heure** — il manquait la conversion (`/ 60`) avant de
+multiplier. Concrètement, toute étape de gamme en mode horaire facturait
+60 fois son coût réel : 27,50 € devenait 1 650 €.
+
+Ce même bug (mêmes unités, même faute) existait aussi dans l'app
+`pilotage`, à deux endroits qui comparent des temps réels remontés par
+l'atelier (`OperationOF.temps_reel`, également en minutes) à un tarif
+horaire ou à une capacité exprimée en heures :
+- `cout_reel_operation()` — coût réel d'une opération d'OF (utilisé par
+  `marge_reelle_ordre_fabrication()`, marge réelle vs prévue) ;
+- `taux_charge_poste()` — le temps réel cumulé (minutes) était comparé
+  directement à une capacité disponible en heures
+  (`nombre_machines × jours_ouvrés × heures_par_jour`), gonflant le taux
+  de charge calculé du même facteur 60. `temps_reel_cumule` dans la
+  réponse de cette fonction est donc désormais exprimé en heures (comme
+  `capacite_disponible`), et non plus en minutes brutes.
+
+Les trois corrigés de la même façon : diviser le temps en minutes par 60
+avant de le multiplier par un montant en €/heure ou de le comparer à une
+capacité en heures. Point technique notable : ce bug n'avait aucune chance
+d'être détecté par les tests existants, qui codaient tous la même erreur
+dans leurs valeurs attendues (`(10 + 5×3) × 50 = 1250`, sans jamais
+diviser par 60) — corrigés en même temps que le code (`chiffrage/tests.py`,
+`pilotage/tests.py`), avec le calcul manuel de l'utilisateur repris tel
+quel comme vérification indépendante (`27,50 € / 15,00 € / 4,5833 €` par
+pièce pour 1, 2 et 12 pièces).
+
+## Libellé d'article, visible et saisissable dès le devis
+
+Un article n'avait que sa référence (ex. `PIECE-00042`) comme identifiant
+lisible — pas de nom/description. Ajouté `Article.libelle` (texte libre,
+optionnel), et `Article.__str__` l'intègre désormais partout où l'article
+est affiché (`"PIECE-00042 — Platine support moteur"`) : select2 des
+lignes de devis, résultats de recherche du constructeur, listes admin —
+sans changement de code supplémentaire à ces endroits, puisqu'ils
+affichent déjà `str(article)`.
+
+Modifiable dès la création de l'article :
+- **Constructeur de devis, "Nouvel article fabriqué"** : nouveau champ
+  "Libellé" à côté de "Référence", transmis à `creer_article_fabrique()`.
+- **Fiche Article** (`ArticleAdmin`) : champ visible dans la liste et la
+  recherche (`search_fields`).
+- **"Dupliquer et modifier"** (`dupliquer_article`) : le libellé est
+  copié comme les autres champs.
+
+Pour un article déjà existant choisi sur une ligne de devis, le petit menu
+(⋮) à côté du champ autocomplete (widget standard de l'admin Django,
+`RelatedFieldWidgetWrapper`) permet de voir/modifier l'article — donc son
+libellé — sans quitter la fiche du devis.
+
+## Prix de vente unitaire sur les lignes de devis
+
+Les lignes de devis n'affichaient que des montants **totaux** pour la
+ligne (prix de vente matière, opérations, total HT/TTC) — pas de prix
+"à l'unité", pourtant utile pour comparer des lignes de quantités
+différentes ou vérifier un tarif au coup d'œil.
+
+Ajouté `DevisLigne.prix_vente_unitaire` (propriété calculée, jamais
+stockée) = `prix_vente_total / quantite` — `None` tant que le chiffrage
+n'a pas été calculé, comme les autres montants dérivés. Branché partout où
+les autres montants de ligne le sont déjà : inline de la fiche Devis,
+`DevisLigneAdmin`, endpoints de calcul/aperçu en direct
+(`recalculer_ligne_view`, `previsualiser_ligne_view`,
+`previsualiser_ligne_nouveau_devis_view`, `moteur.previsualiser_ligne()`),
+JS de calcul live (`devis_admin_live.js`), et tableau "Lignes existantes"
+du constructeur.
+
+Aucune nouvelle règle de calcul : c'est une lecture différente de données
+déjà calculées (`prix_vente_total`), donc pas de risque d'incohérence avec
+les montants totaux déjà affichés — y compris quand un prix unitaire est
+forcé (`prix_vente_unitaire_force`), puisque celui-ci influence déjà
+`prix_vente_matiere` en amont.
+
+## Délai sur le devis : liste paramétrable + saisie libre
+
+Nouveau champ `Devis.delai` (texte libre, optionnel) pour annoncer un
+délai de livraison sur le devis. La contrainte du besoin — "on va le
+chercher dans une liste paramétrable, mais on peut aussi le taper
+directement" — ne correspond ni à un `ForeignKey` (empêcherait la saisie
+libre) ni à un `ChoiceField` (même problème) : elle correspond exactement
+au `<datalist>` HTML natif, qui associe un champ texte libre à une liste
+de suggestions sans jamais contraindre la valeur saisie.
+
+- Nouveau référentiel `commercial.DelaiPropose` (`libelle` + `ordre`
+  d'affichage), géré depuis un admin dédié (`DelaiProposeAdmin`) — vide au
+  départ, à peupler selon les délais habituels de l'atelier (aucune valeur
+  par défaut : contrairement aux taux de TVA, un délai type n'a rien
+  d'universel).
+- `DelaiWidget` (`chiffrage/widgets.py`) : sous-classe de
+  `forms.TextInput` dont `render()` ajoute un `<datalist id="delai-
+  suggestions">` peuplé depuis `DelaiPropose.objects.all()`, en plus du
+  champ texte (`list="delai-suggestions"` sur l'`<input>`). Branché sur le
+  champ `delai` via un `ModelForm` dédié (`DevisAdminForm`) sur
+  `DevisAdmin.form`.
+
+Résultat : le champ "Délai" de la fiche Devis propose les valeurs du
+référentiel dans son autocomplétion native du navigateur, mais accepte
+n'importe quel texte tapé à la main — vérifié en tapant un délai hors
+liste ("Livraison express sous 48h"), accepté sans erreur.
+
+## Livraisons partielles d'une commande
+
+Jusqu'ici, une `Commande` n'avait pas de lignes à elle : les quantités
+venaient directement des lignes du devis, et rien ne suivait ce qui avait
+effectivement été livré. Demandé : pouvoir livrer une commande
+**partiellement**, **article par article**, avec une **quantité livrée
+différente de la quantité commandée**, en laissant apparaître un
+**reliquat** quand la livraison est incomplète.
+
+Architecture reprise à l'identique du modèle déjà en place côté achats
+(`CommandeFournisseur` → `LigneCommandeFournisseur` → `Reception` →
+`ReceptionLigne`), pour la cohérence et parce qu'il couvre exactement le
+même besoin côté réception fournisseur :
+
+- **`CommandeLigne`** (nouveau) : une ligne par article commandé —
+  `quantite_commandee` (figée au moment de la commande) et
+  `quantite_livree` (cumul recalculé, `editable=False`). Propriétés
+  calculées `reliquat` (= commandée − livrée) et `entierement_livree`.
+  Créée automatiquement par `production.lancer_en_production()`, **une
+  par ligne de devis, quelle que soit sa nature** — contrairement aux
+  ordres de fabrication, qui ne concernent que les articles FABRIQUE, le
+  suivi de livraison doit couvrir aussi les matières premières vendues
+  directement.
+- **`Livraison`** / **`LivraisonLigne`** (nouveaux, numérotation
+  automatique via la codification — nouvelle entité `LIVRAISON`, préfixe
+  `LIV-`) : une livraison peut porter sur plusieurs lignes de commande, et
+  une ligne de commande peut être livrée en plusieurs fois.
+  `LivraisonLigne.clean()` refuse qu'une livraison dépasse le reliquat
+  restant (`quantite déjà livrée + nouvelle quantité > quantité
+  commandée`), avec le reliquat déjà connu dans le message d'erreur.
+
+**Effet de bord stock**, symétrique à la réception fournisseur (qui crée
+un mouvement `ENTREE`) : `LivraisonLigne._appliquer()` crée un mouvement
+`SORTIE` (`MouvementStock`) sur le lot de l'article livré. Différence
+assumée avec le mode achats : un article fabriqué sur mesure n'a le plus
+souvent **aucun lot de stock** (`gere_en_stock` vaut faux par défaut pour
+un `FABRIQUE`) — la sortie de stock est donc **sautée silencieusement**
+plutôt que de bloquer la livraison (contrairement à la réception
+fournisseur, qui exige un lot existant). Si plusieurs lots existent pour
+l'article (cas ambigu, comme côté achats), `LivraisonError` est levée.
+
+Point technique notable, corrigé par rapport au modèle achats d'origine :
+dans `ReceptionLigne._appliquer()`, la mise à jour du cumul reçu a lieu
+*avant* la résolution du lot — si celle-ci échoue (lots ambigus), la ligne
+de réception reste tout de même enregistrée avec son cumul incrémenté,
+sans mouvement de stock associé (état incohérent). `LivraisonLigne.save()`
+évite ce piège : la résolution du lot est faite *avant* toute écriture, et
+l'ensemble (`save()` de la ligne + mise à jour du cumul + mouvement de
+stock) est englobé dans une transaction atomique — si le lot est ambigu,
+tout est annulé, y compris l'enregistrement de la ligne elle-même. Aucun
+état "ligne enregistrée mais jamais répercutée" n'est possible.
+
+`LivraisonAdmin.save_formset()` intercepte `LivraisonError` pour l'afficher
+comme un message d'erreur normal de l'admin plutôt que de laisser
+remonter une page 500 (même pattern que `ReceptionAdmin` côté achats).
+
+Vérifié de bout en bout (Playwright) : devis validé → `lancer_en_production`
+crée une commande avec sa ligne (quantité commandée 10, livrée 0, reliquat
+10) → une première livraison de 6 unités laisse un reliquat de 4, visible
+immédiatement sur la fiche Commande.
+
+## Correctif : étape de gamme créée dans le constructeur, prix des opérations à 0
+
+Signalé avec capture : un article fabriqué ("toto123") créé via le
+constructeur, avec une étape de gamme correctement renseignée (poste
+LASER, 10 min fixe + 1 min variable), affichait pourtant "Prix vente
+opérations (HT)" à 0,00 et aucun poste listé dans la colonne "Opérations"
+du tableau "Lignes existantes" — sans aucune erreur, contrairement aux
+autres lignes du même devis qui, elles, affichaient un prix correct.
+
+En cause : `addGammeRow()` (`chiffrage/static/chiffrage/devis_builder.js`)
+pré-remplissait la "Date de début" d'une nouvelle étape avec **la date du
+jour** (`new Date().toISOString()`), sans lien avec la date de création du
+devis en cours. Or `gamme_active()` (`chiffrage/moteur.py`) ne retient que
+les étapes dont `date_debut <= devis.date_creation` — une étape datée
+d'aujourd'hui sur un devis créé à une date antérieure (le cas courant : la
+plupart des devis ne sont pas construits le jour même de leur création)
+est donc **silencieusement exclue** du calcul, sans lever d'erreur (une
+gamme vide de résultats n'est pas une gamme invalide). Reproduit et
+confirmé localement : `gamme_active(article, devis.date_creation)` renvoie
+0 étape dès que `Gamme.date_debut` est postérieure à `Devis.date_creation`.
+
+Corrigé en exposant `devis.date_creation` au JS (`devis-builder-data`,
+`chiffrage/templates/chiffrage/devis_builder.html`) et en l'utilisant
+comme valeur par défaut de la nouvelle étape, à la place de la date du
+jour. Un test dédié documente explicitement ce mécanisme côté serveur
+(`test_etape_datee_apres_le_devis_est_silencieusement_ignoree`), pour
+qu'un futur changement de `gamme_active()` ne puisse pas faire revivre ce
+piège sans le remarquer.
+
+**Pour la ligne déjà créée en production** (l'étape de gamme existante de
+"toto123" reste datée après `date_creation` du devis) : il faut corriger
+sa date de début manuellement — soit depuis la fiche Article (via le
+nouveau lien "Voir la fiche de cet article", section suivante), soit
+directement dans Techniques → Gammes.
+
+## Ouvrir la fiche d'un article directement depuis le constructeur
+
+Ajouté deux liens, pour ne plus avoir à chercher l'article dans le menu
+"Articles" :
+- dans le tableau "Lignes existantes", chaque référence d'article est
+  désormais un lien vers sa fiche (`admin:technique_article_change`),
+  ouvert dans un nouvel onglet (`target="_blank"`) pour ne pas perdre sa
+  place dans le constructeur ;
+- dans le panneau "Ajouter une ligne", en mode "Article existant", un lien
+  "Voir la fiche de cet article ↗" apparaît dès qu'un article est
+  sélectionné dans la recherche (masqué à nouveau si la recherche est
+  modifiée).
+
+## Ajout d'utilisateur simplifié (app `comptes`)
+
+Le formulaire d'ajout d'utilisateur de Django (`auth.User`) n'était pas
+habillé par Unfold : le champ `password1`/`password2` de
+`UserCreationForm` ne passe jamais par `ModelAdmin.formfield_for_dbfield`
+(seul point où Django ajoute la classe CSS `vTextField`/`vPasswordField`
+utilisée par le thème), et Unfold ne fournit pas de secours pour un
+`<input>` sans classe — le CSS d'Unfold réinitialise l'apparence native de
+tous les champs, boîte et bordure comprises. Résultat : sur ce formulaire
+précis, aucun champ ne semblait "cliquable" (ni le mot de passe, ni sa
+confirmation).
+
+Correction et simplification en un seul geste (app `comptes/`) :
+- `comptes.admin.UserAdmin` (Django `UserAdmin` + `unfold.admin.ModelAdmin`)
+  remplace l'enregistrement par défaut de `auth.User` (et `auth.Group`,
+  touché par le même souci sur son propre formulaire) ;
+- `add_form` reprend `unfold.forms.UserCreationForm` (qui, lui, réattribue
+  les bons widgets Unfold à `password1`/`password2`), étendu avec
+  `first_name`/`last_name` (facultatifs) pour saisir un nom dès la
+  création, et sans le choix "Authentification par mot de passe"
+  (Activée/Désactivée) — un ajout de Django 5.1 pensé pour le SSO/LDAP,
+  hors sujet ici ;
+- `add_fieldsets` se limite à : identifiant, prénom, nom, mot de passe (x2)
+  et un seul réglage — "Statut équipe" (`is_staff`), qui conditionne
+  l'accès à l'admin. Le reste (groupes, permissions, statut
+  super-utilisateur...) reste modifiable après coup sur la fiche complète,
+  comme le rappelle le bandeau "After you've created a user...".
+- "Utilisateurs" et "Groupes" apparaissent maintenant dans le menu
+  "Paramétrage" (`UNFOLD["SIDEBAR"]`) — jusque-là non listés, donc
+  seulement accessibles en tapant l'URL ou via la recherche.
+
+## Habillage : palette "atelier" et tableau de bord d'accueil
+
+Deux ajouts purement visuels, sans toucher au fonctionnement de l'admin :
+
+- **Palette** : `UNFOLD["COLORS"]["primary"]` remplace le violet par défaut
+  d'Unfold par une palette ambre/acier (valeurs OKLCH de l'échelle `amber`
+  de Tailwind) — se répercute partout où Unfold utilise sa couleur
+  primaire (boutons, liens actifs, bouton de connexion, icône du logo...).
+  La palette `base` (gris neutre) reste celle par défaut.
+- **Tableau de bord** (`UNFOLD["DASHBOARD_CALLBACK"]` →
+  `comptes.dashboard.dashboard_callback`) : au-dessus de la liste des
+  applications, 5 indicateurs calculés à la volée (aucune table dédiée,
+  comme l'app `pilotage`) — devis en brouillon, devis validés ce mois-ci,
+  CA facturé ce mois-ci (HT), alertes de stock actives (mise en évidence
+  en rouge si > 0) et OF lancés ce mois-ci. Chaque carte est un lien direct
+  vers la liste filtrée correspondante.
+  - `templates/admin/index.html` (nouveau `TEMPLATES["DIRS"]` au niveau du
+    projet, pour que ce template passe avant celui d'Unfold dans l'ordre
+    de résolution) reprend le `admin/index.html` d'Unfold à l'identique et
+    y insère juste la grille de cartes en tête du bloc `content`.
+
+## Créer une commande directement (sans devis formel)
+
+Certaines ventes n'ont pas de devis à proprement parler : le client
+commande directement. Plutôt que de dupliquer le moteur de chiffrage (qui
+ne calcule que sur `Devis`/`DevisLigne`, jamais sur `CommandeLigne` — voir
+"Livraisons partielles d'une commande" plus haut), cette fonctionnalité
+réutilise entièrement le constructeur de devis existant :
+
+- Sur le formulaire d'AJOUT d'un devis, un second bouton **"Créer une
+  commande directement"** (`_construire_commande`, à côté de "Enregistrer
+  et ouvrir le constructeur") enregistre le devis puis ouvre le même
+  constructeur, avec `?commande_directe=1` dans l'URL.
+- Ce paramètre (lu par `devis_builder_view`, jamais persisté en base — pas
+  de nouveau champ ni de migration) bascule juste l'habillage de l'écran :
+  titre "Constructeur de commande", texte explicatif ("ce devis ne sert
+  que de support de calcul interne, il n'est jamais montré au client"), et
+  un bouton **"Valider et créer la commande →"** à la place du simple lien
+  de retour. Ce bouton POST vers une nouvelle vue,
+  `valider_commande_directe_view` (URL `<numero>/valider-commande/`), qui
+  fait exactement ce que fait déjà l'action d'admin "Lancer en
+  production" sur la liste des devis — passer le devis en `VALIDE` puis
+  appeler `lancer_en_production(devis)` — mais dans une seule transaction
+  (`transaction.atomic()`) : si `lancer_en_production` échoue (ex. client
+  sans adresse principale), le passage en `VALIDE` est annulé avec elle,
+  le devis reste en brouillon et modifiable au lieu de se retrouver
+  verrouillé sans commande créée. Succès -> redirection directe vers la
+  fiche de la commande créée.
+- Le lien "Constructeur de devis" de la fiche devis (object-tool) et le
+  lien "Retour à la fiche devis" du constructeur se souviennent du mode
+  via ce même paramètre d'URL, pour l'aller-retour entre les deux écrans.
+  Une fois la commande créée, revisiter le constructeur affiche un lien
+  direct vers elle à la place du bouton de validation.
+
+## Correctif : lignes invisibles sur la fiche commande + prix/TVA/date de livraison par ligne
+
+Remonté par capture d'écran : une commande existante affichait "Lignes de
+commande" complètement vide. Cause réelle, pas juste cosmétique : cette
+commande avait été créée avant l'ajout du modèle `CommandeLigne`
+(fonctionnalité "Livraisons partielles") — aucune ligne n'existait en
+base, il n'y avait donc rien à afficher.
+
+- **`CommandeLigne.devis_ligne`** (FK vers `DevisLigne`, nullable) relie
+  chaque ligne de commande à sa ligne de devis d'origine — posé
+  automatiquement par `lancer_en_production`. Trois propriétés en
+  lecture seule s'appuient dessus pour afficher **prix de vente unitaire,
+  taux de TVA, montant HT et montant TTC** sans dupliquer ces valeurs (le
+  prix vient toujours du devis, jamais recalculé sur la commande) :
+  `taux_tva`, `prix_vente_unitaire`, `montant_ht`, `montant_ttc` — `None`
+  tant qu'aucune ligne de devis n'est reliée.
+- **`CommandeLigne.date_livraison_prevue`** (date, éditable, facultative) :
+  chaque ligne peut avoir sa propre date, indépendante des autres lignes
+  de la même commande — modifiable directement dans l'inline "Lignes de
+  commande" de la fiche.
+- **`production.synchroniser_lignes_commande(commande)`** : filet de
+  sécurité rejouable sans risque — recrée toute ligne manquante par
+  rapport au devis (le bug remonté) et relie `devis_ligne` sur les lignes
+  qui ne l'ont pas encore, sans jamais toucher une `quantite_commandee`
+  déjà enregistrée (une divergence avec le devis reste une décision
+  manuelle). Exposé comme action d'admin **"Synchroniser les lignes
+  depuis le devis"** sur la liste des commandes.
+- **Migration de données** (`0009_synchroniser_lignes_commande_existantes`) :
+  applique cette même synchronisation à toutes les commandes existantes
+  au `migrate` — corrige automatiquement les commandes déjà en production
+  sans action manuelle (dont celle remontée dans le rapport).
+
+## Rattacher une commande fournisseur à une ligne de commande client
+
+`achats.LigneCommandeFournisseur.commande_ligne_client` (FK optionnelle
+vers `chiffrage.CommandeLigne`) trace l'achat qui sert à approvisionner une
+ligne de commande client précise — plusieurs lignes d'achat (réappro en
+plusieurs fois, ou fournisseurs différents) peuvent pointer vers la même
+ligne de commande client. Choisi côté ligne (pas en-tête de commande
+fournisseur) pour permettre le mélange, sur une même commande fournisseur,
+d'achats destinés à des clients différents.
+
+Trois effets, une fois le rattachement fait :
+- **`CommandeLigne.date_livraison_possible`** (propriété, jamais stockée) :
+  la plus tardive des `date_livraison_prevue` des commandes fournisseur
+  rattachées — la ligne client n'est complète que quand tout est arrivé.
+  Toujours recalculée en direct, donc jamais périmée. À la différence de
+  `date_livraison_prevue` (l'engagement pris auprès du client, saisi à la
+  main) : celle-ci n'est **jamais** réécrite automatiquement, même quand un
+  achat est rattaché — les deux dates coexistent volontairement, l'une
+  reflète ce qu'on a promis, l'autre ce que l'appro permet réellement.
+  (Affichée via un petit formatage dédié, `date_livraison_possible_display`
+  dans `chiffrage/admin.py` : Unfold ne localise en `jj/mm/aaaa` que les
+  vrais champs de modèle — une propriété readonly comme celle-ci serait
+  sinon affichée en ISO, `str(date)` brut.)
+- **`CommandeLigne.statut_approvisionnement`** (propriété) : résumé
+  lisible de l'avancement des achats rattachés — ex. "Aciers du Nord —
+  reçu 8/20". Purement informatif, ne touche jamais `quantite_livree`
+  (livraison au client, pilotée indépendamment par `Livraison`).
+- **Clôture automatique d'alerte de stock** : à la création d'une ligne de
+  commande fournisseur avec `commande_ligne_client` renseigné (et sans
+  `alerte_stock_origine` choisie à la main), une alerte de stock active
+  pour le même article est recherchée et clôturée automatiquement — réutilise
+  le mécanisme déjà existant (`alerte_stock_origine`), simplement déclenché
+  par ce nouveau rattachement plutôt que par une sélection manuelle.
+
+## Contenu en pleine largeur d'écran
+
+Le contenu de l'admin (`#content`) était plafonné à une largeur maximale
+centrée (classe Tailwind `container` d'Unfold) — gênant sur les fiches à
+tableaux larges (lignes de devis/commande), qui scrollaient horizontalement
+dans un espace réduit alors que l'écran avait de la place de libre à
+droite.
+
+`comptes.layout.global_callback` (branché sur `UNFOLD["GLOBAL_CALLBACK"]`,
+exécuté par Unfold sur *chaque* page admin, contrairement à
+`DASHBOARD_CALLBACK` qui ne concerne que l'accueil) injecte
+`is_fullwidth: "1"` dans le contexte de toutes les pages. Nécessaire pour
+les fiches (`change_view`) : Unfold n'y expose pas
+`ModelAdmin.list_fullwidth` (qui ne fonctionne que sur les listes, où le
+contexte `cl` existe) — `GLOBAL_CALLBACK` est le seul point d'accroche qui
+couvre aussi bien les fiches que les listes, sans avoir à surcharger un
+template par modèle.
+
+## Lignes de commande modifiables après enregistrement (surcharges + traçabilité)
+
+Quantité, prix de vente unitaire, taux de TVA et désignation restaient
+figés une fois la commande créée. Ils sont maintenant modifiables, avec
+trois garde-fous discutés et validés avant développement :
+
+- **Surcharges, jamais d'écrasement du devis** : `quantite_commandee`,
+  `prix_vente_unitaire` (nouveau champ, avant une propriété qui lisait
+  `devis_ligne`), `taux_tva` (idem, nouvelle FK propre à la commande) et
+  `designation` (nouveau champ) sont pré-remplis depuis le devis à la
+  création (`lancer_en_production`/`synchroniser_lignes_commande`), puis
+  librement modifiables — `devis_ligne` reste un simple pointeur vers la
+  valeur d'origine, jamais touché. `montant_ht`/`montant_ttc` restent des
+  propriétés, mais recalculées depuis les valeurs courantes de la ligne
+  (plus depuis le devis).
+  - `taux_tva`, devenu éditable, est un `<select>` — pour garder l'affichage
+    compact ("20%", pas "Taux normal (20.0%)") jusque dans les options du
+    menu déroulant (pas seulement en lecture seule), `CommandeLigneForm`
+    (chiffrage/admin.py) déclare `taux_tva` avec un `ModelChoiceField` dont
+    `label_from_instance` ne renvoie que le pourcentage — branché sur
+    `CommandeLigneInline` et `CommandeLigneAdmin`. Le même correctif
+    (`TauxTVACompactChoiceField`, factorisée pour être réutilisable) est
+    aussi branché côté devis, sur `DevisLigneForm`/`DevisLigneInline`/
+    `DevisLigneAdmin` : `DevisLigne.taux_tva` est un champ distinct de
+    `CommandeLigne.taux_tva`, donc jamais couvert par la première
+    correction — le menu déroulant "Lignes de devis" affichait encore le
+    libellé complet du référentiel tant que ce second branchement n'était
+    pas fait.
+- **Traçabilité complète** (pas seulement le bouton "Historique" générique,
+  qui ne liste que les noms de champs) : `CommandeLigneModification`,
+  peuplé par `CommandeAdmin.save_formset`/`CommandeLigneAdmin.save_model`
+  (il faut `request.user`, indisponible au niveau du modèle) — une ligne
+  par champ suivi réellement modifié (`champ`, `ancienne_valeur`,
+  `nouvelle_valeur`, `utilisateur`, `date_modification`), visible en
+  inline sur la fiche de la ligne de commande. Migration `0011` : backfill
+  de `prix_vente_unitaire`/`taux_tva` sur les lignes déjà existantes
+  (sinon elles se seraient retrouvées vides après la migration de schéma).
+- **Quantité — augmentation** : plutôt que de modifier une ligne dont
+  l'ordre de fabrication est déjà lancé (ses temps machine resteraient
+  basés sur l'ancienne quantité, jamais recalculés), l'admin autorise
+  maintenant l'ajout d'une nouvelle ligne à une commande existante
+  (`CommandeLigneInline` : l'ajout n'était pas permis avant). Un
+  avertissement (pas un blocage — l'inverse reste possible) s'affiche si
+  la quantité d'une ligne existante augmente alors qu'un OF existe déjà
+  pour son article. `production.lancer_ligne_en_production(ligne)` crée
+  l'OF d'une seule ligne (factorisé avec `lancer_en_production` via
+  `_creer_ordre_fabrication`) — exposé comme action d'admin **"Lancer
+  cette ligne en production (OF)"** sur la liste des lignes de commande.
+- **Quantité — diminution** : aucune tentative de clôturer l'OF côté ERP
+  (ses statuts sont alimentés à sens unique depuis le planning atelier,
+  piloter sa clôture depuis l'ERP entrerait en conflit avec cette
+  synchronisation). Diminuer `quantite_commandee` recalcule juste le
+  `reliquat` côté client ; `CommandeLigne.clean()` refuse de descendre
+  en dessous de `quantite_livree` (déjà livré ne peut pas être "délivré"),
+  et refuse de changer l'article d'une ligne déjà partiellement livrée.
+
+## Nouvelles natures d'article achetées + fournisseurs multiples avec historique de tarifs
+
+`Article.Nature` comptait deux valeurs (matière première, fabriqué) ; trois
+natures d'articles achetés s'y ajoutent : **service acheté**,
+**consommable**, **composant**. Elles sont costées exactement comme une
+matière première (directement depuis `cout_unitaire`, sans nomenclature) —
+`chiffrage/moteur.cout_matiere_article` ne teste plus `nature ==
+MATIERE_PREMIERE` pour décider du calcul direct, mais `nature == FABRIQUE`
+pour décider de la décomposition via nomenclature (seul un fabriqué en a
+une) ; toute autre nature, existante ou nouvelle, passe par le calcul
+direct — généralisation sans changement de comportement pour les deux
+natures préexistantes.
+
+Nouveau modèle `achats.ArticleFournisseur` : associe un article acheté (donc
+pas fabriqué — `clean()` le refuse, un fabriqué est produit en interne) à un
+fournisseur pouvant le livrer, avec sa **référence** et sa **désignation**
+propres à ce fournisseur (distinctes de celles internes à l'article).
+Plusieurs fournisseurs peuvent être associés au même article (contrainte
+d'unicité seulement sur le *couple* article+fournisseur) — inline "Fournisseurs
+d'article" sur la fiche Article pour les ajouter rapidement, et fiche dédiée
+par association (comme `CommandeLigne` : inlinée ET dotée de sa propre page)
+pour gérer son historique de tarifs.
+
+Traçabilité des tarifs : `achats.TarifAchatArticle`, sur le même principe
+que `technique.TarifPoste` (réutilise le même mixin
+`DateRangeHistoriqueMixin` — refuse le chevauchement de deux tarifs actifs
+sur le même `ArticleFournisseur`). `ArticleFournisseur.tarif_actuel` renvoie
+le tarif dont la période couvre aujourd'hui. Cette traçabilité est purement
+déclarative pour l'instant : elle n'alimente pas automatiquement
+`Article.cout_unitaire` (qui reste saisi manuellement et utilisé tel quel
+par le moteur de chiffrage) — un rapprochement automatique serait une
+évolution ultérieure séparée.
+
+## Nouvelle app comptabilite : plan comptable général français + journaux comptables
+
+Nouvelle app `comptabilite`, sur le principe des dictionnaires Dolibarr
+(cf. capture d'écran fournie "Dictionnaires - Journaux comptables").
+
+- **`CompteComptable`** (plan comptable) : `code` (clé primaire), `libelle`,
+  `classe` (1 à 8, déduite automatiquement du 1er chiffre du code —
+  champ non éditable), `compte_parent` (hiérarchie, ex. 1013 sous 101 sous
+  10 sous 1), `systeme` (Système de base / Système développé — distingue
+  les comptes obligatoires des comptes de détail facultatifs du PCG),
+  `actif`.
+- **`JournalComptable`** (dictionnaire des journaux, même principe que la
+  capture d'écran Dolibarr) : `code`, `libelle`, `nature` (Achats, Ventes,
+  Banque, Caisse, Notes de frais, Opérations diverses, Reports à nouveaux),
+  `actif`. Migration `0002` préremplit le jeu standard (AC, VT, BQ1, CA, ER,
+  OD, AN) — les journaux propres à l'entreprise (un par compte bancaire,
+  ex. BQ2 "BANQUE POPULAIRE") s'ajoutent librement depuis l'admin, comme
+  demandé ("permettre d'en ajouter de nouveaux").
+
+**Import du PCG officiel en un clic** : bouton "Importer le plan comptable
+officiel (PCG *millésime*)" sur la liste des comptes comptables
+(`CompteComptableAdmin.actions_list`, mécanisme Unfold pour une action de
+liste qui n'a pas besoin de sélection — contrairement aux actions
+classiques Django admin). Il déclenche `comptabilite.pcg.importer_pcg()`,
+qui charge le jeu de données embarqué dans l'app
+(`comptabilite/data/pcg_<millésime>.json`) et écrit en `bulk_create`/
+`bulk_update` (idempotent — rejouable sans dupliquer, met à jour un
+libellé modifié entre-temps), le tout dans une transaction unique. Même
+fonction exposée en CLI (`manage.py importer_pcg`, pour un déploiement/CI).
+
+*Historique* : la première version faisait un `update_or_create` par
+compte (~1700 requêtes pour 861 comptes) — sur du matériel modeste (NAS),
+cette volée de petites transactions pouvait dépasser le délai d'un worker
+Gunicorn (30s) et le faire tuer en plein import (`SystemExit` dans
+`connection.commit()`, plan comptable à moitié chargé). Passer en bulk
+(quelques requêtes au total) ramène l'import à une fraction de seconde.
+
+Ce jeu de données est un **instantané embarqué**, pas un téléchargement à
+la volée depuis un site tiers au moment du clic : plus fiable (aucune
+dépendance à la disponibilité d'un service externe en production), et le
+contenu exact importé est versionné dans le dépôt. Source : le plan
+comptable général publié annuellement par l'ANC (Autorité des Normes
+Comptables), au format JSON structuré (`code`, `libellé`, `système`,
+`parent`) republié par
+[github.com/arrhes/PCG](https://github.com/arrhes/PCG) sous licence
+CC0 (domaine public) — millésime 2026, 861 comptes. Pour passer
+à un millésime plus récent : remplacer le fichier JSON embarqué et relancer
+l'import (le `update_or_create` absorbe les libellés modifiés sans
+dupliquer les comptes inchangés).
+
+## Génération des écritures comptables (depuis les factures de vente)
+
+Périmètre volontairement limité aux **factures de vente** : c'est le seul
+document "comptable" existant dans l'app (`facturation.Facture`, pont vers
+Tiime). Les achats n'ont pas d'équivalent "facture fournisseur" aujourd'hui
+(seulement des commandes/réceptions logistiques dans l'app `achats`) — la
+génération des écritures d'achat serait une évolution ultérieure séparée.
+
+- **`EcritureComptable`** (journal, date, pièce, libellé, `facture`
+  d'origine optionnelle) + **`LigneEcriture`** (compte, libellé, débit,
+  crédit — jamais les deux à la fois, jamais aucun des deux :
+  `LigneEcriture.clean()`). Une écriture peut aussi être saisie
+  entièrement à la main (pas seulement générée).
+- **Équilibre imposé côté admin** : `LigneEcritureFormSet.clean()`
+  (formset personnalisé sur l'inline "Lignes d'écriture") refuse
+  l'enregistrement si total débit ≠ total crédit — la partie double n'est
+  jamais laissée en défaut ne serait-ce que temporairement.
+- **`ParametresComptables`** : ligne de configuration unique (journal des
+  ventes, compte client, compte de vente, compte de TVA collectée par
+  défaut), modifiable dans l'admin (section "Paramètres comptables").
+  Rien n'est figé dans le code : si un compte n'y est pas configuré,
+  `ParametresComptables.charger()` retombe en mémoire (jamais écrit tant
+  que l'utilisateur n'a rien choisi) sur le code PCG usuel correspondant
+  s'il existe en base (411 — Clients, 706 — Prestations de services,
+  44571 — TVA collectée) — fonctionne donc "out of the box" dès que le
+  plan comptable officiel a été importé, sans étape de configuration
+  obligatoire.
+- **Génération** : `comptabilite.generation.generer_ecriture_facture(facture)`
+  — regroupe les lignes de la commande facturée par taux de TVA
+  (`CommandeLigne.montant_ht`/`montant_ttc`, valeurs courantes,
+  surchargeables — pas celles figées du devis) et pose une ligne "Clients"
+  au débit (TTC total) plus, par taux de TVA distinct, une ligne "Ventes"
+  (HT) et une ligne "TVA collectée" (si non nulle) au crédit. Repli sur
+  `Facture.montant_ht`/`montant_ttc` si la commande n'a aucune ligne
+  chiffrée. Idempotent (`OneToOneField` facture ↔ écriture) : ne génère
+  jamais deux écritures pour la même facture, renvoie l'existante.
+  Exposé dans l'admin par l'action **"Générer l'écriture comptable"** sur
+  la liste des factures (action de sélection standard, pas
+  `actions_list` cette fois : contrairement à l'import du PCG, il y a ici
+  une sélection naturelle — les factures cochées).
+
+## Compte comptable spécifique par article + codes analytiques
+
+- **`ArticleCompteVente`** (`comptabilite/models.py`) : associe un article à
+  un compte de vente précis (`OneToOneField`), qui prime sur
+  `ParametresComptables.compte_vente_defaut` lors de la génération d'une
+  écriture — ex. un fabriqué facturé en 701 "Ventes de produits finis"
+  plutôt que le 706 générique. `comptabilite.generation._repartition_lignes`
+  regroupe désormais les lignes de la commande facturée par (taux de TVA,
+  **compte de vente**, code analytique) plutôt que par seul taux de TVA :
+  une même facture peut donc poser plusieurs lignes "Ventes" à des comptes
+  différents selon les articles vendus, tout en restant équilibrée.
+  Inline "Compte de vente d'article" sur la fiche Article, fiche dédiée
+  dans `comptabilite/admin.py`.
+- **`ArticleCompteAchat`** : même principe côté achat (compte de charge,
+  ex. 601/607). Purement déclaratif pour l'instant — il n'existe pas de
+  document "facture fournisseur" dans l'app (`achats` n'a que des
+  commandes/réceptions logistiques), donc pas encore de génération
+  automatique d'écriture d'achat ; sert de référence pour une saisie
+  manuelle, et de point d'ancrage prêt pour une future génération.
+- **`CodeAnalytique`** : dictionnaire libre de codes comptables
+  complémentaires (comptabilité analytique — atelier, chantier, centre de
+  coût...), même principe que `JournalComptable`. Optionnel sur
+  `ArticleCompteVente`/`ArticleCompteAchat` (code analytique par défaut de
+  l'article) et sur `LigneEcriture` (posable à la main sur n'importe quelle
+  ligne). Repris automatiquement sur la ligne "Ventes" d'une écriture
+  générée depuis la facture — **jamais** sur les lignes Clients/TVA
+  collectée, qui ne portent pas de dimension analytique en pratique
+  comptable courante.
+
+## Postes de gestion + régime fiscal du tiers (import d'un référentiel existant)
+
+Fonctionnalité demandée à partir de deux exports Excel fournis par
+l'utilisateur ("poste de gestion achats"/"ventes" d'un logiciel de gestion
+existant) : un même référentiel de 145 codes partagé entre achat et vente,
+chacun avec un compte différent selon que le tiers est français, français
+exonéré de TVA, intracommunautaire ou hors UE — nuance absente jusqu'ici de
+`ArticleCompteVente`/`ArticleCompteAchat` (un seul compte fixe).
+
+- **`Tiers.regime_fiscal`** (`commercial/models.py`) : France / France
+  exonérée / Intracommunautaire (UE) / Hors UE. Détermine, pour une vente,
+  quel compte utiliser parmi ceux du poste de gestion de l'article vendu
+  (le client) ; pour un achat, pareil côté fournisseur.
+- **`PosteGestion`** (`comptabilite/models.py`) : classification achat *et*
+  vente à la fois (ex. "MP" Matière première : achetée ET revendue en
+  négoce), avec 4 comptes d'achat (un par régime fiscal du fournisseur) et
+  5 comptes de vente (un par régime + un "TVA majorée", cas particulier
+  hérité de la source, non rattaché au régime fiscal — à sélectionner à la
+  main si besoin) + un code analytique par défaut. Contrairement à
+  `ArticleCompteVente`/`Achat`, un poste n'est pas limité à un seul
+  article : il couvre aussi les charges générales qui n'en ont jamais
+  (assurance, abonnements, carburant, télécom...).
+- **`ArticleCompteVente`/`ArticleCompteAchat` étendus** : nouveau champ
+  `poste_gestion`, prioritaire sur le compte fixe existant s'il est
+  renseigné — `resoudre_compte_vente(regime_fiscal)`/
+  `resoudre_compte_achat(regime_fiscal)` choisissent alors le bon compte
+  du poste selon le régime fiscal du tiers. `clean()` impose l'un des deux
+  (poste ou compte fixe), jamais aucun. `comptabilite.generation` lit
+  désormais le régime fiscal du client (`facture.commande.devis.client`)
+  pour résoudre le compte de vente de chaque ligne, et lève une erreur
+  claire si le poste n'a pas de compte configuré pour ce régime précis
+  plutôt que de deviner.
+- **Achats sans article** (`achats.LigneCommandeFournisseur`) : `article`
+  devient optionnel, nouveau `poste_gestion` (+ `designation` libre) pour
+  les lignes de charge générale sans équivalent stocké — `clean()` impose
+  l'un des deux. `ReceptionLigne` ne mouvemente plus le stock pour une
+  ligne sans article (rien à réceptionner physiquement), mais continue de
+  cumuler `quantite_recue`.
+- **Import** : `comptabilite/data/postes_gestion.json` (les 145 postes,
+  fusion des deux exports) + `comptabilite.postes_gestion.importer_postes_gestion()`,
+  bouton "Importer les postes de gestion (achat/vente)" sur la liste des
+  postes (même mécanisme `actions_list` que l'import du PCG). Écrit en
+  bulk pour les mêmes raisons que `pcg.importer_pcg` (voir plus haut —
+  leçon du timeout Gunicorn). Les comptes référencés descendent à un
+  niveau de détail (6 chiffres, ex. `602100`) plus fin que le PCG officiel
+  (max 5) : l'import les **crée automatiquement** s'ils manquent, en
+  système développé, avec le libellé du premier poste qui les référence —
+  un point de départ raisonnable, à affiner ensuite dans l'admin au besoin
+  (177 comptes créés ainsi sur le jeu de données fourni).
+
+## Enrichissement Tiers/Article : comptes par tiers, bibliothèque de paiement, pays, téléphones typés, gamme conditionnelle
+
+Lot de six demandes ponctuelles.
+
+- **`comptabilite.TiersCompteComptable`** : compte client et/ou compte
+  fournisseur propres à un tiers (`OneToOneField`, les deux à la fois pour
+  un tiers "les deux"), prioritaire sur
+  `ParametresComptables.compte_client_defaut` — même principe que
+  `ArticleCompteVente`. Le côté fournisseur reste déclaratif (pas de
+  génération d'écriture d'achat, comme `ArticleCompteAchat`).
+- **`commercial.ConditionPaiement`** : bibliothèque (remplace le texte
+  libre `Tiers.conditions_paiement`, devenu une FK), avec `nombre_jours` +
+  `fin_de_mois` plutôt qu'un simple libellé — exploitable plus tard pour
+  calculer une échéance, contrairement à `DelaiPropose` qui n'est qu'une
+  suggestion de texte.
+- **`commercial.Pays`** (code ISO2, `est_ue`) + `Adresse.pays` : dès que
+  l'adresse de livraison principale d'un tiers (repli sur la facturation
+  principale si pas de livraison) a un pays renseigné,
+  `Adresse.save()` recalcule automatiquement `Tiers.regime_fiscal` — France
+  si le pays est la France, intracommunautaire si `est_ue`, hors UE sinon.
+  Ne touche jamais un régime positionné manuellement sur "France exonérée"
+  (indécidable depuis le seul pays). Jeu de départ : UE-27 + quelques
+  partenaires courants, extensible dans l'admin.
+- **`commercial.ContactTelephone`** : remplace l'ancien champ unique
+  `Contact.telephone` — plusieurs numéros typés par contact (portable **et**
+  bureau **et** fax en même temps), `ContactAdmin` en fiche dédiée avec
+  l'inline (`Contact` était déjà enregistré seul, donc pas de limite
+  d'inline imbriqué).
+- **Gamme masquée si non fabriqué** : `technique/static/technique/article_admin.js`,
+  `initGammeToggle()` — cache la section "Gammes" (`#gamme_etapes-group`)
+  tant que `Nature ≠ Fabriqué`, sur le même principe que les autres
+  toggles déjà en place sur la fiche Article.
+- **`achats.TarifAchatArticle.frais_port`** : champ optionnel ajouté à
+  l'historique de tarif déjà existant (voir plus haut, "Nouvelles natures
+  d'article achetées + fournisseurs multiples").
+
+**Changement cassant assumé** : `Tiers.conditions_paiement` passe de texte
+libre à une liste déroulante — toute valeur déjà saisie à la main est
+perdue à la migration (pas de conversion automatique, discuté avec
+l'utilisateur : aucune donnée de production n'en dépendait encore).
+
+## IBAN, échéance calculée, devise, comptes auxiliaires auto-générés
+
+Quatre pistes proposées après le lot précédent, validées une à une par
+l'utilisateur.
+
+- **`Tiers.iban` / `Tiers.bic`** : coordonnées bancaires du tiers (utile
+  côté fournisseur en vue d'un virement). `commercial.models.valider_iban()`
+  vérifie le format et la clé de contrôle (modulo 97, ISO 13616) dans
+  `Tiers.clean()` — une faute de frappe est détectée avant de partir dans
+  un virement, plutôt que de stocker un IBAN invalide tel quel.
+- **`Facture.date_echeance`** (propriété calculée, pas de colonne) :
+  `self.commande.devis.client.conditions_paiement.calculer_echeance(self.date_facturation)`.
+  `ConditionPaiement.calculer_echeance()` ajoute `nombre_jours` à la date de
+  référence puis, si `fin_de_mois`, reporte au dernier jour du mois
+  obtenu. Renvoie `None` si le client n'a pas de conditions de paiement,
+  ou si celles-ci sont purement descriptives (`nombre_jours` vide, ex.
+  "Comptant" sans jour chiffré). Affichée en lecture seule dans la liste
+  des factures.
+- **`commercial.Devise`** (référentiel ISO 4217, jeu de départ EUR/USD/GBP/CHF
+  via migration de données, extensible dans l'admin) + `Tiers.devise` et
+  `Commande.devise` — un tiers hors UE (régime fiscal "Hors UE") ne
+  facture pas forcément en euros, ce que le régime fiscal seul ne dit pas.
+  `Commande.devise` reprend automatiquement celle du client à la création
+  (`chiffrage.production.lancer_en_production()`), sans empêcher de la
+  changer ensuite au cas par cas.
+- **Comptes auxiliaires auto-générés** (`TiersCompteComptable.code_client` /
+  `code_fournisseur`) : convention propre au cabinet comptable de
+  l'utilisateur — 5 caractères (lettres et/ou chiffres) qu'il détermine
+  lui-même, concaténés à "411" (compte client) ou "401" (compte
+  fournisseur). `clean()` valide le format (exactement 5 caractères
+  alphanumériques) ; `save()` résout ou crée le `CompteComptable`
+  correspondant (système développé) et l'assigne à `compte_client`/
+  `compte_fournisseur` — pas de doublon si le même code est réutilisé pour
+  un autre tiers (`get_or_create` sur le code du compte). Les champs
+  `compte_client`/`compte_fournisseur` restent utilisables directement en
+  échappatoire (compte déjà existant, numérotation différente) quand aucun
+  code à 5 caractères n'est renseigné.
+
+## Écriture comptable d'achat
+
+`comptabilite.generation.generer_ecriture_facture` (vente) avait son
+pendant manquant côté achat : `ArticleCompteAchat` et
+`PosteGestion.compte_achat_*` étaient déjà en place, mais purement
+déclaratifs, faute de document "facture fournisseur" auquel les
+accrocher — l'app achats ne portait que des documents logistiques
+(`CommandeFournisseur`, `Reception`).
+
+- **`achats.FactureFournisseur`** : symétrique de `facturation.Facture`
+  côté vente — la facture "légale" arrive du fournisseur (papier/email/PDF,
+  hors ERP), ce modèle garde une trace interne (numéro généré par
+  codification, `reference_fournisseur` pour le numéro réel donné par le
+  fournisseur, montants HT/TTC, statut de paiement) et sert de point de
+  départ à la génération de l'écriture.
+- **`LigneCommandeFournisseur.taux_tva`** (+ `montant_ht`/`montant_ttc`
+  calculés) : manquait pour pouvoir répartir la TVA déductible par taux,
+  même principe que `CommandeLigne` côté vente.
+- **`achats.generation.generer_ecriture_achat()`** : Fournisseurs (401) au
+  crédit — compte spécifique du fournisseur si `TiersCompteComptable` en a
+  un, sinon le compte par défaut — Achats + TVA déductible au débit, une
+  paire de lignes par groupe (taux de TVA, compte d'achat, code
+  analytique) distinct sur la commande fournisseur facturée. Le compte
+  d'achat est celui d'`ArticleCompteAchat` pour une ligne avec article
+  (résolu selon le régime fiscal du fournisseur), celui du poste de
+  gestion pour une ligne de charge générale sans article, sinon le compte
+  d'achat par défaut. Structure rigoureusement symétrique de
+  `generer_ecriture_facture` (débit/crédit inversés) — mêmes règles de
+  conception (idempotent, repli sur les montants globaux si la commande
+  n'a aucune ligne, code analytique jamais posé sur la ligne
+  Fournisseurs/TVA).
+- **`ParametresComptables`** : quatre nouveaux champs côté achat (journal,
+  compte fournisseur/achat/TVA déductible par défaut), avec repli sur les
+  codes PCG usuels 401/601/44566 comme pour les champs vente existants ;
+  `journal_achats` préconfiguré sur "AC" par migration de données, même
+  principe que `journal_ventes`/"VT".
+- **`EcritureComptable.facture_fournisseur`** : `OneToOneField` référencé
+  par nom d'app (`"achats.FactureFournisseur"`), pas importé directement —
+  `achats` importe déjà `comptabilite.models` (pour `PosteGestion` et
+  maintenant `EcritureComptable`/`LigneEcriture`/`ParametresComptables` via
+  `achats.generation`), un import direct dans l'autre sens créerait un
+  cycle. Django résout la chaîne de caractères après le chargement de
+  toutes les apps — aucun souci d'ordre d'import.
+- **Action admin** "Générer l'écriture comptable" sur la liste des
+  factures fournisseur, même mécanisme que côté facture de vente.
+
+## Fiche Tiers : téléphones imbriqués, aperçu de compte en direct, réorganisation
+
+Trois retours sur la fiche Tiers, après vérification qu'une partie de la
+demande (email et association contact/adresse de livraison) était déjà en
+place.
+
+- **Numéros de téléphone imbriqués** : `ContactTelephone` (plusieurs
+  numéros typés par contact) est maintenant saisissable directement dans
+  le tableau "Contacts" de la fiche Tiers, sans passer par la fiche
+  Contact dédiée — `ContactInline.inlines = [ContactTelephoneInline]`,
+  rendu par `unfold.admin.ModelAdmin` qui embarque nativement
+  `NestedInlinesModelAdminMixin` (pas de nouvelle dépendance, ni de
+  changement de modèle).
+- **Aperçu du compte comptable en direct** : dès que 5 caractères valides
+  sont saisis dans "Code client"/"Code fournisseur"
+  (`TiersCompteComptable`), un texte apparaît sous le champ indiquant le
+  compte qui sera utilisé — son libellé s'il existe déjà en base ("→
+  411DUPON — Dupont SAS (compte existant)"), ou qu'il sera créé sinon.
+  Nouvel endpoint `apercu_compte_comptable_view` (staff uniquement,
+  `commercial/admin.py`) interrogé en AJAX par
+  `commercial/static/commercial/tiers_admin.js` (débounce 300 ms),
+  suivant le même principe que les aperçus déjà en place sur la fiche
+  Devis (`chiffrage/builder_views.py`).
+- **Réorganisation de la fiche** : le fieldset "Commercial" passe en
+  dernière position (après "Coordonnées bancaires") et l'inline "Compte
+  comptable de tiers" passe en tête des tableaux (avant "Adresses" et
+  "Contacts") — Django affiche toujours tous les fieldsets avant tous les
+  inlines, cette combinaison est ce qui rapproche le plus les deux blocs
+  demandés.
+
+**Correctifs après retours utilisateur** :
+
+- "Adresse de livraison associée" (`ContactAdmin`, fiche Contact autonome)
+  utilisait `autocomplete_fields`, qui interroge `AdresseAdmin` sans aucun
+  filtre — le menu proposait les adresses de n'importe quel tiers.
+  Restreint, via `get_form`/`formfield_for_foreignkey`, aux seules adresses
+  de livraison du tiers du contact — vide (avec un `help_text` explicite)
+  tant que le contact et son tiers n'ont pas été enregistrés une première
+  fois.
+- Le même champ, sur le tableau Contacts de la fiche Tiers
+  (`ContactInline`), avait d'abord reçu la même restriction — mais elle
+  rendait le champ inutilisable à la création d'un tiers : aucune adresse
+  n'existe encore en base tant que le tiers n'a pas été enregistré, donc
+  impossible de lier un contact à une adresse tout juste tapée dans le
+  même formulaire (signalé par l'utilisateur, capture à l'appui). Corrigé
+  différemment ici : `adresse_livraison` est exclu du formulaire
+  (`ContactInlineForm`, `exclude = ["adresse_livraison"]`) et remplacé par
+  un champ `adresse_livraison_ref` qui référence une ligne du tableau
+  Adresses par son indice (ex. `"1"` pour `adresses-1-*`), pas par un pk —
+  une ligne pas encore enregistrée n'en a pas encore au moment où Django
+  valide le formulaire. Les options du `<select>` sont construites en JS
+  (`tiers_admin.js`) à partir des lignes du tableau Adresses affichées à
+  l'écran (type Livraison uniquement, réactif à la frappe et aux lignes
+  ajoutées/supprimées) — jamais interrogées en base. `TiersAdmin.
+  save_related()` résout la référence en instance `Adresse` réelle une
+  fois que toutes les adresses ont vraiment été enregistrées (y compris
+  celles créées dans la même requête), et revalide au passage que
+  l'adresse ciblée appartient bien à ce tiers et est de type Livraison —
+  le contrôle que `Contact.clean()` fait normalement, mais qui n'est plus
+  déclenché pour ce champ puisqu'il est exclu du `ModelForm`.
+  `ContactAdmin` (fiche Contact autonome, sans tableau Adresses à côté)
+  garde la première approche, plus simple, suffisante dans son contexte.
+
+## Facture : montants et échéance calculés à titre indicatif depuis la commande
+
+`montant_ht`/`montant_ttc` restent des champs saisis à la main (la facture
+réelle, émise dans Tiime, fait foi — peut différer : facturation partielle
+d'une commande sur plusieurs factures, remise, arrondi) mais n'étaient
+jusqu'ici calculables d'aucune façon depuis les lignes de la commande.
+
+- **`Facture.montant_ht_calcule`/`montant_ttc_calcule`** (propriétés) :
+  somme des lignes actuelles de la commande (`CommandeLigne.montant_ht`/
+  `montant_ttc`), en ignorant les lignes sans prix renseigné — même
+  logique que `comptabilite.generation._repartition_lignes` côté
+  génération d'écriture. `None` si la commande n'a aucune ligne chiffrée.
+- **Pré-remplissage automatique** sur le formulaire d'ajout d'une facture :
+  dès qu'une commande est choisie, `facturation/facture_admin.js`
+  interroge `montants_calcules_commande_view` (nouvel endpoint AJAX,
+  `facturation/admin.py`) et renseigne `montant_ht`/`montant_ttc` — sans
+  jamais écraser une valeur déjà saisie à la main, même principe que
+  `chiffrage/devis_admin_live.js`.
+- **Rappel en lecture seule** sur la fiche (ajout et modification) :
+  "Montants calculés depuis la commande (indicatif)" — utile pour repérer
+  après coup un écart avec les lignes actuelles de la commande (ex.
+  modifiées depuis la création de la facture).
+
+**Non traité, sur demande explicite de l'utilisateur** : un vrai suivi
+des règlements (date, montant, rapprochement bancaire) — `statut_paiement`
+reste un texte libre. Chantier plus lourd, à faire séparément le jour où
+Tiime ne suffit plus comme source de vérité sur les encaissements.
+
+## Correctif : ligne de téléphone vide bloquant l'enregistrement d'un tiers
+
+`ContactTelephoneInline` (`extra=1`) affiche une ligne vide sous chaque
+contact. Sans valeur par défaut sur `type_telephone`, le `<select>` du
+navigateur sélectionnait son premier choix ("Portable") même sans qu'on y
+touche — suffisant pour que Django considère la ligne comme modifiée, et
+donc exige un numéro (champ obligatoire) même sur une ligne qu'on ne
+voulait pas remplir. `ContactTelephone.type_telephone` a désormais
+`default=TypeTelephone.PORTABLE` : la valeur par défaut du modèle
+correspond alors exactement à ce que le `<select>` affiche sans
+interaction, et Django détecte correctement qu'une ligne non touchée n'a
+pas changé (elle est simplement ignorée, comme prévu) — sans rien
+affaiblir : une ligne où l'utilisateur renseigne effectivement un numéro
+reste normalement validée.
+
+## Autocomplétion d'adresse (API Adresse, data.gouv.fr)
+
+Le champ "Adresse" (`Adresse.adresse`) propose désormais des suggestions
+en tapant, via l'**API Adresse** de l'État (Base Adresse Nationale,
+Etalab) : `commercial/static/commercial/adresse_autocomplete.js`,
+interrogée en direct depuis le navigateur (`api-adresse.data.gouv.fr/search/`,
+gratuite, sans clé, CORS ouvert — aucun détour par le backend). Au clic
+sur une suggestion, "Code postal" et "Ville" se remplissent avec elle.
+Fonctionne aussi bien sur la fiche Adresse autonome que sur le tableau
+Adresses imbriqué dans la fiche Tiers (`AdresseInline`) : le script
+détecte tout seul si le champ s'appelle `adresse` (fiche seule) ou
+`adresses-N-adresse` (ligne de tableau), et en déduit le nom des champs
+frères à remplir. Ne couvre que la France (le service lui-même) — une
+adresse hors France reste à saisir à la main, comme avant.
+
+**Vérification** : la construction de la requête, l'affichage des
+suggestions et le remplissage des champs ont été vérifiés avec l'appel
+réseau intercepté (réponse simulée) — l'environnement d'exécution de cette
+session bloque explicitement les appels sortants vers ce domaine
+(politique réseau du bac à sable, sans rapport avec le navigateur réel de
+l'utilisateur, qui appellera l'API directement, sans passer par ce
+même proxy).
+
+## Contact associé à une adresse de facturation (en plus de livraison)
+
+`Contact.adresse_livraison` ne couvrait que les adresses de type
+Livraison (section précédente "Fiche Tiers : téléphones imbriqués...") —
+signalé comme trop restrictif : un contact comptabilité, par exemple, est
+associé à une adresse de facturation, pas de livraison.
+
+Renommé en `Contact.adresse_associee` (migration `RenameField` +
+`AlterField` écrite à la main, pour préserver les données existantes —
+`makemigrations` non interactif aurait par défaut fait un
+`RemoveField`+`AddField`, perdant les liens déjà enregistrés) : accepte
+maintenant indifféremment une adresse de Livraison ou de Facturation du
+même tiers. `Contact.clean()` ne vérifie plus que le type — de toute
+façon `Adresse.TypeAdresse` n'en compte que deux, la restriction n'avait
+plus de sens dès lors que les deux sont acceptés — seule l'appartenance
+au bon tiers reste contrôlée. Même changement côté `ContactInlineForm`/
+`TiersAdmin._resoudre_reference_adresse` (fiche Tiers) et `ContactAdmin.
+formfield_for_foreignkey` (fiche Contact autonome), qui filtraient tous
+les deux sur le type Livraison uniquement.
+
+Le `<select>` "Adresse associée" du tableau Contacts (fiche Tiers)
+préfixe maintenant chaque option par son type ("Livraison — Site
+principal", "Facturation — Service comptabilité") pour les distinguer
+quand un tiers a les deux.
+
+**Vérifié** : création d'un tiers avec une adresse de livraison et une
+adresse de facturation dans le même enregistrement, contact lié à
+l'adresse de facturation dès la création (sans pk pour l'adresse au
+moment de la validation du formulaire — même mécanisme que pour
+livraison) — confirmé en base après enregistrement.
+
+## Autocomplétion SIRET/SIREN <-> raison sociale + adresse du siège
+
+En tapant la raison sociale d'un tiers, l'application propose maintenant
+les entreprises correspondantes (nom, SIRET, adresse du siège) — et
+inversement, en tapant un SIREN ou un SIRET, elle propose de compléter la
+raison sociale et l'adresse. Basé sur **Recherche d'entreprises**
+(`recherche-entreprises.api.gouv.fr`, base SIRENE, service public gratuit
+sans clé, CORS ouvert) : `commercial/static/commercial/
+entreprise_lookup.js`, interrogé en direct depuis le navigateur, sur le
+même principe que l'autocomplétion d'adresse (section précédente).
+Chargé uniquement sur `TiersAdmin` (fiche Tiers), seule fiche portant à
+la fois "Raison sociale" et "SIRET".
+
+- **En tapant "Raison sociale"** (≥ 3 caractères) : une liste déroulante
+  de suggestions apparaît (nom + adresse du siège) ; la sélection remplit
+  "SIRET" et propose l'adresse du siège (voir ci-dessous).
+- **En tapant "SIRET"** (9 chiffres — un SIREN — ou 14 — un SIRET
+  complet) : dès qu'une correspondance exacte est trouvée, complète
+  automatiquement "Raison sociale" (seulement si elle est encore vide, un
+  SIRET ne prouvant pas que le nom déjà saisi est erroné) et, si un
+  SIREN seul avait été tapé, complète le champ en SIRET complet du siège
+  — c'est le sens inverse demandé : « ou l'inverse en tapant le Siren ou
+  le Siret ».
+- **Adresse du siège proposée** : uniquement si le tableau Adresses de la
+  fiche Tiers est encore entièrement vide (`adresses-TOTAL_FORMS == 0`)
+  — dès qu'une adresse existe, impossible de savoir si c'est celle du
+  siège ou une autre, mieux vaut ne rien écraser plutôt que deviner. Le
+  cas échéant, une ligne "Livraison — Siège" est ajoutée et remplie
+  automatiquement, en simulant le même clic sur "Ajouter un objet Adresse
+  supplémentaire" que ferait l'utilisateur (aucun accès direct au DOM
+  interne du formset Django/Unfold) puis en écoutant l'événement
+  `formset:added` qu'Unfold déclenche une fois la ligne effectivement
+  ajoutée et réindexée, pour la remplir au bon indice.
+
+**Vérifié** (appel réseau intercepté — même contrainte réseau du bac à
+sable que pour l'autocomplétion d'adresse, sans rapport avec le
+navigateur réel de l'utilisateur) : suggestions affichées en tapant une
+raison sociale, sélection remplissant SIRET + adresse (nouvelle ligne
+"Livraison — Siège") ; saisie d'un SIRET connu remplissant
+automatiquement raison sociale + adresse ; non-régression vérifiée dans
+les deux sens quand une raison sociale ou une adresse étaient déjà
+saisies à la main (rien n'est écrasé, aucune ligne fantôme ajoutée).
+
+## Correctif : numéro de téléphone d'un contact rendu optionnel
+
+Signalé : le numéro de téléphone d'un contact n'est pas toujours connu au
+moment de la saisie, mais `ContactTelephone.numero` était un champ
+obligatoire — bloquant dès qu'on choisissait un type (ex. "Bureau") sans
+renseigner de numéro (une ligne réellement vide et non touchée était déjà
+tolérée, voir "Correctif : ligne de téléphone vide bloquant
+l'enregistrement d'un tiers").
+
+`numero` passe à `blank=True`. `ContactTelephone.__str__()` et
+`ContactAdmin.telephones_display` (colonne "Téléphones" de la liste des
+contacts) s'adaptent : un numéro absent affiche simplement le type
+("Bureau") plutôt que "Bureau : " suivi de rien.
+
+## Adresse : livraison et facturation à la fois
+
+`Adresse.type_adresse` (un choix unique, Livraison OU Facturation) est
+remplacé par deux cases à cocher indépendantes, `est_livraison` et
+`est_facturation` — une même adresse peut donc être les deux en même
+temps (ex. un client dont le siège reçoit aussi bien les marchandises que
+les factures), plutôt que de devoir la dupliquer en deux lignes
+identiques. Migration `RenameField`-style écrite à la main (`AddField` ×2
+→ report des données existantes → `RemoveField`) pour ne perdre aucune
+donnée. Au moins une case doit être cochée (`Adresse.clean()`).
+
+Tout ce qui filtrait ou affichait par `type_adresse` est adapté :
+`Adresse.__str__`/nouvelle propriété `types_affiches` ("Livraison",
+"Facturation" ou "Livraison + Facturation"), unicité de l'adresse
+principale (désormais vérifiée indépendamment par type, une adresse
+cochée pour les deux devant être unique sur chacun des deux volets),
+application du régime fiscal (même priorité livraison puis repli
+facturation qu'avant), recherche de l'adresse principale par type
+(`chiffrage.production._adresse_principale`, `valeurs_defaut_tiers_view`),
+et le JS (`tiers_admin.js`, `entreprise_lookup.js`) qui construisait le
+libellé "Livraison — Nom" du sélecteur "Adresse associée" d'un contact.
+
+## Glisser-déposer des lignes de devis + conversion en commande en un clic
+
+Deux demandes liées : pouvoir réordonner les lignes d'un devis, et que cet
+ordre soit repris sur la commande une fois convertie.
+
+- **`DevisLigne.ordre`** (nouveau champ, entier) pilote désormais l'ordre
+  d'affichage (`Meta.ordering = ["devis", "ordre", "id"]`) — et, de fait,
+  l'ordre des `CommandeLigne` créées par `lancer_en_production` (qui
+  itère `devis.lignes.all()`, donc déjà trié).
+- **Glisser-déposer natif** (HTML5 `draggable`, pas de librairie externe) :
+  `chiffrage/static/chiffrage/devisligne_reorder.js`, une poignée "⠿"
+  ajoutée devant chaque ligne du tableau "Lignes de devis". Au dépôt,
+  renumérote le champ caché `ordre` de chaque ligne selon sa nouvelle
+  position DOM — jamais affiché ni saisi à la main, persisté au prochain
+  "Enregistrer" comme le reste du formulaire.
+  **Piège rencontré et corrigé** : la ligne "extra" toujours vide du
+  tableau (`DevisLigneInline.extra = 1`) ne doit *jamais* recevoir de
+  valeur d'ordre tant qu'aucun article n'y est choisi — sinon Django la
+  considère comme "modifiée" et exige qu'elle soit intégralement remplie
+  (article, quantité), bloquant tout l'enregistrement. Même classe de bug
+  que le correctif précédent sur les lignes de téléphone/adresse vides ;
+  couverte par un test de régression Python de bout en bout
+  (`ReordonnerLignesDevisAdminTests`) qui rejoue le POST équivalent.
+- **"Convertir en commande" en un clic** : la conversion existait déjà
+  comme action d'admin sur la liste des devis ("Lancer en production",
+  `lancer_en_production`) — désormais aussi accessible directement
+  depuis la fiche d'un devis validé (menu d'outils de la fiche, à côté de
+  "Constructeur de devis"), sans repasser par la liste. Nouvelle vue
+  `convertir_en_commande_view` (POST, même logique que l'action
+  existante) ; si une commande existe déjà pour ce devis, le bouton est
+  remplacé par un lien direct vers elle.
+
+**Vérifié** : glisser-déposer d'une ligne en tête de tableau puis
+enregistrement — l'ordre persiste après rechargement ; conversion d'un
+devis validé en un clic, redirection vers la commande créée avec ses
+lignes dans le même ordre que le devis.
+
+## Fiche Commande : création directe, calcul en direct, TVA automatique
+
+Sept demandes liées, toutes centrées sur la fiche Commande — jusqu'ici
+uniquement modifiable après coup (créée par `lancer_en_production` depuis
+un devis), sans les conforts déjà en place côté Devis.
+
+- **Devis facultatif** (`Commande.devis` passe à `null=True, blank=True`) :
+  une commande peut désormais être créée directement depuis
+  `/admin/chiffrage/commande/add/`, sans passer par un devis. Migration en
+  3 temps (`AddField` du nouveau `client` sans contrainte -> report des
+  données depuis `devis.client` pour les commandes existantes ->
+  `AlterField` non-nullable) pour ne rien perdre.
+- **`Commande.client`** (nouveau, obligatoire) : jusqu'ici le client
+  n'était accessible que via `commande.devis.client` — impossible dès lors
+  que le devis devient facultatif. Pré-rempli depuis `devis.client` par
+  `lancer_en_production`/le "Convertir en commande" de la section
+  précédente, mais toujours modifiable ensuite (demandé explicitement).
+- **`Commande.reference_client`** (nouveau, obligatoire) : la référence
+  que le client donne à sa propre commande (numéro de bon de commande...).
+  Comme cette référence n'est jamais connue au moment de la conversion
+  d'un devis, `lancer_en_production` la laisse vide à la création — à
+  compléter ensuite à la main, la fiche l'exigera dès le premier
+  enregistrement.
+- **Adresses filtrées par client** : dès que "Client" est choisi (ajout
+  comme modification), "Adresse de facturation"/"Adresse de livraison" se
+  pré-remplissent avec les adresses principales de ce client — réutilise
+  l'endpoint déjà exposé côté Devis (`valeurs_defaut_tiers_view`), sans
+  jamais écraser un choix déjà fait (même principe que partout ailleurs
+  dans ce projet).
+- **Bouton "Créer une commande directement" supprimé** (et son détour par
+  un devis-support jamais montré au client, `?commande_directe=1`) : les
+  points ci-dessus le rendent inutile, la commande se crée maintenant
+  directement avec les mêmes conforts.
+- **Taux de TVA = Article × régime fiscal du client**, automatique mais
+  modifiable : nouveau `Article.taux_tva` (taux "normal", régime France)
+  et `chiffrage.moteur.resoudre_taux_tva(article, client)` — un client au
+  régime France applique le taux de l'article (ou le taux par défaut du
+  référentiel s'il n'en a pas), un client exonéré/intracommunautaire/hors
+  UE applique toujours 0 % (nouveau taux "Taux zéro" ajouté au
+  référentiel). Simplement suggéré : le `<select>` "Taux de TVA" n'est
+  rempli que s'il est encore vide, jamais écrasé une fois modifié à la
+  main.
+- **Calcul automatique du prix** (quantité / gamme / nomenclature), comme
+  pour le devis : nouvelle fonction `previsualiser_ligne_commande` et
+  endpoints dédiés (`recalculer_ligne_commande_view`,
+  `previsualiser_ligne_commande_view`,
+  `previsualiser_ligne_nouvelle_commande_view`), mêmes règles que
+  `previsualiser_ligne` mais toujours avec les marges par défaut de
+  l'article/poste — `CommandeLigne` n'a pas de champ de surcharge de marge
+  par ligne. Ne s'applique **que** sur une ligne sans devis d'origine
+  (`devis_ligne` vide) : une ligne héritée d'un devis reste une
+  *surcharge* au sens du modèle, jamais recalculée toute seule — changer
+  sa quantité ne touche que la quantité, pas le prix, jusqu'à ce qu'on le
+  retouche explicitement.
+- **Date de livraison copiée de la ligne précédente** : à l'ajout d'une
+  nouvelle ligne dans le tableau, sa date de livraison prévue reprend
+  celle de la dernière ligne déjà présente (signalé comme le cas le plus
+  courant — plusieurs lignes saisies à la suite pour la même livraison) —
+  seulement si la nouvelle ligne n'en a pas encore.
+
+`commande_admin_live.js` (nouveau) regroupe ces quatre derniers
+comportements ; `commande_admin_live.js`/`devis_admin_live.js` partagent
+le même formset "lignes" (`CommandeLigne.commande` et `DevisLigne.devis`
+ont toutes deux `related_name="lignes"`) mais s'exécutent sur des pages
+différentes, sans conflit.
+
+**Vérifié** : création d'une commande sans devis avec calcul de prix et
+suggestion de TVA en direct sur une ligne fraîchement ajoutée ; adresses
+pré-remplies dès le choix du client ; date de livraison copiée sur une
+deuxième ligne ; bouton "Créer une commande directement" bien absent du
+formulaire d'ajout d'un devis.
