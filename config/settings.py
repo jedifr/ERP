@@ -24,6 +24,20 @@ DEBUG = _env_bool("DJANGO_DEBUG", True)
 
 ALLOWED_HOSTS = [h.strip() for h in os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",") if h.strip()]
 
+# Nécessaire dès que l'admin est accédé via une IP/nom d'hôte différent de localhost avec
+# DEBUG=False (ex. IP du NAS) : Django vérifie l'en-tête Origin des requêtes POST (formulaires
+# admin) contre cette liste. Format attendu : URLs complètes avec schéma, ex.
+# "http://192.168.1.50:8000,https://mon-nas.exemple.fr".
+CSRF_TRUSTED_ORIGINS = [
+    o.strip() for o in os.environ.get("DJANGO_CSRF_TRUSTED_ORIGINS", "").split(",") if o.strip()
+]
+
+# Cet ERP est un outil interne destiné à rester sur le réseau local de l'atelier (pas
+# d'exposition Internet directe) : par simplicité de déploiement (pas de reverse proxy
+# obligatoire), les fichiers déposés (DXF/DWG) sont servis par Django même hors DEBUG.
+# Mettre à `false` si un reverse proxy (Nginx, proxy Synology...) prend le relai.
+SERVE_MEDIA = _env_bool("DJANGO_SERVE_MEDIA", True)
+
 
 # Application definition
 
@@ -37,10 +51,12 @@ INSTALLED_APPS = [
     "rest_framework",
     "django_filters",
     "technique",
+    "decoupe",
 ]
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -111,6 +127,16 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = "static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
+
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
+}
+
+# Fichiers déposés par les utilisateurs (ex. fichiers DXF/DWG des pièces à découper)
+MEDIA_URL = "media/"
+MEDIA_ROOT = BASE_DIR / "media"
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
