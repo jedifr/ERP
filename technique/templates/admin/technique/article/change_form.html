@@ -1,0 +1,19 @@
+{% extends "admin/change_form.html" %}
+{% load i18n %}
+
+{% block object-tools-items %}
+    {% if original %}
+        <li>
+            <form action="{% url 'admin:technique_article_dupliquer' original.pk %}" method="post" class="contents">
+                {% csrf_token %}
+                <button type="submit"
+                        onclick="return confirm('Dupliquer « {{ original }} » (y compris sa nomenclature et sa gamme le cas échéant) ?');"
+                        class="cursor-pointer flex grow items-center gap-2 px-3 py-2 text-left whitespace-nowrap w-full bg-transparent border-0 text-font-default-light dark:text-font-default-dark">
+                <span class="material-symbols-outlined">content_copy</span>
+                Dupliquer et modifier
+                </button>
+            </form>
+        </li>
+    {% endif %}
+    {{ block.super }}
+{% endblock %}

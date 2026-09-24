@@ -20,7 +20,7 @@ class ArticleViewSet(viewsets.ModelViewSet):
     queryset = Article.objects.select_related("matiere").all()
     serializer_class = ArticleSerializer
     filterset_fields = ["nature", "unite_cout", "gere_en_stock", "matiere"]
-    search_fields = ["reference"]
+    search_fields = ["reference", "libelle"]
 
 
 class PosteTravailViewSet(viewsets.ModelViewSet):

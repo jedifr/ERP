@@ -24,6 +24,14 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/v1/", include("technique.urls")),
     path("api/v1/", include("decoupe.urls")),
+    path("api/v1/", include("commercial.urls")),
+    path("api/v1/", include("chiffrage.urls")),
+    path("api/v1/", include("stock.urls")),
+    path("api/v1/", include("facturation.urls")),
+    path("api/v1/", include("comptabilite.urls")),
+    path("api/v1/", include("achats.urls")),
+    path("api/v1/", include("soustraitance.urls")),
+    path("api/v1/", include("pilotage.urls")),
     path("api-auth/", include("rest_framework.urls")),
 ]
 

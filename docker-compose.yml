@@ -5,9 +5,9 @@ services:
     environment:
       POSTGRES_DB: ${DB_NAME:-erp_db}
       POSTGRES_USER: ${DB_USER:-erp_user}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD doit être défini dans le fichier .env}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-erp_dev_password}
     volumes:
-      - db_data:/var/lib/postgresql/data
+      - erp_postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-erp_user} -d ${DB_NAME:-erp_db}"]
       interval: 5s
@@ -20,18 +20,18 @@ services:
     env_file:
       - .env
     environment:
-      # Le réseau Docker Compose fait de "db" le nom d'hôte du conteneur PostgreSQL —
-      # indépendant de la valeur DB_HOST du .env (utile en local hors Docker).
       DB_HOST: db
-      DB_PORT: "5432"
+      DB_PORT: 5432
     depends_on:
       db:
         condition: service_healthy
     volumes:
-      - media_data:/app/media
+      # Fichiers déposés (DXF/DWG des pièces à découper, app `decoupe`) — persistants entre
+      # reconstructions du conteneur.
+      - erp_media_data:/app/media
     ports:
       - "${ERP_PORT:-8000}:8000"
 
 volumes:
-  db_data:
-  media_data:
+  erp_postgres_data:
+  erp_media_data:
