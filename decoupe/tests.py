@@ -375,3 +375,85 @@ class ApiTests(TestCase):
             format="json",
         )
         self.assertEqual(reponse.status_code, 400)
+
+
+class AnalyserFichierAdminViewTests(TestCase):
+    """Vue AJAX appelée par piecedecoupe_admin.js dès la sélection du fichier, avant tout
+    enregistrement — permet d'afficher l'analyse et l'aperçu en direct sur le formulaire."""
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_superuser(
+            "decoupe-admin", "decoupe-admin@example.com", "pass1234"
+        )
+        self.client.force_login(self.user)
+        self.url = "/admin/decoupe/piecedecoupe/analyser/"
+
+    def test_fichier_valide_renvoie_la_geometrie_et_un_apercu_svg(self):
+        contenu = _dxf_bytes(_rectangle_avec_trou)
+        reponse = self.client.post(
+            self.url, {"fichier_source": SimpleUploadedFile("flasque.dxf", contenu)}
+        )
+        self.assertEqual(reponse.status_code, 200)
+        data = reponse.json()
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["statut_display"], "Importée")
+        self.assertEqual(data["format_source_display"], "DXF")
+        self.assertEqual(data["nb_contours_interieurs"], 1)
+        self.assertAlmostEqual(data["largeur_mm"], 100, places=1)
+        self.assertAlmostEqual(data["hauteur_mm"], 50, places=1)
+        self.assertIn("<svg", data["svg"])
+
+    def test_fichier_sans_contour_ferme_renvoie_une_erreur_lisible(self):
+        contenu = _dxf_bytes(lambda msp: msp.add_text("x", dxfattribs={"insert": (0, 0)}))
+        reponse = self.client.post(
+            self.url, {"fichier_source": SimpleUploadedFile("invalide.dxf", contenu)}
+        )
+        self.assertEqual(reponse.status_code, 200)
+        data = reponse.json()
+        self.assertFalse(data["ok"])
+        self.assertEqual(data["statut_display"], "Erreur d'import")
+        self.assertTrue(data["message_erreur"])
+
+    def test_extension_non_supportee_rejetee(self):
+        reponse = self.client.post(
+            self.url,
+            {"fichier_source": SimpleUploadedFile("piece.txt", b"pas un dxf")},
+        )
+        self.assertEqual(reponse.status_code, 400)
+
+    def test_aucun_fichier_rejete(self):
+        reponse = self.client.post(self.url, {})
+        self.assertEqual(reponse.status_code, 400)
+
+    def test_utilisateur_non_authentifie_redirige_vers_le_login(self):
+        self.client.logout()
+        contenu = _dxf_bytes(_rectangle_avec_trou)
+        reponse = self.client.post(
+            self.url, {"fichier_source": SimpleUploadedFile("flasque.dxf", contenu)}
+        )
+        self.assertEqual(reponse.status_code, 302)
+
+
+class ApercuPieceAdminTests(TestCase):
+    """Aperçu SVG affiché sur la fiche PieceDecoupe (formulaire d'ajout et de modification)."""
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_superuser(
+            "apercu-admin", "apercu-admin@example.com", "pass1234"
+        )
+        self.client.force_login(self.user)
+
+    def test_apercu_absent_avant_import(self):
+        reponse = self.client.get("/admin/decoupe/piecedecoupe/add/")
+        self.assertEqual(reponse.status_code, 200)
+        self.assertContains(reponse, "En attente d&#x27;import du fichier source.")
+
+    def test_apercu_svg_present_apres_import(self):
+        contenu = _dxf_bytes(_rectangle_avec_trou)
+        piece = PieceDecoupe.objects.create(
+            nom="Flasque", fichier_source=SimpleUploadedFile("flasque.dxf", contenu)
+        )
+        piece.importer_geometrie()
+        reponse = self.client.get(f"/admin/decoupe/piecedecoupe/{piece.pk}/change/")
+        self.assertEqual(reponse.status_code, 200)
+        self.assertContains(reponse, "<svg")

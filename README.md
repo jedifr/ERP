@@ -1899,3 +1899,43 @@ sur GitHub.
 **Vérifié** : badge `v2026.09.25.1` visible sur le tableau de bord et sur
 une page de liste (ex. Devis) ; préfixe `[v2026.09.25.1]` présent dans le
 titre de l'onglet du navigateur sur les deux pages.
+
+## Analyse en direct et aperçu visuel des pièces à découper
+
+Auparavant, l'extraction de la géométrie (surface, périmètre, contours...)
+n'avait lieu qu'à l'enregistrement de la fiche `PieceDecoupe`, et rien
+n'affichait la silhouette de la pièce. Deux ajouts sur `decoupe/admin.py` :
+
+- **Analyse dès la sélection du fichier, avant tout enregistrement** :
+  `decoupe/static/decoupe/piecedecoupe_admin.js` écoute le `change` du champ
+  "Fichier source" et envoie le fichier en AJAX vers une nouvelle vue
+  (`decoupe/admin_views.py::analyser_fichier_view`,
+  `/admin/decoupe/piecedecoupe/analyser/`) qui appelle directement
+  `extraire_geometrie()` sur un fichier temporaire, **sans rien
+  persister** — l'enregistrement réel (via `PieceDecoupe.importer_geometrie()`)
+  a toujours lieu normalement au clic sur "Enregistrer", cette vue ne fait
+  qu'anticiper le même résultat pour l'affichage. Les champs Statut, Format
+  source, Message erreur, Avertissements, Surface, Périmètre, Largeur,
+  Hauteur et Nb contours se mettent à jour en direct avec le résultat.
+- **Aperçu visuel** : nouveau champ "Aperçu" (méthode `apercu_piece`) qui
+  affiche la silhouette de la pièce (contour extérieur + trous) en SVG,
+  aussi bien en direct sur le formulaire (avant save, à partir de la
+  réponse AJAX) que sur une fiche déjà enregistrée (à partir de
+  `contour_json` persisté). Réutilise le rendu de contour de
+  `decoupe/services/apercu_svg.py` (jusque-là utilisé seulement pour
+  l'aperçu d'une feuille imbriquée) via une nouvelle fonction
+  `generer_svg_piece()`, dédiée à une pièce seule sans feuille englobante.
+
+Point technique notable : Unfold ne pose une classe CSS `field-<nom>` (point
+d'accroche pour du JS ciblant un champ readonly précis) que sur ses tableaux
+inline, pas sur les champs readonly de premier niveau d'un formulaire — même
+contrainte déjà rencontrée sur `DevisAdmin` (montants HT/TTC). Les champs
+concernés sont donc exclus du formulaire (`exclude`) et remplacés par des
+méthodes `readonly_fields` dédiées (`statut_display`, `surface_mm2_display`,
+etc.), chacune enveloppant sa valeur dans un `<span id="decoupe-...">` que le
+JS peut cibler de façon stable.
+
+**Vérifié** : import d'un fichier DXF d'exemple (pièce ronde à trou central) —
+analyse (statut, surface, périmètre, dimensions, contours) et aperçu SVG
+affichés en direct avant tout clic sur "Enregistrer" ; aperçu toujours présent
+après enregistrement sur la fiche de modification.
