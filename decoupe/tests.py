@@ -492,6 +492,39 @@ class ImbricationJobModelTests(TestCase):
             ligne.full_clean()
 
 
+class ImbricationJobAdminApercuTests(TestCase):
+    """L'aperçu visuel des feuilles n'était visible nulle part dans l'admin (seuls les
+    chiffres — nb_feuilles, taux d'utilisation — l'étaient) ; `generer_svg_feuille` n'était
+    branché que sur un endpoint API brut. Couvre son ajout sur la fiche ImbricationJob."""
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_superuser(
+            "imbrication-admin", "imbrication-admin@example.com", "pass1234"
+        )
+        self.client.force_login(self.user)
+        contenu = _dxf_bytes(_rectangle_avec_trou)
+        self.piece = PieceDecoupe.objects.create(
+            nom="Flasque", fichier_source=SimpleUploadedFile("flasque.dxf", contenu)
+        )
+        self.piece.importer_geometrie()
+
+    def test_aucune_feuille_avant_calcul(self):
+        job = ImbricationJob.objects.create(largeur_feuille_mm=1000, longueur_feuille_mm=2000)
+        reponse = self.client.get(f"/admin/decoupe/imbricationjob/{job.pk}/change/")
+        self.assertEqual(reponse.status_code, 200)
+        self.assertContains(reponse, "Aucune feuille calculée pour l&#x27;instant.")
+
+    def test_apercu_svg_par_feuille_apres_calcul(self):
+        job = ImbricationJob.objects.create(largeur_feuille_mm=1000, longueur_feuille_mm=2000)
+        ImbricationLigne.objects.create(job=job, piece=self.piece, quantite=3)
+        job.calculer()
+
+        reponse = self.client.get(f"/admin/decoupe/imbricationjob/{job.pk}/change/")
+        self.assertEqual(reponse.status_code, 200)
+        self.assertContains(reponse, "Feuille 1")
+        self.assertContains(reponse, "<svg")
+
+
 class ApiTests(TestCase):
     def setUp(self):
         self.client = APIClient()

@@ -2037,3 +2037,24 @@ autorisée" auto-décochée, matière/épaisseur/pas de rotation persistés ; no
 admin "Profils d'import" avec ses règles en inline. Tests : nouvelle suite sur
 la classification par calque, le moteur d'imbrication à angles libres (le cas
 du losange notamment) et le caractère volontairement sans-effet du miroir.
+
+## Aperçu visuel de l'imbrication dans l'admin
+
+`generer_svg_feuille()` (silhouette réelle des pièces placées sur une
+feuille) existait déjà, mais n'était branché que sur un endpoint API brut
+(`/api/v1/imbrications/<id>/apercu/<feuille>/`) — la fiche ImbricationJob de
+l'admin n'affichait que des chiffres (nombre de feuilles, taux
+d'utilisation), sans aucun moyen de voir le plan de découpe. Nouveau champ
+"Aperçu des feuilles" sur la fiche : une image par feuille calculée, avec les
+pièces à leur position, rotation et échelle réelles.
+
+Les SVG générés portent des attributs `width`/`height` en millimètres
+(pensés pour un export imprimable via l'API, à l'échelle 1:1) — beaucoup trop
+grands affichés tels quels sur une page admin (une feuille 1000×1000mm
+s'afficherait à ~3780px de large). L'aperçu admin les contraint à une largeur
+d'écran raisonnable (480px max) sans toucher à la fonction partagée avec
+l'API.
+
+**Vérifié** : imbrication de 15 pièces sur une feuille 1000×1000mm — plan de
+découpe affiché directement sur la fiche, à une taille d'affichage correcte,
+avec le message "Aucune feuille calculée pour l'instant" avant tout calcul.

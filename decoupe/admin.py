@@ -13,7 +13,7 @@ from .models import (
     ProfilImportDecoupe,
     RegleProfilImportDecoupe,
 )
-from .services.apercu_svg import generer_svg_piece
+from .services.apercu_svg import generer_svg_feuille, generer_svg_piece
 
 
 class ImbricationLigneInline(TabularInline):
@@ -211,6 +211,7 @@ class ImbricationJobAdmin(ModelAdmin):
     autocomplete_fields = ["article_matiere"]
     inlines = [ImbricationLigneInline]
     readonly_fields = [
+        "apercu_imbrication",
         "nb_feuilles",
         "surface_pieces_mm2",
         "surface_feuilles_mm2",
@@ -220,6 +221,43 @@ class ImbricationJobAdmin(ModelAdmin):
         "date_calcul",
     ]
     actions = ["recalculer"]
+
+    @admin.display(description="Aperçu des feuilles")
+    def apercu_imbrication(self, obj):
+        if not obj or not obj.pk or not obj.nb_feuilles:
+            return format_html(
+                '<div id="decoupe-apercu-imbrication">{}</div>',
+                "Aucune feuille calculée pour l'instant.",
+            )
+        placements = obj.placements.select_related("piece").order_by("numero_feuille", "y_mm", "x_mm")
+        par_feuille = {}
+        for placement in placements:
+            par_feuille.setdefault(placement.numero_feuille, []).append(
+                (placement.piece, placement.x_mm, placement.y_mm, placement.rotation_deg, placement.miroir)
+            )
+
+        blocs = []
+        for numero in sorted(par_feuille):
+            svg = generer_svg_feuille(obj.largeur_feuille_mm, obj.longueur_feuille_mm, par_feuille[numero])
+            blocs.append(
+                format_html(
+                    '<div style="margin-bottom: 1rem;">'
+                    '<div style="font-weight: 600; margin-bottom: 0.25rem;">Feuille {}</div>{}'
+                    "</div>",
+                    numero,
+                    mark_safe(svg) if svg else "—",
+                )
+            )
+        # Les SVG générés portent des attributs width/height en "mm" (utiles pour un export
+        # imprimable via l'API) — beaucoup trop grands tels quels sur une page admin (une feuille
+        # 1000×1000mm s'afficherait à ~3780px). On force ici une taille d'écran raisonnable.
+        style = (
+            "<style>#decoupe-apercu-imbrication svg "
+            "{ width: 100%; max-width: 480px; height: auto; display: block; }</style>"
+        )
+        return format_html(
+            '<div id="decoupe-apercu-imbrication">{}{}</div>', mark_safe(style), mark_safe("".join(blocs))
+        )
 
     @admin.action(description="Recalculer l'imbrication")
     def recalculer(self, request, queryset):
