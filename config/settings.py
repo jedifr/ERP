@@ -330,6 +330,11 @@ UNFOLD = {
                         "icon": "grid_view",
                         "link": reverse_lazy("admin:decoupe_imbricationjob_changelist"),
                     },
+                    {
+                        "title": "Profils d'import",
+                        "icon": "layers",
+                        "link": reverse_lazy("admin:decoupe_profilimportdecoupe_changelist"),
+                    },
                 ],
             },
             {

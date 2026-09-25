@@ -5,7 +5,14 @@ from django.utils.safestring import mark_safe
 from unfold.admin import ModelAdmin, TabularInline
 
 from .admin_views import analyser_fichier_view
-from .models import ImbricationJob, ImbricationLigne, ImbricationPlacement, PieceDecoupe
+from .models import (
+    ImbricationJob,
+    ImbricationLigne,
+    ImbricationPlacement,
+    PieceDecoupe,
+    ProfilImportDecoupe,
+    RegleProfilImportDecoupe,
+)
 from .services.apercu_svg import generer_svg_piece
 
 
@@ -15,10 +22,24 @@ class ImbricationLigneInline(TabularInline):
     autocomplete_fields = ["piece"]
 
 
+class RegleProfilImportDecoupeInline(TabularInline):
+    model = RegleProfilImportDecoupe
+    extra = 1
+
+
+@admin.register(ProfilImportDecoupe)
+class ProfilImportDecoupeAdmin(ModelAdmin):
+    list_display = ["nom", "description"]
+    search_fields = ["nom"]
+    inlines = [RegleProfilImportDecoupeInline]
+
+
 @admin.register(PieceDecoupe)
 class PieceDecoupeAdmin(ModelAdmin):
     list_display = [
         "nom",
+        "matiere",
+        "epaisseur",
         "format_source",
         "statut",
         "largeur_mm",
@@ -27,9 +48,9 @@ class PieceDecoupeAdmin(ModelAdmin):
         "nb_contours_interieurs",
         "date_import",
     ]
-    list_filter = ["statut", "format_source", "rotation_autorisee"]
+    list_filter = ["statut", "format_source", "pas_rotation_deg", "symetrie_autorisee", "a_gravure", "profil_import"]
     search_fields = ["nom"]
-    autocomplete_fields = ["article"]
+    autocomplete_fields = ["article", "matiere", "profil_import"]
     # Champs bruts totalement exclus du formulaire (jamais éditables ni affichés tels quels) :
     # remplacés ci-dessous par des méthodes readonly `*_display`, seules à apparaître, pour
     # disposer d'un <span id="..."> stable — voir le commentaire sur `apercu_piece`.
@@ -43,6 +64,11 @@ class PieceDecoupeAdmin(ModelAdmin):
         "largeur_mm",
         "hauteur_mm",
         "nb_contours_interieurs",
+        "calques_detectes",
+        "a_gravure",
+        "gravure_json",
+        "pliage_json",
+        "longueur_gravure_mm",
     ]
     readonly_fields = [
         "apercu_piece",
@@ -55,6 +81,9 @@ class PieceDecoupeAdmin(ModelAdmin):
         "largeur_mm_display",
         "hauteur_mm_display",
         "nb_contours_interieurs_display",
+        "calques_detectes_display",
+        "a_gravure_display",
+        "longueur_gravure_mm_display",
         "contour_json",
         "date_import",
     ]
@@ -76,6 +105,8 @@ class PieceDecoupeAdmin(ModelAdmin):
                 obj.hauteur_mm or 0,
                 (obj.contour_json or {}).get("exterieur") or [],
                 (obj.contour_json or {}).get("trous") or [],
+                (obj.gravure_json or {}).get("traits") or [],
+                (obj.pliage_json or {}).get("traits") or [],
             )
         return format_html(
             '<div id="decoupe-apercu">{}</div>',
@@ -126,6 +157,21 @@ class PieceDecoupeAdmin(ModelAdmin):
         valeur = obj.nb_contours_interieurs if obj else 0
         return format_html('<span id="decoupe-nb-contours">{}</span>', valeur)
 
+    @admin.display(description="Calques détectés")
+    def calques_detectes_display(self, obj):
+        valeurs = (obj and obj.calques_detectes) or []
+        return format_html('<span id="decoupe-calques">{}</span>', ", ".join(valeurs) if valeurs else "-")
+
+    @admin.display(description="Gravure détectée")
+    def a_gravure_display(self, obj):
+        texte = "Oui" if obj and obj.a_gravure else "Non"
+        return format_html('<span id="decoupe-a-gravure">{}</span>', texte)
+
+    @admin.display(description="Longueur gravure mm")
+    def longueur_gravure_mm_display(self, obj):
+        valeur = obj.longueur_gravure_mm if obj and obj.longueur_gravure_mm else "-"
+        return format_html('<span id="decoupe-longueur-gravure">{}</span>', valeur)
+
     @admin.action(description="Réimporter la géométrie depuis le fichier source")
     def reimporter(self, request, queryset):
         for piece in queryset:
@@ -134,8 +180,9 @@ class PieceDecoupeAdmin(ModelAdmin):
 
     def save_model(self, request, obj, form, change):
         fichier_modifie = "fichier_source" in form.changed_data
+        profil_modifie = "profil_import" in form.changed_data
         super().save_model(request, obj, form, change)
-        if fichier_modifie:
+        if fichier_modifie or profil_modifie:
             obj.importer_geometrie()
 
     def get_urls(self):
@@ -187,5 +234,5 @@ class ImbricationJobAdmin(ModelAdmin):
 
 @admin.register(ImbricationPlacement)
 class ImbricationPlacementAdmin(ModelAdmin):
-    list_display = ["job", "piece", "numero_feuille", "x_mm", "y_mm", "rotation_deg"]
-    list_filter = ["numero_feuille"]
+    list_display = ["job", "piece", "numero_feuille", "x_mm", "y_mm", "rotation_deg", "miroir"]
+    list_filter = ["numero_feuille", "miroir"]

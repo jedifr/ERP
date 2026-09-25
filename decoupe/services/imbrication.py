@@ -1,20 +1,43 @@
-"""Imbrication (nesting) rectangulaire de pièces dans des feuilles de dimensions données.
+"""Imbrication (nesting) de pièces dans des feuilles de dimensions données.
 
-Approche retenue : chaque pièce est représentée par son rectangle englobant, avec rotation
-possible par pas de 90° si autorisée (`PieceDecoupe.rotation_autorisee` — à décocher quand le
-sens de la matière ou une contrainte d'orientation l'impose). Le compactage utilise un
-algorithme d'étagères ("shelf packing", variante Best-Fit Decreasing Height) : simple,
-déterministe, et qui se généralise naturellement à plusieurs feuilles.
+Approche retenue : chaque pièce est représentée par le rectangle englobant *de son orientation
+candidate* — rotation par pas de 5°/45°/90° selon `PieceDecoupe.pas_rotation_deg`, recalculé à
+partir de son contour réel (pas seulement de sa largeur/hauteur à 0°). Le compactage lui-même
+reste un algorithme d'étagères ("shelf packing", variante Best-Fit Decreasing Height) : simple,
+déterministe, et qui se généralise naturellement à plusieurs feuilles. Pour chaque pièce à
+placer, toutes les orientations candidates sont essayées sur l'étagère courante, les plus
+compactes (plus petite aire de rectangle englobant) en premier, et la première qui rentre est
+retenue.
 
-Ce n'est donc pas une imbrication polygonale exacte (No-Fit-Polygon) : le remplissage réel
-serait meilleur avec des pièces pivotées à un angle quelconque et glissées entre les
-concavités. Cette approximation par rectangle englobant est cependant standard pour un
-chiffrage — et le taux d'utilisation retourné est calculé à partir de la surface réelle des
-pièces (issue de leur contour, pas de leur rectangle englobant), ce qui donne une estimation
-matière prudente et réaliste malgré l'algorithme de placement simplifié.
+Ce n'est donc toujours pas une imbrication polygonale exacte (No-Fit-Polygon) : deux pièces ne
+peuvent pas s'imbriquer l'une dans les concavités de l'autre, seuls leurs rectangles englobants
+respectifs sont comparés. Mais contrairement à la version précédente (limitée à une rotation
+fixe 0°/90°), le rectangle englobant est maintenant évalué sous plusieurs angles, ce qui réduit
+sensiblement la perte de place sur des pièces non rectangulaires mal orientées dans leur
+fichier source. Le taux d'utilisation retourné reste calculé à partir de la surface réelle des
+pièces (issue de leur contour, pas de leur rectangle englobant), pour une estimation matière
+prudente et réaliste malgré l'algorithme de placement par rectangles englobants.
+
+Pourquoi `symetrie_autorisee` n'influence pas le placement ici : retourner une pièce (miroir)
+ne change JAMAIS la largeur ni la hauteur de son rectangle englobant, quelle que soit la forme
+— une réflexion est une isométrie qui préserve l'étendue de la pièce sur chaque axe, elle ne
+fait que changer le signe des coordonnées. Autrement dit, pour cet algorithme fondé sur des
+rectangles englobants, retourner une pièce n'ouvre jamais une possibilité de placement que la
+rotation seule n'explorait pas déjà — le moteur n'a donc jamais besoin de retourner une pièce
+pour la caser, et ne le fait jamais. La contrainte "pas de symétrie si gravure" est de ce fait
+toujours respectée, mais par construction plutôt que par un choix actif du moteur : elle n'aura
+d'effet observable sur le nombre de feuilles/le placement que le jour où une imbrication
+polygonale exacte (No-Fit-Polygon) remplacera cette approche par rectangles englobants — c'est
+seulement là qu'un retournement peut réellement faire gagner de la place en présentant à une
+pièce voisine un profil différent. `Placement.miroir` (toujours `False` aujourd'hui) et
+`ItemANester.symetrie_autorisee` sont conservés pour cette évolution future, sans être exploités
+ici.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+from shapely.affinity import rotate
+from shapely.geometry import Polygon
 
 
 @dataclass
@@ -23,8 +46,17 @@ class ItemANester:
     largeur_mm: float
     hauteur_mm: float
     surface_mm2: float
-    rotation_autorisee: bool
     quantite: int
+    pas_rotation_deg: int | None = None
+    symetrie_autorisee: bool = True
+    exterieur: list = field(default_factory=list)
+
+    def polygone(self):
+        """Contour réel si connu, sinon un rectangle synthétique largeur × hauteur — les deux
+        cas se traitent alors de façon strictement identique par `_orientations`."""
+        if len(self.exterieur) >= 3:
+            return Polygon(self.exterieur)
+        return Polygon([(0, 0), (self.largeur_mm, 0), (self.largeur_mm, self.hauteur_mm), (0, self.hauteur_mm)])
 
 
 @dataclass
@@ -36,6 +68,7 @@ class Placement:
     largeur_placee_mm: float
     hauteur_placee_mm: float
     rotation_deg: int
+    miroir: bool = False
 
 
 @dataclass
@@ -84,17 +117,35 @@ class _Feuille:
         return 0.0, y_nouvelle
 
 
+def _angles_candidats(pas_rotation_deg):
+    if not pas_rotation_deg:
+        return [0]
+    nb = max(1, 360 // pas_rotation_deg)
+    return [i * pas_rotation_deg for i in range(nb)]
+
+
 def _orientations(item, largeur_utile, hauteur_utile):
-    """Renvoie les (largeur, hauteur, rotation) sous lesquelles la pièce tient dans une feuille vide."""
+    """Renvoie les (largeur, hauteur, rotation) de rectangle englobant sous lesquelles la pièce
+    tient dans une feuille vide, triées par aire croissante (les plus compactes d'abord —
+    heuristique simple pour limiter la place perdue).
+
+    Pas de candidats "miroir" ici : voir le docstring du module — un retournement ne change
+    jamais la largeur/hauteur du rectangle englobant, ce serait donc systématiquement écarté
+    par la déduplication ci-dessous sans jamais influencer un seul placement."""
+    polygone = item.polygone()
+    vus = set()
     options = []
-    if item.largeur_mm <= largeur_utile + 1e-6 and item.hauteur_mm <= hauteur_utile + 1e-6:
-        options.append((item.largeur_mm, item.hauteur_mm, 0))
-    if (
-        item.rotation_autorisee
-        and item.hauteur_mm <= largeur_utile + 1e-6
-        and item.largeur_mm <= hauteur_utile + 1e-6
-    ):
-        options.append((item.hauteur_mm, item.largeur_mm, 90))
+    for angle in _angles_candidats(item.pas_rotation_deg):
+        g = rotate(polygone, angle, origin=(0, 0)) if angle else polygone
+        minx, miny, maxx, maxy = g.bounds
+        largeur, hauteur = maxx - minx, maxy - miny
+        cle = (round(largeur, 2), round(hauteur, 2))
+        if cle in vus:
+            continue
+        vus.add(cle)
+        if largeur <= largeur_utile + 1e-6 and hauteur <= hauteur_utile + 1e-6:
+            options.append((largeur, hauteur, angle))
+    options.sort(key=lambda o: o[0] * o[1])
     return options
 
 
@@ -104,7 +155,8 @@ def calculer_imbrication(
     """Place les `items` (avec leur quantité) sur autant de feuilles que nécessaire.
 
     `items` : itérable de `ItemANester`. Les pièces trop grandes pour tenir sur une feuille
-    vide (même seules) sont écartées et listées dans `pieces_non_placees`.
+    vide (même seules, sous quelque orientation autorisée que ce soit) sont écartées et
+    listées dans `pieces_non_placees`.
     """
     largeur_utile = largeur_feuille_mm - 2 * marge_bord_mm
     hauteur_utile = longueur_feuille_mm - 2 * marge_bord_mm
@@ -152,7 +204,7 @@ def calculer_imbrication(
         if not place:
             feuille = _Feuille(largeur_utile, hauteur_utile)
             feuilles.append(feuille)
-            # Une feuille neuve peut toujours accueillir la première orientation valide,
+            # Une feuille neuve peut toujours accueillir la première orientation candidate,
             # puisque celle-ci a déjà été validée contre la zone utile complète.
             largeur, hauteur, rotation = options[0]
             x, y = feuille.placer(largeur, hauteur, espacement_pieces_mm)

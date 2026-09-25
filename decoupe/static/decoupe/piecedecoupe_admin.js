@@ -16,6 +16,9 @@
         largeur_mm: "decoupe-largeur-mm",
         hauteur_mm: "decoupe-hauteur-mm",
         nb_contours_interieurs: "decoupe-nb-contours",
+        calques_detectes: "decoupe-calques",
+        a_gravure: "decoupe-a-gravure",
+        longueur_gravure_mm: "decoupe-longueur-gravure",
     };
 
     function majChamp(nomChamp, texte) {
@@ -27,12 +30,29 @@
         return valeur == null ? "-" : Number(valeur).toFixed(decimales);
     }
 
+    function dernierFichierSelectionne() {
+        const input = document.getElementById("id_fichier_source");
+        return input && input.files && input.files[0] ? input.files[0] : null;
+    }
+
+    function decocherSymetrieSiGravure(aGravure) {
+        const case_ = document.getElementById("id_symetrie_autorisee");
+        if (case_ && aGravure && case_.checked) {
+            case_.checked = false;
+            case_.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+    }
+
     function analyserFichier(fichier) {
         const apercu = document.getElementById("decoupe-apercu");
         if (apercu) apercu.textContent = "Analyse en cours...";
 
         const donnees = new FormData();
         donnees.append("fichier_source", fichier);
+        const profilSelect = document.getElementById("id_profil_import");
+        if (profilSelect && profilSelect.value) {
+            donnees.append("profil_import", profilSelect.value);
+        }
 
         fetch("/admin/decoupe/piecedecoupe/analyser/", {
             method: "POST",
@@ -52,9 +72,16 @@
 
                 if (!data.ok) {
                     if (apercu) apercu.textContent = "-";
-                    ["surface_mm2", "perimetre_decoupe_mm", "largeur_mm", "hauteur_mm", "nb_contours_interieurs"].forEach(
-                        (champ) => majChamp(champ, "-")
-                    );
+                    [
+                        "surface_mm2",
+                        "perimetre_decoupe_mm",
+                        "largeur_mm",
+                        "hauteur_mm",
+                        "nb_contours_interieurs",
+                        "calques_detectes",
+                        "a_gravure",
+                        "longueur_gravure_mm",
+                    ].forEach((champ) => majChamp(champ, "-"));
                     return;
                 }
 
@@ -63,6 +90,13 @@
                 majChamp("largeur_mm", formatNombre(data.largeur_mm, 1));
                 majChamp("hauteur_mm", formatNombre(data.hauteur_mm, 1));
                 majChamp("nb_contours_interieurs", data.nb_contours_interieurs);
+                majChamp(
+                    "calques_detectes",
+                    data.calques_detectes && data.calques_detectes.length ? data.calques_detectes.join(", ") : "-"
+                );
+                majChamp("a_gravure", data.a_gravure ? "Oui" : "Non");
+                majChamp("longueur_gravure_mm", formatNombre(data.longueur_gravure_mm, 2));
+                decocherSymetrieSiGravure(data.a_gravure);
 
                 if (apercu) apercu.innerHTML = data.svg || "-";
             })
@@ -73,11 +107,22 @@
 
     document.addEventListener("DOMContentLoaded", function () {
         const input = document.getElementById("id_fichier_source");
-        if (!input) return;
-        input.addEventListener("change", function () {
-            if (input.files && input.files[0]) {
-                analyserFichier(input.files[0]);
-            }
-        });
+        if (input) {
+            input.addEventListener("change", function () {
+                const fichier = dernierFichierSelectionne();
+                if (fichier) analyserFichier(fichier);
+            });
+        }
+
+        // Changer de profil d'import doit ré-analyser le fichier déjà choisi (le classement
+        // des calques en dépend) — nécessite jQuery pour capter le "change" émis par le
+        // widget select2 de l'autocomplete, comme pour les champs client/article ailleurs
+        // dans l'admin (un addEventListener natif ne le reçoit pas toujours).
+        if (typeof django !== "undefined" && django.jQuery) {
+            django.jQuery("#id_profil_import").on("change", function () {
+                const fichier = dernierFichierSelectionne();
+                if (fichier) analyserFichier(fichier);
+            });
+        }
     });
 })();

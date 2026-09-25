@@ -5,7 +5,7 @@ from django.contrib.admin.views.decorators import staff_member_required
 from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods
 
-from .models import PieceDecoupe
+from .models import PieceDecoupe, ProfilImportDecoupe
 from .services.apercu_svg import generer_svg_piece
 from .services.geometrie import ErreurImportGeometrie, extraire_geometrie
 
@@ -17,7 +17,9 @@ def analyser_fichier_view(request):
     sans l'enregistrer — utilisé par le JS de la fiche PieceDecoupe pour afficher l'analyse et
     l'aperçu en direct, avant même de cliquer sur "Enregistrer". L'import réel (persisté) a
     toujours lieu à l'enregistrement, via `PieceDecoupe.importer_geometrie()` — cette vue ne
-    fait qu'anticiper le même résultat pour l'affichage."""
+    fait qu'anticiper le même résultat pour l'affichage. Si un profil d'import est sélectionné
+    dans le formulaire (`profil_import`), ses règles de calque sont appliquées pour séparer
+    découpe / gravure / pliage, exactement comme à l'enregistrement."""
     fichier = request.FILES.get("fichier_source")
     if not fichier:
         return JsonResponse({"detail": "Aucun fichier reçu."}, status=400)
@@ -26,6 +28,13 @@ def analyser_fichier_view(request):
     if extension not in (PieceDecoupe.FormatSource.DXF, PieceDecoupe.FormatSource.DWG):
         return JsonResponse({"detail": "Seuls les fichiers .dxf et .dwg sont acceptés."}, status=400)
 
+    regles_calques = None
+    profil_id = request.POST.get("profil_import")
+    if profil_id:
+        profil = ProfilImportDecoupe.objects.filter(pk=profil_id).first()
+        if profil:
+            regles_calques = profil.regles_par_calque()
+
     with tempfile.TemporaryDirectory() as dossier:
         chemin = Path(dossier) / fichier.name
         with open(chemin, "wb") as cible:
@@ -33,7 +42,7 @@ def analyser_fichier_view(request):
                 cible.write(morceau)
 
         try:
-            resultat = extraire_geometrie(str(chemin), extension)
+            resultat = extraire_geometrie(str(chemin), extension, regles_calques=regles_calques)
         except ErreurImportGeometrie as exc:
             return JsonResponse(
                 {
@@ -44,7 +53,9 @@ def analyser_fichier_view(request):
                 }
             )
 
-    svg = generer_svg_piece(resultat.largeur_mm, resultat.hauteur_mm, resultat.exterior, resultat.holes)
+    svg = generer_svg_piece(
+        resultat.largeur_mm, resultat.hauteur_mm, resultat.exterior, resultat.holes, resultat.gravure, resultat.pliage
+    )
     return JsonResponse(
         {
             "ok": True,
@@ -57,6 +68,9 @@ def analyser_fichier_view(request):
             "largeur_mm": resultat.largeur_mm,
             "hauteur_mm": resultat.hauteur_mm,
             "nb_contours_interieurs": len(resultat.holes),
+            "calques_detectes": resultat.calques,
+            "a_gravure": bool(resultat.gravure),
+            "longueur_gravure_mm": resultat.longueur_gravure_mm,
             "svg": svg,
         }
     )

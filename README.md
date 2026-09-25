@@ -1939,3 +1939,101 @@ JS peut cibler de façon stable.
 analyse (statut, surface, périmètre, dimensions, contours) et aperçu SVG
 affichés en direct avant tout clic sur "Enregistrer" ; aperçu toujours présent
 après enregistrement sur la fiche de modification.
+
+## Matière/épaisseur à l'import, profils de calques, rotation libre et miroir
+
+Quatre ajouts sur le module découpe, pensés du point de vue devis/méthodes :
+
+### Matière, épaisseur et pas de rotation dès l'import
+
+`PieceDecoupe` gagne trois champs saisissables dès le formulaire d'ajout (avant
+tout enregistrement, comme le reste de l'analyse en direct) :
+
+- **`matière`** et **`épaisseur`** : la pièce n'a plus besoin d'être déjà liée
+  à un article fabriqué pour enregistrer dans quelle tôle elle doit être
+  découpée.
+- **`pas_rotation_deg`** (5° / 45° / 90°, ou vide) remplace l'ancienne case à
+  cocher "rotation autorisée" (oui/non) : on choisit maintenant la finesse de
+  rotation autorisée pour l'imbrication, pas seulement si elle l'est.
+- **`symétrie_autorisée`** (case à cocher, cochée par défaut) : à décocher
+  quand la pièce ne peut pas être retournée (miroir) — gravure, marquage non
+  symétrique...
+
+### Profils d'import (calques DXF/DWG)
+
+Nouveau modèle **Profil d'import** (menu "Chiffrage découpe → Profils
+d'import") : une liste de règles *calque → rôle* (Découpe / Gravure-marquage
+/ Pliage / Ignoré), réutilisable d'un import à l'autre plutôt que de reclasser
+les calques à la main à chaque fois.
+
+Corrige au passage un vrai défaut, pas seulement un confort : **sans profil**,
+`extraire_geometrie()` traitait toutes les entités du fichier comme de la
+découpe, sans distinction de calque — un logo gravé (tracé fermé, mais pas
+destiné à être découpé) dessiné sur un calque séparé était donc détecté à tort
+comme un **trou à découper**. Avec un profil sélectionné à l'import (champ
+`profil_import` sur la fiche PieceDecoupe, appliqué aussi à l'analyse en
+direct avant enregistrement), seuls les calques classés "Découpe" alimentent
+la reconstruction du contour (silhouette + vrais trous) ; les calques
+"Gravure"/"Pliage" sont extraits à part comme de simples tracés (longueur de
+gravure calculée séparément, pas comptée dans le périmètre de découpe) ; les
+calques "Ignoré" sont exclus. Un calque présent dans le fichier mais absent
+du profil reste traité comme découpe, avec un avertissement (plutôt que
+silencieusement ignoré, pour ne jamais faire disparaître de la matière à
+découper sans le signaler).
+
+L'aperçu SVG de la pièce (déjà en place) affiche maintenant la découpe en
+bleu, la gravure en orange et le pliage en vert pointillé — pour vérifier
+d'un coup d'œil que le classement des calques est correct.
+
+Un nouveau champ `a_gravure`, détecté automatiquement (informatif, pas
+modifiable), signale la présence de tracés de gravure. Le JS du formulaire
+d'ajout (`piecedecoupe_admin.js`) décoche automatiquement "symétrie
+autorisée" dès qu'une gravure est détectée en direct — une suggestion, pas
+une contrainte imposée après coup : rien ne revient la recocher/décocher
+silencieusement lors d'un réimport ultérieur, c'est toujours la décision
+explicite de l'utilisateur qui prévaut une fois la fiche enregistrée.
+Changer de profil d'import sur une fiche déjà enregistrée relance
+automatiquement l'analyse (pas besoin de réuploader le fichier).
+
+### Imbrication à angles de rotation libres
+
+Le moteur d'imbrication (`decoupe/services/imbrication.py`) n'essayait
+auparavant que deux orientations par pièce (0° et 90°, sur la seule base de
+sa largeur/hauteur à plat). Il essaie maintenant **toutes les orientations
+autorisées par `pas_rotation_deg`** (jusqu'à 72 angles différents pour un pas
+de 5°), calculées à partir du contour réel de la pièce (pas juste de son
+rectangle englobant à 0°) — les plus compactes en premier. Ça change
+réellement le résultat : une pièce en losange (carré tourné à 45°, par
+exemple) ne tient pas dans une feuille à 0°/90° mais tient une fois ramenée à
+son orientation "carrée" à 45°, une case que l'ancien moteur ne considérait
+tout simplement jamais.
+
+### Miroir : ajouté au moteur, mais sans effet observable pour l'instant — et c'est voulu
+
+`symetrie_autorisee` et un champ `Placement.miroir` existent bien dans le
+moteur. Mais en creusant l'implémentation, un fait géométrique s'est imposé :
+**retourner une pièce (miroir) ne change jamais la largeur ni la hauteur de
+son rectangle englobant**, quelle que soit sa forme — une réflexion est une
+isométrie qui préserve l'étendue de la pièce sur chaque axe. Pour un moteur
+qui compare des pièces par leur rectangle englobant (c'est le cas ici, pas
+une imbrication polygonale exacte), retourner une pièce n'ouvre donc jamais
+une possibilité de placement que la rotation seule n'explorait pas déjà. Le
+moteur n'a par conséquent jamais besoin de retourner une pièce pour la caser,
+et ne le fait jamais — `Placement.miroir` reste toujours `False` aujourd'hui.
+
+La contrainte "pas de symétrie si gravure" est donc toujours respectée, mais
+par construction plutôt que par un choix actif du moteur. Elle n'aura un
+effet observable sur le nombre de feuilles/le placement que le jour où une
+véritable imbrication polygonale (No-Fit-Polygon — les pièces glissées dans
+les concavités les unes des autres) remplacera l'actuelle approche par
+rectangles englobants : c'est un chantier nettement plus lourd, qu'on a
+délibérément laissé de côté ici plutôt que de le lancer à la légère. Les
+champs `symetrie_autorisee`/`miroir` sont conservés, prêts pour ce jour-là.
+
+**Vérifié** : import d'un fichier DXF à 3 calques (découpe / gravure /
+pliage) via un profil dédié — calques détectés et classés correctement,
+aperçu SVG coloré par rôle, gravure non comptée comme trou, case "symétrie
+autorisée" auto-décochée, matière/épaisseur/pas de rotation persistés ; nouvel
+admin "Profils d'import" avec ses règles en inline. Tests : nouvelle suite sur
+la classification par calque, le moteur d'imbrication à angles libres (le cas
+du losange notamment) et le caractère volontairement sans-effet du miroir.

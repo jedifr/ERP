@@ -10,7 +10,14 @@ from rest_framework.test import APIClient
 
 from technique.models import Article, Matiere
 
-from .models import ImbricationJob, ImbricationLigne, ImbricationPlacement, PieceDecoupe
+from .models import (
+    ImbricationJob,
+    ImbricationLigne,
+    ImbricationPlacement,
+    PieceDecoupe,
+    ProfilImportDecoupe,
+    RegleProfilImportDecoupe,
+)
 from .services.geometrie import ErreurImportGeometrie, extraire_geometrie
 from .services.imbrication import ItemANester, calculer_imbrication
 
@@ -136,12 +143,65 @@ class ExtraireGeometrieTests(TestCase):
         with self.assertRaises(ErreurImportGeometrie):
             extraire_geometrie(chemin, "dwg")
 
+    def _piece_calques_multiples(self, msp):
+        msp.add_lwpolyline([(0, 0), (100, 0), (100, 50), (0, 50)], close=True, dxfattribs={"layer": "COUPE"})
+        # Logo gravé À L'INTÉRIEUR de la silhouette : sans profil, ce contour fermé sur un
+        # calque séparé serait détecté à tort comme un trou à découper.
+        msp.add_lwpolyline([(40, 15), (60, 15), (50, 35)], close=True, dxfattribs={"layer": "GRAVURE"})
+        msp.add_line((0, 25), (100, 25), dxfattribs={"layer": "PLIAGE"})
+
+    def test_sans_profil_la_gravure_est_prise_pour_un_trou(self):
+        # Comportement historique (sans profil, regles_calques=None) : tout est traité comme
+        # découpe, donc la gravure ressort comme un trou — exactement le défaut que corrige la
+        # fonctionnalité de profils d'import testée ci-dessous.
+        chemin = self._fichier(self._piece_calques_multiples)
+        resultat = extraire_geometrie(chemin, "dxf")
+        self.assertEqual(len(resultat.holes), 1)
+
+    def test_regles_calques_separent_decoupe_gravure_pliage(self):
+        chemin = self._fichier(self._piece_calques_multiples)
+        regles = {"coupe": "decoupe", "gravure": "gravure", "pliage": "pliage"}
+        resultat = extraire_geometrie(chemin, "dxf", regles_calques=regles)
+
+        self.assertEqual(len(resultat.holes), 0)
+        self.assertAlmostEqual(resultat.surface_mm2, 5000, delta=1)
+        self.assertGreater(len(resultat.gravure), 0)
+        longueur_triangle_attendue = 20 + 2 * math.sqrt(10**2 + 20**2)
+        self.assertAlmostEqual(resultat.longueur_gravure_mm, longueur_triangle_attendue, delta=1)
+        self.assertEqual(len(resultat.pliage), 1)
+        self.assertAlmostEqual(resultat.pliage[0][0][0], 0, delta=0.5)
+        self.assertEqual(resultat.calques, ["COUPE", "GRAVURE", "PLIAGE"])
+        self.assertEqual(resultat.avertissements, [])
+
+    def test_calque_non_couvert_par_profil_avertit_et_reste_decoupe(self):
+        def piece(msp):
+            msp.add_lwpolyline([(0, 0), (100, 0), (100, 50), (0, 50)], close=True, dxfattribs={"layer": "AUTRE"})
+
+        chemin = self._fichier(piece)
+        resultat = extraire_geometrie(chemin, "dxf", regles_calques={"coupe": "decoupe"})
+        self.assertAlmostEqual(resultat.surface_mm2, 5000, delta=1)
+        self.assertTrue(any("AUTRE" in avertissement for avertissement in resultat.avertissements))
+
+    def test_calque_ignore_est_exclu(self):
+        def piece(msp):
+            msp.add_lwpolyline([(0, 0), (100, 0), (100, 50), (0, 50)], close=True, dxfattribs={"layer": "COUPE"})
+            # Un trait isolé et non fermé : s'il n'était pas ignoré, il déclencherait
+            # l'avertissement "contour non fermé" — sa présence prouve que le calque "ignore"
+            # a bien été exclu avant la reconstruction du contour.
+            msp.add_line((200, 200), (300, 300), dxfattribs={"layer": "COTES"})
+
+        chemin = self._fichier(piece)
+        regles = {"coupe": "decoupe", "cotes": "ignore"}
+        resultat = extraire_geometrie(chemin, "dxf", regles_calques=regles)
+        self.assertAlmostEqual(resultat.surface_mm2, 5000, delta=1)
+        self.assertEqual(resultat.avertissements, [])
+
 
 class CalculerImbricationTests(TestCase):
     def test_grille_deux_par_deux_tient_sur_une_feuille(self):
         items = [
             ItemANester(
-                piece_id=1, largeur_mm=400, hauteur_mm=400, surface_mm2=160_000, rotation_autorisee=False, quantite=4
+                piece_id=1, largeur_mm=400, hauteur_mm=400, surface_mm2=160_000, pas_rotation_deg=None, quantite=4
             )
         ]
         resultat = calculer_imbrication(
@@ -154,7 +214,7 @@ class CalculerImbricationTests(TestCase):
     def test_cinquieme_piece_ouvre_une_deuxieme_feuille(self):
         items = [
             ItemANester(
-                piece_id=1, largeur_mm=400, hauteur_mm=400, surface_mm2=160_000, rotation_autorisee=False, quantite=5
+                piece_id=1, largeur_mm=400, hauteur_mm=400, surface_mm2=160_000, pas_rotation_deg=None, quantite=5
             )
         ]
         resultat = calculer_imbrication(
@@ -172,7 +232,7 @@ class CalculerImbricationTests(TestCase):
 
         items = [
             ItemANester(
-                piece_id=1, largeur_mm=130, hauteur_mm=70, surface_mm2=9100, rotation_autorisee=True, quantite=12
+                piece_id=1, largeur_mm=130, hauteur_mm=70, surface_mm2=9100, pas_rotation_deg=90, quantite=12
             )
         ]
         resultat = calculer_imbrication(
@@ -191,7 +251,7 @@ class CalculerImbricationTests(TestCase):
     def test_piece_plus_grande_que_la_feuille_est_ecartee(self):
         items = [
             ItemANester(
-                piece_id=99, largeur_mm=2000, hauteur_mm=2000, surface_mm2=4_000_000, rotation_autorisee=True, quantite=1
+                piece_id=99, largeur_mm=2000, hauteur_mm=2000, surface_mm2=4_000_000, pas_rotation_deg=90, quantite=1
             )
         ]
         resultat = calculer_imbrication(
@@ -203,7 +263,7 @@ class CalculerImbricationTests(TestCase):
     def test_rotation_permet_de_faire_tenir_la_piece(self):
         items = [
             ItemANester(
-                piece_id=1, largeur_mm=900, hauteur_mm=400, surface_mm2=360_000, rotation_autorisee=True, quantite=1
+                piece_id=1, largeur_mm=900, hauteur_mm=400, surface_mm2=360_000, pas_rotation_deg=90, quantite=1
             )
         ]
         resultat = calculer_imbrication(
@@ -215,13 +275,83 @@ class CalculerImbricationTests(TestCase):
     def test_taux_utilisation_base_sur_surface_reelle(self):
         items = [
             ItemANester(
-                piece_id=1, largeur_mm=100, hauteur_mm=100, surface_mm2=7854, rotation_autorisee=False, quantite=1
+                piece_id=1, largeur_mm=100, hauteur_mm=100, surface_mm2=7854, pas_rotation_deg=None, quantite=1
             )
         ]
         resultat = calculer_imbrication(
             items, largeur_feuille_mm=100, longueur_feuille_mm=100, marge_bord_mm=0, espacement_pieces_mm=0
         )
         self.assertAlmostEqual(resultat.taux_utilisation_pct, 78.54, places=1)
+
+
+class ImbricationAnglesLibresTests(TestCase):
+    """Le rectangle englobant d'une pièce non rectangulaire dépend de l'angle sous lequel on le
+    calcule : une pièce en losange (carré tourné à 45°) a un rectangle englobant deux fois plus
+    grand en aire à 0°/90° qu'une fois ramenée à son orientation « carrée » à 45° — de quoi
+    vérifier que le pas de rotation influence réellement le placement, pas seulement les
+    métadonnées."""
+
+    def _diamant(self, **kwargs):
+        return ItemANester(
+            piece_id=1,
+            largeur_mm=200,
+            hauteur_mm=200,
+            surface_mm2=20000,
+            exterieur=[(100, 0), (0, 100), (-100, 0), (0, -100)],
+            quantite=1,
+            **kwargs,
+        )
+
+    def test_rotation_a_90_seulement_ne_suffit_pas(self):
+        resultat = calculer_imbrication(
+            [self._diamant(pas_rotation_deg=90)],
+            largeur_feuille_mm=150,
+            longueur_feuille_mm=150,
+            marge_bord_mm=0,
+            espacement_pieces_mm=0,
+        )
+        self.assertEqual(resultat.pieces_non_placees, [1])
+
+    def test_rotation_a_45_permet_le_placement(self):
+        resultat = calculer_imbrication(
+            [self._diamant(pas_rotation_deg=45)],
+            largeur_feuille_mm=150,
+            longueur_feuille_mm=150,
+            marge_bord_mm=0,
+            espacement_pieces_mm=0,
+        )
+        self.assertEqual(resultat.pieces_non_placees, [])
+        self.assertEqual(resultat.nb_feuilles, 1)
+        self.assertEqual(resultat.placements[0].rotation_deg, 45)
+
+    def test_symetrie_n_a_aucun_effet_observable_sur_le_placement(self):
+        # Voir le docstring du module `imbrication.py` : un miroir ne change jamais la
+        # largeur/hauteur du rectangle englobant, donc le moteur ne retourne jamais une pièce
+        # — `symetrie_autorisee` ne doit changer ni la rotation choisie, ni `miroir` (toujours
+        # False). Pièce chirale (forme en L, asymétrique) pour écarter tout cas particulier lié
+        # à une pièce elle-même symétrique.
+        piece_chirale = dict(
+            piece_id=1,
+            largeur_mm=3,
+            hauteur_mm=2,
+            surface_mm2=5,
+            exterieur=[(0, 0), (3, 0), (3, 1), (1, 1), (1, 2), (0, 2)],
+            pas_rotation_deg=45,
+            quantite=1,
+        )
+        resultat_avec = calculer_imbrication(
+            [ItemANester(symetrie_autorisee=True, **piece_chirale)],
+            largeur_feuille_mm=10,
+            longueur_feuille_mm=10,
+        )
+        resultat_sans = calculer_imbrication(
+            [ItemANester(symetrie_autorisee=False, **piece_chirale)],
+            largeur_feuille_mm=10,
+            longueur_feuille_mm=10,
+        )
+        self.assertEqual(resultat_avec.placements[0].rotation_deg, resultat_sans.placements[0].rotation_deg)
+        self.assertFalse(resultat_avec.placements[0].miroir)
+        self.assertFalse(resultat_sans.placements[0].miroir)
 
 
 class PieceDecoupeModelTests(TestCase):
@@ -260,6 +390,49 @@ class PieceDecoupeModelTests(TestCase):
 
         with self.assertRaises(ValidationError):
             piece.full_clean()
+
+    def test_matiere_et_epaisseur_persistees(self):
+        acier = Matiere.objects.create(nom="Acier inox", densite=7.9)
+        contenu = _dxf_bytes(_rectangle_avec_trou)
+        piece = PieceDecoupe.objects.create(
+            nom="Flasque",
+            fichier_source=SimpleUploadedFile("flasque.dxf", contenu),
+            matiere=acier,
+            epaisseur=3,
+        )
+        piece.refresh_from_db()
+        self.assertEqual(piece.matiere, acier)
+        self.assertEqual(piece.epaisseur, 3)
+
+    def test_profil_import_classe_la_gravure_et_desactive_le_trou(self):
+        profil = ProfilImportDecoupe.objects.create(nom="Poste laser atelier")
+        RegleProfilImportDecoupe.objects.create(profil=profil, calque="COUPE", role="decoupe")
+        RegleProfilImportDecoupe.objects.create(profil=profil, calque="GRAVURE", role="gravure")
+
+        def piece_avec_logo(msp):
+            msp.add_lwpolyline([(0, 0), (100, 0), (100, 50), (0, 50)], close=True, dxfattribs={"layer": "COUPE"})
+            msp.add_lwpolyline(
+                [(40, 15), (60, 15), (50, 35)], close=True, dxfattribs={"layer": "GRAVURE"}
+            )
+
+        contenu = _dxf_bytes(piece_avec_logo)
+        piece = PieceDecoupe.objects.create(
+            nom="Flasque logo",
+            fichier_source=SimpleUploadedFile("flasque_logo.dxf", contenu),
+            profil_import=profil,
+        )
+        piece.importer_geometrie()
+        piece.refresh_from_db()
+
+        self.assertEqual(piece.nb_contours_interieurs, 0)
+        self.assertTrue(piece.a_gravure)
+        self.assertGreater(piece.longueur_gravure_mm, 0)
+        self.assertIn("COUPE", piece.calques_detectes)
+        self.assertIn("GRAVURE", piece.calques_detectes)
+        # Comportement délibéré : la détection auto informe (a_gravure), mais ne modifie jamais
+        # elle-même symetrie_autorisee après coup — seul le JS du formulaire d'ajout pré-suggère
+        # la case décochée avant tout enregistrement (voir piecedecoupe_admin.js).
+        self.assertTrue(piece.symetrie_autorisee)
 
 
 class ImbricationJobModelTests(TestCase):
@@ -433,6 +606,32 @@ class AnalyserFichierAdminViewTests(TestCase):
         )
         self.assertEqual(reponse.status_code, 302)
 
+    def test_profil_import_applique_a_l_analyse_en_direct(self):
+        profil = ProfilImportDecoupe.objects.create(nom="Poste laser")
+        RegleProfilImportDecoupe.objects.create(profil=profil, calque="COUPE", role="decoupe")
+        RegleProfilImportDecoupe.objects.create(profil=profil, calque="GRAVURE", role="gravure")
+
+        def piece_avec_logo(msp):
+            msp.add_lwpolyline([(0, 0), (100, 0), (100, 50), (0, 50)], close=True, dxfattribs={"layer": "COUPE"})
+            msp.add_lwpolyline([(40, 15), (60, 15), (50, 35)], close=True, dxfattribs={"layer": "GRAVURE"})
+
+        contenu = _dxf_bytes(piece_avec_logo)
+        reponse = self.client.post(
+            self.url,
+            {
+                "fichier_source": SimpleUploadedFile("flasque_logo.dxf", contenu),
+                "profil_import": profil.pk,
+            },
+        )
+        self.assertEqual(reponse.status_code, 200)
+        data = reponse.json()
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["nb_contours_interieurs"], 0)
+        self.assertTrue(data["a_gravure"])
+        self.assertGreater(data["longueur_gravure_mm"], 0)
+        self.assertIn("COUPE", data["calques_detectes"])
+        self.assertIn("GRAVURE", data["calques_detectes"])
+
 
 class ApercuPieceAdminTests(TestCase):
     """Aperçu SVG affiché sur la fiche PieceDecoupe (formulaire d'ajout et de modification)."""
@@ -457,3 +656,37 @@ class ApercuPieceAdminTests(TestCase):
         reponse = self.client.get(f"/admin/decoupe/piecedecoupe/{piece.pk}/change/")
         self.assertEqual(reponse.status_code, 200)
         self.assertContains(reponse, "<svg")
+
+
+class ProfilImportDecoupeModelTests(TestCase):
+    def test_regles_par_calque_est_insensible_a_la_casse_du_dict(self):
+        profil = ProfilImportDecoupe.objects.create(nom="Poste laser")
+        RegleProfilImportDecoupe.objects.create(profil=profil, calque="Gravure", role="gravure")
+        self.assertEqual(profil.regles_par_calque(), {"gravure": "gravure"})
+
+    def test_reimport_avec_nouveau_profil_reclasse_la_piece(self):
+        # Changer le profil d'import sur une pièce déjà enregistrée doit la reclasser sans
+        # ré-uploader le fichier (voir PieceDecoupeAdmin.save_model : déclenche un réimport dès
+        # que `profil_import` change, même si `fichier_source` ne change pas).
+        profil = ProfilImportDecoupe.objects.create(nom="Poste laser")
+        RegleProfilImportDecoupe.objects.create(profil=profil, calque="COUPE", role="decoupe")
+        RegleProfilImportDecoupe.objects.create(profil=profil, calque="GRAVURE", role="gravure")
+
+        def piece_avec_logo(msp):
+            msp.add_lwpolyline([(0, 0), (100, 0), (100, 50), (0, 50)], close=True, dxfattribs={"layer": "COUPE"})
+            msp.add_lwpolyline([(40, 15), (60, 15), (50, 35)], close=True, dxfattribs={"layer": "GRAVURE"})
+
+        contenu = _dxf_bytes(piece_avec_logo)
+        piece = PieceDecoupe.objects.create(
+            nom="Flasque logo", fichier_source=SimpleUploadedFile("flasque_logo.dxf", contenu)
+        )
+        piece.importer_geometrie()
+        piece.refresh_from_db()
+        self.assertEqual(piece.nb_contours_interieurs, 1)  # sans profil : gravure prise pour un trou
+
+        piece.profil_import = profil
+        piece.save()
+        piece.importer_geometrie()
+        piece.refresh_from_db()
+        self.assertEqual(piece.nb_contours_interieurs, 0)
+        self.assertTrue(piece.a_gravure)

@@ -2,7 +2,49 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 
-from technique.models import Article
+from technique.models import Article, Matiere
+
+
+class ProfilImportDecoupe(models.Model):
+    """Ensemble de règles réutilisables pour classer les calques d'un DXF/DWG au moment de
+    l'import (découpe / gravure / pliage / ignoré) — évite de reclasser les calques à la main
+    à chaque import quand les fichiers viennent toujours du même poste CAO."""
+
+    nom = models.CharField(max_length=100, unique=True)
+    description = models.TextField(blank=True)
+
+    class Meta:
+        verbose_name = "Profil d'import"
+        verbose_name_plural = "Profils d'import"
+        ordering = ["nom"]
+
+    def __str__(self):
+        return self.nom
+
+    def regles_par_calque(self):
+        """`{nom de calque en minuscules: rôle}`, prêt à passer à `extraire_geometrie()`."""
+        return {regle.calque.lower(): regle.role for regle in self.regles.all()}
+
+
+class RegleProfilImportDecoupe(models.Model):
+    class Role(models.TextChoices):
+        DECOUPE = "decoupe", "Découpe"
+        GRAVURE = "gravure", "Gravure / marquage"
+        PLIAGE = "pliage", "Pliage"
+        IGNORE = "ignore", "Ignoré"
+
+    profil = models.ForeignKey(ProfilImportDecoupe, on_delete=models.CASCADE, related_name="regles")
+    calque = models.CharField(max_length=100, help_text="Nom du calque DXF/DWG (comparaison insensible à la casse)")
+    role = models.CharField(max_length=10, choices=Role.choices)
+
+    class Meta:
+        verbose_name = "Règle de profil d'import"
+        verbose_name_plural = "Règles de profil d'import"
+        unique_together = [("profil", "calque")]
+        ordering = ["calque"]
+
+    def __str__(self):
+        return f"{self.calque} → {self.get_role_display()}"
 
 
 class PieceDecoupe(models.Model):
@@ -17,6 +59,11 @@ class PieceDecoupe(models.Model):
         OK = "ok", "Importée"
         ERREUR = "erreur", "Erreur d'import"
 
+    class PasRotation(models.IntegerChoices):
+        PAS_5 = 5, "5°"
+        PAS_45 = 45, "45°"
+        PAS_90 = 90, "90°"
+
     nom = models.CharField(max_length=200)
     article = models.ForeignKey(
         Article,
@@ -26,13 +73,35 @@ class PieceDecoupe(models.Model):
         related_name="pieces_decoupe",
         help_text="Article fabriqué correspondant, si déjà référencé au socle technique",
     )
+    matiere = models.ForeignKey(
+        Matiere,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="pieces_decoupe",
+    )
+    epaisseur = models.FloatField(null=True, blank=True, help_text="Épaisseur de tôle (mm)")
     fichier_source = models.FileField(upload_to="decoupe/sources/%Y/%m/")
     format_source = models.CharField(max_length=10, choices=FormatSource.choices, blank=True)
-    rotation_autorisee = models.BooleanField(
-        default=True,
-        help_text="À décocher si le sens de la matière (fil, grain) impose l'orientation de la pièce",
+    profil_import = models.ForeignKey(
+        ProfilImportDecoupe,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="pieces_decoupe",
+        help_text="Règles de classement des calques (découpe / gravure / pliage / ignoré) utilisées à l'import",
     )
-
+    pas_rotation_deg = models.PositiveSmallIntegerField(
+        choices=PasRotation.choices,
+        null=True,
+        blank=True,
+        help_text="Pas de rotation autorisé pour l'imbrication — vide si aucune rotation n'est permise "
+        "(sens de la matière imposé)",
+    )
+    symetrie_autorisee = models.BooleanField(
+        default=True,
+        help_text="À décocher si la pièce ne peut pas être retournée (miroir) — gravure, marquage non symétrique...",
+    )
     statut = models.CharField(max_length=20, choices=Statut.choices, default=Statut.EN_ATTENTE)
     message_erreur = models.TextField(blank=True)
     avertissements = models.JSONField(default=list, blank=True)
@@ -48,6 +117,15 @@ class PieceDecoupe(models.Model):
     nb_contours_interieurs = models.PositiveIntegerField(default=0, help_text="Nombre de trous détectés")
     contour_json = models.JSONField(
         null=True, blank=True, help_text="Contour extérieur et trous, coordonnées locales en mm"
+    )
+    calques_detectes = models.JSONField(default=list, blank=True, help_text="Calques trouvés dans le fichier source")
+    a_gravure = models.BooleanField(
+        default=False, help_text="Détecté automatiquement : le fichier contient des tracés classés « gravure »"
+    )
+    gravure_json = models.JSONField(null=True, blank=True, help_text="Tracés de gravure/marquage, repère local en mm")
+    pliage_json = models.JSONField(null=True, blank=True, help_text="Lignes de pliage détectées, repère local en mm")
+    longueur_gravure_mm = models.FloatField(
+        null=True, blank=True, help_text="Longueur totale des tracés de gravure/marquage"
     )
 
     date_import = models.DateTimeField(auto_now_add=True)
@@ -87,8 +165,9 @@ class PieceDecoupe(models.Model):
         """
         from .services.geometrie import ErreurImportGeometrie, extraire_geometrie
 
+        regles_calques = self.profil_import.regles_par_calque() if self.profil_import_id else None
         try:
-            resultat = extraire_geometrie(self.fichier_source.path, self.format_source)
+            resultat = extraire_geometrie(self.fichier_source.path, self.format_source, regles_calques=regles_calques)
         except ErreurImportGeometrie as exc:
             self.statut = self.Statut.ERREUR
             self.message_erreur = str(exc)
@@ -103,6 +182,11 @@ class PieceDecoupe(models.Model):
         self.hauteur_mm = resultat.hauteur_mm
         self.nb_contours_interieurs = len(resultat.holes)
         self.contour_json = {"exterieur": resultat.exterior, "trous": resultat.holes}
+        self.calques_detectes = resultat.calques
+        self.a_gravure = bool(resultat.gravure)
+        self.gravure_json = {"traits": resultat.gravure}
+        self.pliage_json = {"traits": resultat.pliage}
+        self.longueur_gravure_mm = resultat.longueur_gravure_mm
         self.avertissements = resultat.avertissements
         self.save()
         return True
@@ -165,7 +249,9 @@ class ImbricationJob(models.Model):
                 largeur_mm=ligne.piece.largeur_mm,
                 hauteur_mm=ligne.piece.hauteur_mm,
                 surface_mm2=ligne.piece.surface_mm2,
-                rotation_autorisee=ligne.piece.rotation_autorisee,
+                pas_rotation_deg=ligne.piece.pas_rotation_deg,
+                symetrie_autorisee=ligne.piece.symetrie_autorisee,
+                exterieur=(ligne.piece.contour_json or {}).get("exterieur") or [],
                 quantite=ligne.quantite,
             )
             for ligne in self.lignes.select_related("piece").all()
@@ -187,6 +273,7 @@ class ImbricationJob(models.Model):
                 x_mm=placement.x_mm,
                 y_mm=placement.y_mm,
                 rotation_deg=placement.rotation_deg,
+                miroir=placement.miroir,
             )
             for placement in resultat.placements
         )
@@ -240,7 +327,8 @@ class ImbricationPlacement(models.Model):
     numero_feuille = models.PositiveIntegerField()
     x_mm = models.FloatField()
     y_mm = models.FloatField()
-    rotation_deg = models.PositiveIntegerField(choices=[(0, "0°"), (90, "90°")], default=0)
+    rotation_deg = models.PositiveSmallIntegerField(default=0, help_text="Angle de rotation appliqué (pas de 5°)")
+    miroir = models.BooleanField(default=False, help_text="Pièce retournée (symétrie miroir) pour ce placement")
 
     class Meta:
         verbose_name = "Placement"
