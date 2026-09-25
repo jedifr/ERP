@@ -1,3 +1,4 @@
+from django import forms
 from django.contrib import admin
 from django.urls import path
 from django.utils.html import format_html
@@ -26,6 +27,45 @@ def _bloc_feuille_svg(numero, svg):
         "</div>",
         numero,
         mark_safe(svg) if svg else "—",
+    )
+
+
+def _table_calques(calques, roles_effectifs):
+    """Tableau éditable calque → rôle, une ligne par calque détecté dans le fichier source.
+    `roles_effectifs` : `{calque en minuscules: rôle}` déjà résolu (manuel > profil > découpe
+    par défaut). Même structure HTML (classes, attributs `data-calque`) que celle reconstruite
+    côté client par piecedecoupe_admin.js après une (ré)analyse — un `<select>` par calque,
+    stylé comme les autres champs du formulaire plutôt que le rendu brut d'un `<select>` HTML."""
+    lignes = []
+    for calque in calques:
+        role_actuel = roles_effectifs.get(calque.lower(), RegleProfilImportDecoupe.Role.DECOUPE)
+        options = "".join(
+            format_html(
+                '<option value="{}"{}>{}</option>',
+                valeur,
+                mark_safe(" selected") if valeur == role_actuel else "",
+                libelle,
+            )
+            for valeur, libelle in RegleProfilImportDecoupe.Role.choices
+        )
+        lignes.append(
+            format_html(
+                '<tr><td style="padding: 4px 8px 4px 0;">{}</td>'
+                '<td style="padding: 4px 0;">'
+                '<select class="decoupe-calque-role" data-calque="{}" '
+                'style="padding: 0.375rem; border-radius: 0.375rem; border: 1px solid #e5e7eb;">{}</select>'
+                "</td></tr>",
+                calque,
+                calque,
+                mark_safe(options),
+            )
+        )
+    return format_html(
+        '<table style="border-collapse: collapse;"><thead><tr>'
+        '<th style="text-align:left; padding: 4px 8px 4px 0;">Calque</th>'
+        '<th style="text-align:left; padding: 4px 0;">Rôle</th>'
+        "</tr></thead><tbody>{}</tbody></table>",
+        mark_safe("".join(lignes)),
     )
 
 
@@ -94,13 +134,18 @@ class PieceDecoupeAdmin(ModelAdmin):
         "largeur_mm_display",
         "hauteur_mm_display",
         "nb_contours_interieurs_display",
-        "calques_detectes_display",
+        "calques_editables",
         "a_gravure_display",
         "longueur_gravure_mm_display",
         "contour_json",
         "date_import",
     ]
     actions = ["reimporter"]
+
+    def formfield_for_dbfield(self, db_field, request, **kwargs):
+        if db_field.name == "regles_calques_manuelles":
+            kwargs["widget"] = forms.HiddenInput()
+        return super().formfield_for_dbfield(db_field, request, **kwargs)
 
     class Media:
         js = ["decoupe/piecedecoupe_admin.js"]
@@ -170,10 +215,33 @@ class PieceDecoupeAdmin(ModelAdmin):
         valeur = obj.nb_contours_interieurs if obj else 0
         return format_html('<span id="decoupe-nb-contours">{}</span>', valeur)
 
-    @admin.display(description="Calques détectés")
-    def calques_detectes_display(self, obj):
-        valeurs = (obj and obj.calques_detectes) or []
-        return format_html('<span id="decoupe-calques">{}</span>', ", ".join(valeurs) if valeurs else "-")
+    # Cases à cocher/sélecteurs par calque, pas juste un affichage : le formulaire d'import
+    # doit permettre de dire quels calques garder et lesquels sont de la découpe/gravure,
+    # directement à l'écran — l'enregistrement écrit le résultat dans
+    # `regles_calques_manuelles` (champ caché : voir formfield_for_dbfield et le <style>
+    # ci-dessous qui masque sa ligne, class `field-regles_calques_manuelles` posée par Unfold
+    # sur un champ de formulaire normal, contrairement aux champs readonly de premier niveau).
+    @admin.display(description="Calques")
+    def calques_editables(self, obj):
+        calques = (obj and obj.calques_detectes) or []
+        style = "<style>.field-regles_calques_manuelles { display: none; }</style>"
+        if not calques:
+            return format_html(
+                '<div id="decoupe-calques-editables">{}{}</div>',
+                mark_safe(style),
+                "En attente d'import du fichier source.",
+            )
+        if obj.regles_calques_manuelles:
+            roles_effectifs = {calque.lower(): role for calque, role in obj.regles_calques_manuelles.items()}
+        elif obj.profil_import_id:
+            roles_effectifs = obj.profil_import.regles_par_calque()
+        else:
+            roles_effectifs = {}
+        return format_html(
+            '<div id="decoupe-calques-editables">{}{}</div>',
+            mark_safe(style),
+            _table_calques(calques, roles_effectifs),
+        )
 
     @admin.display(description="Gravure détectée")
     def a_gravure_display(self, obj):
@@ -194,8 +262,9 @@ class PieceDecoupeAdmin(ModelAdmin):
     def save_model(self, request, obj, form, change):
         fichier_modifie = "fichier_source" in form.changed_data
         profil_modifie = "profil_import" in form.changed_data
+        calques_modifies = "regles_calques_manuelles" in form.changed_data
         super().save_model(request, obj, form, change)
-        if fichier_modifie or profil_modifie:
+        if fichier_modifie or profil_modifie or calques_modifies:
             obj.importer_geometrie()
 
     def get_urls(self):

@@ -2122,3 +2122,50 @@ premier niveau).
 `ImbricationJob` en base), sélection d'une pièce et saisie d'une quantité —
 aperçu des feuilles et statistiques mis à jour en direct, sans passer par
 "Enregistrer".
+
+## Tableau des calques éditable à l'analyse d'un DXF/DWG
+
+Jusqu'ici, le classement des calques (découpe / gravure / pliage / ignoré)
+ne pouvait se faire qu'en amont, via un `ProfilImportDecoupe` préparé à
+l'avance (voir plus haut). Il manquait un moyen de voir, au cas par cas et
+sans rien préparer, la liste des calques présents dans le fichier qu'on
+vient d'importer, et de corriger leur rôle directement à l'écran.
+
+Nouveau champ `PieceDecoupe.regles_calques_manuelles` (JSON,
+`{calque: rôle}`, prioritaire sur `profil_import` dans
+`importer_geometrie()`) et tableau interactif affiché juste sous l'aperçu,
+dès l'analyse terminée (avant même l'enregistrement) : une ligne par calque
+détecté, avec un menu déroulant Découpe / Gravure marquage / Pliage / Ignoré
+par calque. Choisir un rôle relance aussitôt l'analyse (même mécanisme AJAX
+que le reste de la fiche) et met à jour aperçu, contours, surface et
+détection de gravure en direct.
+
+`ErreurImportGeometrie` porte désormais `calques`/`calques_roles` même en
+cas d'échec (ex. plus aucun calque de découpe après une mauvaise
+correction) : le tableau reste affiché et corrigeable sans devoir
+ré-uploader le fichier. `analyser_fichier_view` accepte aussi un `piece_id`
+en plus de `fichier_source` — nécessaire pour rejouer l'analyse sur une
+pièce déjà enregistrée (changer un rôle de calque sur le formulaire de
+modification ne repasse pas par le champ fichier). Construction du tableau
+côté JS entièrement par API DOM (`textContent`/`dataset`, jamais
+`innerHTML`) : les noms de calques viennent du fichier uploadé, donc non
+fiables.
+
+**Correctif découvert pendant la vérification visuelle** : à l'ouverture de
+la fiche d'une pièce déjà enregistrée, l'initialisation du widget select2
+du champ "Profil import" émettait elle-même un évènement `change` — sans
+aucune action de l'utilisateur — ce qui relançait une analyse par défaut et
+écrasait silencieusement le tableau de calques (et le classement
+enregistré) au prochain "Enregistrer". Corrigé en ne réagissant plus qu'à
+un changement réel de valeur du champ (comparaison à la dernière valeur
+connue) plutôt qu'à tout évènement `change`.
+
+**Vérifié** : import d'un DXF à 3 calques (COUPE/GRAVURE/PLIAGE, un logo
+triangulaire sur GRAVURE pris pour un trou tant que le calque reste classé
+"Découpe" par défaut) — tableau de 3 lignes affiché, correction
+GRAVURE→Gravure et PLIAGE→Pliage : nombre de contours intérieurs passe de 1
+à 0, gravure détectée passe à "Oui", aperçu SVG recoloré en direct.
+Enregistrement puis réouverture de la fiche : classement et statistiques
+bien persistés (confirmé aussi directement en base) — y compris après
+correction du bug de ré-analyse fantôme ci-dessus, qui aurait sinon
+silencieusement réinitialisé le classement à l'ouverture.

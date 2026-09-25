@@ -91,6 +91,11 @@ class PieceDecoupe(models.Model):
         related_name="pieces_decoupe",
         help_text="Règles de classement des calques (découpe / gravure / pliage / ignoré) utilisées à l'import",
     )
+    regles_calques_manuelles = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Classement calque → rôle choisi à la main pour cette pièce (prioritaire sur le profil d'import)",
+    )
     pas_rotation_deg = models.PositiveSmallIntegerField(
         choices=PasRotation.choices,
         null=True,
@@ -165,7 +170,12 @@ class PieceDecoupe(models.Model):
         """
         from .services.geometrie import ErreurImportGeometrie, extraire_geometrie
 
-        regles_calques = self.profil_import.regles_par_calque() if self.profil_import_id else None
+        if self.regles_calques_manuelles:
+            regles_calques = {calque.lower(): role for calque, role in self.regles_calques_manuelles.items()}
+        elif self.profil_import_id:
+            regles_calques = self.profil_import.regles_par_calque()
+        else:
+            regles_calques = None
         try:
             resultat = extraire_geometrie(self.fichier_source.path, self.format_source, regles_calques=regles_calques)
         except ErreurImportGeometrie as exc:

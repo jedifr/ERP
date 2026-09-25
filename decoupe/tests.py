@@ -173,6 +173,19 @@ class ExtraireGeometrieTests(TestCase):
         self.assertAlmostEqual(resultat.pliage[0][0][0], 0, delta=0.5)
         self.assertEqual(resultat.calques, ["COUPE", "GRAVURE", "PLIAGE"])
         self.assertEqual(resultat.avertissements, [])
+        self.assertEqual(
+            resultat.calques_roles, {"COUPE": "decoupe", "GRAVURE": "gravure", "PLIAGE": "pliage"}
+        )
+
+    def test_erreur_porte_les_calques_pour_permettre_une_correction(self):
+        # Tout classé en gravure/ignoré par erreur : plus aucune découpe, l'import échoue —
+        # mais les calques doivent rester consultables pour corriger sans ré-uploader.
+        chemin = self._fichier(self._piece_calques_multiples)
+        regles = {"coupe": "gravure", "gravure": "gravure", "pliage": "ignore"}
+        with self.assertRaises(ErreurImportGeometrie) as cm:
+            extraire_geometrie(chemin, "dxf", regles_calques=regles)
+        self.assertEqual(cm.exception.calques, ["COUPE", "GRAVURE", "PLIAGE"])
+        self.assertEqual(cm.exception.calques_roles["COUPE"], "gravure")
 
     def test_calque_non_couvert_par_profil_avertit_et_reste_decoupe(self):
         def piece(msp):
@@ -833,6 +846,74 @@ class AnalyserFichierAdminViewTests(TestCase):
         self.assertIn("COUPE", data["calques_detectes"])
         self.assertIn("GRAVURE", data["calques_detectes"])
 
+    def _piece_avec_logo_dxf(self):
+        def piece_avec_logo(msp):
+            msp.add_lwpolyline([(0, 0), (100, 0), (100, 50), (0, 50)], close=True, dxfattribs={"layer": "COUPE"})
+            msp.add_lwpolyline([(40, 15), (60, 15), (50, 35)], close=True, dxfattribs={"layer": "GRAVURE"})
+
+        return _dxf_bytes(piece_avec_logo)
+
+    def test_calques_roles_manuel_prioritaire_sur_le_profil(self):
+        profil = ProfilImportDecoupe.objects.create(nom="Poste laser")
+        RegleProfilImportDecoupe.objects.create(profil=profil, calque="GRAVURE", role="decoupe")
+
+        reponse = self.client.post(
+            self.url,
+            {
+                "fichier_source": SimpleUploadedFile("flasque_logo.dxf", self._piece_avec_logo_dxf()),
+                "profil_import": profil.pk,
+                "calques_roles": json.dumps({"COUPE": "decoupe", "GRAVURE": "gravure"}),
+            },
+        )
+        data = reponse.json()
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["nb_contours_interieurs"], 0)
+        self.assertEqual(data["calques_roles"]["GRAVURE"], "gravure")
+
+    def test_role_choices_renvoyes_pour_construire_le_tableau(self):
+        reponse = self.client.post(
+            self.url, {"fichier_source": SimpleUploadedFile("flasque.dxf", _dxf_bytes(_rectangle_avec_trou))}
+        )
+        data = reponse.json()
+        valeurs = [choix[0] for choix in data["role_choices"]]
+        self.assertEqual(set(valeurs), {"decoupe", "gravure", "pliage", "ignore"})
+
+    def test_reanalyse_depuis_piece_existante_sans_reuploader(self):
+        piece = PieceDecoupe.objects.create(
+            nom="Flasque logo", fichier_source=SimpleUploadedFile("flasque_logo.dxf", self._piece_avec_logo_dxf())
+        )
+        piece.importer_geometrie()
+        piece.refresh_from_db()
+        self.assertEqual(piece.nb_contours_interieurs, 1)  # sans classement : gravure prise pour un trou
+
+        reponse = self.client.post(
+            self.url,
+            {
+                "piece_id": piece.pk,
+                "calques_roles": json.dumps({"COUPE": "decoupe", "GRAVURE": "gravure"}),
+            },
+        )
+        self.assertEqual(reponse.status_code, 200)
+        data = reponse.json()
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["nb_contours_interieurs"], 0)
+        # Non persisté : la pièce en base n'a pas bougé.
+        piece.refresh_from_db()
+        self.assertEqual(piece.nb_contours_interieurs, 1)
+
+    def test_erreur_renvoie_quand_meme_les_calques_pour_correction(self):
+        reponse = self.client.post(
+            self.url,
+            {
+                "fichier_source": SimpleUploadedFile("flasque_logo.dxf", self._piece_avec_logo_dxf()),
+                "calques_roles": json.dumps({"COUPE": "ignore", "GRAVURE": "gravure"}),
+            },
+        )
+        data = reponse.json()
+        self.assertFalse(data["ok"])
+        self.assertIn("COUPE", data["calques_detectes"])
+        self.assertEqual(data["calques_roles"]["COUPE"], "ignore")
+
 
 class ApercuPieceAdminTests(TestCase):
     """Aperçu SVG affiché sur la fiche PieceDecoupe (formulaire d'ajout et de modification)."""
@@ -857,6 +938,31 @@ class ApercuPieceAdminTests(TestCase):
         reponse = self.client.get(f"/admin/decoupe/piecedecoupe/{piece.pk}/change/")
         self.assertEqual(reponse.status_code, 200)
         self.assertContains(reponse, "<svg")
+
+    def test_tableau_calques_absent_avant_import(self):
+        reponse = self.client.get("/admin/decoupe/piecedecoupe/add/")
+        self.assertEqual(reponse.status_code, 200)
+        self.assertNotContains(reponse, "decoupe-calque-role")
+
+    def test_tableau_calques_reflete_le_classement_manuel_persiste(self):
+        def piece_avec_logo(msp):
+            msp.add_lwpolyline([(0, 0), (100, 0), (100, 50), (0, 50)], close=True, dxfattribs={"layer": "COUPE"})
+            msp.add_lwpolyline([(40, 15), (60, 15), (50, 35)], close=True, dxfattribs={"layer": "GRAVURE"})
+
+        piece = PieceDecoupe.objects.create(
+            nom="Flasque logo",
+            fichier_source=SimpleUploadedFile("flasque_logo.dxf", _dxf_bytes(piece_avec_logo)),
+            regles_calques_manuelles={"COUPE": "decoupe", "GRAVURE": "gravure"},
+        )
+        piece.importer_geometrie()
+
+        reponse = self.client.get(f"/admin/decoupe/piecedecoupe/{piece.pk}/change/")
+        contenu_html = reponse.content.decode()
+        self.assertIn('data-calque="COUPE"', contenu_html)
+        self.assertIn('data-calque="GRAVURE"', contenu_html)
+        # La ligne GRAVURE doit avoir l'option "gravure" sélectionnée.
+        bloc_gravure = contenu_html.split('data-calque="GRAVURE"')[1].split("</select>")[0]
+        self.assertIn('value="gravure" selected', bloc_gravure)
 
 
 class ProfilImportDecoupeModelTests(TestCase):
@@ -891,3 +997,66 @@ class ProfilImportDecoupeModelTests(TestCase):
         piece.refresh_from_db()
         self.assertEqual(piece.nb_contours_interieurs, 0)
         self.assertTrue(piece.a_gravure)
+
+
+class ReglesCalquesManuellesTests(TestCase):
+    """Classement manuel par calque (PieceDecoupe.regles_calques_manuelles) — le tableau de
+    calques affiché après analyse, un choix par calque, prioritaire sur le profil d'import :
+    corrige le classement pièce par pièce sans devoir créer/modifier un profil réutilisable."""
+
+    def _piece_avec_logo(self, msp):
+        msp.add_lwpolyline([(0, 0), (100, 0), (100, 50), (0, 50)], close=True, dxfattribs={"layer": "COUPE"})
+        msp.add_lwpolyline([(40, 15), (60, 15), (50, 35)], close=True, dxfattribs={"layer": "GRAVURE"})
+
+    def test_regles_manuelles_prioritaires_sur_le_profil(self):
+        profil = ProfilImportDecoupe.objects.create(nom="Poste laser")
+        # Le profil classe (à tort) GRAVURE en découpe : sans classement manuel, ce serait un
+        # trou de plus.
+        RegleProfilImportDecoupe.objects.create(profil=profil, calque="GRAVURE", role="decoupe")
+        RegleProfilImportDecoupe.objects.create(profil=profil, calque="COUPE", role="decoupe")
+
+        contenu = _dxf_bytes(self._piece_avec_logo)
+        piece = PieceDecoupe.objects.create(
+            nom="Flasque logo",
+            fichier_source=SimpleUploadedFile("flasque_logo.dxf", contenu),
+            profil_import=profil,
+            regles_calques_manuelles={"COUPE": "decoupe", "GRAVURE": "gravure"},
+        )
+        piece.importer_geometrie()
+        piece.refresh_from_db()
+        self.assertEqual(piece.nb_contours_interieurs, 0)
+        self.assertTrue(piece.a_gravure)
+
+    def test_regles_manuelles_vides_retombent_sur_le_profil(self):
+        profil = ProfilImportDecoupe.objects.create(nom="Poste laser")
+        RegleProfilImportDecoupe.objects.create(profil=profil, calque="COUPE", role="decoupe")
+        RegleProfilImportDecoupe.objects.create(profil=profil, calque="GRAVURE", role="gravure")
+
+        contenu = _dxf_bytes(self._piece_avec_logo)
+        piece = PieceDecoupe.objects.create(
+            nom="Flasque logo",
+            fichier_source=SimpleUploadedFile("flasque_logo.dxf", contenu),
+            profil_import=profil,
+        )
+        piece.importer_geometrie()
+        piece.refresh_from_db()
+        self.assertEqual(piece.nb_contours_interieurs, 0)
+        self.assertTrue(piece.a_gravure)
+
+    def test_reimport_declenche_par_changement_des_regles_manuelles_seules(self):
+        # Modifier uniquement regles_calques_manuelles (ni le fichier, ni profil_import) sur
+        # une fiche déjà enregistrée doit quand même déclencher un réimport — vérifié au niveau
+        # admin via form.changed_data dans PieceDecoupeAdmin.save_model.
+        contenu = _dxf_bytes(self._piece_avec_logo)
+        piece = PieceDecoupe.objects.create(
+            nom="Flasque logo", fichier_source=SimpleUploadedFile("flasque_logo.dxf", contenu)
+        )
+        piece.importer_geometrie()
+        piece.refresh_from_db()
+        self.assertEqual(piece.nb_contours_interieurs, 1)  # gravure prise pour un trou, par défaut
+
+        piece.regles_calques_manuelles = {"COUPE": "decoupe", "GRAVURE": "gravure"}
+        piece.save()
+        piece.importer_geometrie()
+        piece.refresh_from_db()
+        self.assertEqual(piece.nb_contours_interieurs, 0)

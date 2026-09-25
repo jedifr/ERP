@@ -40,7 +40,17 @@ ROLE_IGNORE = "ignore"
 
 
 class ErreurImportGeometrie(Exception):
-    """Levée quand un fichier DXF/DWG ne peut pas être exploité pour en extraire une pièce."""
+    """Levée quand un fichier DXF/DWG ne peut pas être exploité pour en extraire une pièce.
+
+    Porte `calques`/`calques_roles` quand l'échec survient après la détection des calques (ex.
+    plus aucune entité de découpe une fois les rôles appliqués) : permet à l'appelant d'afficher
+    quand même le tableau des calques, pour corriger un mauvais classement sans tout reprendre à
+    zéro (un calque basculé par erreur en "gravure"/"ignoré" par exemple)."""
+
+    def __init__(self, message, calques=None, calques_roles=None):
+        super().__init__(message)
+        self.calques = calques or []
+        self.calques_roles = calques_roles or {}
 
 
 @dataclass
@@ -56,6 +66,7 @@ class GeometrieResultat:
     pliage: list = field(default_factory=list)
     longueur_gravure_mm: float = 0.0
     calques: list = field(default_factory=list)
+    calques_roles: dict = field(default_factory=dict)
 
 
 def _point(vecteur):
@@ -230,6 +241,7 @@ def extraire_geometrie(chemin, format_source, regles_calques=None):
 
     avertissements = []
     calques_detectes = set()
+    calques_roles = {}
     lignes_decoupe = []
     traits_gravure = []
     traits_pliage = []
@@ -239,6 +251,7 @@ def extraire_geometrie(chemin, format_source, regles_calques=None):
         nom_calque = entite.dxf.layer
         calques_detectes.add(nom_calque)
         role = _role_calque(nom_calque, regles_calques, avertissements)
+        calques_roles[nom_calque] = role
         if role == ROLE_IGNORE:
             continue
         lignes = _vers_lignes(entite, avertissements)
@@ -249,15 +262,22 @@ def extraire_geometrie(chemin, format_source, regles_calques=None):
         else:
             lignes_decoupe.extend(lignes)
 
+    calques_tries = sorted(calques_detectes)
     if not lignes_decoupe:
         raise ErreurImportGeometrie(
             "Aucune entité géométrique exploitable (ligne, polyligne, arc, cercle...) n'a été trouvée "
-            "sur un calque de découpe."
+            "sur un calque de découpe.",
+            calques=calques_tries,
+            calques_roles=calques_roles,
         )
 
     anneaux = _contours_fermes(lignes_decoupe, avertissements)
     if not anneaux:
-        raise ErreurImportGeometrie("Aucun contour fermé n'a été trouvé dans le fichier.")
+        raise ErreurImportGeometrie(
+            "Aucun contour fermé n'a été trouvé dans le fichier.",
+            calques=calques_tries,
+            calques_roles=calques_roles,
+        )
 
     silhouette = _assembler_silhouette(anneaux)
     piece = _extraire_polygone_principal(silhouette, avertissements)
@@ -280,5 +300,6 @@ def extraire_geometrie(chemin, format_source, regles_calques=None):
         gravure=_traits_locaux(traits_gravure, minx, miny),
         pliage=_traits_locaux(traits_pliage, minx, miny),
         longueur_gravure_mm=sum(ligne.length for ligne in traits_gravure),
-        calques=sorted(calques_detectes),
+        calques=calques_tries,
+        calques_roles=calques_roles,
     )
