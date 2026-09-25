@@ -2093,3 +2093,32 @@ axes) — elle ne change alors que l'ordre/l'emplacement de remplissage.
 tiennent sur 1 seule feuille en mode vertical/bas gauche (visible sur la
 capture, les deux pièces calées en bas de la feuille), contre 2 feuilles
 nécessaires en horizontal/haut gauche pour le même lot.
+
+## Imbrication en direct (sans enregistrer)
+
+Jusqu'ici, voir le résultat d'un changement sur la fiche Imbrication
+(dimensions de feuille, direction, coin de départ, lignes pièce/quantité)
+demandait de cliquer sur "Enregistrer et continuer les modifications" —
+`ImbricationJobAdmin.save_related()` ne recalculait qu'à l'enregistrement.
+
+Nouvelle vue AJAX (`previsualiser_imbrication_view`,
+`/admin/decoupe/imbricationjob/previsualiser/`) : reconstruit l'état courant
+du formulaire (feuille, direction, coin de départ, chaque ligne
+pièce/quantité du formset — y compris une pièce tout juste ajoutée ou une
+ligne supprimée, sans persister quoi que ce soit) et appelle
+`calculer_imbrication()` directement. `imbricationjob_admin.js` déclenche ce
+recalcul (avec un anti-rebond de 400 ms) sur toute modification pertinente —
+y compris sur le **formulaire d'ajout**, avant même la première
+sauvegarde — et met à jour en direct l'aperçu des feuilles ainsi que les
+chiffres (nombre de feuilles, surfaces, taux d'utilisation, coût matière
+estimé, pièces non placées).
+
+Comme pour PieceDecoupeAdmin, chaque chiffre readonly est enveloppé dans un
+`<span id="...">` dédié plutôt qu'affiché tel quel (même contrainte Unfold,
+déjà documentée : pas de classe `field-<nom>` sur les champs readonly de
+premier niveau).
+
+**Vérifié** : sur le formulaire d'ajout (jamais enregistré, aucun
+`ImbricationJob` en base), sélection d'une pièce et saisie d'une quantité —
+aperçu des feuilles et statistiques mis à jour en direct, sans passer par
+"Enregistrer".

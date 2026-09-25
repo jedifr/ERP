@@ -1,3 +1,4 @@
+import json
 import math
 import tempfile
 from pathlib import Path
@@ -596,6 +597,100 @@ class ImbricationJobAdminApercuTests(TestCase):
         self.assertEqual(reponse.status_code, 200)
         self.assertContains(reponse, "Feuille 1")
         self.assertContains(reponse, "<svg")
+
+
+class PrevisualiserImbricationAdminViewTests(TestCase):
+    """Vue AJAX appelée par imbricationjob_admin.js à chaque changement de la fiche
+    ImbricationJob (feuille, direction, coin de départ, lignes) — permet de voir le résultat
+    en direct sans "Enregistrer et continuer les modifications", sur le formulaire d'ajout
+    comme de modification."""
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_superuser(
+            "imbrication-live-admin", "imbrication-live-admin@example.com", "pass1234"
+        )
+        self.client.force_login(self.user)
+        self.url = "/admin/decoupe/imbricationjob/previsualiser/"
+        contenu = _dxf_bytes(_rectangle_avec_trou)
+        self.piece = PieceDecoupe.objects.create(
+            nom="Flasque", fichier_source=SimpleUploadedFile("flasque.dxf", contenu)
+        )
+        self.piece.importer_geometrie()
+
+    def _poster(self, **kwargs):
+        payload = {
+            "largeur_feuille_mm": "1000",
+            "longueur_feuille_mm": "2000",
+            "marge_bord_mm": "5",
+            "espacement_pieces_mm": "5",
+            "direction": "horizontal",
+            "coin_depart": "bas_gauche",
+            "lignes": [],
+        }
+        payload.update(kwargs)
+        return self.client.post(self.url, data=json.dumps(payload), content_type="application/json")
+
+    def test_calcule_sans_rien_enregistrer(self):
+        nb_avant = ImbricationJob.objects.count()
+        reponse = self._poster(lignes=[{"piece": self.piece.pk, "quantite": 3}])
+        self.assertEqual(reponse.status_code, 200)
+        data = reponse.json()
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["nb_feuilles"], 1)
+        self.assertEqual(len(data["feuilles"]), 1)
+        self.assertIn("<svg", data["feuilles"][0]["svg"])
+        self.assertEqual(ImbricationJob.objects.count(), nb_avant)
+
+    def test_sans_lignes_renvoie_un_resultat_vide(self):
+        reponse = self._poster(lignes=[])
+        self.assertEqual(reponse.status_code, 200)
+        data = reponse.json()
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["nb_feuilles"], 0)
+        self.assertEqual(data["feuilles"], [])
+
+    def test_dimensions_de_feuille_manquantes_ne_plante_pas(self):
+        reponse = self._poster(largeur_feuille_mm="", longueur_feuille_mm="")
+        self.assertEqual(reponse.status_code, 200)
+        self.assertFalse(reponse.json()["ok"])
+
+    def test_piece_non_importee_est_ignoree_sans_erreur(self):
+        piece_en_echec = PieceDecoupe.objects.create(
+            nom="Non importée", fichier_source=SimpleUploadedFile("x.dxf", _dxf_bytes(_rectangle_avec_trou))
+        )
+        reponse = self._poster(lignes=[{"piece": piece_en_echec.pk, "quantite": 1}])
+        self.assertEqual(reponse.status_code, 200)
+        data = reponse.json()
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["nb_feuilles"], 0)
+        self.assertIn("Non importée", data["pieces_ignorees"])
+
+    def test_direction_verticale_appliquee_en_direct(self):
+        # Même cas que ImbricationDirectionCoinDepartTests.test_direction_verticale_.... :
+        # 2 pièces de tailles différentes tiennent sur 1 feuille en vertical, 2 en horizontal.
+        contenu_a = _dxf_bytes(lambda msp: msp.add_lwpolyline([(0, 0), (120, 0), (120, 60), (0, 60)], close=True))
+        piece_a = PieceDecoupe.objects.create(nom="A", fichier_source=SimpleUploadedFile("a.dxf", contenu_a))
+        piece_a.importer_geometrie()
+        contenu_b = _dxf_bytes(lambda msp: msp.add_lwpolyline([(0, 0), (60, 0), (60, 120), (0, 120)], close=True))
+        piece_b = PieceDecoupe.objects.create(nom="B", fichier_source=SimpleUploadedFile("b.dxf", contenu_b))
+        piece_b.importer_geometrie()
+
+        lignes = [{"piece": piece_a.pk, "quantite": 1}, {"piece": piece_b.pk, "quantite": 1}]
+        reponse_h = self._poster(
+            largeur_feuille_mm="200", longueur_feuille_mm="150", marge_bord_mm="0", espacement_pieces_mm="0",
+            direction="horizontal", lignes=lignes,
+        )
+        reponse_v = self._poster(
+            largeur_feuille_mm="200", longueur_feuille_mm="150", marge_bord_mm="0", espacement_pieces_mm="0",
+            direction="vertical", lignes=lignes,
+        )
+        self.assertEqual(reponse_h.json()["nb_feuilles"], 2)
+        self.assertEqual(reponse_v.json()["nb_feuilles"], 1)
+
+    def test_utilisateur_non_authentifie_redirige_vers_le_login(self):
+        self.client.logout()
+        reponse = self._poster(lignes=[{"piece": self.piece.pk, "quantite": 1}])
+        self.assertEqual(reponse.status_code, 302)
 
 
 class ApiTests(TestCase):

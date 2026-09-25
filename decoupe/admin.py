@@ -4,7 +4,7 @@ from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 from unfold.admin import ModelAdmin, TabularInline
 
-from .admin_views import analyser_fichier_view
+from .admin_views import analyser_fichier_view, previsualiser_imbrication_view
 from .models import (
     ImbricationJob,
     ImbricationLigne,
@@ -14,6 +14,19 @@ from .models import (
     RegleProfilImportDecoupe,
 )
 from .services.apercu_svg import generer_svg_feuille, generer_svg_piece
+
+
+def _bloc_feuille_svg(numero, svg):
+    """Bloc "Feuille N" + son aperçu SVG — partagé entre le rendu initial (fiche déjà
+    enregistrée) et le format que le JS d'aperçu en direct reconstruit à l'identique côté
+    client à partir de la réponse JSON de `previsualiser_imbrication_view`."""
+    return format_html(
+        '<div style="margin-bottom: 1rem;">'
+        '<div style="font-weight: 600; margin-bottom: 0.25rem;">Feuille {}</div>{}'
+        "</div>",
+        numero,
+        mark_safe(svg) if svg else "—",
+    )
 
 
 class ImbricationLigneInline(TabularInline):
@@ -210,42 +223,50 @@ class ImbricationJobAdmin(ModelAdmin):
     ]
     autocomplete_fields = ["article_matiere"]
     inlines = [ImbricationLigneInline]
-    readonly_fields = [
-        "apercu_imbrication",
+    # Champs bruts exclus du formulaire, remplacés par des méthodes readonly `*_display` — même
+    # raison et même solution que sur PieceDecoupeAdmin (voir son commentaire) : donner un
+    # <span id="..."> stable au JS d'aperçu en direct, ce qu'Unfold ne fournit pas nativement
+    # sur les champs readonly de premier niveau.
+    exclude = [
         "nb_feuilles",
         "surface_pieces_mm2",
         "surface_feuilles_mm2",
         "taux_utilisation_pct",
         "cout_matiere_estime",
         "pieces_non_placees",
+    ]
+    readonly_fields = [
+        "apercu_imbrication",
+        "nb_feuilles_display",
+        "surface_pieces_mm2_display",
+        "surface_feuilles_mm2_display",
+        "taux_utilisation_pct_display",
+        "cout_matiere_estime_display",
+        "pieces_non_placees_display",
         "date_calcul",
     ]
     actions = ["recalculer"]
 
+    class Media:
+        js = ["decoupe/imbricationjob_admin.js"]
+
     @admin.display(description="Aperçu des feuilles")
     def apercu_imbrication(self, obj):
         if not obj or not obj.pk or not obj.nb_feuilles:
-            return format_html(
-                '<div id="decoupe-apercu-imbrication">{}</div>',
-                "Aucune feuille calculée pour l'instant.",
-            )
-        placements = obj.placements.select_related("piece").order_by("numero_feuille", "y_mm", "x_mm")
-        par_feuille = {}
-        for placement in placements:
-            par_feuille.setdefault(placement.numero_feuille, []).append(
-                (placement.piece, placement.x_mm, placement.y_mm, placement.rotation_deg, placement.miroir)
-            )
-
-        blocs = []
-        for numero in sorted(par_feuille):
-            svg = generer_svg_feuille(obj.largeur_feuille_mm, obj.longueur_feuille_mm, par_feuille[numero])
-            blocs.append(
-                format_html(
-                    '<div style="margin-bottom: 1rem;">'
-                    '<div style="font-weight: 600; margin-bottom: 0.25rem;">Feuille {}</div>{}'
-                    "</div>",
-                    numero,
-                    mark_safe(svg) if svg else "—",
+            contenu = "Aucune feuille calculée pour l'instant."
+        else:
+            placements = obj.placements.select_related("piece").order_by("numero_feuille", "y_mm", "x_mm")
+            par_feuille = {}
+            for placement in placements:
+                par_feuille.setdefault(placement.numero_feuille, []).append(
+                    (placement.piece, placement.x_mm, placement.y_mm, placement.rotation_deg, placement.miroir)
+                )
+            contenu = mark_safe(
+                "".join(
+                    _bloc_feuille_svg(
+                        numero, generer_svg_feuille(obj.largeur_feuille_mm, obj.longueur_feuille_mm, placements_feuille)
+                    )
+                    for numero, placements_feuille in sorted(par_feuille.items())
                 )
             )
         # Les SVG générés portent des attributs width/height en "mm" (utiles pour un export
@@ -255,9 +276,36 @@ class ImbricationJobAdmin(ModelAdmin):
             "<style>#decoupe-apercu-imbrication svg "
             "{ width: 100%; max-width: 480px; height: auto; display: block; }</style>"
         )
-        return format_html(
-            '<div id="decoupe-apercu-imbrication">{}{}</div>', mark_safe(style), mark_safe("".join(blocs))
-        )
+        return format_html('<div id="decoupe-apercu-imbrication">{}{}</div>', mark_safe(style), contenu)
+
+    @admin.display(description="Nb feuilles")
+    def nb_feuilles_display(self, obj):
+        return format_html('<span id="decoupe-imb-nb-feuilles">{}</span>', (obj and obj.nb_feuilles) or "-")
+
+    @admin.display(description="Surface pieces mm2")
+    def surface_pieces_mm2_display(self, obj):
+        valeur = obj.surface_pieces_mm2 if obj and obj.surface_pieces_mm2 is not None else "-"
+        return format_html('<span id="decoupe-imb-surface-pieces">{}</span>', valeur)
+
+    @admin.display(description="Surface feuilles mm2")
+    def surface_feuilles_mm2_display(self, obj):
+        valeur = obj.surface_feuilles_mm2 if obj and obj.surface_feuilles_mm2 is not None else "-"
+        return format_html('<span id="decoupe-imb-surface-feuilles">{}</span>', valeur)
+
+    @admin.display(description="Taux utilisation pct")
+    def taux_utilisation_pct_display(self, obj):
+        valeur = obj.taux_utilisation_pct if obj and obj.taux_utilisation_pct is not None else "-"
+        return format_html('<span id="decoupe-imb-taux">{}</span>', valeur)
+
+    @admin.display(description="Cout matiere estime")
+    def cout_matiere_estime_display(self, obj):
+        valeur = obj.cout_matiere_estime if obj and obj.cout_matiere_estime is not None else "-"
+        return format_html('<span id="decoupe-imb-cout">{}</span>', valeur)
+
+    @admin.display(description="Pieces non placees")
+    def pieces_non_placees_display(self, obj):
+        valeurs = (obj and obj.pieces_non_placees) or []
+        return format_html('<span id="decoupe-imb-non-placees">{}</span>', ", ".join(map(str, valeurs)) or "-")
 
     @admin.action(description="Recalculer l'imbrication")
     def recalculer(self, request, queryset):
@@ -268,6 +316,16 @@ class ImbricationJobAdmin(ModelAdmin):
     def save_related(self, request, form, formsets, change):
         super().save_related(request, form, formsets, change)
         form.instance.calculer()
+
+    def get_urls(self):
+        urls = [
+            path(
+                "previsualiser/",
+                self.admin_site.admin_view(previsualiser_imbrication_view),
+                name="decoupe_imbricationjob_previsualiser",
+            ),
+        ]
+        return urls + super().get_urls()
 
 
 @admin.register(ImbricationPlacement)
