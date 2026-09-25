@@ -2058,3 +2058,38 @@ l'API.
 **Vérifié** : imbrication de 15 pièces sur une feuille 1000×1000mm — plan de
 découpe affiché directement sur la fiche, à une taille d'affichage correcte,
 avec le message "Aucune feuille calculée pour l'instant" avant tout calcul.
+
+## Sens d'imbrication et coin de départ
+
+Deux nouveaux réglages sur la fiche Imbrication :
+
+- **Direction** : "Horizontal" (rangées remplies horizontalement, empilées
+  verticalement — comportement historique, reste la valeur par défaut) ou
+  "Vertical" (colonnes remplies verticalement, empilées horizontalement).
+- **Coin départ** : le coin de la feuille où démarre le placement —
+  "Bas gauche" (nouvelle valeur par défaut, convention machine la plus
+  courante), "Bas droite", "Haut gauche" ou "Haut droite".
+
+Techniquement, `decoupe/services/imbrication.py` calcule toujours en interne
+dans un repère canonique (origine en haut à gauche, algorithme d'étagères
+inchangé) ; `direction` présente juste la feuille et chaque pièce à
+l'algorithme avec largeur/hauteur inversées en mode vertical ("une étagère"
+devient alors une colonne), et `coin_depart` réfléchit les coordonnées
+obtenues selon l'axe concerné une fois le placement calculé — deux réglages
+indépendants, combinables librement.
+
+`direction` n'est pas qu'un réétiquetage cosmétique : sur un lot de pièces de
+tailles différentes, le sens de remplissage peut changer le nombre de
+feuilles nécessaires (une pièce qui ne rentre pas à côté d'une autre en mode
+"rangées" peut tenir à côté en mode "colonnes", ou inversement) — démontré
+par un test dédié (deux pièces 120×60 et 60×120 : 2 feuilles en horizontal, 1
+seule en vertical, sur une même feuille 200×150). En revanche, pour un lot
+de pièces **toutes de la même taille**, la direction ne change jamais le
+nombre de feuilles ni le taux d'utilisation (démontrable algébriquement :
+`floor(A/a)×floor(B/b)` est symétrique en échangeant les rôles des deux
+axes) — elle ne change alors que l'ordre/l'emplacement de remplissage.
+
+**Vérifié** : deux pièces de tailles différentes sur une feuille 200×150 —
+tiennent sur 1 seule feuille en mode vertical/bas gauche (visible sur la
+capture, les deux pièces calées en bas de la feuille), contre 2 feuilles
+nécessaires en horizontal/haut gauche pour le même lot.

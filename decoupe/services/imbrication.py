@@ -150,16 +150,52 @@ def _orientations(item, largeur_utile, hauteur_utile):
 
 
 def calculer_imbrication(
-    items, largeur_feuille_mm, longueur_feuille_mm, marge_bord_mm=0.0, espacement_pieces_mm=0.0
+    items,
+    largeur_feuille_mm,
+    longueur_feuille_mm,
+    marge_bord_mm=0.0,
+    espacement_pieces_mm=0.0,
+    direction="horizontal",
+    coin_depart="bas_gauche",
 ):
     """Place les `items` (avec leur quantité) sur autant de feuilles que nécessaire.
 
     `items` : itérable de `ItemANester`. Les pièces trop grandes pour tenir sur une feuille
     vide (même seules, sous quelque orientation autorisée que ce soit) sont écartées et
     listées dans `pieces_non_placees`.
+
+    `direction` : "horizontal" (rangées remplies horizontalement, empilées verticalement — le
+    comportement historique) ou "vertical" (colonnes remplies verticalement, empilées
+    horizontalement). L'algorithme d'étagères lui-même ne change pas : en mode vertical, on lui
+    présente juste la feuille et chaque pièce avec largeur/hauteur inversées ("une étagère"
+    devient alors une colonne), puis on ré-inverse la position obtenue.
+
+    `coin_depart` : coin de la feuille où démarre le placement — "bas_gauche" (par défaut,
+    convention machine la plus courante), "bas_droite", "haut_gauche" ou "haut_droite".
+    L'algorithme calcule toujours en interne dans un repère canonique (origine en haut à
+    gauche) ; `coin_depart` ne fait que réfléchir les coordonnées obtenues selon l'axe
+    concerné, une fois le placement calculé.
     """
     largeur_utile = largeur_feuille_mm - 2 * marge_bord_mm
     hauteur_utile = longueur_feuille_mm - 2 * marge_bord_mm
+    vertical = direction == "vertical"
+    largeur_algo, hauteur_algo = (hauteur_utile, largeur_utile) if vertical else (largeur_utile, hauteur_utile)
+
+    def _placer(feuille, largeur, hauteur):
+        """Place une pièce (dimensions réelles largeur × hauteur) sur `feuille` et renvoie sa
+        position réelle (x, y), en tenant compte de `direction` et `coin_depart`."""
+        position = feuille.placer(hauteur, largeur, espacement_pieces_mm) if vertical else feuille.placer(
+            largeur, hauteur, espacement_pieces_mm
+        )
+        if position is None:
+            return None
+        a, b = position
+        x, y = (b, a) if vertical else (a, b)
+        if coin_depart in ("bas_gauche", "bas_droite"):
+            y = hauteur_utile - y - hauteur
+        if coin_depart in ("bas_droite", "haut_droite"):
+            x = largeur_utile - x - largeur
+        return x, y
 
     unites = []
     pieces_non_placees = []
@@ -182,7 +218,7 @@ def calculer_imbrication(
         place = False
         for numero_feuille, feuille in enumerate(feuilles, start=1):
             for largeur, hauteur, rotation in options:
-                position = feuille.placer(largeur, hauteur, espacement_pieces_mm)
+                position = _placer(feuille, largeur, hauteur)
                 if position is not None:
                     x, y = position
                     placements.append(
@@ -202,12 +238,12 @@ def calculer_imbrication(
                 break
 
         if not place:
-            feuille = _Feuille(largeur_utile, hauteur_utile)
+            feuille = _Feuille(largeur_algo, hauteur_algo)
             feuilles.append(feuille)
             # Une feuille neuve peut toujours accueillir la première orientation candidate,
             # puisque celle-ci a déjà été validée contre la zone utile complète.
             largeur, hauteur, rotation = options[0]
-            x, y = feuille.placer(largeur, hauteur, espacement_pieces_mm)
+            x, y = _placer(feuille, largeur, hauteur)
             placements.append(
                 Placement(
                     piece_id=item.piece_id,

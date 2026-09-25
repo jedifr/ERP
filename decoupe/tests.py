@@ -284,6 +284,79 @@ class CalculerImbricationTests(TestCase):
         self.assertAlmostEqual(resultat.taux_utilisation_pct, 78.54, places=1)
 
 
+class ImbricationDirectionCoinDepartTests(TestCase):
+    """`direction` (horizontal/vertical) et `coin_depart` (bas_gauche par défaut) — valeurs
+    obtenues par exécution directe puis fixées en dur (cf. commentaires), l'algorithme
+    d'étagères n'étant pas trivial à vérifier à la main de bout en bout."""
+
+    def test_coin_depart_reflete_les_coordonnees(self):
+        # Deux pièces 100×80 sur une feuille utile 150×200 : une seule tient par rangée
+        # (100+100=200 > 150), donc rangée 1 en (0,0), rangée 2 en (0,80) dans le repère
+        # canonique (haut gauche, sans réflexion).
+        item = ItemANester(piece_id=1, largeur_mm=100, hauteur_mm=80, surface_mm2=8000, quantite=2)
+        attendu = {
+            "haut_gauche": {(0.0, 0.0), (0.0, 80.0)},
+            "bas_gauche": {(0.0, 200 - 80.0), (0.0, 200 - 160.0)},
+            "haut_droite": {(150 - 100.0, 0.0), (150 - 100.0, 80.0)},
+            "bas_droite": {(150 - 100.0, 200 - 80.0), (150 - 100.0, 200 - 160.0)},
+        }
+        for coin, points_attendus in attendu.items():
+            resultat = calculer_imbrication(
+                [item], largeur_feuille_mm=150, longueur_feuille_mm=200, coin_depart=coin
+            )
+            points = {(p.x_mm, p.y_mm) for p in resultat.placements}
+            self.assertEqual(points, points_attendus, coin)
+
+    def test_direction_verticale_peut_reduire_le_nombre_de_feuilles(self):
+        # Deux pièces de tailles différentes (120×60 et 60×120) sur une feuille 200×150 :
+        # en horizontal, la seconde ne rentre pas sous la première (60+120=180 > 150 de haut
+        # utile) et ouvre une deuxième feuille ; en vertical, le même calcul — mené sur les
+        # axes inversés — la fait tenir à côté sur la même feuille. Un exemple concret que le
+        # sens de remplissage n'est pas qu'un simple réétiquetage : il peut changer le nombre
+        # de feuilles nécessaires sur un lot de tailles mélangées.
+        item_a = ItemANester(piece_id=1, largeur_mm=120, hauteur_mm=60, surface_mm2=7200, quantite=1)
+        item_b = ItemANester(piece_id=2, largeur_mm=60, hauteur_mm=120, surface_mm2=7200, quantite=1)
+
+        resultat_horizontal = calculer_imbrication(
+            [item_a, item_b], largeur_feuille_mm=200, longueur_feuille_mm=150, direction="horizontal"
+        )
+        self.assertEqual(resultat_horizontal.nb_feuilles, 2)
+
+        resultat_vertical = calculer_imbrication(
+            [item_a, item_b], largeur_feuille_mm=200, longueur_feuille_mm=150, direction="vertical"
+        )
+        self.assertEqual(resultat_vertical.nb_feuilles, 1)
+
+    def test_aucun_chevauchement_quelle_que_soit_la_combinaison(self):
+        from shapely.geometry import box
+
+        item = ItemANester(piece_id=1, largeur_mm=130, hauteur_mm=70, surface_mm2=9100, quantite=12)
+        for direction in ("horizontal", "vertical"):
+            for coin in ("bas_gauche", "bas_droite", "haut_gauche", "haut_droite"):
+                resultat = calculer_imbrication(
+                    [item],
+                    largeur_feuille_mm=500,
+                    longueur_feuille_mm=500,
+                    marge_bord_mm=5,
+                    espacement_pieces_mm=3,
+                    direction=direction,
+                    coin_depart=coin,
+                )
+                par_feuille = {}
+                for p in resultat.placements:
+                    par_feuille.setdefault(p.numero_feuille, []).append(
+                        box(p.x_mm, p.y_mm, p.x_mm + p.largeur_placee_mm, p.y_mm + p.hauteur_placee_mm)
+                    )
+                    self.assertGreaterEqual(p.x_mm, 5 - 1e-6, (direction, coin))
+                    self.assertGreaterEqual(p.y_mm, 5 - 1e-6, (direction, coin))
+                    self.assertLessEqual(p.x_mm + p.largeur_placee_mm, 500 - 5 + 1e-6, (direction, coin))
+                    self.assertLessEqual(p.y_mm + p.hauteur_placee_mm, 500 - 5 + 1e-6, (direction, coin))
+                for rectangles in par_feuille.values():
+                    for i, a in enumerate(rectangles):
+                        for b in rectangles[i + 1 :]:
+                            self.assertAlmostEqual(a.intersection(b).area, 0, places=6, msg=(direction, coin))
+
+
 class ImbricationAnglesLibresTests(TestCase):
     """Le rectangle englobant d'une pièce non rectangulaire dépend de l'angle sous lequel on le
     calcule : une pièce en losange (carré tourné à 45°) a un rectangle englobant deux fois plus

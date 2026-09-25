@@ -196,6 +196,16 @@ class ImbricationJob(models.Model):
     """Un calcul d'imbrication : un jeu de pièces (avec quantités) placées dans une surface de
     tôle donnée, avec estimation du nombre de feuilles et du coût matière."""
 
+    class Direction(models.TextChoices):
+        HORIZONTAL = "horizontal", "Horizontal (rangées empilées verticalement)"
+        VERTICAL = "vertical", "Vertical (colonnes empilées horizontalement)"
+
+    class CoinDepart(models.TextChoices):
+        BAS_GAUCHE = "bas_gauche", "Bas gauche"
+        BAS_DROITE = "bas_droite", "Bas droite"
+        HAUT_GAUCHE = "haut_gauche", "Haut gauche"
+        HAUT_DROITE = "haut_droite", "Haut droite"
+
     article_matiere = models.ForeignKey(
         Article,
         on_delete=models.SET_NULL,
@@ -208,6 +218,18 @@ class ImbricationJob(models.Model):
     longueur_feuille_mm = models.FloatField()
     marge_bord_mm = models.FloatField(default=5, help_text="Marge non utilisable en bord de feuille")
     espacement_pieces_mm = models.FloatField(default=5, help_text="Espacement minimal entre deux pièces")
+    direction = models.CharField(
+        max_length=10,
+        choices=Direction.choices,
+        default=Direction.HORIZONTAL,
+        help_text="Sens de remplissage des pièces sur la feuille",
+    )
+    coin_depart = models.CharField(
+        max_length=12,
+        choices=CoinDepart.choices,
+        default=CoinDepart.BAS_GAUCHE,
+        help_text="Coin de la feuille où démarre le placement (convention machine la plus courante : bas gauche)",
+    )
 
     nb_feuilles = models.PositiveIntegerField(null=True, blank=True)
     surface_pieces_mm2 = models.FloatField(null=True, blank=True)
@@ -262,6 +284,8 @@ class ImbricationJob(models.Model):
             longueur_feuille_mm=self.longueur_feuille_mm,
             marge_bord_mm=self.marge_bord_mm,
             espacement_pieces_mm=self.espacement_pieces_mm,
+            direction=self.direction,
+            coin_depart=self.coin_depart,
         )
 
         self.placements.all().delete()
