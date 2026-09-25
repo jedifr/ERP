@@ -75,4 +75,11 @@ echo "==> Terminé. État des conteneurs :"
 $DOCKER_CMD ps
 
 echo
+if [ -f "${PROJECT_DIR}/VERSION" ]; then
+    echo "==> Version déployée : $(cat "${PROJECT_DIR}/VERSION")"
+else
+    echo "!! Fichier VERSION introuvable."
+fi
+
+echo
 echo "En cas de souci : $DOCKER_CMD logs -f web"

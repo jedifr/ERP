@@ -1870,3 +1870,32 @@ reste de l'admin).
 **Vérifié** : import d'un fichier DXF d'exemple (`decoupe/exemples/`) via le
 formulaire d'ajout — géométrie extraite automatiquement (surface, périmètre,
 dimensions, contours intérieurs), statut passé à "Importée".
+
+## Numéro de version
+
+Le NAS n'a pas `.git` (le code y arrive par archive tar.gz via
+`update-nas.sh`) : impossible d'y afficher un hash de commit. La version
+suivie ici est donc un simple fichier texte, `VERSION` à la racine du dépôt
+(ex. `2026.09.25.1`), incrémenté par Claude à chaque push notable.
+
+- **Badge dans l'admin** : `UNFOLD["ENVIRONMENT"]` (`comptes/version.py`,
+  `badge_environnement`) affiche `v<VERSION>` en pastille bleue en haut à
+  droite de **toutes** les pages admin (mécanisme Unfold standard — cf.
+  `unfold/helpers/label.html`/`userlinks.html`), et
+  `UNFOLD["ENVIRONMENT_TITLE_PREFIX"]` (`prefixe_titre`) l'ajoute aussi
+  dans l'onglet du navigateur (`[v<VERSION>] Nom de la page`). Deux
+  emplacements pour la même info, visibles sans avoir à ouvrir un menu.
+- **Vérification en terminal** : `update-nas.sh` affiche désormais
+  `Version déployée : <contenu de VERSION>` à la fin de la mise à jour,
+  juste après l'état des conteneurs — pratique pour confirmer par SSH
+  qu'un `git push` a bien été pris en compte, sans passer par le
+  navigateur.
+
+Pour vérifier que la dernière version est bien installée : comparer le
+badge affiché dans l'admin (ou la sortie d'`update-nas.sh`) avec le
+contenu du fichier `VERSION` sur la branche `claude/project-construction-k7owwb`
+sur GitHub.
+
+**Vérifié** : badge `v2026.09.25.1` visible sur le tableau de bord et sur
+une page de liste (ex. Devis) ; préfixe `[v2026.09.25.1]` présent dans le
+titre de l'onglet du navigateur sur les deux pages.

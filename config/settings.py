@@ -211,6 +211,8 @@ UNFOLD = {
     "SHOW_VIEW_ON_SITE": False,
     "DASHBOARD_CALLBACK": "comptes.dashboard.dashboard_callback",
     "GLOBAL_CALLBACK": "comptes.layout.global_callback",
+    "ENVIRONMENT": "comptes.version.badge_environnement",
+    "ENVIRONMENT_TITLE_PREFIX": "comptes.version.prefixe_titre",
     # Identité "atelier" : ambre/acier plutôt que le violet par défaut d'Unfold.
     "COLORS": {
         "primary": {
