@@ -1854,3 +1854,19 @@ suggestion de TVA en direct sur une ligne fraîchement ajoutée ; adresses
 pré-remplies dès le choix du client ; date de livraison copiée sur une
 deuxième ligne ; bouton "Créer une commande directement" bien absent du
 formulaire d'ajout d'un devis.
+
+## Fusion du module « Chiffrage découpe laser / jet d'eau »
+
+L'app `decoupe` (voir section dédiée plus haut) avait été développée sur une
+branche séparée (`claude/great-dijkstra-ilhwgi`), déjà réintégrée à cette
+branche-ci en amont — la fusion s'est donc faite en avance rapide, sans
+conflit. `decoupe/admin.py` utilisait encore l'admin Django brut
+(`django.contrib.admin.ModelAdmin`/`TabularInline`) au lieu des classes
+habillées `unfold.admin` employées par le reste du projet — corrigé pour
+rester cohérent visuellement avec les autres fiches (le champ "Fichier
+source" bénéficie maintenant du même composant de dépôt de fichier que le
+reste de l'admin).
+
+**Vérifié** : import d'un fichier DXF d'exemple (`decoupe/exemples/`) via le
+formulaire d'ajout — géométrie extraite automatiquement (surface, périmètre,
+dimensions, contours intérieurs), statut passé à "Importée".

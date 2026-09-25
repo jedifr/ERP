@@ -1,16 +1,17 @@
 from django.contrib import admin
+from unfold.admin import ModelAdmin, TabularInline
 
 from .models import ImbricationJob, ImbricationLigne, ImbricationPlacement, PieceDecoupe
 
 
-class ImbricationLigneInline(admin.TabularInline):
+class ImbricationLigneInline(TabularInline):
     model = ImbricationLigne
     extra = 1
     autocomplete_fields = ["piece"]
 
 
 @admin.register(PieceDecoupe)
-class PieceDecoupeAdmin(admin.ModelAdmin):
+class PieceDecoupeAdmin(ModelAdmin):
     list_display = [
         "nom",
         "format_source",
@@ -53,7 +54,7 @@ class PieceDecoupeAdmin(admin.ModelAdmin):
 
 
 @admin.register(ImbricationJob)
-class ImbricationJobAdmin(admin.ModelAdmin):
+class ImbricationJobAdmin(ModelAdmin):
     list_display = [
         "id",
         "article_matiere",
@@ -89,6 +90,6 @@ class ImbricationJobAdmin(admin.ModelAdmin):
 
 
 @admin.register(ImbricationPlacement)
-class ImbricationPlacementAdmin(admin.ModelAdmin):
+class ImbricationPlacementAdmin(ModelAdmin):
     list_display = ["job", "piece", "numero_feuille", "x_mm", "y_mm", "rotation_deg"]
     list_filter = ["numero_feuille"]
