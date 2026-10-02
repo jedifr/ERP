@@ -20,6 +20,7 @@ class MouvementStockSerializer(FullCleanModelSerializer):
     class Meta:
         model = MouvementStock
         fields = "__all__"
+        read_only_fields = ["utilisateur", "date_creation", "annule_mouvement"]
 
 
 class AlerteStockSerializer(FullCleanModelSerializer):

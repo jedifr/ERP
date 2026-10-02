@@ -6,7 +6,7 @@ from django.utils import timezone
 from simple_history.models import HistoricalRecords
 
 from commercial.models import Adresse, Contact, Devise, TauxTVA, Tiers
-from stock.models import Lot, MouvementStock
+from stock.models import Lot, MouvementStock, StockInsuffisantError
 from technique.models import Article, PosteTravail
 
 
@@ -683,13 +683,20 @@ class LivraisonLigne(models.Model):
         ligne.commande.mettre_a_jour_statut_livraison()
 
         if lot is not None:
-            MouvementStock.objects.create(
-                lot=lot,
-                type_mouvement=MouvementStock.TypeMouvement.SORTIE,
-                quantite=self.quantite_livree,
-                date_mouvement=self.livraison.date_livraison,
-                reference_origine=f"LIVRAISON-{self.livraison.numero}",
-            )
+            try:
+                MouvementStock.objects.create(
+                    lot=lot,
+                    type_mouvement=MouvementStock.TypeMouvement.SORTIE,
+                    quantite=self.quantite_livree,
+                    date_mouvement=self.livraison.date_livraison,
+                    reference_origine=f"LIVRAISON-{self.livraison.numero}",
+                )
+            except StockInsuffisantError as exc:
+                # Annule toute la ligne (save() est atomique) : on ne livre pas ce
+                # que le stock ne contient pas.
+                raise LivraisonError(
+                    f"{exc} Régularisez le stock (entrée ou inventaire) avant de saisir cette livraison."
+                ) from exc
 
     @staticmethod
     def _lot_unique_pour_article(article):

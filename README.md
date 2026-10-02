@@ -2276,3 +2276,39 @@ par `save()` avec motif, pour que l'historique ne mente pas.
 achats, comptabilité, pilotage) exposent toujours leur API en
 `IsAuthenticated` seul — même correction à y appliquer — et le contrôle
 `DEBUG`/`SECRET_KEY` au démarrage en production.
+
+## Recette du module B (stock) : priorité 1, intégrité du journal
+
+Constats de l'audit corrigés (tests : `SortieSuperieureAuDisponibleTests`,
+`JournalImmuableTests`, `TracabiliteMouvementTests`, `ContrePassationTests`) :
+
+- **Journal immuable** : un mouvement ne se modifie ni ne se supprime (modèle,
+  requêtes groupées, admin, API). Avant, l'édition ou la suppression d'un
+  mouvement laissait le solde du lot inchangé, donc faux. Le solde d'un lot
+  est désormais toujours égal à la somme de ses mouvements.
+- **Correction par contre-passation** : action « Annuler le mouvement » (page
+  de confirmation avec motif obligatoire) ou `POST /api/v1/mouvements-stock/<id>/annuler/`.
+  Crée le mouvement inverse, lié à l'original ; refusé si déjà annulé, si c'est
+  lui-même une annulation, ou si l'inversion rendrait le stock négatif. Une
+  alerte prévient quand le mouvement vient d'un document (réception, livraison) :
+  ce document n'est pas corrigé automatiquement. Permission `annuler_mouvement`.
+- **Plus de sortie au-delà du disponible** : refus à la validation du formulaire
+  et à l'enregistrement, sous verrou de ligne sur le lot (deux sorties
+  simultanées ne passent plus toutes les deux). Une livraison qui dépasserait le
+  stock est annulée en bloc avec un message demandant de régulariser le stock.
+- **Auteur et horodatage** sur chaque mouvement ; **motif obligatoire** pour
+  un mouvement saisi à la main (sans référence d'origine).
+- **Fin des résidus flottants** : quantités conservées à 6 décimales
+  (`0.1 + 0.2 - 0.3` donne exactement 0 et ne fausse plus les seuils d'alerte).
+- Défaut latent corrigé : `date_mouvement` avait pour défaut un *datetime* sur un
+  champ date, ce qui faisait échouer la réponse de l'API pour un mouvement créé
+  sans date.
+
+Correction de l'audit : `Lot.quantite` était déjà en lecture seule (admin et
+API) ; le vrai risque venait de l'édition des mouvements, traitée ci-dessus.
+La saisie d'un mouvement depuis la fiche d'un lot reste possible (ajout
+seulement). Les lignes d'un journal existant n'ont pas d'auteur ni d'heure.
+
+**Vérifié** (Playwright) : journal lisible (colonnes Article/Emplacement),
+page de confirmation d'annulation, annulation d'une entrée de 12 (lot 44 → 32)
+avec le mouvement d'origine conservé et la contre-passation tracée.
