@@ -3719,3 +3719,126 @@ class ValidationDuDevisTests(_FixtureModuleA, TestCase):
         self.assertEqual(response.status_code, 403)
         commande.refresh_from_db()
         self.assertEqual(commande.statut, Commande.Statut.EN_COURS)
+
+
+class RolesMetierModuleATests(_FixtureModuleA, TestCase):
+    """A-AD-01 / D-AD-02 : rôles prédéfinis (Commercial, Responsable commercial,
+    Direction, Atelier) et API soumise aux permissions du modèle."""
+
+    def _utilisateur(self, nom, groupe=None, *, staff=True):
+        from django.contrib.auth import get_user_model
+        from django.contrib.auth.models import Group
+
+        utilisateur = get_user_model().objects.create_user(nom, f"{nom}@example.com", "pass1234", is_staff=staff)
+        if groupe:
+            utilisateur.groups.add(Group.objects.get(name=groupe))
+        return utilisateur
+
+    def _patch(self, url, donnees):
+        return self.client.patch(url, data=json.dumps(donnees), content_type="application/json")
+
+    def test_groupes_par_defaut_existent_avec_les_bonnes_habilitations(self):
+        from django.contrib.auth.models import Group
+
+        def codes(nom):
+            return set(Group.objects.get(name=nom).permissions.values_list("codename", flat=True))
+
+        self.assertNotIn("valider_devis", codes("Commercial"))
+        self.assertNotIn("annuler_commande", codes("Commercial"))
+        self.assertIn("valider_devis", codes("Responsable commercial"))
+        self.assertIn("annuler_commande", codes("Responsable commercial"))
+        self.assertNotIn("valider_vente_sous_cout", codes("Responsable commercial"))
+        self.assertIn("valider_vente_sous_cout", codes("Direction"))
+        self.assertNotIn("view_devis", codes("Atelier"))
+        self.assertIn("change_ordrefabrication", codes("Atelier"))
+
+    def test_groupes_personnalises_ne_sont_jamais_reecrits(self):
+        from django.contrib.auth.models import Group, Permission
+
+        from .apps import creer_groupes_par_defaut
+
+        groupe = Group.objects.get(name="Commercial")
+        groupe.permissions.add(Permission.objects.get(codename="valider_devis"))
+        creer_groupes_par_defaut(sender=apps_chiffrage())
+        self.assertTrue(groupe.permissions.filter(codename="valider_devis").exists())
+
+    def test_api_sans_permission_ni_lecture_ni_ecriture(self):
+        self.client.force_login(self._utilisateur("anonyme-a"))
+        self.assertEqual(self.client.get("/api/v1/devis/").status_code, 403)
+        self.assertEqual(self.client.get(f"/api/v1/devis/{self.devis.pk}/").status_code, 403)
+        response = self.client.post(
+            "/api/v1/devis/",
+            data=json.dumps({"numero": "DEV-X", "client": self.tiers.pk, "date_creation": "2026-01-01"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_commercial_lit_et_cree_mais_ne_valide_pas(self):
+        self.client.force_login(self._utilisateur("com-a", "Commercial"))
+        self.assertEqual(self.client.get("/api/v1/devis/").status_code, 200)
+        response = self._patch(f"/api/v1/devis/{self.devis.pk}/", {"delai": "2 semaines"})
+        self.assertEqual(response.status_code, 200, response.content)
+        response = self._patch(f"/api/v1/devis/{self.devis.pk}/", {"statut": "valide"})
+        self.assertEqual(response.status_code, 403, response.content)
+        self.devis.refresh_from_db()
+        self.assertEqual(self.devis.statut, Devis.Statut.BROUILLON)
+
+    def test_commercial_ne_supprime_pas_un_devis(self):
+        self.client.force_login(self._utilisateur("com-b", "Commercial"))
+        self.assertEqual(self.client.delete(f"/api/v1/devis/{self.devis.pk}/").status_code, 403)
+        self.assertTrue(Devis.objects.filter(pk=self.devis.pk).exists())
+
+    def test_responsable_valide_mais_pas_sous_le_cout(self):
+        self.client.force_login(self._utilisateur("resp-a", "Responsable commercial"))
+        self.ligne.prix_vente_unitaire_force = 1
+        self.ligne.save()
+        refus = self._patch(f"/api/v1/devis/{self.devis.pk}/", {"statut": "valide"})
+        self.assertEqual(refus.status_code, 400, refus.content)
+        self.ligne.prix_vente_unitaire_force = None
+        self.ligne.save()
+        accepte = self._patch(f"/api/v1/devis/{self.devis.pk}/", {"statut": "valide"})
+        self.assertEqual(accepte.status_code, 200, accepte.content)
+
+    def test_direction_valide_sous_le_cout(self):
+        self.client.force_login(self._utilisateur("dir-a", "Direction"))
+        self.ligne.prix_vente_unitaire_force = 1
+        self.ligne.save()
+        reponse = self._patch(f"/api/v1/devis/{self.devis.pk}/", {"statut": "valide"})
+        self.assertEqual(reponse.status_code, 200, reponse.content)
+
+    def test_seul_un_responsable_annule_une_commande(self):
+        self._valider()
+        commande = lancer_en_production(self.devis)
+        self.client.force_login(self._utilisateur("com-c", "Commercial"))
+        self.assertEqual(self.client.post(f"/api/v1/commandes/{commande.pk}/annuler/").status_code, 403)
+        self.client.force_login(self._utilisateur("resp-b", "Responsable commercial"))
+        self.assertEqual(self.client.post(f"/api/v1/commandes/{commande.pk}/annuler/").status_code, 200)
+
+    def test_lancer_en_production_exige_la_creation_de_commande(self):
+        self._valider()
+        self.client.force_login(self._utilisateur("atelier-a", "Atelier"))
+        self.assertEqual(self.client.post(f"/api/v1/devis/{self.devis.pk}/lancer-en-production/").status_code, 403)
+        self.client.force_login(self._utilisateur("com-d", "Commercial"))
+        self.assertEqual(self.client.post(f"/api/v1/devis/{self.devis.pk}/lancer-en-production/").status_code, 201)
+
+    def test_atelier_voit_les_commandes_mais_pas_les_devis(self):
+        self.client.force_login(self._utilisateur("atelier-b", "Atelier"))
+        self.assertEqual(self.client.get("/api/v1/commandes/").status_code, 200)
+        self.assertEqual(self.client.get("/api/v1/devis/").status_code, 403)
+        self.assertEqual(self.client.get("/admin/chiffrage/devis/").status_code, 403)
+        self.assertEqual(self.client.get("/admin/chiffrage/commande/").status_code, 200)
+
+    def test_commercial_dans_ladmin_sans_champ_statut(self):
+        self.client.force_login(self._utilisateur("com-e", "Commercial"))
+        self.assertEqual(self.client.get("/admin/chiffrage/devis/").status_code, 200)
+        self.assertNotContains(self.client.get("/admin/chiffrage/devis/add/"), 'name="statut"')
+
+    def test_responsable_voit_le_champ_statut(self):
+        self.client.force_login(self._utilisateur("resp-c", "Responsable commercial"))
+        self.assertContains(self.client.get("/admin/chiffrage/devis/add/"), 'name="statut"')
+
+
+def apps_chiffrage():
+    from django.apps import apps
+
+    return apps.get_app_config("chiffrage")

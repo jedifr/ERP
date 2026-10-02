@@ -2250,3 +2250,29 @@ validation d'un devis par l'API impossible (verrou déclenché à tort) et
 permettait de déplacer une ligne hors d'un devis validé ; les contrôles lisent
 désormais l'état d'origine en base. Le retour en brouillon après un refus passe
 par `save()` avec motif, pour que l'historique ne mente pas.
+
+## Recette du module A : priorité 3, rôles métier et API sous permissions
+
+- **Quatre groupes prédéfinis**, créés au premier `migrate` (jamais réécrits
+  ensuite : leurs permissions restent ajustables dans Utilisateurs → Groupes) :
+
+  | Groupe | Peut |
+  |---|---|
+  | Commercial | créer et modifier devis, lignes et commandes ; consulter les livraisons. Ne valide pas, n'annule pas, ne supprime pas un devis. |
+  | Responsable commercial | + valider un devis, annuler une commande, supprimer un devis, saisir les livraisons. |
+  | Direction | + valider un devis **vendu sous le coût**. |
+  | Atelier | consulter les commandes ; consulter et modifier les ordres de fabrication. Aucun accès aux devis ni aux prix de revient. |
+
+  Un compte sans groupe n'a accès à rien : à rattacher à un groupe à la
+  création de l'utilisateur.
+- **API du module sous permissions** (`comptes.permissions.ModelPermissionsAvecLecture`) :
+  avant, tout compte connecté lisait et écrivait tout via `/api/v1/` alors que
+  l'admin le lui interdisait. Désormais lecture = permission « voir », écriture =
+  ajout / modification / suppression ; les actions spéciales (valider,
+  recalculer, lancer en production, annuler, resynchroniser) vérifient leur
+  permission propre.
+
+**Reste à faire hors module A** : les autres modules (stock, facturation,
+achats, comptabilité, pilotage) exposent toujours leur API en
+`IsAuthenticated` seul — même correction à y appliquer — et le contrôle
+`DEBUG`/`SECRET_KEY` au démarrage en production.

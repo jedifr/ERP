@@ -2,7 +2,10 @@ from django.db import transaction
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+
+from comptes.permissions import ModelPermissionsAvecLecture
 
 from .models import Commande, CommandeError, Devis, DevisLigne, DevisLigneOperation, OperationOF, OrdreFabrication
 from .moteur import ChiffrageError, calculer_devis
@@ -21,6 +24,7 @@ from .serializers import (
 
 
 class DevisViewSet(viewsets.ModelViewSet):
+    permission_classes = [ModelPermissionsAvecLecture]
     queryset = Devis.objects.select_related("client").all()
     serializer_class = DevisSerializer
     filterset_fields = ["statut", "client"]
@@ -51,9 +55,11 @@ class DevisViewSet(viewsets.ModelViewSet):
         if raisons:
             raise ValidationError({"statut": raisons})
 
-    @action(detail=True, methods=["post"], url_path="recalculer")
+    @action(detail=True, methods=["post"], url_path="recalculer", permission_classes=[IsAuthenticated])
     def recalculer(self, request, pk=None):
         devis = self.get_object()
+        if not request.user.has_perm("chiffrage.change_devis"):
+            raise PermissionDenied("Vous n'avez pas la permission de modifier un devis.")
         if devis.statut == Devis.Statut.VALIDE:
             return Response({"detail": MESSAGE_DEVIS_VERROUILLE}, status=status.HTTP_400_BAD_REQUEST)
         try:
@@ -62,9 +68,11 @@ class DevisViewSet(viewsets.ModelViewSet):
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(DevisSerializer(devis).data)
 
-    @action(detail=True, methods=["post"], url_path="lancer-en-production")
+    @action(detail=True, methods=["post"], url_path="lancer-en-production", permission_classes=[IsAuthenticated])
     def lancer_en_production_action(self, request, pk=None):
         devis = self.get_object()
+        if not request.user.has_perm("chiffrage.add_commande"):
+            raise PermissionDenied("Vous n'avez pas la permission de créer une commande.")
         try:
             commande = lancer_en_production(devis)
         except ChiffrageError as exc:
@@ -73,6 +81,7 @@ class DevisViewSet(viewsets.ModelViewSet):
 
 
 class DevisLigneViewSet(viewsets.ModelViewSet):
+    permission_classes = [ModelPermissionsAvecLecture]
     queryset = DevisLigne.objects.select_related("devis", "article").all()
     serializer_class = DevisLigneSerializer
     filterset_fields = ["devis", "article"]
@@ -84,18 +93,20 @@ class DevisLigneViewSet(viewsets.ModelViewSet):
 
 
 class DevisLigneOperationViewSet(viewsets.ModelViewSet):
+    permission_classes = [ModelPermissionsAvecLecture]
     queryset = DevisLigneOperation.objects.select_related("devis_ligne", "poste").all()
     serializer_class = DevisLigneOperationSerializer
     filterset_fields = ["devis_ligne", "poste"]
 
 
 class CommandeViewSet(viewsets.ModelViewSet):
+    permission_classes = [ModelPermissionsAvecLecture]
     queryset = Commande.objects.select_related("devis", "adresse_facturation", "adresse_livraison").all()
     serializer_class = CommandeSerializer
     filterset_fields = ["devis", "statut"]
     search_fields = ["numero"]
 
-    @action(detail=True, methods=["post"], url_path="annuler")
+    @action(detail=True, methods=["post"], url_path="annuler", permission_classes=[IsAuthenticated])
     def annuler_action(self, request, pk=None):
         commande = self.get_object()
         if not request.user.has_perm("chiffrage.annuler_commande"):
@@ -108,14 +119,17 @@ class CommandeViewSet(viewsets.ModelViewSet):
 
 
 class OrdreFabricationViewSet(viewsets.ModelViewSet):
+    permission_classes = [ModelPermissionsAvecLecture]
     queryset = OrdreFabrication.objects.select_related("commande", "article").all()
     serializer_class = OrdreFabricationSerializer
     filterset_fields = ["commande", "article", "statut_synchro"]
     search_fields = ["numero"]
 
-    @action(detail=True, methods=["post"], url_path="resynchroniser")
+    @action(detail=True, methods=["post"], url_path="resynchroniser", permission_classes=[IsAuthenticated])
     def resynchroniser_action(self, request, pk=None):
         of = self.get_object()
+        if not request.user.has_perm("chiffrage.change_ordrefabrication"):
+            raise PermissionDenied("Vous n'avez pas la permission de modifier un ordre de fabrication.")
         reussite = resynchroniser(of)
         serializer = OrdreFabricationSerializer(of)
         return Response(
@@ -124,6 +138,7 @@ class OrdreFabricationViewSet(viewsets.ModelViewSet):
 
 
 class OperationOFViewSet(viewsets.ModelViewSet):
+    permission_classes = [ModelPermissionsAvecLecture]
     queryset = OperationOF.objects.select_related("ordre_fabrication", "poste").all()
     serializer_class = OperationOFSerializer
     filterset_fields = ["ordre_fabrication", "poste"]
