@@ -2312,3 +2312,41 @@ seulement). Les lignes d'un journal existant n'ont pas d'auteur ni d'heure.
 **Vérifié** (Playwright) : journal lisible (colonnes Article/Emplacement),
 page de confirmation d'annulation, annulation d'une entrée de 12 (lot 44 → 32)
 avec le mouvement d'origine conservé et la contre-passation tracée.
+
+## Recette du module B (stock) : priorité 2, fonctions manquantes du flux
+
+Tests : `TransfertTests`, `InventaireTests`, `ValorisationTests`,
+`VerrouLotEtHistoriqueTests` (`stock/tests.py`).
+
+- **Transferts** (menu Stock → Transferts de stock, API `/api/v1/transferts-stock/`) :
+  déplacent une quantité d'un lot vers un autre emplacement en une opération
+  atomique — une sortie et une entrée liées par la même référence
+  `TRANSFERT-n`, lot cible créé au besoin, valorisation conservée. Refusé si
+  le stock source ne suffit pas ou si l'emplacement est identique. Immuables :
+  on défait un transfert par un transfert inverse.
+- **Inventaires** (Stock → Inventaires, API `/api/v1/inventaires/`) : on saisit
+  la quantité comptée par lot (action « Ajouter tous les lots en stock » pour
+  pré-remplir), puis « Valider l'inventaire » (permission `valider_inventaire`)
+  transforme chaque écart en mouvement d'ajustement tracé (`INVENTAIRE-n`,
+  motif « Écart d'inventaire »), jamais en réécriture du solde. Un inventaire
+  validé est figé (lignes, suppression) ; il garde la quantité théorique et
+  l'écart de chaque ligne.
+- **Valorisation au coût moyen pondéré** : chaque entrée peut porter un coût
+  unitaire (les réceptions fournisseur reprennent le prix d'achat de la ligne
+  de commande) ; le lot en déduit son coût moyen et sa valeur (colonnes de la
+  liste des lots). Les sorties ne changent pas le coût moyen.
+  **Attention** : le stock déjà présent *sans* coût compte pour 0 dans la
+  moyenne — valorisez le stock initial (entrée avec coût, ou inventaire) pour
+  des valeurs exactes. Les lots existants démarrent à un coût moyen de 0.
+- **Livraison sur plusieurs lots en FIFO** : la sortie consomme les lots du plus
+  ancien au plus récent (avant : « plusieurs lots » bloquait la livraison).
+  Si le stock total ne suffit pas, toute la ligne est annulée, sans sortie
+  partielle. La **réception** fournisseur reste, elle, limitée à un lot par
+  article (choix du lot de destination : voir module C/achats).
+- **Lot : article et emplacement figés** dès qu'il a un mouvement (formulaire,
+  API et modèle) ; pour déplacer, utiliser un transfert. **Historique** en
+  lecture seule sur les lots et les emplacements.
+
+**Vérifié** (Playwright) : liste des lots avec coût moyen et valeur (52 × 1,25 =
+65 €) ; inventaire brouillon puis validé (compté 49, théorique 52, écart −3,
+sortie d'ajustement créée, formulaire figé).

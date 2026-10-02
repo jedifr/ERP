@@ -4,12 +4,26 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from .models import AlerteStock, Emplacement, Lot, MouvementImmuableError, MouvementStock, StockInsuffisantError
+from .models import (
+    AlerteStock,
+    Emplacement,
+    Inventaire,
+    InventaireError,
+    InventaireLigne,
+    Lot,
+    MouvementImmuableError,
+    MouvementStock,
+    StockInsuffisantError,
+    Transfert,
+)
 from .serializers import (
     AlerteStockSerializer,
     EmplacementSerializer,
+    InventaireLigneSerializer,
+    InventaireSerializer,
     LotSerializer,
     MouvementStockSerializer,
+    TransfertSerializer,
 )
 
 
@@ -57,3 +71,55 @@ class AlerteStockViewSet(viewsets.ModelViewSet):
     queryset = AlerteStock.objects.select_related("article").all()
     serializer_class = AlerteStockSerializer
     filterset_fields = ["article", "statut"]
+
+
+class TransfertViewSet(
+    mixins.CreateModelMixin, mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet
+):
+    queryset = Transfert.objects.select_related("lot_source", "emplacement_cible", "lot_cible").all()
+    serializer_class = TransfertSerializer
+    filterset_fields = ["lot_source", "emplacement_cible"]
+
+    def perform_create(self, serializer):
+        try:
+            serializer.save(utilisateur=self.request.user)
+        except StockInsuffisantError as exc:
+            raise ValidationError({"quantite": [str(exc)]}) from exc
+
+
+class InventaireViewSet(viewsets.ModelViewSet):
+    queryset = Inventaire.objects.all()
+    serializer_class = InventaireSerializer
+    filterset_fields = ["statut"]
+
+    def perform_update(self, serializer):
+        if serializer.instance.statut == Inventaire.Statut.VALIDE:
+            raise ValidationError("Cet inventaire est validé : il ne se modifie plus.")
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        if instance.statut == Inventaire.Statut.VALIDE:
+            raise ValidationError("Cet inventaire est validé : il ne se supprime pas.")
+        instance.delete()
+
+    @action(detail=True, methods=["post"], url_path="valider", permission_classes=[IsAuthenticated])
+    def valider_action(self, request, pk=None):
+        if not request.user.has_perm("stock.valider_inventaire"):
+            raise PermissionDenied("Vous n'avez pas la permission de valider un inventaire.")
+        inventaire = self.get_object()
+        try:
+            inventaire.valider(utilisateur=request.user)
+        except (InventaireError, StockInsuffisantError) as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(InventaireSerializer(inventaire).data)
+
+
+class InventaireLigneViewSet(viewsets.ModelViewSet):
+    queryset = InventaireLigne.objects.select_related("inventaire", "lot").all()
+    serializer_class = InventaireLigneSerializer
+    filterset_fields = ["inventaire", "lot"]
+
+    def perform_destroy(self, instance):
+        if instance.inventaire.statut == Inventaire.Statut.VALIDE:
+            raise ValidationError("Cet inventaire est validé : ses lignes ne se suppriment plus.")
+        instance.delete()

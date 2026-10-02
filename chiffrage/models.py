@@ -672,9 +672,8 @@ class LivraisonLigne(models.Model):
         # sur mesure n'a le plus souvent aucun lot de stock (gere_en_stock
         # est faux par défaut pour un FABRIQUE) : dans ce cas la sortie de
         # stock est simplement sautée plutôt que de bloquer la livraison.
-        # Résolu AVANT toute mise à jour : si plusieurs lots existent (cas
-        # ambigu), tout doit être annulé (voir save()).
-        lot = self._lot_unique_pour_article(ligne.article)
+        # Plusieurs lots : consommés du plus ancien au plus récent (FIFO).
+        lots = self._lots_fifo(ligne.article)
 
         CommandeLigne.objects.filter(pk=ligne.pk).update(
             quantite_livree=models.F("quantite_livree") + self.quantite_livree
@@ -682,33 +681,41 @@ class LivraisonLigne(models.Model):
         ligne.refresh_from_db(fields=["quantite_livree"])
         ligne.commande.mettre_a_jour_statut_livraison()
 
-        if lot is not None:
-            try:
+        if not lots:
+            return
+        reste = self.quantite_livree
+        try:
+            for lot in lots:
+                prelevement = min(reste, lot.quantite)
+                if prelevement <= 0:
+                    continue
                 MouvementStock.objects.create(
                     lot=lot,
                     type_mouvement=MouvementStock.TypeMouvement.SORTIE,
-                    quantite=self.quantite_livree,
+                    quantite=prelevement,
                     date_mouvement=self.livraison.date_livraison,
                     reference_origine=f"LIVRAISON-{self.livraison.numero}",
                 )
-            except StockInsuffisantError as exc:
-                # Annule toute la ligne (save() est atomique) : on ne livre pas ce
-                # que le stock ne contient pas.
-                raise LivraisonError(
-                    f"{exc} Régularisez le stock (entrée ou inventaire) avant de saisir cette livraison."
-                ) from exc
+                reste = round(reste - prelevement, 6)
+                if reste <= 0:
+                    break
+            if reste > 0:
+                raise StockInsuffisantError(
+                    f"Stock insuffisant pour « {ligne.article} » : il manque {reste:g} "
+                    f"sur {self.quantite_livree:g} à sortir."
+                )
+        except StockInsuffisantError as exc:
+            # Annule toute la ligne (save() est atomique) : on ne livre pas ce
+            # que le stock ne contient pas.
+            raise LivraisonError(
+                f"{exc} Régularisez le stock (entrée ou inventaire) avant de saisir cette livraison."
+            ) from exc
 
     @staticmethod
-    def _lot_unique_pour_article(article):
-        lots = list(Lot.objects.filter(article=article))
-        if len(lots) == 0:
-            return None
-        if len(lots) > 1:
-            raise LivraisonError(
-                f"Plusieurs lots existent pour l'article « {article} » : sortie de stock automatique "
-                "non applicable, mettez à jour le stock manuellement."
-            )
-        return lots[0]
+    def _lots_fifo(article):
+        return list(Lot.objects.select_for_update().filter(article=article, quantite__gt=0).order_by("id")) or list(
+            Lot.objects.filter(article=article).order_by("id")[:1]
+        )
 
 
 class OrdreFabrication(models.Model):

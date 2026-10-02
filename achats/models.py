@@ -311,6 +311,7 @@ class ReceptionLigne(models.Model):
             quantite=self.quantite_recue,
             date_mouvement=self.reception.date_reception,
             reference_origine=f"RECEPTION-{self.reception.numero}",
+            cout_unitaire=ligne.prix_unitaire_achat,
         )
 
     @staticmethod

@@ -1,10 +1,9 @@
 from django import forms
 from django.contrib import admin, messages
-from django.core.exceptions import PermissionDenied
 from django.http import HttpResponseRedirect
 from django.urls import path, reverse
 from django.utils.html import format_html
-from simple_history.admin import SimpleHistoryAdmin
+from comptes.historique import HistoriqueLectureSeule
 from unfold.admin import ModelAdmin, TabularInline
 
 from codification.mixins import CodificationInitialeMixin
@@ -85,18 +84,6 @@ class DevisLigneForm(forms.ModelForm):
 
     def clean_ordre(self):
         return self.cleaned_data.get("ordre") or 0
-
-
-class HistoriqueLectureSeule(SimpleHistoryAdmin):
-    """Historique consultable, jamais rejouable : « revenir à une version
-    précédente » réécrirait un devis ou une commande en contournant le verrou
-    du devis validé et les contrôles de validation."""
-
-    def revert_disabled(self, request, obj=None):
-        return True
-
-    def history_form_view(self, request, object_id, version_id, extra_context=None):
-        raise PermissionDenied
 
 
 def devis_verrouille(devis):

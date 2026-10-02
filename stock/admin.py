@@ -7,13 +7,19 @@ from unfold.admin import ModelAdmin, TabularInline
 from codification.mixins import CodificationInitialeMixin
 from codification.models import RegleCodification
 
+from comptes.historique import HistoriqueLectureSeule
+
 from .models import (
     AlerteStock,
     Emplacement,
+    Inventaire,
+    InventaireError,
+    InventaireLigne,
     Lot,
     MouvementImmuableError,
     MouvementStock,
     StockInsuffisantError,
+    Transfert,
 )
 
 PREFIXES_DOCUMENTS = ("LIVRAISON-", "RECEPTION-")
@@ -36,7 +42,7 @@ class MouvementStockInline(TabularInline):
 
 
 @admin.register(Emplacement)
-class EmplacementAdmin(CodificationInitialeMixin, ModelAdmin):
+class EmplacementAdmin(CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
     codification_entite = RegleCodification.Entite.EMPLACEMENT
 
     list_display = ["code", "libelle"]
@@ -44,13 +50,21 @@ class EmplacementAdmin(CodificationInitialeMixin, ModelAdmin):
 
 
 @admin.register(Lot)
-class LotAdmin(ModelAdmin):
-    list_display = ["article", "emplacement", "quantite", "statut"]
+class LotAdmin(HistoriqueLectureSeule, ModelAdmin):
+    list_display = ["article", "emplacement", "quantite", "cout_unitaire_moyen", "valeur_stock", "statut"]
     list_filter = ["emplacement", "statut"]
     search_fields = ["article__reference"]
     autocomplete_fields = ["article", "emplacement"]
-    readonly_fields = ["quantite"]
+    readonly_fields = ["quantite", "cout_unitaire_moyen", "valeur_stock"]
     inlines = [MouvementStockInline]
+
+    def get_readonly_fields(self, request, obj=None):
+        champs = list(super().get_readonly_fields(request, obj))
+        if obj is not None and obj.mouvements.exists():
+            # Changer l'article ou l'emplacement d'un lot déjà mouvementé fausserait
+            # tout son historique : on passe par un transfert.
+            champs += ["article", "emplacement"]
+        return champs
 
     def save_formset(self, request, form, formset, change):
         if formset.model is not MouvementStock:
@@ -155,6 +169,87 @@ class MouvementStockAdmin(ModelAdmin):
             "motif": "",
         }
         return TemplateResponse(request, "admin/stock/annuler_mouvement.html", contexte)
+
+
+@admin.register(Transfert)
+class TransfertAdmin(ModelAdmin):
+    """Déplacer du stock d'un emplacement à un autre : saisie seule, jamais modifiable."""
+
+    list_display = ["date_transfert", "lot_source", "emplacement_cible", "quantite", "motif", "utilisateur"]
+    autocomplete_fields = ["lot_source", "emplacement_cible"]
+    readonly_fields = ["lot_cible", "utilisateur", "date_creation"]
+    search_fields = ["lot_source__article__reference", "motif"]
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def save_model(self, request, obj, form, change):
+        obj.utilisateur = request.user
+        try:
+            super().save_model(request, obj, form, change)
+        except StockInsuffisantError as exc:
+            self.message_user(request, str(exc), level=messages.ERROR)
+
+
+class InventaireLigneInline(TabularInline):
+    model = InventaireLigne
+    extra = 0
+    autocomplete_fields = ["lot"]
+    fields = ["lot", "quantite_comptee", "quantite_theorique", "ecart"]
+    readonly_fields = ["quantite_theorique", "ecart"]
+
+    def _brouillon(self, obj):
+        return obj is None or obj.statut == Inventaire.Statut.BROUILLON
+
+    def has_add_permission(self, request, obj=None):
+        return self._brouillon(obj) and super().has_add_permission(request, obj)
+
+    def has_change_permission(self, request, obj=None):
+        return self._brouillon(obj) and super().has_change_permission(request, obj)
+
+    def has_delete_permission(self, request, obj=None):
+        return self._brouillon(obj) and super().has_delete_permission(request, obj)
+
+
+@admin.register(Inventaire)
+class InventaireAdmin(ModelAdmin):
+    list_display = ["__str__", "statut", "commentaire", "utilisateur_validation", "date_validation"]
+    list_filter = ["statut"]
+    readonly_fields = ["statut", "utilisateur_validation", "date_validation"]
+    inlines = [InventaireLigneInline]
+    actions = ["action_ajouter_tous_les_lots", "action_valider"]
+
+    def has_delete_permission(self, request, obj=None):
+        return (obj is None or obj.statut == Inventaire.Statut.BROUILLON) and super().has_delete_permission(request, obj)
+
+    @admin.action(description="Ajouter tous les lots en stock (brouillons seulement)")
+    def action_ajouter_tous_les_lots(self, request, queryset):
+        total = 0
+        for inventaire in queryset.filter(statut=Inventaire.Statut.BROUILLON):
+            existants = set(inventaire.lignes.values_list("lot_id", flat=True))
+            for lot in Lot.objects.filter(article__gere_en_stock=True).exclude(pk__in=existants):
+                InventaireLigne.objects.create(inventaire=inventaire, lot=lot, quantite_comptee=lot.quantite)
+                total += 1
+        self.message_user(request, f"{total} ligne(s) ajoutée(s), à corriger avec les quantités comptées.")
+
+    @admin.action(description="Valider l'inventaire (ajuste le stock)", permissions=["valider"])
+    def action_valider(self, request, queryset):
+        for inventaire in queryset:
+            try:
+                inventaire.valider(utilisateur=request.user)
+            except (InventaireError, StockInsuffisantError) as exc:
+                self.message_user(request, f"{inventaire} : {exc}", level=messages.ERROR)
+            else:
+                nb = inventaire.lignes.exclude(ecart=0).count()
+                self.message_user(
+                    request, f"{inventaire} validé : {nb} ajustement(s) de stock.", level=messages.SUCCESS
+                )
+
+    def has_valider_permission(self, request):
+        return request.user.has_perm("stock.valider_inventaire")
 
 
 @admin.register(AlerteStock)

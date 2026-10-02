@@ -849,24 +849,42 @@ class LivraisonPartielleTests(TestCase):
         self.commande_ligne.refresh_from_db()
         self.assertEqual(self.commande_ligne.quantite_livree, 6)
 
-    def test_plusieurs_lots_leve_erreur_et_annule_tout(self):
+    def test_plusieurs_lots_sont_consommes_en_fifo(self):
         emplacement1 = Emplacement.objects.create(code="EMP-LIV-1")
         emplacement2 = Emplacement.objects.create(code="EMP-LIV-2")
-        Lot.objects.create(article=self.article, emplacement=emplacement1, quantite=5)
-        Lot.objects.create(article=self.article, emplacement=emplacement2, quantite=5)
+        ancien = Lot.objects.create(article=self.article, emplacement=emplacement1, quantite=5)
+        recent = Lot.objects.create(article=self.article, emplacement=emplacement2, quantite=5)
+
+        LivraisonLigne.objects.create(
+            livraison=self._livraison(), commande_ligne=self.commande_ligne, quantite_livree=6
+        )
+
+        ancien.refresh_from_db()
+        recent.refresh_from_db()
+        self.assertEqual((ancien.quantite, recent.quantite), (0, 4))
+        self.assertEqual(MouvementStock.objects.filter(reference_origine="LIVRAISON-LIV-1").count(), 2)
+
+    def test_stock_total_insuffisant_sur_plusieurs_lots_annule_tout(self):
+        emplacement1 = Emplacement.objects.create(code="EMP-LIV-1")
+        emplacement2 = Emplacement.objects.create(code="EMP-LIV-2")
+        ancien = Lot.objects.create(article=self.article, emplacement=emplacement1, quantite=5)
+        recent = Lot.objects.create(article=self.article, emplacement=emplacement2, quantite=3)
 
         livraison = self._livraison()
         with self.assertRaises(LivraisonError):
             LivraisonLigne.objects.create(
-                livraison=livraison, commande_ligne=self.commande_ligne, quantite_livree=6
+                livraison=livraison, commande_ligne=self.commande_ligne, quantite_livree=9
             )
 
-        # Tout ou rien : ni la ligne, ni le cumul livré ne doivent être
-        # enregistrés (pas de ligne "fantôme" avec une quantité jamais
-        # répercutée) — voir LivraisonLigne.save().
+        # Tout ou rien : ni la ligne, ni le cumul livré, ni aucune sortie de
+        # stock partielle ne doivent subsister — voir LivraisonLigne.save().
         self.assertEqual(LivraisonLigne.objects.count(), 0)
         self.commande_ligne.refresh_from_db()
         self.assertEqual(self.commande_ligne.quantite_livree, 0)
+        ancien.refresh_from_db()
+        recent.refresh_from_db()
+        self.assertEqual((ancien.quantite, recent.quantite), (5, 3))
+        self.assertFalse(MouvementStock.objects.filter(reference_origine="LIVRAISON-LIV-1").exists())
 
 
 class PlanningSyncTests(TestCase):
@@ -2686,11 +2704,11 @@ class LivraisonAdminTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "LIV-00001")
 
-    def test_erreur_lots_multiples_affichee_sans_500(self):
+    def test_stock_insuffisant_affiche_sans_500(self):
         emplacement1 = Emplacement.objects.create(code="EMP-LIV-ADMIN-1")
         emplacement2 = Emplacement.objects.create(code="EMP-LIV-ADMIN-2")
-        Lot.objects.create(article=self.article, emplacement=emplacement1, quantite=5)
-        Lot.objects.create(article=self.article, emplacement=emplacement2, quantite=5)
+        Lot.objects.create(article=self.article, emplacement=emplacement1, quantite=2)
+        Lot.objects.create(article=self.article, emplacement=emplacement2, quantite=2)
 
         payload = {
             "numero": "LIV-ADMIN-TEST",
@@ -2708,7 +2726,7 @@ class LivraisonAdminTests(TestCase):
         }
         response = self.client.post("/admin/chiffrage/livraison/add/", data=payload, follow=True)
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Plusieurs lots existent")
+        self.assertContains(response, "Stock insuffisant")
         # La livraison (l'objet parent) est enregistrée normalement — c'est
         # l'admin lui-même qui la sauvegarde avant de traiter les inlines.
         self.assertTrue(Livraison.objects.filter(pk="LIV-ADMIN-TEST").exists())
