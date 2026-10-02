@@ -1,11 +1,20 @@
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.core.validators import MinValueValidator
 from django.db import models, transaction
 from django.utils import timezone
 
 from commercial.models import Adresse, Contact, Devise, TauxTVA, Tiers
 from stock.models import Lot, MouvementStock
 from technique.models import Article, PosteTravail
+
+
+def _strictement_positif(valeur):
+    if valeur is not None and valeur <= 0:
+        raise ValidationError("Doit être strictement supérieur à 0.")
+
+
+positif_ou_nul = MinValueValidator(0, message="Ne peut pas être négatif.")
 
 
 def _taux_tva_par_defaut():
@@ -49,7 +58,11 @@ class Devis(models.Model):
     date_creation = models.DateField("date de création")
     statut = models.CharField("statut", max_length=20, choices=Statut.choices, default=Statut.BROUILLON)
     taux_marge_globale = models.FloatField(
-        "taux de marge globale", null=True, blank=True, help_text="Optionnel, écrase les marges par défaut"
+        "taux de marge globale",
+        null=True,
+        blank=True,
+        validators=[positif_ou_nul],
+        help_text="Optionnel, écrase les marges par défaut",
     )
     delai = models.CharField(
         "délai",
@@ -123,7 +136,7 @@ class DevisLigne(models.Model):
         default=0,
         help_text="Ordre d'affichage (glisser-déposer sur la fiche devis) — repris tel quel sur la commande.",
     )
-    quantite = models.FloatField("quantité")
+    quantite = models.FloatField("quantité", validators=[_strictement_positif])
     cout_matiere_calcule = models.FloatField(
         "coût matière calculé", null=True, blank=True, editable=False
     )
@@ -131,12 +144,14 @@ class DevisLigne(models.Model):
         "taux de marge matière appliqué",
         null=True,
         blank=True,
+        validators=[positif_ou_nul],
         help_text="Pré-rempli depuis l'article, éditable",
     )
     prix_vente_unitaire_force = models.FloatField(
         "prix de vente unitaire forcé (HT)",
         null=True,
         blank=True,
+        validators=[positif_ou_nul],
         help_text=(
             "Si renseigné, remplace le calcul automatique (coût matière × marge) : "
             "prix de vente matière de la ligne = quantité × ce prix unitaire."
@@ -215,7 +230,11 @@ class DevisLigneOperation(models.Model):
     ordre = models.PositiveIntegerField("ordre")
     cout_calcule = models.FloatField("coût calculé", null=True, blank=True, editable=False)
     taux_marge_applique = models.FloatField(
-        "taux de marge appliqué", null=True, blank=True, help_text="Pré-rempli depuis le poste, éditable"
+        "taux de marge appliqué",
+        null=True,
+        blank=True,
+        validators=[positif_ou_nul],
+        help_text="Pré-rempli depuis le poste, éditable",
     )
     prix_vente = models.FloatField("prix de vente (HT)", null=True, blank=True, editable=False)
 
@@ -233,7 +252,16 @@ class DevisLigneOperation(models.Model):
         return f"{self.devis_ligne} — étape {self.ordre} ({self.poste})"
 
 
+class CommandeError(Exception):
+    """Opération impossible sur une commande dans son état actuel."""
+
+
 class Commande(models.Model):
+    class Statut(models.TextChoices):
+        EN_COURS = "en_cours", "En cours"
+        SOLDEE = "soldee", "Soldée"
+        ANNULEE = "annulee", "Annulée"
+
     numero = models.CharField("numéro", max_length=50, primary_key=True)
     devis = models.ForeignKey(
         Devis,
@@ -259,7 +287,7 @@ class Commande(models.Model):
         help_text="Référence donnée par le client à sa propre commande (numéro de bon de commande, etc.).",
     )
     date_commande = models.DateField("date de commande")
-    statut = models.CharField("statut", max_length=50, blank=True)
+    statut = models.CharField("statut", max_length=20, choices=Statut.choices, default=Statut.EN_COURS)
     adresse_facturation = models.ForeignKey(
         Adresse,
         verbose_name="adresse de facturation",
@@ -302,6 +330,32 @@ class Commande(models.Model):
                 raise ValidationError(
                     {"adresse_livraison": "Cette adresse n'appartient pas au client sélectionné."}
                 )
+
+    def annuler(self):
+        """Annule la commande — refusé dès qu'une livraison existe (il faudrait
+        alors un retour client et un avoir, pas une annulation). Les ordres de
+        fabrication déjà lancés ne sont pas touchés : à arrêter côté planning."""
+        if self.statut == self.Statut.ANNULEE:
+            raise CommandeError(f"La commande « {self} » est déjà annulée.")
+        if self.livraisons.exists():
+            raise CommandeError(
+                f"La commande « {self} » a déjà été livrée (au moins en partie) : "
+                "elle ne peut plus être annulée."
+            )
+        self.statut = self.Statut.ANNULEE
+        self.save(update_fields=["statut"])
+
+    def mettre_a_jour_statut_livraison(self):
+        """Passe la commande à « soldée » quand toutes ses lignes sont
+        entièrement livrées (et la rouvre si ce n'est plus le cas)."""
+        if self.statut == self.Statut.ANNULEE:
+            return
+        lignes = list(self.lignes.all())
+        soldee = bool(lignes) and all(ligne.entierement_livree for ligne in lignes)
+        nouveau = self.Statut.SOLDEE if soldee else self.Statut.EN_COURS
+        if nouveau != self.statut:
+            self.statut = nouveau
+            self.save(update_fields=["statut"])
 
 
 class LivraisonError(Exception):
@@ -346,11 +400,12 @@ class CommandeLigne(models.Model):
         blank=True,
         help_text="Libellé propre à cette commande, remplace celui de l'article s'il est renseigné.",
     )
-    quantite_commandee = models.FloatField("quantité commandée")
+    quantite_commandee = models.FloatField("quantité commandée", validators=[positif_ou_nul])
     prix_vente_unitaire = models.FloatField(
         "prix de vente unitaire (HT)",
         null=True,
         blank=True,
+        validators=[positif_ou_nul],
         help_text="Pré-rempli depuis le devis à la création de la commande, modifiable ensuite.",
     )
     taux_tva = models.ForeignKey(
@@ -554,6 +609,8 @@ class LivraisonLigne(models.Model):
         if self.quantite_livree is not None and self.quantite_livree <= 0:
             raise ValidationError({"quantite_livree": "La quantité livrée doit être positive."})
         if self.pk is None and self.commande_ligne_id:
+            if self.commande_ligne.commande.statut == Commande.Statut.ANNULEE:
+                raise ValidationError("Cette commande est annulée : aucune livraison possible.")
             deja_livre = self.commande_ligne.quantite_livree
             commandee = self.commande_ligne.quantite_commandee
             if deja_livre + (self.quantite_livree or 0) > commandee:
@@ -591,6 +648,8 @@ class LivraisonLigne(models.Model):
         CommandeLigne.objects.filter(pk=ligne.pk).update(
             quantite_livree=models.F("quantite_livree") + self.quantite_livree
         )
+        ligne.refresh_from_db(fields=["quantite_livree"])
+        ligne.commande.mettre_a_jour_statut_livraison()
 
         if lot is not None:
             MouvementStock.objects.create(

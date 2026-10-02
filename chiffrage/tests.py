@@ -3131,3 +3131,311 @@ class CommandeLigneAuditAdminTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertFalse(OrdreFabrication.objects.filter(commande=self.commande, article=self.article).exists())
+
+
+class _FixtureModuleA:
+    """Client avec adresses principales, article matière, devis (brouillon par
+    défaut) à une ligne — socle commun aux tests de recette du module A."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        self.user = get_user_model().objects.create_superuser("recette-a", "ra@example.com", "pass1234")
+        self.client.force_login(self.user)
+        self.tiers = Tiers.objects.create(code="CLI-REC-A", raison_sociale="Client Recette A", type_tiers=Tiers.TypeTiers.CLIENT)
+        for champ in ("est_facturation", "est_livraison"):
+            Adresse.objects.create(
+                tiers=self.tiers, adresse="1 rue", code_postal="75000", ville="Paris",
+                est_principale=True, **{champ: True},
+            )
+        self.article = Article.objects.create(
+            reference="ART-REC-A", nature=Article.Nature.MATIERE_PREMIERE,
+            unite_cout=Article.UniteCout.PIECE, cout_unitaire=10, taux_marge_defaut=10,
+        )
+        self.devis = Devis.objects.create(
+            numero="DEV-REC-A", client=self.tiers, date_creation=datetime.date(2026, 1, 1),
+        )
+        self.ligne = DevisLigne.objects.create(devis=self.devis, article=self.article, quantite=3)
+
+    def _valider(self):
+        self.devis.statut = Devis.Statut.VALIDE
+        self.devis.save()
+
+
+class ValidationDesSaisiesTests(_FixtureModuleA, TestCase):
+    """A-NV-02 : quantités et prix absurdes rejetés dès la validation de modèle
+    (donc par l'admin, les vues AJAX et l'API, qui passent toutes par full_clean)."""
+
+    def _erreurs(self, instance):
+        with self.assertRaises(ValidationError) as cm:
+            instance.full_clean()
+        return cm.exception.message_dict
+
+    def test_quantite_de_ligne_devis_doit_etre_strictement_positive(self):
+        for valeur in (0, -5):
+            ligne = DevisLigne(devis=self.devis, article=self.article, quantite=valeur)
+            self.assertIn("quantite", self._erreurs(ligne), valeur)
+
+    def test_prix_force_et_marges_negatifs_refuses(self):
+        ligne = DevisLigne(
+            devis=self.devis, article=self.article, quantite=1,
+            prix_vente_unitaire_force=-1, taux_marge_matiere_applique=-10,
+        )
+        erreurs = self._erreurs(ligne)
+        self.assertIn("prix_vente_unitaire_force", erreurs)
+        self.assertIn("taux_marge_matiere_applique", erreurs)
+
+    def test_marge_globale_du_devis_negative_refusee(self):
+        devis = Devis(numero="DEV-NEG", client=self.tiers, date_creation=datetime.date(2026, 1, 1), taux_marge_globale=-5)
+        self.assertIn("taux_marge_globale", self._erreurs(devis))
+
+    def test_ligne_de_commande_refuse_quantite_ou_prix_negatifs(self):
+        self._valider()
+        commande = lancer_en_production(self.devis)
+        ligne = commande.lignes.get()
+        ligne.quantite_commandee = -1
+        ligne.prix_vente_unitaire = -3
+        erreurs = self._erreurs(ligne)
+        self.assertIn("quantite_commandee", erreurs)
+        self.assertIn("prix_vente_unitaire", erreurs)
+
+    def test_api_refuse_une_quantite_negative(self):
+        response = self.client.post(
+            "/api/v1/devis-lignes/",
+            data=json.dumps({"devis": self.devis.pk, "article": self.article.pk, "quantite": -2}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400, response.content)
+
+    def test_valeurs_valides_toujours_acceptees(self):
+        ligne = DevisLigne(
+            devis=self.devis, article=self.article, quantite=0.5,
+            prix_vente_unitaire_force=0, taux_marge_matiere_applique=0,
+        )
+        ligne.full_clean()
+
+
+class DevisValideVerrouilleTests(_FixtureModuleA, TestCase):
+    """A-OP-02 : un devis validé est le prix engagé auprès du client — il ne
+    se modifie plus sans repasser explicitement en brouillon."""
+
+    def setUp(self):
+        super().setUp()
+        self._valider()
+
+    def test_formulaire_admin_rend_les_champs_en_lecture_seule(self):
+        response = self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/change/")
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'name="delai"')
+        self.assertNotContains(response, 'name="taux_marge_globale"')
+        self.assertContains(response, 'name="statut"')
+
+    def test_inline_lignes_sans_ajout_ni_suppression(self):
+        response = self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/change/")
+        self.assertNotContains(response, 'name="lignes-0-quantite"')
+        self.assertNotContains(response, "Ajouter un autre")
+
+    def test_post_ne_modifie_pas_un_devis_valide(self):
+        self.client.post(
+            f"/admin/chiffrage/devis/{self.devis.pk}/change/",
+            {"statut": "valide", "taux_marge_globale": "99", "lignes-TOTAL_FORMS": "0", "lignes-INITIAL_FORMS": "0"},
+        )
+        self.devis.refresh_from_db()
+        self.assertIsNone(self.devis.taux_marge_globale)
+
+    def test_repasser_en_brouillon_possible_sans_commande(self):
+        self.client.post(
+            f"/admin/chiffrage/devis/{self.devis.pk}/change/",
+            {"statut": "brouillon", "lignes-TOTAL_FORMS": "1", "lignes-INITIAL_FORMS": "1",
+             "lignes-0-id": self.ligne.pk, "lignes-0-devis": self.devis.pk},
+        )
+        self.devis.refresh_from_db()
+        self.assertEqual(self.devis.statut, Devis.Statut.BROUILLON)
+
+    def test_repasser_en_brouillon_refuse_si_commande_existante(self):
+        lancer_en_production(self.devis)
+        response = self.client.post(
+            f"/admin/chiffrage/devis/{self.devis.pk}/change/",
+            {"statut": "brouillon", "lignes-TOTAL_FORMS": "0", "lignes-INITIAL_FORMS": "0"},
+        )
+        self.assertContains(response, "commande est déjà issue")
+        self.devis.refresh_from_db()
+        self.assertEqual(self.devis.statut, Devis.Statut.VALIDE)
+
+    def test_action_recalculer_ignore_un_devis_valide(self):
+        self.ligne.refresh_from_db()
+        avant = self.ligne.prix_vente_matiere
+        self.article.cout_unitaire = 999
+        self.article.save()
+        response = self.client.post(
+            "/admin/chiffrage/devis/",
+            {"action": "action_recalculer", "_selected_action": [self.devis.pk]}, follow=True,
+        )
+        self.assertContains(response, "verrouillé")
+        self.ligne.refresh_from_db()
+        self.assertEqual(self.ligne.prix_vente_matiere, avant)
+
+    def test_recalcul_live_dune_ligne_refuse(self):
+        response = self.client.post(
+            f"/admin/chiffrage/devis/{self.devis.pk}/lignes/{self.ligne.pk}/recalculer/",
+            data=json.dumps({"quantite": "50"}), content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 409)
+        self.ligne.refresh_from_db()
+        self.assertEqual(self.ligne.quantite, 3)
+
+    def test_api_refuse_modification_et_suppression_de_ligne(self):
+        url = f"/api/v1/devis-lignes/{self.ligne.pk}/"
+        response = self.client.patch(url, data=json.dumps({"quantite": 99}), content_type="application/json")
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertEqual(self.client.delete(url).status_code, 400)
+        self.ligne.refresh_from_db()
+        self.assertEqual(self.ligne.quantite, 3)
+
+    def test_api_refuse_ajout_de_ligne_et_modification_du_devis(self):
+        response = self.client.post(
+            "/api/v1/devis-lignes/",
+            data=json.dumps({"devis": self.devis.pk, "article": self.article.pk, "quantite": 1}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400, response.content)
+        response = self.client.patch(
+            f"/api/v1/devis/{self.devis.pk}/", data=json.dumps({"delai": "hier"}), content_type="application/json"
+        )
+        self.assertEqual(response.status_code, 400, response.content)
+
+    def test_api_recalculer_refuse(self):
+        response = self.client.post(f"/api/v1/devis/{self.devis.pk}/recalculer/")
+        self.assertEqual(response.status_code, 400)
+
+    def test_api_repasse_en_brouillon_possible_sans_commande(self):
+        response = self.client.patch(
+            f"/api/v1/devis/{self.devis.pk}/", data=json.dumps({"statut": "brouillon"}), content_type="application/json"
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+
+    def test_brouillon_reste_librement_modifiable(self):
+        self.devis.statut = Devis.Statut.BROUILLON
+        self.devis.save()
+        response = self.client.patch(
+            f"/api/v1/devis-lignes/{self.ligne.pk}/", data=json.dumps({"quantite": 7}), content_type="application/json"
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+
+
+class LancementEnProductionRobusteTests(_FixtureModuleA, TestCase):
+    """A-OP-06 / A-NV-01 : lancer deux fois (double-clic) ne doit jamais
+    produire une erreur 500 ni une commande en double."""
+
+    def setUp(self):
+        super().setUp()
+        self._valider()
+
+    def test_second_lancement_refuse_proprement(self):
+        lancer_en_production(self.devis)
+        with self.assertRaises(ChiffrageError):
+            lancer_en_production(self.devis)
+        self.assertEqual(Commande.objects.filter(devis=self.devis).count(), 1)
+
+    def test_numero_de_commande_deja_pris_donne_une_erreur_metier(self):
+        Commande.objects.create(
+            numero=f"CDE-{self.devis.numero}", client=self.tiers, reference_client="X",
+            date_commande=datetime.date(2026, 1, 1),
+            adresse_facturation=self.tiers.adresses.first(), adresse_livraison=self.tiers.adresses.first(),
+        )
+        with self.assertRaises(ChiffrageError):
+            lancer_en_production(self.devis)
+        self.assertFalse(Commande.objects.filter(devis=self.devis).exists())
+
+    def test_double_post_de_laction_admin_ne_plante_pas(self):
+        donnees = {"action": "action_lancer_en_production", "_selected_action": [self.devis.pk]}
+        premier = self.client.post("/admin/chiffrage/devis/", donnees, follow=True)
+        second = self.client.post("/admin/chiffrage/devis/", donnees, follow=True)
+        self.assertEqual(premier.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertContains(second, "déjà été lancé")
+        self.assertEqual(Commande.objects.filter(devis=self.devis).count(), 1)
+
+    def test_lancement_depuis_un_devis_brouillon_refuse(self):
+        self.devis.statut = Devis.Statut.BROUILLON
+        self.devis.save()
+        with self.assertRaises(ChiffrageError):
+            lancer_en_production(self.devis)
+
+
+class StatutCommandeTests(_FixtureModuleA, TestCase):
+    """A-OP-05 : la commande a un vrai cycle de vie (en cours / soldée / annulée)."""
+
+    def setUp(self):
+        super().setUp()
+        self._valider()
+        self.commande = lancer_en_production(self.devis)
+        self.ligne_cde = self.commande.lignes.get()
+
+    def _livrer(self, quantite, numero="LIV-REC-A"):
+        livraison = Livraison.objects.create(numero=numero, commande=self.commande, date_livraison=datetime.date(2026, 2, 1))
+        return LivraisonLigne.objects.create(livraison=livraison, commande_ligne=self.ligne_cde, quantite_livree=quantite)
+
+    def test_une_commande_nouvelle_est_en_cours(self):
+        self.assertEqual(self.commande.statut, Commande.Statut.EN_COURS)
+
+    def test_livraison_partielle_laisse_en_cours_puis_solde(self):
+        self._livrer(1, "LIV-1")
+        self.commande.refresh_from_db()
+        self.assertEqual(self.commande.statut, Commande.Statut.EN_COURS)
+        self._livrer(2, "LIV-2")
+        self.commande.refresh_from_db()
+        self.assertEqual(self.commande.statut, Commande.Statut.SOLDEE)
+
+    def test_annulation_possible_sans_livraison(self):
+        self.commande.annuler()
+        self.commande.refresh_from_db()
+        self.assertEqual(self.commande.statut, Commande.Statut.ANNULEE)
+
+    def test_annulation_refusee_apres_livraison(self):
+        from .models import CommandeError
+
+        self._livrer(1)
+        with self.assertRaises(CommandeError):
+            self.commande.annuler()
+        self.commande.refresh_from_db()
+        self.assertEqual(self.commande.statut, Commande.Statut.EN_COURS)
+
+    def test_double_annulation_refusee(self):
+        from .models import CommandeError
+
+        self.commande.annuler()
+        with self.assertRaises(CommandeError):
+            self.commande.annuler()
+
+    def test_livraison_refusee_sur_commande_annulee(self):
+        self.commande.annuler()
+        livraison = Livraison.objects.create(numero="LIV-ANN", commande=self.commande, date_livraison=datetime.date(2026, 2, 1))
+        ligne = LivraisonLigne(livraison=livraison, commande_ligne=self.ligne_cde, quantite_livree=1)
+        with self.assertRaises(ValidationError):
+            ligne.full_clean()
+
+    def test_action_admin_annuler(self):
+        response = self.client.post(
+            "/admin/chiffrage/commande/",
+            {"action": "action_annuler", "_selected_action": [self.commande.pk]}, follow=True,
+        )
+        self.assertContains(response, "commande annulée")
+        self.commande.refresh_from_db()
+        self.assertEqual(self.commande.statut, Commande.Statut.ANNULEE)
+
+    def test_statut_non_editable_dans_la_fiche_admin(self):
+        response = self.client.get(f"/admin/chiffrage/commande/{self.commande.pk}/change/")
+        self.assertNotContains(response, 'name="statut"')
+
+    def test_api_annuler_et_statut_en_lecture_seule(self):
+        response = self.client.patch(
+            f"/api/v1/commandes/{self.commande.pk}/", data=json.dumps({"statut": "annulee"}), content_type="application/json"
+        )
+        self.commande.refresh_from_db()
+        self.assertEqual(self.commande.statut, Commande.Statut.EN_COURS)
+        response = self.client.post(f"/api/v1/commandes/{self.commande.pk}/annuler/")
+        self.assertEqual(response.status_code, 200, response.content)
+        self.commande.refresh_from_db()
+        self.assertEqual(self.commande.statut, Commande.Statut.ANNULEE)
+        self.assertEqual(self.client.post(f"/api/v1/commandes/{self.commande.pk}/annuler/").status_code, 400)

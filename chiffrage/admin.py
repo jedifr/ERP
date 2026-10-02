@@ -25,6 +25,7 @@ from .models import (
     Commande,
     CommandeLigne,
     CommandeLigneModification,
+    CommandeError,
     Devis,
     DevisLigne,
     DevisLigneOperation,
@@ -83,6 +84,17 @@ class DevisLigneForm(forms.ModelForm):
         return self.cleaned_data.get("ordre") or 0
 
 
+def devis_verrouille(devis):
+    """Un devis validé est figé : c'est le prix engagé auprès du client. Pour le
+    modifier, il faut d'abord le repasser en brouillon (voir DevisAdminForm)."""
+    if devis is None or devis.pk is None:
+        return False
+    # Relu en base plutôt que sur l'instance : après un POST invalide, le
+    # formulaire a déjà réécrit l'instance avec le statut soumis, et le verrou
+    # tomberait en plein rendu de la page d'erreur.
+    return Devis.objects.filter(pk=devis.pk, statut=Devis.Statut.VALIDE).exists()
+
+
 class DevisLigneInline(TabularInline):
     model = DevisLigne
     form = DevisLigneForm
@@ -96,6 +108,15 @@ class DevisLigneInline(TabularInline):
         "prix_vente_unitaire",
         "prix_vente_ttc",
     ]
+
+    def has_add_permission(self, request, obj=None):
+        return not devis_verrouille(obj) and super().has_add_permission(request, obj)
+
+    def has_change_permission(self, request, obj=None):
+        return not devis_verrouille(obj) and super().has_change_permission(request, obj)
+
+    def has_delete_permission(self, request, obj=None):
+        return not devis_verrouille(obj) and super().has_delete_permission(request, obj)
 
 
 class DevisLigneOperationInline(TabularInline):
@@ -113,6 +134,17 @@ class DevisAdminForm(forms.ModelForm):
         model = Devis
         fields = "__all__"
         widgets = {"delai": DelaiWidget()}
+
+    def clean(self):
+        cleaned = super().clean()
+        # À ce stade l'instance porte encore le statut enregistré en base
+        # (construct_instance n'a pas encore tourné).
+        if devis_verrouille(self.instance) and cleaned.get("statut") == Devis.Statut.BROUILLON:
+            if self.instance.commandes.exists():
+                raise forms.ValidationError(
+                    "Une commande est déjà issue de ce devis : impossible de le repasser en brouillon."
+                )
+        return cleaned
 
 
 @admin.register(Devis)
@@ -143,6 +175,13 @@ class DevisAdmin(CodificationInitialeMixin, ModelAdmin):
     ]
     inlines = [DevisLigneInline]
     actions = ["action_recalculer", "action_lancer_en_production"]
+
+    def get_readonly_fields(self, request, obj=None):
+        champs = list(super().get_readonly_fields(request, obj))
+        if devis_verrouille(obj):
+            # Tout sauf le statut, pour pouvoir repasser le devis en brouillon.
+            champs += [f.name for f in Devis._meta.concrete_fields if f.name != "statut"]
+        return champs
 
     class Media:
         js = ["chiffrage/devis_admin_live.js", "chiffrage/devisligne_reorder.js"]
@@ -226,6 +265,13 @@ class DevisAdmin(CodificationInitialeMixin, ModelAdmin):
     @admin.action(description="Recalculer le chiffrage")
     def action_recalculer(self, request, queryset):
         for devis in queryset:
+            if devis_verrouille(devis):
+                self.message_user(
+                    request,
+                    f"{devis} : devis validé, donc verrouillé — son chiffrage n'est pas recalculé.",
+                    level=messages.WARNING,
+                )
+                continue
             try:
                 calculer_devis(devis)
             except ChiffrageError as exc:
@@ -264,6 +310,12 @@ class DevisLigneAdmin(ModelAdmin):
     search_fields = ["devis__numero", "article__reference"]
     autocomplete_fields = ["devis", "article"]
     inlines = [DevisLigneOperationInline]
+
+    def has_change_permission(self, request, obj=None):
+        return not (obj is not None and devis_verrouille(obj.devis)) and super().has_change_permission(request, obj)
+
+    def has_delete_permission(self, request, obj=None):
+        return not (obj is not None and devis_verrouille(obj.devis)) and super().has_delete_permission(request, obj)
 
     @admin.display(description="Taux de TVA")
     def taux_tva_display(self, obj):
@@ -363,10 +415,14 @@ class CommandeAdmin(CodificationInitialeMixin, ModelAdmin):
     codification_entite = RegleCodification.Entite.COMMANDE
 
     list_display = ["numero", "client", "reference_client", "devis", "date_commande", "statut", "devise"]
+    list_filter = ["statut"]
     search_fields = ["numero", "reference_client", "client__raison_sociale", "devis__numero"]
     autocomplete_fields = ["devis", "client", "adresse_facturation", "adresse_livraison", "devise"]
+    # Le statut ne se saisit pas : « soldée » est déduit des livraisons, « annulée »
+    # passe par l'action dédiée (qui refuse une commande déjà livrée).
+    readonly_fields = ["statut"]
     inlines = [CommandeLigneInline]
-    actions = ["action_synchroniser_lignes"]
+    actions = ["action_synchroniser_lignes", "action_annuler"]
 
     class Media:
         js = ["chiffrage/commande_admin_live.js"]
@@ -404,6 +460,18 @@ class CommandeAdmin(CodificationInitialeMixin, ModelAdmin):
         self.message_user(
             request, f"{total_creees} ligne(s) de commande recréée(s).", level=messages.SUCCESS
         )
+
+    @admin.action(description="Annuler la commande")
+    def action_annuler(self, request, queryset):
+        for commande in queryset:
+            try:
+                commande.annuler()
+            except CommandeError as exc:
+                self.message_user(request, str(exc), level=messages.ERROR)
+                continue
+            nb_of = commande.ordres_fabrication.count()
+            suite = f" {nb_of} ordre(s) de fabrication restent à arrêter dans le planning." if nb_of else ""
+            self.message_user(request, f"{commande} : commande annulée.{suite}", level=messages.SUCCESS)
 
     def save_formset(self, request, form, formset, change):
         if formset.model is not CommandeLigne:

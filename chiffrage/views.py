@@ -1,8 +1,9 @@
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
-from .models import Commande, Devis, DevisLigne, DevisLigneOperation, OperationOF, OrdreFabrication
+from .models import Commande, CommandeError, Devis, DevisLigne, DevisLigneOperation, OperationOF, OrdreFabrication
 from .moteur import ChiffrageError, calculer_devis
 from .planning_sync import resynchroniser
 from .production import lancer_en_production
@@ -13,6 +14,7 @@ from .serializers import (
     DevisSerializer,
     OperationOFSerializer,
     OrdreFabricationSerializer,
+    MESSAGE_DEVIS_VERROUILLE,
 )
 
 
@@ -25,6 +27,8 @@ class DevisViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="recalculer")
     def recalculer(self, request, pk=None):
         devis = self.get_object()
+        if devis.statut == Devis.Statut.VALIDE:
+            return Response({"detail": MESSAGE_DEVIS_VERROUILLE}, status=status.HTTP_400_BAD_REQUEST)
         try:
             calculer_devis(devis)
         except ChiffrageError as exc:
@@ -46,6 +50,11 @@ class DevisLigneViewSet(viewsets.ModelViewSet):
     serializer_class = DevisLigneSerializer
     filterset_fields = ["devis", "article"]
 
+    def perform_destroy(self, instance):
+        if instance.devis.statut == Devis.Statut.VALIDE:
+            raise ValidationError(MESSAGE_DEVIS_VERROUILLE)
+        super().perform_destroy(instance)
+
 
 class DevisLigneOperationViewSet(viewsets.ModelViewSet):
     queryset = DevisLigneOperation.objects.select_related("devis_ligne", "poste").all()
@@ -56,8 +65,17 @@ class DevisLigneOperationViewSet(viewsets.ModelViewSet):
 class CommandeViewSet(viewsets.ModelViewSet):
     queryset = Commande.objects.select_related("devis", "adresse_facturation", "adresse_livraison").all()
     serializer_class = CommandeSerializer
-    filterset_fields = ["devis"]
+    filterset_fields = ["devis", "statut"]
     search_fields = ["numero"]
+
+    @action(detail=True, methods=["post"], url_path="annuler")
+    def annuler_action(self, request, pk=None):
+        commande = self.get_object()
+        try:
+            commande.annuler()
+        except CommandeError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(CommandeSerializer(commande).data)
 
 
 class OrdreFabricationViewSet(viewsets.ModelViewSet):

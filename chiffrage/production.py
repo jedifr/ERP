@@ -5,7 +5,7 @@ de la disponibilité du planning atelier (la synchronisation est tentée après
 coup, voir planning_sync.py).
 """
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from technique.models import Article, PosteTravail
@@ -75,52 +75,71 @@ def _creer_ordre_fabrication(commande, article, quantite, date_reference, index)
 
 
 def lancer_en_production(devis):
+    try:
+        with transaction.atomic():
+            commande, ordres_crees = _creer_commande_et_ordres(devis)
+    except IntegrityError as exc:
+        # Filet de sécurité : le numéro de commande dérive du devis, donc un
+        # numéro déjà pris ailleurs finit ici plutôt qu'en erreur 500.
+        raise ChiffrageError(
+            f"Impossible de créer la commande du devis « {devis} » : numéro déjà utilisé "
+            "ou lancement déjà en cours."
+        ) from exc
+
+    # Hors transaction : la synchro planning est un appel réseau, qui ne doit
+    # ni retenir le verrou du devis ni faire échouer la création locale.
+    for of in ordres_crees:
+        tenter_synchronisation(of)
+
+    return commande
+
+
+def _creer_commande_et_ordres(devis):
+    # Verrou de ligne sur le devis : un second lancement simultané (double-clic)
+    # attend la fin du premier, puis voit la commande déjà créée au lieu d'en
+    # créer une deuxième.
+    devis = Devis.objects.select_for_update().get(pk=devis.pk)
     if devis.statut != Devis.Statut.VALIDE:
         raise ChiffrageError("Seul un devis validé peut être lancé en production.")
     if Commande.objects.filter(devis=devis).exists():
         raise ChiffrageError(f"Le devis « {devis} » a déjà été lancé en production.")
 
-    with transaction.atomic():
-        commande = Commande.objects.create(
-            numero=_generer_numero_commande(devis),
-            devis=devis,
-            client=devis.client,
-            date_commande=timezone.now().date(),
-            adresse_facturation=_adresse_principale(devis.client, "est_facturation", "facturation"),
-            adresse_livraison=_adresse_principale(devis.client, "est_livraison", "livraison"),
-            devise=devis.client.devise,
+    commande = Commande.objects.create(
+        numero=_generer_numero_commande(devis),
+        devis=devis,
+        client=devis.client,
+        date_commande=timezone.now().date(),
+        adresse_facturation=_adresse_principale(devis.client, "est_facturation", "facturation"),
+        adresse_livraison=_adresse_principale(devis.client, "est_livraison", "livraison"),
+        devise=devis.client.devise,
+    )
+
+    ordres_crees = []
+    index = 1
+    for ligne in devis.lignes.select_related("article").all():
+        # Une ligne de commande par ligne de devis, quelle que soit la nature
+        # de l'article : c'est elle qui porte le suivi de livraison (partielle,
+        # article par article) — indépendant des ordres de fabrication, qui ne
+        # concernent que les FABRIQUE. prix_vente_unitaire/taux_tva : valeur de
+        # départ recopiée du devis, surchargeable ensuite sur la commande (voir
+        # CommandeLigne) sans jamais modifier la ligne de devis.
+        CommandeLigne.objects.create(
+            commande=commande,
+            article=ligne.article,
+            quantite_commandee=ligne.quantite,
+            devis_ligne=ligne,
+            prix_vente_unitaire=ligne.prix_vente_unitaire,
+            taux_tva=ligne.taux_tva,
         )
 
-        ordres_crees = []
-        index = 1
-        for ligne in devis.lignes.select_related("article").all():
-            # Une ligne de commande par ligne de devis, quelle que soit la
-            # nature de l'article : c'est elle qui porte le suivi de
-            # livraison (partielle, article par article) — indépendant des
-            # ordres de fabrication, qui ne concernent que les FABRIQUE.
-            # prix_vente_unitaire/taux_tva : valeur de départ recopiée du
-            # devis, surchargeable ensuite sur la commande (voir
-            # CommandeLigne) sans jamais modifier la ligne de devis.
-            CommandeLigne.objects.create(
-                commande=commande,
-                article=ligne.article,
-                quantite_commandee=ligne.quantite,
-                devis_ligne=ligne,
-                prix_vente_unitaire=ligne.prix_vente_unitaire,
-                taux_tva=ligne.taux_tva,
-            )
+        if ligne.article.nature != Article.Nature.FABRIQUE:
+            continue
 
-            if ligne.article.nature != Article.Nature.FABRIQUE:
-                continue
+        of = _creer_ordre_fabrication(commande, ligne.article, ligne.quantite, devis.date_creation, index)
+        index += 1
+        ordres_crees.append(of)
 
-            of = _creer_ordre_fabrication(commande, ligne.article, ligne.quantite, devis.date_creation, index)
-            index += 1
-            ordres_crees.append(of)
-
-    for of in ordres_crees:
-        tenter_synchronisation(of)
-
-    return commande
+    return commande, ordres_crees
 
 
 def lancer_ligne_en_production(commande_ligne):

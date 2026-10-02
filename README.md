@@ -2169,3 +2169,45 @@ Enregistrement puis réouverture de la fiche : classement et statistiques
 bien persistés (confirmé aussi directement en base) — y compris après
 correction du bug de ré-analyse fantôme ci-dessus, qui aurait sinon
 silencieusement réinitialisé le classement à l'ouverture.
+
+## Recette du module A (devis → commande) : priorité 1, intégrité
+
+Issu de l'audit de recette (cahier de tests + analyse d'écart) : les défauts
+« Must have » du module Devis/Commandes, corrigés dans l'ordre de gravité.
+Chaque point est couvert par des tests dédiés (`ValidationDesSaisiesTests`,
+`DevisValideVerrouilleTests`, `LancementEnProductionRobusteTests`,
+`StatutCommandeTests` dans `chiffrage/tests.py`).
+
+- **Saisies absurdes refusées** : quantité d'une ligne de devis strictement
+  positive ; prix forcé, taux de marge (ligne, opération, devis), prix et
+  quantité de ligne de commande jamais négatifs. Les validateurs sont sur les
+  champs du modèle, donc appliqués partout : admin, recalcul AJAX et API.
+- **Devis validé = devis verrouillé** : c'est le prix engagé auprès du client.
+  Sur la fiche admin tous les champs passent en lecture seule (sauf le statut)
+  et les lignes ne peuvent plus être ajoutées, modifiées ni supprimées ; même
+  règle pour l'API (lignes, devis, recalcul) et pour le recalcul en direct
+  (409). Pour modifier, repasser le devis en « Brouillon » — refusé dès
+  qu'une commande en est issue. L'action « Recalculer le chiffrage » ignore
+  les devis validés (sinon un changement de coût matière modifiait un prix
+  déjà engagé).
+- **Lancement en production robuste** : verrou de ligne sur le devis
+  (`select_for_update`) et conversion de toute collision de numéro en erreur
+  métier — un double-clic ne crée plus de commande en double ni d'erreur 500.
+  La synchro planning (appel réseau) reste exécutée après le commit.
+- **Statut de commande structuré** (`Commande.Statut`) : *En cours*, *Soldée*
+  (déduit automatiquement quand toutes les lignes sont entièrement livrées),
+  *Annulée*. Le statut n'est plus saisissable : l'annulation passe par
+  l'action admin « Annuler la commande » ou `POST /api/v1/commandes/<n>/annuler/`,
+  refusée dès qu'une livraison existe (il faudrait alors un retour client et
+  un avoir) ; aucune livraison n'est possible sur une commande annulée. Les
+  OF déjà lancés ne sont pas arrêtés automatiquement : l'action le rappelle.
+  La migration `0015` reprend les anciens statuts texte libre (soldée si tout
+  est livré, sinon en cours).
+
+**Vérifié** (Playwright) : fiche d'un devis validé — seul le statut reste
+éditable, lignes en lecture seule sans bouton d'ajout ; commande annulée
+visible en liste, statut non éditable sur sa fiche.
+
+Bug trouvé en écrivant les tests : après un POST invalide, Django réécrit
+l'instance avec le statut soumis, ce qui désactivait le verrou en plein rendu
+de la page d'erreur (KeyError) — le verrou relit donc le statut en base.

@@ -211,6 +211,8 @@ def recalculer_ligne_view(request, numero, ligne_id):
     "Recalculer le chiffrage")."""
     devis = get_object_or_404(Devis, pk=numero)
     ligne = get_object_or_404(DevisLigne, pk=ligne_id, devis=devis)
+    if devis.statut == Devis.Statut.VALIDE:
+        return JsonResponse({"detail": "Ce devis est validé : il est verrouillé."}, status=409)
 
     try:
         payload = json.loads(request.body)
