@@ -3,6 +3,7 @@ from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models, transaction
 from django.utils import timezone
+from simple_history.models import HistoricalRecords
 
 from commercial.models import Adresse, Contact, Devise, TauxTVA, Tiers
 from stock.models import Lot, MouvementStock
@@ -75,10 +76,16 @@ class Devis(models.Model):
         ),
     )
 
+    history = HistoricalRecords()
+
     class Meta:
         verbose_name = "Devis"
         verbose_name_plural = "Devis"
         ordering = ["-date_creation", "numero"]
+        permissions = [
+            ("valider_devis", "Peut valider un devis"),
+            ("valider_vente_sous_cout", "Peut valider un devis vendu sous le coût"),
+        ]
 
     def __str__(self):
         return self.numero
@@ -101,27 +108,28 @@ class Devis(models.Model):
 
     @property
     def montant_matiere_ht(self):
-        return sum(ligne.prix_vente_matiere or 0 for ligne in self.lignes.all())
+        return round(sum(ligne.prix_vente_matiere or 0 for ligne in self.lignes.all()), 2)
 
     montant_matiere_ht.fget.short_description = "Montant matière HT"
 
     @property
     def montant_operations_ht(self):
-        return sum(ligne.prix_vente_operations for ligne in self.lignes.all())
+        return round(sum(ligne.prix_vente_operations for ligne in self.lignes.all()), 2)
 
     montant_operations_ht.fget.short_description = "Montant opérations HT (temps machine / main d'œuvre)"
 
     @property
     def montant_total_ht(self):
-        return self.montant_matiere_ht + self.montant_operations_ht
+        return round(self.montant_matiere_ht + self.montant_operations_ht, 2)
 
     montant_total_ht.fget.short_description = "Montant total HT"
 
     @property
     def montant_total_ttc(self):
         """Somme des prix TTC de chaque ligne (chacune avec son propre taux de
-        TVA) — reflète donc correctement un devis à taux de TVA mixtes."""
-        return sum(ligne.prix_vente_ttc or 0 for ligne in self.lignes.all())
+        TVA et arrondie au centime) — reflète donc correctement un devis à taux
+        de TVA mixtes, et correspond à ce que la facture affichera."""
+        return round(sum(ligne.prix_vente_ttc or 0 for ligne in self.lignes.all()), 2)
 
     montant_total_ttc.fget.short_description = "Montant total TTC"
 
@@ -171,6 +179,8 @@ class DevisLigne(models.Model):
         help_text="Pré-rempli avec le taux par défaut du référentiel, modifiable par ligne",
     )
 
+    history = HistoricalRecords()
+
     class Meta:
         verbose_name = "Ligne de devis"
         verbose_name_plural = "Lignes de devis"
@@ -215,9 +225,27 @@ class DevisLigne(models.Model):
         if self.prix_vente_total is None:
             return None
         taux = self.taux_tva.taux if self.taux_tva_id else 0
-        return self.prix_vente_total * (1 + taux / 100)
+        return round(self.prix_vente_total * (1 + taux / 100), 2)
 
     prix_vente_ttc.fget.short_description = "Prix de vente TTC"
+
+    @property
+    def cout_total(self):
+        """Coût matière + coût des opérations de gamme. None tant que le
+        chiffrage matière n'a pas été calculé."""
+        if self.cout_matiere_calcule is None:
+            return None
+        return self.cout_matiere_calcule + sum(op.cout_calcule or 0 for op in self.operations.all())
+
+    cout_total.fget.short_description = "Coût total"
+
+    @property
+    def vente_sous_le_cout(self):
+        """Vrai si le prix de vente est inférieur au coût (au centime près) —
+        typiquement un prix unitaire forcé trop bas."""
+        if self.prix_vente_total is None or self.cout_total is None:
+            return False
+        return self.prix_vente_total < self.cout_total - 0.005
 
 
 class DevisLigneOperation(models.Model):
@@ -310,10 +338,13 @@ class Commande(models.Model):
         help_text="Par défaut celle du client si renseignée",
     )
 
+    history = HistoricalRecords()
+
     class Meta:
         verbose_name = "Commande"
         verbose_name_plural = "Commandes"
         ordering = ["-date_commande", "numero"]
+        permissions = [("annuler_commande", "Peut annuler une commande")]
 
     def __str__(self):
         return self.numero
@@ -478,7 +509,7 @@ class CommandeLigne(models.Model):
         devis d'origine."""
         if self.prix_vente_unitaire is None:
             return None
-        return self.prix_vente_unitaire * self.quantite_commandee
+        return round(self.prix_vente_unitaire * self.quantite_commandee, 2)
 
     montant_ht.fget.short_description = "Montant HT"
 
@@ -487,7 +518,7 @@ class CommandeLigne(models.Model):
         if self.montant_ht is None:
             return None
         taux = self.taux_tva.taux if self.taux_tva_id else 0
-        return self.montant_ht * (1 + taux / 100)
+        return round(self.montant_ht * (1 + taux / 100), 2)
 
     montant_ttc.fget.short_description = "Montant TTC"
 

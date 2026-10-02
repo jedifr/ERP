@@ -31,6 +31,7 @@ from .moteur import (
     previsualiser_ligne_commande,
     resoudre_taux_tva,
 )
+from .validation import verifier_validation_devis
 from .planning_sync import PlanningSyncError, resynchroniser, tenter_synchronisation
 from .production import lancer_en_production, lancer_ligne_en_production, synchroniser_lignes_commande
 
@@ -249,9 +250,10 @@ class CalculerDevisTests(TestCase):
     def test_montants_devis_integrent_matiere_et_operations(self):
         calculer_devis(self.devis)
         operation_attendue = 25 / 60 * 50 * 1.15
-        self.assertAlmostEqual(self.devis.montant_matiere_ht, 133.7112, places=3)
-        self.assertAlmostEqual(self.devis.montant_operations_ht, operation_attendue)
-        self.assertAlmostEqual(self.devis.montant_total_ht, 133.7112 + operation_attendue, places=3)
+        # Les montants affichés sont arrondis au centime (comme sur la facture).
+        self.assertEqual(self.devis.montant_matiere_ht, 133.71)
+        self.assertEqual(self.devis.montant_operations_ht, round(operation_attendue, 2))
+        self.assertEqual(self.devis.montant_total_ht, round(133.71 + round(operation_attendue, 2), 2))
 
 
 class ResoudreTauxTvaTests(TestCase):
@@ -3292,6 +3294,15 @@ class DevisValideVerrouilleTests(_FixtureModuleA, TestCase):
         self.ligne.refresh_from_db()
         self.assertEqual(self.ligne.quantite, 3)
 
+    def test_api_refuse_de_deplacer_une_ligne_hors_dun_devis_valide(self):
+        autre = Devis.objects.create(numero="DEV-AUTRE", client=self.tiers, date_creation=datetime.date(2026, 1, 1))
+        response = self.client.patch(
+            f"/api/v1/devis-lignes/{self.ligne.pk}/", data=json.dumps({"devis": autre.pk}), content_type="application/json"
+        )
+        self.assertEqual(response.status_code, 400, response.content)
+        self.ligne.refresh_from_db()
+        self.assertEqual(self.ligne.devis_id, self.devis.pk)
+
     def test_api_refuse_ajout_de_ligne_et_modification_du_devis(self):
         response = self.client.post(
             "/api/v1/devis-lignes/",
@@ -3439,3 +3450,272 @@ class StatutCommandeTests(_FixtureModuleA, TestCase):
         self.commande.refresh_from_db()
         self.assertEqual(self.commande.statut, Commande.Statut.ANNULEE)
         self.assertEqual(self.client.post(f"/api/v1/commandes/{self.commande.pk}/annuler/").status_code, 400)
+
+
+class PisteDAuditTests(_FixtureModuleA, TestCase):
+    """A-AD-02 : qui a modifié quoi, quand, avec l'ancienne et la nouvelle valeur,
+    sur le devis, ses lignes et la commande (django-simple-history)."""
+
+    def test_modification_du_devis_tracee_avec_utilisateur_et_valeurs(self):
+        avant = self.devis.history.count()
+        response = self.client.patch(
+            f"/api/v1/devis/{self.devis.pk}/", data=json.dumps({"delai": "3 semaines"}), content_type="application/json"
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(self.devis.history.count(), avant + 1)
+        derniere, precedente = self.devis.history.all()[0], self.devis.history.all()[1]
+        self.assertEqual(derniere.history_user, self.user)
+        changements = {c.field: (c.old, c.new) for c in derniere.diff_against(precedente).changes}
+        self.assertEqual(changements["delai"], ("", "3 semaines"))
+
+    def test_modification_de_ligne_tracee(self):
+        self.client.patch(
+            f"/api/v1/devis-lignes/{self.ligne.pk}/", data=json.dumps({"quantite": 8}), content_type="application/json"
+        )
+        derniere, precedente = self.ligne.history.all()[0], self.ligne.history.all()[1]
+        changements = {c.field: (c.old, c.new) for c in derniere.diff_against(precedente).changes}
+        self.assertEqual(changements["quantite"], (3.0, 8.0))
+        self.assertEqual(derniere.history_user, self.user)
+
+    def test_suppression_de_ligne_conservee_dans_lhistorique(self):
+        pk = self.ligne.pk
+        self.client.delete(f"/api/v1/devis-lignes/{pk}/")
+        self.assertFalse(DevisLigne.objects.filter(pk=pk).exists())
+        self.assertEqual(DevisLigne.history.filter(id=pk, history_type="-").count(), 1)
+
+    def test_annulation_de_commande_tracee(self):
+        self._valider()
+        commande = lancer_en_production(self.devis)
+        self.client.post(
+            "/admin/chiffrage/commande/",
+            {"action": "action_annuler", "_selected_action": [commande.pk]}, follow=True,
+        )
+        derniere = commande.history.first()
+        self.assertEqual(derniere.statut, Commande.Statut.ANNULEE)
+        self.assertEqual(derniere.history_user, self.user)
+
+    def test_restauration_dune_version_precedente_impossible(self):
+        self.client.patch(
+            f"/api/v1/devis/{self.devis.pk}/", data=json.dumps({"delai": "ASAP"}), content_type="application/json"
+        )
+        ancienne = self.devis.history.last()
+        response = self.client.post(f"/admin/chiffrage/devis/{self.devis.pk}/history/{ancienne.pk}/", {})
+        self.assertEqual(response.status_code, 403)
+        self.devis.refresh_from_db()
+        self.assertEqual(self.devis.delai, "ASAP")
+
+    def test_validation_refusee_laisse_une_trace_coherente(self):
+        from django.contrib.auth import get_user_model
+        from django.contrib.auth.models import Permission
+
+        simple = get_user_model().objects.create_user("trace-a", "t@example.com", "pass1234", is_staff=True)
+        simple.user_permissions.set(Permission.objects.filter(
+            content_type__app_label="chiffrage",
+            codename__in=["add_devis", "change_devis", "view_devis", "change_devisligne", "view_devisligne", "valider_devis"],
+        ))
+        self.ligne.prix_vente_unitaire_force = 1
+        self.ligne.save()
+        self.client.force_login(simple)
+        self.client.post(
+            f"/admin/chiffrage/devis/{self.devis.pk}/change/",
+            {"numero": self.devis.pk, "client": self.tiers.pk, "date_creation": "2026-01-01", "statut": "valide",
+             "taux_marge_globale": "", "adresse_facturation": "", "adresse_livraison": "", "contact": "",
+             "lignes-TOTAL_FORMS": "1", "lignes-INITIAL_FORMS": "1", "lignes-MIN_NUM_FORMS": "0",
+             "lignes-MAX_NUM_FORMS": "1000", "lignes-0-id": self.ligne.pk, "lignes-0-devis": self.devis.pk,
+             "lignes-0-article": self.article.pk, "lignes-0-quantite": "3",
+             "lignes-0-taux_marge_matiere_applique": "", "lignes-0-prix_vente_unitaire_force": "1",
+             "lignes-0-taux_tva": "", "_save": "Enregistrer"},
+        )
+        self.devis.refresh_from_db()
+        self.assertEqual(self.devis.statut, Devis.Statut.BROUILLON)
+        dernier = self.devis.history.first()
+        self.assertEqual(dernier.statut, Devis.Statut.BROUILLON)
+        self.assertIn("Validation refusée", dernier.history_change_reason)
+        self.assertIn(Devis.Statut.VALIDE, [h.statut for h in self.devis.history.all()])
+
+    def test_page_historique_de_ladmin(self):
+        self.client.patch(
+            f"/api/v1/devis/{self.devis.pk}/", data=json.dumps({"delai": "ASAP"}), content_type="application/json"
+        )
+        response = self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/history/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "recette-a")
+
+
+class ArrondisMontantsTests(_FixtureModuleA, TestCase):
+    """A-TD-01 : tous les montants affichés sont au centime, et le total TTC est la
+    somme des lignes arrondies (ce que la facture Tiime affichera)."""
+
+    def test_devis_a_tva_mixte_total_ttc_est_la_somme_des_lignes_arrondies(self):
+        tva20 = TauxTVA.objects.create(nom="N20 arrondi", taux=20)
+        tva55 = TauxTVA.objects.create(nom="R55 arrondi", taux=5.5)
+        for taux, prix in ((tva20, 3.333), (tva55, 3.333), (tva55, 7.777)):
+            DevisLigne.objects.create(
+                devis=self.devis, article=self.article, quantite=3,
+                prix_vente_unitaire_force=prix, taux_tva=taux,
+            )
+        DevisLigne.objects.filter(pk=self.ligne.pk).delete()
+        calculer_devis(self.devis)
+        lignes = list(self.devis.lignes.all())
+        for ligne in lignes:
+            self.assertEqual(ligne.prix_vente_ttc, round(ligne.prix_vente_ttc, 2))
+        attendu = round(sum(l.prix_vente_ttc for l in lignes), 2)
+        self.assertEqual(self.devis.montant_total_ttc, attendu)
+        self.assertEqual(self.devis.montant_total_ht, round(self.devis.montant_total_ht, 2))
+
+    def test_montants_de_ligne_de_commande_au_centime(self):
+        self._valider()
+        commande = lancer_en_production(self.devis)
+        tva = TauxTVA.objects.create(nom="T20 arrondi cde", taux=20)
+        ligne = commande.lignes.get()
+        ligne.prix_vente_unitaire = 3.333
+        ligne.quantite_commandee = 3
+        ligne.taux_tva = tva
+        ligne.save()
+        self.assertEqual(ligne.montant_ht, 10.0)  # 9.999 -> 10.00
+        self.assertEqual(ligne.montant_ttc, 12.0)  # 10.00 * 1.2, sans résidu flottant
+
+    def test_somme_de_flottants_sans_residu(self):
+        # 0.1 + 0.2 ne doit pas afficher 0.30000000000000004
+        tiers = self.tiers
+        devis = Devis.objects.create(numero="DEV-FLOAT", client=tiers, date_creation=datetime.date(2026, 1, 1))
+        for prix in (0.1, 0.2):
+            DevisLigne.objects.create(devis=devis, article=self.article, quantite=1, prix_vente_unitaire_force=prix)
+        calculer_devis(devis)
+        self.assertEqual(devis.montant_total_ht, 0.3)
+
+
+class ValidationDuDevisTests(_FixtureModuleA, TestCase):
+    """A-MG-01 : on ne valide pas n'importe quel devis — vide, non chiffrable ou
+    vendu sous le coût sans habilitation — et seul un utilisateur habilité valide."""
+
+    def _formulaire(self, **lignes):
+        data = {
+            "numero": "DEV-VALID-01", "client": self.tiers.pk, "date_creation": "2026-01-01",
+            "statut": Devis.Statut.VALIDE, "taux_marge_globale": "", "adresse_facturation": "",
+            "adresse_livraison": "", "contact": "",
+            "lignes-TOTAL_FORMS": "1", "lignes-INITIAL_FORMS": "0",
+            "lignes-MIN_NUM_FORMS": "0", "lignes-MAX_NUM_FORMS": "1000",
+            "lignes-0-article": self.article.pk, "lignes-0-quantite": "3",
+            "lignes-0-taux_marge_matiere_applique": "", "lignes-0-prix_vente_unitaire_force": "",
+            "lignes-0-taux_tva": "", "lignes-0-id": "", "lignes-0-devis": "", "_save": "Enregistrer",
+        }
+        data.update({f"lignes-0-{cle}": valeur for cle, valeur in lignes.items()})
+        return data
+
+    def _utilisateur_habilite(self, *, sous_cout=False):
+        from django.contrib.auth import get_user_model
+        from django.contrib.auth.models import Permission
+
+        codes = ["add_devis", "change_devis", "view_devis", "add_devisligne", "change_devisligne",
+                 "view_devisligne", "delete_devisligne", "valider_devis"]
+        if sous_cout:
+            codes.append("valider_vente_sous_cout")
+        utilisateur = get_user_model().objects.create_user(
+            f"habilite-{int(sous_cout)}", "h@example.com", "pass1234", is_staff=True
+        )
+        utilisateur.user_permissions.set(Permission.objects.filter(content_type__app_label="chiffrage", codename__in=codes))
+        return utilisateur
+
+    def test_devis_normal_valide_et_chiffre_automatiquement(self):
+        response = self.client.post("/admin/chiffrage/devis/add/", self._formulaire(), follow=True)
+        devis = Devis.objects.get(pk="DEV-VALID-01")
+        self.assertEqual(devis.statut, Devis.Statut.VALIDE, response.content.decode()[:0])
+        self.assertIsNotNone(devis.lignes.get().prix_vente_matiere)
+
+    def test_devis_vendu_sous_le_cout_refuse_sans_permission(self):
+        self.client.force_login(self._utilisateur_habilite())
+        response = self.client.post(
+            "/admin/chiffrage/devis/add/", self._formulaire(prix_vente_unitaire_force="1"), follow=True
+        )
+        devis = Devis.objects.get(pk="DEV-VALID-01")
+        self.assertEqual(devis.statut, Devis.Statut.BROUILLON)
+        self.assertContains(response, "vendu sous le coût")
+
+    def test_devis_vendu_sous_le_cout_accepte_avec_permission(self):
+        self.client.force_login(self._utilisateur_habilite(sous_cout=True))
+        self.client.post("/admin/chiffrage/devis/add/", self._formulaire(prix_vente_unitaire_force="1"), follow=True)
+        self.assertEqual(Devis.objects.get(pk="DEV-VALID-01").statut, Devis.Statut.VALIDE)
+
+    def test_utilisateur_sans_permission_de_validation_ne_voit_pas_le_statut(self):
+        from django.contrib.auth import get_user_model
+        from django.contrib.auth.models import Permission
+
+        simple = get_user_model().objects.create_user("simple-a", "s@example.com", "pass1234", is_staff=True)
+        simple.user_permissions.set(
+            Permission.objects.filter(content_type__app_label="chiffrage", codename__in=["add_devis", "view_devis", "change_devis"])
+        )
+        self.client.force_login(simple)
+        response = self.client.get("/admin/chiffrage/devis/add/")
+        self.assertNotContains(response, 'name="statut"')
+
+    def test_forcer_le_statut_sans_permission_est_ignore(self):
+        from django.contrib.auth import get_user_model
+        from django.contrib.auth.models import Permission
+
+        simple = get_user_model().objects.create_user("simple-b", "s2@example.com", "pass1234", is_staff=True)
+        simple.user_permissions.set(
+            Permission.objects.filter(
+                content_type__app_label="chiffrage",
+                codename__in=["add_devis", "view_devis", "change_devis", "add_devisligne", "change_devisligne", "view_devisligne"],
+            )
+        )
+        self.client.force_login(simple)
+        self.client.post("/admin/chiffrage/devis/add/", self._formulaire(), follow=True)
+        self.assertEqual(Devis.objects.get(pk="DEV-VALID-01").statut, Devis.Statut.BROUILLON)
+
+    def test_devis_sans_ligne_ne_peut_pas_etre_valide(self):
+        self.devis.lignes.all().delete()
+        raisons = verifier_validation_devis(self.devis)
+        self.assertEqual(raisons, ["Le devis ne contient aucune ligne."])
+
+    def test_ligne_non_chiffrable_bloque_la_validation(self):
+        article_sans_cout = Article.objects.create(reference="ART-SANS-COUT", nature=Article.Nature.MATIERE_PREMIERE)
+        DevisLigne.objects.create(devis=self.devis, article=article_sans_cout, quantite=1)
+        raisons = verifier_validation_devis(self.devis)
+        self.assertTrue(raisons)
+        self.assertTrue(any("Chiffrage impossible" in r or "non chiffrée" in r for r in raisons), raisons)
+
+    def test_api_refuse_la_validation_sous_le_cout_et_annule_tout(self):
+        self.client.force_login(self._utilisateur_habilite())
+        self.ligne.prix_vente_unitaire_force = 1
+        self.ligne.save()
+        response = self.client.patch(
+            f"/api/v1/devis/{self.devis.pk}/", data=json.dumps({"statut": "valide"}), content_type="application/json"
+        )
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn("sous le coût", response.content.decode())
+        self.devis.refresh_from_db()
+        self.assertEqual(self.devis.statut, Devis.Statut.BROUILLON)
+
+    def test_api_valide_un_devis_normal_et_le_chiffre(self):
+        self.client.force_login(self._utilisateur_habilite())
+        response = self.client.patch(
+            f"/api/v1/devis/{self.devis.pk}/", data=json.dumps({"statut": "valide"}), content_type="application/json"
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.devis.refresh_from_db()
+        self.assertEqual(self.devis.statut, Devis.Statut.VALIDE)
+        self.assertIsNotNone(self.devis.lignes.get().prix_vente_matiere)
+
+    def test_api_refuse_la_validation_sans_permission(self):
+        from django.contrib.auth import get_user_model
+
+        get_user_model().objects.create_user("api-simple", "x@example.com", "pass1234")
+        self.client.force_login(get_user_model().objects.get(username="api-simple"))
+        response = self.client.patch(
+            f"/api/v1/devis/{self.devis.pk}/", data=json.dumps({"statut": "valide"}), content_type="application/json"
+        )
+        self.assertEqual(response.status_code, 403, response.content)
+
+    def test_annulation_de_commande_exige_la_permission(self):
+        self._valider()
+        commande = lancer_en_production(self.devis)
+        from django.contrib.auth import get_user_model
+
+        get_user_model().objects.create_user("sans-droit", "z@example.com", "pass1234", is_staff=True)
+        self.client.force_login(get_user_model().objects.get(username="sans-droit"))
+        response = self.client.post(f"/api/v1/commandes/{commande.pk}/annuler/")
+        self.assertEqual(response.status_code, 403)
+        commande.refresh_from_db()
+        self.assertEqual(commande.statut, Commande.Statut.EN_COURS)

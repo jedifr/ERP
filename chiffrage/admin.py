@@ -1,8 +1,10 @@
 from django import forms
 from django.contrib import admin, messages
+from django.core.exceptions import PermissionDenied
 from django.http import HttpResponseRedirect
 from django.urls import path, reverse
 from django.utils.html import format_html
+from simple_history.admin import SimpleHistoryAdmin
 from unfold.admin import ModelAdmin, TabularInline
 
 from codification.mixins import CodificationInitialeMixin
@@ -37,6 +39,7 @@ from .models import (
 )
 from .moteur import ChiffrageError, calculer_devis
 from .planning_sync import resynchroniser
+from .validation import verifier_validation_devis
 from .production import (
     CHAMPS_SUIVIS_COMMANDE_LIGNE,
     enregistrer_modification_ligne,
@@ -82,6 +85,18 @@ class DevisLigneForm(forms.ModelForm):
 
     def clean_ordre(self):
         return self.cleaned_data.get("ordre") or 0
+
+
+class HistoriqueLectureSeule(SimpleHistoryAdmin):
+    """Historique consultable, jamais rejouable : « revenir à une version
+    précédente » réécrirait un devis ou une commande en contournant le verrou
+    du devis validé et les contrôles de validation."""
+
+    def revert_disabled(self, request, obj=None):
+        return True
+
+    def history_form_view(self, request, object_id, version_id, extra_context=None):
+        raise PermissionDenied
 
 
 def devis_verrouille(devis):
@@ -148,7 +163,7 @@ class DevisAdminForm(forms.ModelForm):
 
 
 @admin.register(Devis)
-class DevisAdmin(CodificationInitialeMixin, ModelAdmin):
+class DevisAdmin(CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
     codification_entite = RegleCodification.Entite.DEVIS
     form = DevisAdminForm
 
@@ -178,10 +193,35 @@ class DevisAdmin(CodificationInitialeMixin, ModelAdmin):
 
     def get_readonly_fields(self, request, obj=None):
         champs = list(super().get_readonly_fields(request, obj))
+        if not request.user.has_perm("chiffrage.valider_devis"):
+            # Seul un utilisateur habilité valide un devis (ou le repasse en brouillon).
+            champs.append("statut")
         if devis_verrouille(obj):
             # Tout sauf le statut, pour pouvoir repasser le devis en brouillon.
             champs += [f.name for f in Devis._meta.concrete_fields if f.name != "statut"]
         return champs
+
+    def save_related(self, request, form, formsets, change):
+        super().save_related(request, form, formsets, change)
+        devis = form.instance
+        if "statut" not in form.changed_data or devis.statut != Devis.Statut.VALIDE:
+            return
+        # Les lignes viennent d'être enregistrées : c'est maintenant qu'on peut
+        # contrôler (et chiffrer) le devis tel qu'il va être validé.
+        if request.user.has_perm("chiffrage.valider_devis"):
+            raisons = verifier_validation_devis(
+                devis, peut_vendre_sous_cout=request.user.has_perm("chiffrage.valider_vente_sous_cout")
+            )
+        else:
+            raisons = ["Vous n'avez pas la permission de valider un devis."]
+        if raisons:
+            # Via save() (pas update()) pour que l'historique montre la tentative
+            # de validation ET son annulation, avec le motif.
+            devis.statut = Devis.Statut.BROUILLON
+            devis._change_reason = ("Validation refusée : " + " ".join(raisons))[:100]
+            devis.save(update_fields=["statut"])
+            for raison in raisons:
+                messages.error(request, f"{devis} : validation refusée, le devis reste en brouillon. {raison}")
 
     class Media:
         js = ["chiffrage/devis_admin_live.js", "chiffrage/devisligne_reorder.js"]
@@ -293,7 +333,7 @@ class DevisAdmin(CodificationInitialeMixin, ModelAdmin):
 
 
 @admin.register(DevisLigne)
-class DevisLigneAdmin(ModelAdmin):
+class DevisLigneAdmin(HistoriqueLectureSeule, ModelAdmin):
     form = DevisLigneForm
     list_display = [
         "devis",
@@ -411,7 +451,7 @@ class CommandeLigneInline(TabularInline):
 
 
 @admin.register(Commande)
-class CommandeAdmin(CodificationInitialeMixin, ModelAdmin):
+class CommandeAdmin(CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
     codification_entite = RegleCodification.Entite.COMMANDE
 
     list_display = ["numero", "client", "reference_client", "devis", "date_commande", "statut", "devise"]
@@ -463,6 +503,9 @@ class CommandeAdmin(CodificationInitialeMixin, ModelAdmin):
 
     @admin.action(description="Annuler la commande")
     def action_annuler(self, request, queryset):
+        if not request.user.has_perm("chiffrage.annuler_commande"):
+            self.message_user(request, "Vous n'avez pas la permission d'annuler une commande.", level=messages.ERROR)
+            return
         for commande in queryset:
             try:
                 commande.annuler()

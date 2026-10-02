@@ -2211,3 +2211,42 @@ visible en liste, statut non éditable sur sa fiche.
 Bug trouvé en écrivant les tests : après un POST invalide, Django réécrit
 l'instance avec le statut soumis, ce qui désactivait le verrou en plein rendu
 de la page d'erreur (KeyError) — le verrou relit donc le statut en base.
+
+## Recette du module A : priorité 2, traçabilité, arrondis, contrôle à la validation
+
+- **Piste d'audit** (`django-simple-history`) sur les devis, leurs lignes et les
+  commandes : qui, quand, et ancienne → nouvelle valeur de chaque champ, y
+  compris les suppressions de ligne. Consultable via le bouton « Historique »
+  de chaque fiche. Elle est en **lecture seule** : la restauration d'une
+  version précédente est désactivée (elle aurait contourné le verrou du devis
+  validé). Au démarrage, `populate_history --auto` crée le point de départ des
+  enregistrements antérieurs (idempotent). Les lignes de commande gardent en
+  plus leur journal dédié `CommandeLigneModification`.
+- **Arrondis au centime** : prix TTC d'une ligne, montants HT/TTC d'une ligne
+  de commande, totaux d'un devis et montants indicatifs de facture. Le total
+  TTC est la somme des lignes arrondies (comme sur la facture Tiime) et ne
+  laisse plus de résidu flottant (`0.1 + 0.2` s'affiche `0.3`). Les prix
+  unitaires gardent leur précision ; le passage des champs en `Decimal` reste
+  un chantier à part (migration lourde).
+- **Contrôle à la validation d'un devis** (`chiffrage/validation.py`) : le
+  chiffrage est recalculé, puis la validation est refusée — le devis reste en
+  brouillon avec un message par raison — si le devis est vide, si une ligne
+  n'est pas chiffrable, ou si une ligne est **vendue sous son coût** sans la
+  permission dédiée. Même contrôle côté API (transaction annulée en cas de
+  refus).
+- **Permissions métier** : `valider_devis` (sans elle, le champ statut
+  disparaît du formulaire et l'API répond 403), `valider_vente_sous_cout`,
+  `annuler_commande`. À attribuer par groupe dans l'admin (Utilisateurs →
+  Groupes) ; un superutilisateur les a toutes.
+
+**Vérifié** (Playwright) : un utilisateur habilité à valider mais pas à vendre
+sous le coût tente de valider un devis dont la ligne est à 10 € HT pour un coût
+de 50 € — refus affiché, devis resté en brouillon ; page d'historique du devis
+avec auteur et changement de statut.
+
+Bugs trouvés par les tests de cette étape : `FullCleanModelSerializer` applique
+les valeurs soumises sur l'instance avant toute vérification, ce qui rendait la
+validation d'un devis par l'API impossible (verrou déclenché à tort) et
+permettait de déplacer une ligne hors d'un devis validé ; les contrôles lisent
+désormais l'état d'origine en base. Le retour en brouillon après un refus passe
+par `save()` avec motif, pour que l'historique ne mente pas.

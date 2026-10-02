@@ -17,11 +17,16 @@ class DevisSerializer(FullCleanModelSerializer):
         fields = "__all__"
 
     def validate(self, attrs):
+        # État d'origine lu AVANT super().validate() : celui-ci applique les
+        # valeurs soumises sur l'instance (setattr) pour lancer full_clean(),
+        # ce qui masquerait le statut réellement enregistré.
+        statut_actuel = self.instance.statut if self.instance is not None else None
+        commandes_existantes = self.instance.commandes.exists() if self.instance is not None else False
         attrs = super().validate(attrs)
-        if self.instance is not None and self.instance.statut == Devis.Statut.VALIDE:
-            if attrs.get("statut", self.instance.statut) == Devis.Statut.VALIDE:
+        if statut_actuel == Devis.Statut.VALIDE:
+            if attrs.get("statut", statut_actuel) == Devis.Statut.VALIDE:
                 raise serializers.ValidationError(MESSAGE_DEVIS_VERROUILLE)
-            if self.instance.commandes.exists():
+            if commandes_existantes:
                 raise serializers.ValidationError(
                     "Une commande est déjà issue de ce devis : impossible de le repasser en brouillon."
                 )
@@ -35,9 +40,15 @@ class DevisLigneSerializer(FullCleanModelSerializer):
         read_only_fields = ["cout_matiere_calcule", "prix_vente_matiere"]
 
     def validate(self, attrs):
+        # Devis d'origine (avant un éventuel déplacement de la ligne vers un
+        # autre devis) et devis visé : aucun des deux ne doit être validé.
+        devis_ids = set()
+        if self.instance is not None:
+            devis_ids.add(self.instance.devis_id)
         attrs = super().validate(attrs)
-        devis = attrs.get("devis") or (self.instance.devis if self.instance else None)
-        if devis is not None and devis.statut == Devis.Statut.VALIDE:
+        if attrs.get("devis") is not None:
+            devis_ids.add(attrs["devis"].pk)
+        if Devis.objects.filter(pk__in=devis_ids, statut=Devis.Statut.VALIDE).exists():
             raise serializers.ValidationError(MESSAGE_DEVIS_VERROUILLE)
         return attrs
 

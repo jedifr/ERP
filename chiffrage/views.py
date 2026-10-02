@@ -1,12 +1,14 @@
+from django.db import transaction
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 
 from .models import Commande, CommandeError, Devis, DevisLigne, DevisLigneOperation, OperationOF, OrdreFabrication
 from .moteur import ChiffrageError, calculer_devis
 from .planning_sync import resynchroniser
 from .production import lancer_en_production
+from .validation import verifier_validation_devis
 from .serializers import (
     CommandeSerializer,
     DevisLigneOperationSerializer,
@@ -23,6 +25,31 @@ class DevisViewSet(viewsets.ModelViewSet):
     serializer_class = DevisSerializer
     filterset_fields = ["statut", "client"]
     search_fields = ["numero"]
+
+    def perform_create(self, serializer):
+        with transaction.atomic():
+            self._controler_validation(serializer.save(), statut_avant=None)
+
+    def perform_update(self, serializer):
+        # Relu en base : la validation du serializer a déjà appliqué les valeurs
+        # soumises sur l'instance, qui ne porte donc plus l'ancien statut.
+        statut_avant = Devis.objects.values_list("statut", flat=True).get(pk=serializer.instance.pk)
+        with transaction.atomic():
+            self._controler_validation(serializer.save(), statut_avant)
+
+    def _controler_validation(self, devis, statut_avant):
+        """Passage à « validé » : permission requise, puis mêmes contrôles que
+        l'admin. Levée dans la transaction : tout est annulé en cas de refus."""
+        if devis.statut != Devis.Statut.VALIDE or statut_avant == Devis.Statut.VALIDE:
+            return
+        user = self.request.user
+        if not user.has_perm("chiffrage.valider_devis"):
+            raise PermissionDenied("Vous n'avez pas la permission de valider un devis.")
+        raisons = verifier_validation_devis(
+            devis, peut_vendre_sous_cout=user.has_perm("chiffrage.valider_vente_sous_cout")
+        )
+        if raisons:
+            raise ValidationError({"statut": raisons})
 
     @action(detail=True, methods=["post"], url_path="recalculer")
     def recalculer(self, request, pk=None):
@@ -71,6 +98,8 @@ class CommandeViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="annuler")
     def annuler_action(self, request, pk=None):
         commande = self.get_object()
+        if not request.user.has_perm("chiffrage.annuler_commande"):
+            raise PermissionDenied("Vous n'avez pas la permission d'annuler une commande.")
         try:
             commande.annuler()
         except CommandeError as exc:

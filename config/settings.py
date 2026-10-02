@@ -48,6 +48,7 @@ SERVE_MEDIA = _env_bool("DJANGO_SERVE_MEDIA", True)
 
 INSTALLED_APPS = [
     "unfold",
+    "unfold.contrib.simple_history",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -55,6 +56,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "rest_framework",
+    "simple_history",
     "django_filters",
     "codification",
     "comptes",
@@ -78,8 +80,12 @@ MIDDLEWARE = [
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
+    "simple_history.middleware.HistoryRequestMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
+
+# L'historique est en lecture seule (voir chiffrage.admin.HistoriqueLectureSeule).
+SIMPLE_HISTORY_REVERT_DISABLED = True
 
 ROOT_URLCONF = "config.urls"
 
