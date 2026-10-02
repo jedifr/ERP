@@ -734,3 +734,76 @@ class VerrouLotEtHistoriqueTests(_FixtureStock, TestCase):
         ancienne = self.lot.history.last()
         r = self.client.post(f"/admin/stock/lot/{self.lot.pk}/history/{ancienne.pk}/", {})
         self.assertEqual(r.status_code, 403)
+
+
+class RolesStockTests(_FixtureStock, TestCase):
+    """B-AD : API et admin du stock soumis aux permissions, rôles Magasinier / Responsable stock."""
+
+    def _utilisateur(self, nom, groupe=None):
+        from django.contrib.auth.models import Group
+
+        utilisateur = get_user_model().objects.create_user(nom, f"{nom}@example.com", "pass1234", is_staff=True)
+        if groupe:
+            utilisateur.groups.add(Group.objects.get(name=groupe))
+        return utilisateur
+
+    def test_api_sans_permission_ni_lecture_ni_ecriture(self):
+        self.client.force_login(self._utilisateur("rien-stock"))
+        for url in ("lots", "mouvements-stock", "emplacements", "inventaires", "transferts-stock", "alertes-stock"):
+            self.assertEqual(self.client.get(f"/api/v1/{url}/").status_code, 403, url)
+        r = self.client.post(
+            "/api/v1/mouvements-stock/",
+            data={"lot": self.lot.pk, "type_mouvement": "entree", "quantite": 1, "motif": "x"},
+            content_type="application/json",
+        )
+        self.assertEqual(r.status_code, 403)
+
+    def test_magasinier_saisit_mais_ne_corrige_ni_ne_valide(self):
+        self._entree(10)
+        mouvement = self.lot.mouvements.first()
+        self.client.force_login(self._utilisateur("mag-a", "Magasinier"))
+        self.assertEqual(self.client.get("/api/v1/mouvements-stock/").status_code, 200)
+        r = self.client.post(
+            "/api/v1/mouvements-stock/",
+            data={"lot": self.lot.pk, "type_mouvement": "sortie", "quantite": 2, "motif": "Casse"},
+            content_type="application/json",
+        )
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(self.client.post(f"/api/v1/mouvements-stock/{mouvement.pk}/annuler/").status_code, 403)
+        from .models import Inventaire
+
+        inventaire = Inventaire.objects.create()
+        self.assertEqual(self.client.post(f"/api/v1/inventaires/{inventaire.pk}/valider/").status_code, 403)
+
+    def test_responsable_stock_annule_et_valide(self):
+        from .models import Inventaire, InventaireLigne
+
+        self._entree(10)
+        mouvement = self.lot.mouvements.first()
+        self.client.force_login(self._utilisateur("resp-stock", "Responsable stock"))
+        self.assertEqual(self.client.post(f"/api/v1/mouvements-stock/{mouvement.pk}/annuler/").status_code, 201)
+        inventaire = Inventaire.objects.create()
+        InventaireLigne.objects.create(inventaire=inventaire, lot=self.lot, quantite_comptee=3)
+        self.assertEqual(self.client.post(f"/api/v1/inventaires/{inventaire.pk}/valider/").status_code, 200)
+
+    def test_atelier_consulte_le_stock_sans_le_modifier(self):
+        self.client.force_login(self._utilisateur("atelier-stock", "Atelier"))
+        self.assertEqual(self.client.get("/api/v1/lots/").status_code, 200)
+        self.assertEqual(self.client.get("/api/v1/inventaires/").status_code, 403)
+        r = self.client.post(
+            "/api/v1/mouvements-stock/",
+            data={"lot": self.lot.pk, "type_mouvement": "entree", "quantite": 1, "motif": "x"},
+            content_type="application/json",
+        )
+        self.assertEqual(r.status_code, 403)
+
+    def test_magasinier_saisit_un_mouvement_dans_ladmin(self):
+        self.client.force_login(self._utilisateur("mag-b", "Magasinier"))
+        self.assertEqual(self.client.get("/admin/stock/mouvementstock/add/").status_code, 200)
+        self.client.post(
+            "/admin/stock/mouvementstock/add/",
+            {"lot": self.lot.pk, "type_mouvement": "entree", "quantite": "5", "date_mouvement": "2026-01-01",
+             "reference_origine": "", "motif": "Réception hors commande"},
+        )
+        self.lot.refresh_from_db()
+        self.assertEqual(self.lot.quantite, 5)

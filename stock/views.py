@@ -4,6 +4,8 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from comptes.permissions import ModelPermissionsAvecLecture
+
 from .models import (
     AlerteStock,
     Emplacement,
@@ -28,12 +30,14 @@ from .serializers import (
 
 
 class EmplacementViewSet(viewsets.ModelViewSet):
+    permission_classes = [ModelPermissionsAvecLecture]
     queryset = Emplacement.objects.all()
     serializer_class = EmplacementSerializer
     search_fields = ["code", "libelle"]
 
 
 class LotViewSet(viewsets.ModelViewSet):
+    permission_classes = [ModelPermissionsAvecLecture]
     queryset = Lot.objects.select_related("article", "emplacement").all()
     serializer_class = LotSerializer
     filterset_fields = ["article", "emplacement", "statut"]
@@ -45,6 +49,7 @@ class MouvementStockViewSet(
     """Journal de stock : consultation et saisie seulement. Pas de modification ni de
     suppression — une erreur se corrige par `annuler` (mouvement inverse)."""
 
+    permission_classes = [ModelPermissionsAvecLecture]
     queryset = MouvementStock.objects.select_related("lot").all()
     serializer_class = MouvementStockSerializer
     filterset_fields = ["lot", "type_mouvement"]
@@ -68,6 +73,7 @@ class MouvementStockViewSet(
 
 
 class AlerteStockViewSet(viewsets.ModelViewSet):
+    permission_classes = [ModelPermissionsAvecLecture]
     queryset = AlerteStock.objects.select_related("article").all()
     serializer_class = AlerteStockSerializer
     filterset_fields = ["article", "statut"]
@@ -76,6 +82,7 @@ class AlerteStockViewSet(viewsets.ModelViewSet):
 class TransfertViewSet(
     mixins.CreateModelMixin, mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet
 ):
+    permission_classes = [ModelPermissionsAvecLecture]
     queryset = Transfert.objects.select_related("lot_source", "emplacement_cible", "lot_cible").all()
     serializer_class = TransfertSerializer
     filterset_fields = ["lot_source", "emplacement_cible"]
@@ -88,6 +95,7 @@ class TransfertViewSet(
 
 
 class InventaireViewSet(viewsets.ModelViewSet):
+    permission_classes = [ModelPermissionsAvecLecture]
     queryset = Inventaire.objects.all()
     serializer_class = InventaireSerializer
     filterset_fields = ["statut"]
@@ -115,6 +123,7 @@ class InventaireViewSet(viewsets.ModelViewSet):
 
 
 class InventaireLigneViewSet(viewsets.ModelViewSet):
+    permission_classes = [ModelPermissionsAvecLecture]
     queryset = InventaireLigne.objects.select_related("inventaire", "lot").all()
     serializer_class = InventaireLigneSerializer
     filterset_fields = ["inventaire", "lot"]

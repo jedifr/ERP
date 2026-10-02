@@ -142,3 +142,69 @@ class DashboardCallbackTests(TestCase):
         self.assertTrue(kpis["Alertes de stock"]["attention"])
         self.assertEqual(kpis["Ordres de fabrication"]["value"], 1)
         self.assertEqual(kpis["Pièces à découper"]["value"], 1)
+
+
+class GroupesMetierTests(TestCase):
+    """Les rôles par défaut doivent être réellement utilisables dans l'admin : les
+    listes à autocomplétion répondent 403 sans la permission « voir » du modèle lié."""
+
+    AUTOCOMPLETIONS = {
+        "Commercial": [
+            ("chiffrage", "devis", "client"), ("chiffrage", "devis", "adresse_livraison"),
+            ("chiffrage", "devis", "contact"), ("chiffrage", "devisligne", "article"),
+            ("chiffrage", "commande", "client"), ("chiffrage", "commande", "devis"),
+            ("chiffrage", "commandeligne", "article"),
+        ],
+        "Magasinier": [
+            ("stock", "lot", "article"), ("stock", "lot", "emplacement"),
+            ("stock", "mouvementstock", "lot"), ("stock", "transfert", "lot_source"),
+            ("stock", "transfert", "emplacement_cible"), ("stock", "inventaireligne", "lot"),
+        ],
+        "Atelier": [("chiffrage", "operationof", "poste")],
+    }
+
+    def _utilisateur(self, groupe):
+        from django.contrib.auth import get_user_model
+        from django.contrib.auth.models import Group
+
+        utilisateur = get_user_model().objects.create_user(
+            f"u-{groupe.replace(' ', '-')}", "g@example.com", "pass1234", is_staff=True
+        )
+        utilisateur.groups.add(Group.objects.get(name=groupe))
+        return utilisateur
+
+    def test_autocompletions_accessibles_pour_chaque_role(self):
+        for groupe, cas in self.AUTOCOMPLETIONS.items():
+            self.client.force_login(self._utilisateur(groupe))
+            for app, modele, champ in cas:
+                reponse = self.client.get(
+                    "/admin/autocomplete/", {"app_label": app, "model_name": modele, "field_name": champ, "term": ""}
+                )
+                self.assertEqual(reponse.status_code, 200, f"{groupe} : {app}.{modele}.{champ}")
+
+    def test_responsables_heritent_des_roles_de_base(self):
+        from django.contrib.auth.models import Group
+
+        def codes(nom):
+            return set(
+                f"{p.content_type.app_label}.{p.codename}" for p in Group.objects.get(name=nom).permissions.select_related("content_type")
+            )
+
+        self.assertLessEqual(codes("Magasinier"), codes("Responsable stock"))
+        self.assertLessEqual(codes("Commercial"), codes("Responsable commercial"))
+        self.assertIn("stock.valider_inventaire", codes("Responsable stock"))
+        self.assertNotIn("stock.valider_inventaire", codes("Magasinier"))
+        self.assertNotIn("stock.annuler_mouvement", codes("Magasinier"))
+
+    def test_synchroniser_ajoute_sans_jamais_retirer(self):
+        from django.contrib.auth.models import Group, Permission
+        from django.core.management import call_command
+
+        groupe = Group.objects.get(name="Magasinier")
+        retiree = Permission.objects.get(content_type__app_label="stock", codename="add_transfert")
+        groupe.permissions.remove(retiree)
+        supplementaire = Permission.objects.get(content_type__app_label="chiffrage", codename="valider_devis")
+        groupe.permissions.add(supplementaire)
+        call_command("synchroniser_groupes", stdout=__import__("io").StringIO())
+        self.assertTrue(groupe.permissions.filter(pk=retiree.pk).exists())
+        self.assertTrue(groupe.permissions.filter(pk=supplementaire.pk).exists())

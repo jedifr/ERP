@@ -2350,3 +2350,29 @@ Tests : `TransfertTests`, `InventaireTests`, `ValorisationTests`,
 **Vérifié** (Playwright) : liste des lots avec coût moyen et valeur (52 × 1,25 =
 65 €) ; inventaire brouillon puis validé (compté 49, théorique 52, écart −3,
 sortie d'ajustement créée, formulaire figé).
+
+## Recette du module B (stock) : priorité 3, rôles et API sous permissions
+
+- **Deux nouveaux rôles** : *Magasinier* (consulte, saisit mouvements, lots,
+  transferts et inventaires en brouillon ; ne corrige pas un mouvement ni ne
+  valide un inventaire) et *Responsable stock* (+ annuler un mouvement, valider
+  un inventaire, gérer les emplacements). *Atelier* peut consulter les lots,
+  *Direction* consulter le stock.
+- **API du stock sous permissions** (lecture incluse), comme pour le module A :
+  avant, tout compte connecté lisait et écrivait lots et mouvements.
+- **Les définitions de groupes sont centralisées** dans `comptes/groupes.py`
+  (permissions inter-applications). Un groupe déjà créé n'est jamais réécrit ;
+  pour lui ajouter les permissions apparues depuis dans sa définition par défaut :
+  `python manage.py synchroniser_groupes` (ajoute seulement, ne retire jamais).
+
+**Correction du module A (priorité 3)** : les groupes *Commercial*, *Responsable
+commercial* et *Atelier* n'avaient pas la permission « voir » des modèles liés
+(client, adresse, contact, article, poste…). Or les listes à autocomplétion de
+l'admin répondent 403 sans elle : un commercial ne pouvait pas choisir un
+client sur un devis. C'est corrigé, et un test parcourt désormais les
+autocomplétions de chaque rôle. Si ces groupes existent déjà sur votre
+installation, lancez `python manage.py synchroniser_groupes` après la mise à jour
+(à ajouter à votre routine de mise à jour si vous ajustez souvent les rôles).
+Autre défaut corrigé au passage : `comptes` n'ayant pas de modèle, Django
+n'émettait jamais son signal `post_migrate` ; la création des groupes est
+désormais branchée sur celui d'`auth`.

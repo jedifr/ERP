@@ -3773,11 +3773,11 @@ class RolesMetierModuleATests(_FixtureModuleA, TestCase):
     def test_groupes_personnalises_ne_sont_jamais_reecrits(self):
         from django.contrib.auth.models import Group, Permission
 
-        from .apps import creer_groupes_par_defaut
+        from comptes.groupes import creer_groupes_par_defaut
 
         groupe = Group.objects.get(name="Commercial")
         groupe.permissions.add(Permission.objects.get(codename="valider_devis"))
-        creer_groupes_par_defaut(sender=apps_chiffrage())
+        creer_groupes_par_defaut(sender=None)
         self.assertTrue(groupe.permissions.filter(codename="valider_devis").exists())
 
     def test_api_sans_permission_ni_lecture_ni_ecriture(self):
@@ -3854,9 +3854,3 @@ class RolesMetierModuleATests(_FixtureModuleA, TestCase):
     def test_responsable_voit_le_champ_statut(self):
         self.client.force_login(self._utilisateur("resp-c", "Responsable commercial"))
         self.assertContains(self.client.get("/admin/chiffrage/devis/add/"), 'name="statut"')
-
-
-def apps_chiffrage():
-    from django.apps import apps
-
-    return apps.get_app_config("chiffrage")
