@@ -14,6 +14,8 @@ from decoupe.models import PieceDecoupe
 from facturation.models import Facture
 from stock.models import AlerteStock
 
+from .securite import diagnostics
+
 
 def dashboard_callback(request, context):
     aujourdhui = timezone.localdate()
@@ -101,5 +103,7 @@ def dashboard_callback(request, context):
         },
     ]
     context["dashboard_date"] = aujourdhui
+    if getattr(getattr(request, "user", None), "is_superuser", False):
+        context["alertes_securite"] = diagnostics()
 
     return context

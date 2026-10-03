@@ -8,6 +8,7 @@ class ComptesConfig(AppConfig):
     verbose_name = "Comptes utilisateurs"
 
     def ready(self):
+        from . import auth  # noqa: F401  (branche les signaux de journalisation des connexions)
         from .groupes import creer_groupes_par_defaut
 
         post_migrate.connect(creer_groupes_par_defaut, dispatch_uid="comptes_groupes_par_defaut")

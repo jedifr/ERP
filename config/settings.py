@@ -21,7 +21,8 @@ def _env_bool(name, default=False):
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "django-insecure-change-me-in-production")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = _env_bool("DJANGO_DEBUG", True)
+# Faux par défaut : une variable d'environnement oubliée ne doit jamais activer le mode debug.
+DEBUG = _env_bool("DJANGO_DEBUG", False)
 
 ALLOWED_HOSTS = [h.strip() for h in os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",") if h.strip()]
 
@@ -37,6 +38,14 @@ USE_X_FORWARDED_HOST = True
 CSRF_TRUSTED_ORIGINS = [
     o.strip() for o in os.environ.get("DJANGO_CSRF_TRUSTED_ORIGINS", "").split(",") if o.strip()
 ]
+
+# Sessions et cookies. Les cookies « sécurisés » ne partent qu'en HTTPS : à activer seulement si
+# l'ERP est servi en HTTPS (sinon la connexion en HTTP cesse de fonctionner).
+SESSION_COOKIE_AGE = int(os.environ.get("DJANGO_SESSION_HEURES", "12")) * 3600  # une journée de travail
+SESSION_COOKIE_SECURE = CSRF_COOKIE_SECURE = _env_bool("DJANGO_COOKIES_SECURISES", False)
+SECURE_HSTS_SECONDS = int(os.environ.get("DJANGO_HSTS_SECONDS", "0"))  # ex. 31536000 une fois le HTTPS validé
+SECURE_CONTENT_TYPE_NOSNIFF = True
+X_FRAME_OPTIONS = "DENY"
 
 # Les fichiers déposés (DXF/DWG des pièces à découper, app `decoupe`) sont servis par Django
 # même hors DEBUG : par défaut cet ERP reste sur le réseau local de l'atelier, éventuellement
@@ -90,6 +99,8 @@ SIMPLE_HISTORY_REVERT_DISABLED = True
 # Connexion directe sur /admin/login/ (sans ?next=) : revenir à l'accueil de l'admin plutôt
 # que sur /accounts/profile/ (Django par défaut), qui n'existe pas ici (404).
 LOGIN_REDIRECT_URL = "/admin/"
+# Page de connexion unique (sinon Django redirige vers /accounts/login/, qui n'existe pas).
+LOGIN_URL = "/admin/login/"
 
 ROOT_URLCONF = "config.urls"
 
@@ -126,12 +137,18 @@ DATABASES = {
 }
 
 
+# Authentification : refus après trop d'échecs (voir comptes.connexions). Réglable ici.
+AUTHENTICATION_BACKENDS = ["comptes.auth.ModelBackendProtege"]
+CONNEXION_ECHECS_MAX = int(os.environ.get("DJANGO_CONNEXION_ECHECS_MAX", "5"))
+CONNEXION_FENETRE_MINUTES = int(os.environ.get("DJANGO_CONNEXION_FENETRE_MINUTES", "15"))
+
+
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
-    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
+    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator", "OPTIONS": {"min_length": 10}},
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
@@ -180,7 +197,10 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 50,
-    "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
+    # Sécurisé par défaut : lecture = permission « voir », écriture = ajout/modification/
+    # suppression du modèle (voir comptes.permissions). Un nouveau ViewSet est donc protégé
+    # sans rien ajouter ; une vue sans modèle (APIView) doit déclarer sa propre permission.
+    "DEFAULT_PERMISSION_CLASSES": ["comptes.permissions.ModelPermissionsAvecLecture"],
 }
 
 
@@ -464,6 +484,11 @@ UNFOLD = {
                         "title": "Groupes",
                         "icon": "groups",
                         "link": reverse_lazy("admin:auth_group_changelist"),
+                    },
+                    {
+                        "title": "Journal des connexions",
+                        "icon": "login",
+                        "link": reverse_lazy("admin:comptes_evenementconnexion_changelist"),
                     },
                 ],
             },

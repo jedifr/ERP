@@ -13,6 +13,11 @@ l'admin répondent 403 sans elles.
 
 from django.apps import apps as django_apps
 
+def _crud(app, *modeles, actions=("view", "add", "change", "delete")):
+    """Codes « app.action_modele » pour chaque modèle (noms de classe en minuscules)."""
+    return [f"{app}.{action}_{modele.lower()}" for modele in modeles for action in actions]
+
+
 # Permissions de consultation requises par les listes déroulantes à autocomplétion.
 _LIENS_COMMERCIAUX = [
     "commercial.view_tiers", "commercial.view_adresse", "commercial.view_contact",
@@ -21,6 +26,9 @@ _LIENS_COMMERCIAUX = [
 
 _COMMERCIAL = [
     *_LIENS_COMMERCIAUX,
+    # Créer et modifier ses clients (jamais les supprimer) et leurs coordonnées.
+    *_crud("commercial", "Tiers", "Adresse", "Contact", "ContactTelephone", actions=("add", "change")),
+    *_crud("commercial", "ConditionPaiement", "Pays", "DelaiPropose", "TauxTVA", actions=("view",)),
     "chiffrage.view_devis", "chiffrage.add_devis", "chiffrage.change_devis",
     "chiffrage.view_devisligne", "chiffrage.add_devisligne", "chiffrage.change_devisligne",
     "chiffrage.delete_devisligne",
@@ -61,12 +69,41 @@ _MAGASINIER = [
     "stock.view_alertestock", "stock.change_alertestock",
 ]
 
+_METHODES = [
+    *_crud("technique", "Matiere", "Article", "PosteTravail", "TarifPoste", "Nomenclature", "Gamme"),
+    *_crud("decoupe", "PieceDecoupe", "ImbricationJob", "ImbricationLigne", "ImbricationPlacement",
+           "ProfilImportDecoupe", "RegleProfilImportDecoupe"),
+    *_crud("commercial", "TauxTVA", actions=("view",)),
+]
+
+_ACHATS = [
+    *_crud("achats", "ArticleFournisseur", "CommandeFournisseur", "LigneCommandeFournisseur", "Reception",
+           "ReceptionLigne", "FactureFournisseur", "TarifAchatArticle"),
+    *_crud("soustraitance", "EnvoiSousTraitance", "RetourSousTraitance"),
+    *_crud("commercial", "Tiers", "Adresse", "Contact", "TauxTVA", "Devise", "ConditionPaiement", "Pays",
+           actions=("view",)),
+    *_crud("technique", "Article", "Matiere", "PosteTravail", actions=("view",)),
+    "chiffrage.view_commandeligne", "chiffrage.view_commande",
+    "stock.view_alertestock", "stock.view_lot", "stock.view_emplacement",
+    "comptabilite.view_postegestion", "comptabilite.view_codeanalytique",
+]
+
+_COMPTABILITE = [
+    *_crud("comptabilite", "CompteComptable", "CodeAnalytique", "JournalComptable", "EcritureComptable",
+           "LigneEcriture", "PosteGestion", "ArticleCompteVente",
+           "ArticleCompteAchat", "TiersCompteComptable", "ParametresComptables"),
+    *_crud("facturation", "Facture", "FactureLigne", actions=("view",)),
+    *_crud("achats", "FactureFournisseur", "CommandeFournisseur", actions=("view",)),
+    *_crud("commercial", "Tiers", "Adresse", actions=("view",)),
+    "technique.view_article",
+]
+
 GROUPES_PAR_DEFAUT = {
     "Commercial": _COMMERCIAL,
     "Responsable commercial": _RESPONSABLE_COMMERCIAL,
     "Direction": [
         *_RESPONSABLE_COMMERCIAL,
-        "chiffrage.valider_vente_sous_cout",
+        "chiffrage.valider_vente_sous_cout", "chiffrage.voir_marges",
         "stock.view_lot", "stock.view_mouvementstock", "stock.view_inventaire", "stock.view_transfert",
         "stock.view_emplacement",
         "facturation.view_facture", "facturation.view_factureligne",
@@ -85,6 +122,9 @@ GROUPES_PAR_DEFAUT = {
         "comptabilite.add_ecriturecomptable", "comptabilite.add_ligneecriture",
         "comptabilite.view_comptecomptable", "comptabilite.view_journalcomptable",
     ],
+    "Méthodes et bureau d'études": _METHODES,
+    "Achats": _ACHATS,
+    "Comptabilité": _COMPTABILITE,
     "Magasinier": _MAGASINIER,
     "Responsable stock": [
         *_MAGASINIER,

@@ -18,7 +18,8 @@ Including another URLconf
 from django.conf import settings
 from django.contrib import admin
 from django.urls import include, path, re_path
-from django.views.static import serve as serve_static
+
+from comptes.views import media_protege
 
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -36,10 +37,9 @@ urlpatterns = [
 ]
 
 if settings.SERVE_MEDIA:
-    # `django.conf.urls.static.static()` refuse de servir les fichiers hors DEBUG (c'est
-    # voulu pour un vrai déploiement Internet) ; on appelle donc la vue directement, ce qui
-    # est un choix assumé pour cet ERP interne au réseau local (voir `SERVE_MEDIA` dans
-    # `config/settings.py`).
+    # Servi par Django même hors DEBUG (`django.conf.urls.static.static()` refuse hors DEBUG) :
+    # choix assumé pour cet ERP interne au réseau local (voir `SERVE_MEDIA` dans
+    # `config/settings.py`). Réservé aux comptes connectés habilités : voir comptes.views.
     urlpatterns += [
-        re_path(r"^media/(?P<path>.*)$", serve_static, {"document_root": settings.MEDIA_ROOT}),
+        re_path(r"^media/(?P<path>.*)$", media_protege),
     ]

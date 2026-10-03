@@ -9,6 +9,16 @@
 {% endblock %}
 
 {% block content %}
+    {% if alertes_securite %}
+        <div class="mb-6 rounded-default border border-red-200 bg-red-50 p-4 text-sm text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200">
+            <div class="mb-2 font-semibold">Sécurité : {{ alertes_securite|length }} point{{ alertes_securite|length|pluralize }} à traiter (visible des administrateurs seulement)</div>
+            <ul class="list-disc pl-5">
+                {% for c in alertes_securite %}
+                    <li><strong>{{ c.titre }}</strong>{% if c.niveau == "critique" %} <span class="font-semibold uppercase">— critique</span>{% endif %}. {{ c.conseil }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+    {% endif %}
     {% if kpis %}
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
             {% for kpi in kpis %}

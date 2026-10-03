@@ -840,6 +840,7 @@ class OrdreFabrication(models.Model):
         verbose_name = "Ordre de fabrication"
         verbose_name_plural = "Ordres de fabrication"
         ordering = ["-date_lancement", "numero"]
+        permissions = [("voir_marges", "Peut consulter les marges réelles et taux de charge (pilotage)")]
 
     def __str__(self):
         return self.numero

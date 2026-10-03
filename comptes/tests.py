@@ -161,6 +161,21 @@ class GroupesMetierTests(TestCase):
             ("stock", "transfert", "emplacement_cible"), ("stock", "inventaireligne", "lot"),
         ],
         "Atelier": [("chiffrage", "operationof", "poste")],
+        "Méthodes et bureau d'études": [
+            ("technique", "article", "matiere"), ("technique", "gamme", "article"), ("technique", "gamme", "poste"),
+            ("technique", "nomenclature", "article_parent"), ("technique", "tarifposte", "poste"),
+        ],
+        "Achats": [
+            ("achats", "commandefournisseur", "fournisseur"), ("achats", "articlefournisseur", "article"),
+            ("achats", "lignecommandefournisseur", "commande_ligne_client"),
+            ("achats", "lignecommandefournisseur", "poste_gestion"),
+            ("achats", "reception", "commande_fournisseur"), ("achats", "facturefournisseur", "commande_fournisseur"),
+        ],
+        "Comptabilité": [
+            ("comptabilite", "articlecomptevente", "article"), ("comptabilite", "articlecomptevente", "compte_vente"),
+            ("comptabilite", "tierscomptecomptable", "tiers"), ("comptabilite", "comptecomptable", "compte_parent"),
+        ],
+        "Facturation": [("facturation", "facture", "commande")],
     }
 
     def _utilisateur(self, groupe):
@@ -236,3 +251,325 @@ class ConnexionDirecteTests(TestCase):
         get_user_model().objects.create_superuser("direct", "d@example.com", "pass1234")
         r = self.client.post("/admin/login/", {"username": "direct", "password": "pass1234"})
         self.assertRedirects(r, "/admin/", fetch_redirect_response=False)
+
+
+class ApiSecuriseeParDefautTests(TestCase):
+    """D-AD-02 : aucune route d'API ne doit répondre à un compte sans permission."""
+
+    APPS = ["technique", "decoupe", "commercial", "chiffrage", "stock", "facturation", "comptabilite", "achats", "soustraitance"]
+
+    def _prefixes(self):
+        import importlib
+
+        prefixes = []
+        for app in self.APPS:
+            module = importlib.import_module(f"{app}.urls")
+            prefixes += [prefixe for prefixe, _viewset, _nom in module.router.registry]
+        return prefixes
+
+    def test_chaque_route_refuse_un_compte_sans_permission(self):
+        self.client.force_login(get_user_model().objects.create_user("api-nu", "n@example.com", "pass1234", is_staff=True))
+        prefixes = self._prefixes()
+        self.assertGreater(len(prefixes), 40)  # garde-fou : la liste a bien été construite
+        ouvertes = [p for p in prefixes if self.client.get(f"/api/v1/{p}/").status_code != 403]
+        self.assertEqual(ouvertes, [])
+
+    def test_chaque_route_refuse_lecriture_sans_permission(self):
+        self.client.force_login(get_user_model().objects.create_user("api-nu2", "n@example.com", "pass1234", is_staff=True))
+        ouvertes = [p for p in self._prefixes() if self.client.post(f"/api/v1/{p}/", data={}, content_type="application/json").status_code != 403]
+        self.assertEqual(ouvertes, [])
+
+    def test_visiteur_non_connecte_refuse_partout(self):
+        for prefixe in self._prefixes():
+            self.assertIn(self.client.get(f"/api/v1/{prefixe}/").status_code, (401, 403), prefixe)
+
+    def test_superutilisateur_garde_lacces(self):
+        self.client.force_login(get_user_model().objects.create_superuser("api-su", "s@example.com", "pass1234"))
+        for prefixe in self._prefixes():
+            self.assertEqual(self.client.get(f"/api/v1/{prefixe}/").status_code, 200, prefixe)
+
+    def test_pilotage_reserve_aux_comptes_habilites(self):
+        from django.contrib.auth.models import Group
+
+        urls = ["/api/v1/pilotage/marge-reelle/OF-X/", "/api/v1/pilotage/taux-charge/P/?date_debut=2026-01-01&date_fin=2026-01-31"]
+        simple = get_user_model().objects.create_user("pilot-nu", "p@example.com", "pass1234", is_staff=True)
+        self.client.force_login(simple)
+        for url in urls:
+            self.assertEqual(self.client.get(url).status_code, 403, url)
+        direction = get_user_model().objects.create_user("pilot-dir", "d@example.com", "pass1234", is_staff=True)
+        direction.groups.add(Group.objects.get(name="Direction"))
+        self.client.force_login(direction)
+        for url in urls:
+            self.assertEqual(self.client.get(url).status_code, 404, url)  # autorisé : l'objet n'existe simplement pas
+
+
+class MediaProtegeTests(TestCase):
+    """Les plans clients déposés ne doivent pas être lisibles sans connexion."""
+
+    def setUp(self):
+        import tempfile
+
+        from django.test import override_settings
+
+        self._dossier = tempfile.TemporaryDirectory()
+        (__import__("pathlib").Path(self._dossier.name) / "decoupe").mkdir()
+        (__import__("pathlib").Path(self._dossier.name) / "decoupe" / "plan.dxf").write_text("PLAN CONFIDENTIEL")
+        (__import__("pathlib").Path(self._dossier.name) / "autre.txt").write_text("divers")
+        self._override = override_settings(MEDIA_ROOT=self._dossier.name)
+        self._override.enable()
+        self.addCleanup(self._override.disable)
+        self.addCleanup(self._dossier.cleanup)
+
+    def test_visiteur_non_connecte_redirige_vers_la_connexion(self):
+        r = self.client.get("/media/decoupe/plan.dxf")
+        self.assertEqual(r.status_code, 302)
+        self.assertIn("/admin/login/", r.url)
+
+    def test_compte_sans_droit_sur_les_pieces_refuse(self):
+        self.client.force_login(get_user_model().objects.create_user("media-nu", "m@example.com", "pass1234", is_staff=True))
+        self.assertEqual(self.client.get("/media/decoupe/plan.dxf").status_code, 403)
+
+    def test_role_methodes_peut_lire_les_plans(self):
+        from django.contrib.auth.models import Group
+
+        utilisateur = get_user_model().objects.create_user("media-bet", "m@example.com", "pass1234", is_staff=True)
+        utilisateur.groups.add(Group.objects.get(name="Méthodes et bureau d'études"))
+        self.client.force_login(utilisateur)
+        r = self.client.get("/media/decoupe/plan.dxf")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(b"".join(r.streaming_content), b"PLAN CONFIDENTIEL")
+
+    def test_autres_dossiers_reserves_au_personnel(self):
+        self.client.force_login(get_user_model().objects.create_user("media-ext", "m@example.com", "pass1234"))
+        self.assertEqual(self.client.get("/media/autre.txt").status_code, 403)
+        self.client.force_login(get_user_model().objects.create_user("media-staff", "m2@example.com", "pass1234", is_staff=True))
+        self.assertEqual(self.client.get("/media/autre.txt").status_code, 200)
+
+    def test_pas_de_sortie_du_dossier(self):
+        self.client.force_login(get_user_model().objects.create_superuser("media-su", "s@example.com", "pass1234"))
+        self.assertIn(self.client.get("/media/../settings.py").status_code, (400, 404))
+
+
+class DiagnosticSecuriteTests(TestCase):
+    CLE_FORTE = "k" * 10 + "Zx9" * 10 + "q8"
+
+    def _titres(self, **reglages):
+        from django.test import override_settings
+
+        from .securite import diagnostics
+
+        with override_settings(**reglages):
+            return {c.titre for c in diagnostics()}
+
+    def _reglages_sains(self, **surcharge):
+        base = dict(
+            DEBUG=False, SECRET_KEY=self.CLE_FORTE, ALLOWED_HOSTS=["erp.local"],
+            SESSION_COOKIE_SECURE=True, CSRF_COOKIE_SECURE=True,
+            DATABASES={"default": {**__import__("django.conf", fromlist=["settings"]).settings.DATABASES["default"], "PASSWORD": "Un-vrai-mot-de-passe-9"}},
+        )
+        base.update(surcharge)
+        return base
+
+    def test_configuration_saine_sans_constat(self):
+        self.assertEqual(self._titres(**self._reglages_sains()), set())
+
+    def test_debug_est_critique(self):
+        self.assertIn("Mode DEBUG activé", self._titres(**self._reglages_sains(DEBUG=True)))
+
+    def test_cle_par_defaut_ou_courte_est_critique(self):
+        for cle in ("django-insecure-change-me-in-production", "change-me-in-production", "trop-courte"):
+            self.assertIn("Clé secrète par défaut ou trop courte", self._titres(**self._reglages_sains(SECRET_KEY=cle)), cle)
+
+    def test_hotes_et_mot_de_passe_et_cookies(self):
+        titres = self._titres(**self._reglages_sains(ALLOWED_HOSTS=["*"], SESSION_COOKIE_SECURE=False))
+        self.assertIn("ALLOWED_HOSTS accepte tous les noms", titres)
+        self.assertIn("Cookies de session non marqués « sécurisés »", titres)
+
+    def test_mot_de_passe_de_base_par_defaut(self):
+        from django.conf import settings
+
+        reglages = self._reglages_sains()
+        reglages["DATABASES"] = {"default": {**settings.DATABASES["default"], "PASSWORD": "erp_dev_password"}}
+        self.assertIn("Mot de passe de base de données par défaut", self._titres(**reglages))
+
+    def test_debug_est_faux_par_defaut_sans_variable(self):
+        import os
+        import subprocess
+        import sys
+
+        env = {k: v for k, v in os.environ.items() if k != "DJANGO_DEBUG"}
+        sortie = subprocess.run(
+            [sys.executable, "-c", "from django.conf import settings; import os; os.environ.setdefault('DJANGO_SETTINGS_MODULE','config.settings'); print(settings.DEBUG)"],
+            capture_output=True, text=True, env=env, cwd=str(__import__('django.conf', fromlist=['settings']).settings.BASE_DIR),
+        )
+        self.assertEqual(sortie.stdout.strip(), "False", sortie.stderr)
+
+    def test_bandeau_visible_des_seuls_superutilisateurs(self):
+        from django.test import override_settings
+
+        with override_settings(DEBUG=False, SECRET_KEY="trop-courte"):
+            self.client.force_login(get_user_model().objects.create_superuser("sec-su", "s@example.com", "pass1234"))
+            self.assertContains(self.client.get("/admin/"), "Clé secrète par défaut ou trop courte")
+            self.client.force_login(get_user_model().objects.create_user("sec-staff", "t@example.com", "pass1234", is_staff=True))
+            self.assertNotContains(self.client.get("/admin/"), "Clé secrète par défaut")
+
+    def test_commande_verifier_securite_code_de_sortie(self):
+        import io
+
+        from django.core.management import call_command
+        from django.test import override_settings
+
+        with override_settings(**self._reglages_sains()):
+            sortie = io.StringIO()
+            call_command("verifier_securite", stdout=sortie)
+            self.assertIn("aucun constat", sortie.getvalue())
+        with override_settings(**self._reglages_sains(DEBUG=True)):
+            with self.assertRaises(SystemExit) as cm:
+                call_command("verifier_securite", stdout=io.StringIO())
+            self.assertEqual(cm.exception.code, 1)
+
+    def test_mot_de_passe_trop_court_refuse(self):
+        from django.contrib.auth.password_validation import validate_password
+        from django.core.exceptions import ValidationError
+
+        with self.assertRaises(ValidationError):
+            validate_password("Abc9xyz!1")  # 9 caractères
+        validate_password("Rx7!pLm29qZw")
+
+
+class LimitationConnexionTests(TestCase):
+    """D-AD-04 : 5 échecs en 15 minutes verrouillent l'identifiant (même avec le bon mot de passe)."""
+
+    def setUp(self):
+        self.utilisateur = get_user_model().objects.create_user("marc", "m@example.com", "Bon-mot-de-passe-1", is_staff=True)
+
+    def _tenter(self, identifiant="marc", mot_de_passe="mauvais", **extra):
+        return self.client.post("/admin/login/", {"username": identifiant, "password": mot_de_passe}, **extra)
+
+    def _echouer(self, n, identifiant="marc"):
+        for _ in range(n):
+            self._tenter(identifiant)
+
+    def test_quatre_echecs_ne_bloquent_pas(self):
+        self._echouer(4)
+        self.assertEqual(self._tenter(mot_de_passe="Bon-mot-de-passe-1").status_code, 302)
+
+    def test_cinq_echecs_bloquent_meme_avec_le_bon_mot_de_passe(self):
+        self._echouer(5)
+        r = self._tenter(mot_de_passe="Bon-mot-de-passe-1")
+        self.assertEqual(r.status_code, 200)  # reste sur la page de connexion
+        self.assertNotIn("_auth_user_id", self.client.session)
+
+    def test_message_explicite_de_verrouillage(self):
+        self._echouer(5)
+        r = self._tenter(mot_de_passe="Bon-mot-de-passe-1")
+        self.assertContains(r, "compte verrouillé")
+
+    def test_les_refus_pendant_le_verrou_ne_prolongent_pas_le_blocage(self):
+        from .models import EvenementConnexion
+
+        self._echouer(5)
+        self._echouer(10)  # tentatives pendant le verrou
+        self.assertEqual(EvenementConnexion.objects.filter(identifiant="marc", type_evenement="echec").count(), 5)
+        self.assertEqual(EvenementConnexion.objects.filter(identifiant="marc", type_evenement="bloque").count(), 10)
+
+    def test_le_verrou_tombe_apres_la_fenetre(self):
+        import datetime
+
+        from django.utils import timezone
+
+        from .models import EvenementConnexion
+
+        self._echouer(5)
+        EvenementConnexion.objects.filter(type_evenement="echec").update(date=timezone.now() - datetime.timedelta(minutes=16))
+        self.assertEqual(self._tenter(mot_de_passe="Bon-mot-de-passe-1").status_code, 302)
+
+    def test_un_succes_remet_le_compteur_a_zero(self):
+        self._echouer(4)
+        self._tenter(mot_de_passe="Bon-mot-de-passe-1")
+        self.client.logout()
+        self._echouer(4)  # 4 nouveaux échecs seulement : pas de blocage
+        self.assertEqual(self._tenter(mot_de_passe="Bon-mot-de-passe-1").status_code, 302)
+
+    def test_autres_comptes_non_affectes_et_casse_ignoree(self):
+        get_user_model().objects.create_user("lea", "l@example.com", "Autre-mot-de-passe-2", is_staff=True)
+        self._echouer(3)
+        self._echouer(2, identifiant="MARC")  # même compte, autre casse
+        self.assertEqual(self._tenter(mot_de_passe="Bon-mot-de-passe-1").status_code, 200)
+        self.assertEqual(self._tenter("lea", "Autre-mot-de-passe-2").status_code, 302)
+
+    def test_identifiant_inexistant_traite_pareil(self):
+        from .connexions import compte_verrouille
+
+        self._echouer(5, identifiant="fantome")
+        self.assertTrue(compte_verrouille("fantome"))
+
+    def test_api_en_authentification_de_base_est_protegee_aussi(self):
+        import base64
+
+        get_user_model().objects.filter(username="marc").update(is_superuser=True)
+        entete = lambda mdp: {"HTTP_AUTHORIZATION": "Basic " + base64.b64encode(f"marc:{mdp}".encode()).decode()}
+        for _ in range(5):
+            self.client.get("/api/v1/articles/", **entete("faux"))
+        self.assertEqual(self.client.get("/api/v1/articles/", **entete("Bon-mot-de-passe-1")).status_code, 403)
+
+    def test_journal_enregistre_succes_et_adresse_ip(self):
+        from .models import EvenementConnexion
+
+        self._tenter(mot_de_passe="Bon-mot-de-passe-1", HTTP_X_FORWARDED_FOR="203.0.113.7, 10.0.0.1")
+        evenement = EvenementConnexion.objects.get(type_evenement="succes")
+        self.assertEqual((evenement.identifiant, evenement.adresse_ip), ("marc", "203.0.113.7"))
+
+    def test_adresse_ip_invalide_ignoree(self):
+        from .models import EvenementConnexion
+
+        self._tenter(HTTP_X_FORWARDED_FOR="pas-une-ip")
+        self.assertIsNone(EvenementConnexion.objects.get(type_evenement="echec").adresse_ip)
+
+    def test_minutes_restantes_et_purge(self):
+        import datetime
+
+        from django.utils import timezone
+
+        from .connexions import enregistrer, minutes_restantes
+        from .models import EvenementConnexion
+
+        self.assertEqual(minutes_restantes("marc"), 0)
+        self._echouer(5)
+        self.assertTrue(1 <= minutes_restantes("marc") <= 15)
+        EvenementConnexion.objects.update(date=timezone.now() - datetime.timedelta(days=200))
+        enregistrer("quelquun", "succes")
+        self.assertEqual(EvenementConnexion.objects.count(), 1)  # l'ancien historique est purgé
+
+    def test_deblocage_manuel_par_un_administrateur(self):
+        from .models import EvenementConnexion
+
+        self._echouer(5)
+        admin_user = get_user_model().objects.create_superuser("root", "r@example.com", "Admin-mot-de-passe-3")
+        self.client.force_login(admin_user)
+        ids = list(EvenementConnexion.objects.filter(identifiant="marc").values_list("pk", flat=True)[:1])
+        self.client.post("/admin/comptes/evenementconnexion/", {"action": "action_debloquer", "_selected_action": ids}, follow=True)
+        self.client.logout()
+        self.assertEqual(self._tenter(mot_de_passe="Bon-mot-de-passe-1").status_code, 302)
+
+    def test_journal_en_consultation_seule_et_reserve_aux_habilites(self):
+        from .models import EvenementConnexion
+
+        self._echouer(1)
+        evenement = EvenementConnexion.objects.first()
+        self.client.force_login(get_user_model().objects.create_superuser("root2", "r@example.com", "Admin-mot-de-passe-3"))
+        self.assertEqual(self.client.get("/admin/comptes/evenementconnexion/").status_code, 200)
+        self.assertEqual(self.client.get("/admin/comptes/evenementconnexion/add/").status_code, 403)
+        self.assertEqual(self.client.post(f"/admin/comptes/evenementconnexion/{evenement.pk}/delete/", {"post": "yes"}).status_code, 403)
+        simple = get_user_model().objects.create_user("simple-j", "s@example.com", "pass-mot-de-passe-4", is_staff=True)
+        self.client.force_login(simple)
+        self.assertEqual(self.client.get("/admin/comptes/evenementconnexion/").status_code, 403)
+
+
+class JournalAffichageTests(TestCase):
+    def test_colonne_verrouille_en_clair(self):
+        for _ in range(5):
+            self.client.post("/admin/login/", {"username": "cible", "password": "x"})
+        self.client.force_login(get_user_model().objects.create_superuser("root3", "r@example.com", "Admin-mot-de-passe-3"))
+        page = self.client.get("/admin/comptes/evenementconnexion/?q=cible")
+        self.assertContains(page, "VERROUILLÉ")

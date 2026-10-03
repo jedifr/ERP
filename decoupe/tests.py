@@ -5,6 +5,7 @@ from pathlib import Path
 
 import ezdxf
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from rest_framework.test import APIClient
@@ -710,7 +711,13 @@ class ApiTests(TestCase):
     def setUp(self):
         self.client = APIClient()
         utilisateur = get_user_model().objects.create_user(username="op", password="x", email="jedifr@gmail.com")
+        utilisateur.groups.add(Group.objects.get(name="Méthodes et bureau d'études"))
         self.client.force_authenticate(utilisateur)
+
+    def test_api_refusee_sans_role(self):
+        sans_role = get_user_model().objects.create_user(username="sans-role", password="x")
+        self.client.force_authenticate(sans_role)
+        self.assertEqual(self.client.get("/api/v1/pieces-decoupe/").status_code, 403)
 
     def test_upload_piece_puis_creation_imbrication(self):
         contenu = _dxf_bytes(_rectangle_avec_trou)

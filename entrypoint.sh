@@ -7,6 +7,8 @@ python manage.py migrate --noinput
 # activation (ne touche que ceux qui n'ont encore aucune entrée : idempotent).
 python manage.py populate_history --auto
 python manage.py collectstatic --noinput
+# Signale (sans bloquer) les réglages de sécurité douteux dans `docker compose logs web`.
+python manage.py verifier_securite || true
 
 exec gunicorn config.wsgi:application \
     --bind 0.0.0.0:8000 \

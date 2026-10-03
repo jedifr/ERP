@@ -2486,3 +2486,46 @@ Tests : `RetardsEtEcartsTests`, `RolesFacturationTests` (`facturation/tests.py`)
 **Vérifié** (Playwright) : liste des factures (échéance « en retard », colonne
 d'écart, bouton « Préparer une facture ») et tableau de bord (1 facture en retard,
 120 € TTC à relancer, CA net d'avoirs).
+
+## Recette du module D (sécurité transverse) : priorité 1
+
+Tests : `ApiSecuriseeParDefautTests`, `MediaProtegeTests`, `DiagnosticSecuriteTests`,
+`LimitationConnexionTests`, `GroupesMetierTests` (`comptes/tests.py`).
+
+- **API sécurisée par défaut.** Toute route d'API exige désormais la permission du modèle
+  (lecture = « voir », écriture = ajout/modification/suppression) : c'est le réglage par
+  défaut de DRF (`ModelPermissionsAvecLecture`), donc un futur ViewSet est protégé sans rien
+  ajouter. Avant, technique, commercial, comptabilité, achats, sous-traitance et découpe
+  n'exigeaient qu'un compte connecté. Un test parcourt **toutes** les routes enregistrées.
+  Les marges réelles et taux de charge (pilotage) exigent la nouvelle permission
+  `voir_marges` (rôle *Direction*).
+- **Nouveaux rôles** pour les modules sans rôle jusque-là : *Méthodes et bureau d'études*
+  (articles, matières, gammes, postes, découpe), *Achats* (achats, sous-traitance),
+  *Comptabilité*. Le rôle *Commercial* peut maintenant créer et modifier ses clients,
+  adresses et contacts (il ne pouvait que les consulter). Un test vérifie que les listes à
+  autocomplétion de chaque rôle répondent.
+- **Fichiers `/media/` protégés.** Les plans DXF/DWG des clients étaient lisibles par
+  quiconque connaissait l'URL, sans connexion. Ils exigent maintenant un compte connecté ayant
+  le droit de voir les pièces à découper (autres fichiers : compte du personnel).
+- **Configuration de production.** `DEBUG` vaut `False` si la variable est absente (avant :
+  `True`). Un diagnostic (`manage.py verifier_securite`, lancé au démarrage du conteneur,
+  et **bandeau rouge sur l'accueil de l'admin, visible des seuls superutilisateurs**) signale :
+  mode DEBUG, clé secrète par défaut ou trop courte, `ALLOWED_HOSTS` ouvert, mot de passe
+  de base par défaut, cookies non sécurisés. Rien ne bloque le démarrage : un réglage douteux
+  est signalé, jamais cause de panne. Nouveaux réglages `.env` : `DJANGO_SESSION_HEURES`
+  (12 par défaut), `DJANGO_COOKIES_SECURISES`, `DJANGO_HSTS_SECONDS` (à activer seulement
+  une fois l'ERP servi en HTTPS). Mots de passe : 10 caractères minimum.
+- **Connexion : anti force brute et journal.** Après 5 échecs en 15 minutes sur un même
+  identifiant, la connexion est refusée — même avec le bon mot de passe — jusqu'à ce que les
+  échecs sortent de la fenêtre ; une connexion réussie remet le compteur à zéro, un
+  administrateur peut débloquer (permission `debloquer_compte`). Le compteur est par
+  identifiant, pas par IP : derrière le reverse proxy du NAS toutes les requêtes ont la même
+  adresse et un blocage par IP verrouillerait tout le monde. S'applique aussi à l'API en
+  authentification de base. Le *Journal des connexions* (Paramétrage) trace réussites,
+  échecs, refus et déblocages, en consultation seule, conservé 180 jours.
+- Corrigé au passage : `LOGIN_URL` n'était pas défini (la redirection vers la connexion
+  pointait sur `/accounts/login/`, inexistant).
+
+**Vérifié** (Playwright) : 5 échecs puis bon mot de passe → refusé avec le message
+« compte verrouillé, réessayez dans 15 minute(s) » ; bandeau de sécurité sur l'accueil ;
+journal des connexions.
