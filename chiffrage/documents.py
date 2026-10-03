@@ -6,6 +6,7 @@ from comptes.models import Societe
 from comptes.montants import ZERO, D0, arrondir, arrondir_prix, pourcent, somme
 from comptes.pdf import (
     GRIS,
+    PageBreak,
     Paragraph,
     Spacer,
     Table,
@@ -376,10 +377,7 @@ def generer_pdf_bon_preparation(commande):
     )
 
 
-def generer_pdf_ordre_fabrication(of):
-    """Fiche de fabrication : quantité, livraison prévue, nomenclature (composants) et gamme (opérations)."""
-    st = styles()
-    societe = Societe.charger()
+def _elements_fiche_fabrication(of, societe, st):
     titre = f"ORDRE DE FABRICATION {of.numero}"
     references = [
         f"Commande : {of.commande_id}",
@@ -431,11 +429,31 @@ def generer_pdf_ordre_fabrication(of):
     else:
         gamme = Paragraph("Aucune opération de gamme.", st["petit"])
 
-    elements = [
+    return titre, [
         entete_societe(societe, st), Spacer(1, 8 * mm),
         _titre_et_references(titre, references), Spacer(1, 5 * mm),
         resume, Spacer(1, 6 * mm),
         Paragraph("<b>Nomenclature</b>", st["normal"]), Spacer(1, 2 * mm), nomenclature, Spacer(1, 6 * mm),
         Paragraph("<b>Gamme</b>", st["normal"]), Spacer(1, 2 * mm), gamme,
     ]
+
+
+def generer_pdf_ordre_fabrication(of):
+    """Fiche de fabrication : quantité, livraison prévue, nomenclature (composants) et gamme (opérations)."""
+    titre, elements = _elements_fiche_fabrication(of, Societe.charger(), styles())
+    return construire_pdf(elements, titre)
+
+
+def generer_pdf_ordres_fabrication(ordres):
+    """Toutes les fiches de fabrication dans un seul PDF, une par page (impression en une fois)."""
+    ordres = list(ordres)
+    if not ordres:
+        raise DocumentError("Aucun ordre de fabrication à imprimer.")
+    st, societe = styles(), Societe.charger()
+    elements = []
+    for of in ordres:
+        if elements:
+            elements.append(PageBreak())
+        elements += _elements_fiche_fabrication(of, societe, st)[1]
+    titre = f"ORDRES DE FABRICATION {ordres[0].commande_id}" if len({o.commande_id for o in ordres}) == 1 else "ORDRES DE FABRICATION"
     return construire_pdf(elements, titre)

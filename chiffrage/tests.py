@@ -4807,3 +4807,62 @@ class DocumentsCommandeTests(_FixtureOrdresCommande, TestCase):
         self.client.force_login(magasinier)
         reponse = self.client.get(f"/admin/chiffrage/commande/{self.commande.pk}/bon-preparation-pdf/")
         self.assertEqual(reponse.status_code, 200)
+
+
+class ImpressionGroupeeOFTests(_FixtureOrdresCommande, TestCase):
+    """Toutes les fiches de fabrication d'une commande dans un seul PDF, une par page."""
+
+    def _pages(self, pdf):
+        return pdf.count(b"/Type /Page\n")
+
+    def test_un_seul_pdf_une_page_par_of(self):
+        from .documents import generer_pdf_ordres_fabrication
+
+        ordres = creer_ordres_fabrication(self.commande)  # 3 OF
+        pdf = generer_pdf_ordres_fabrication(ordres)
+        texte = pdf.decode("latin-1")
+        self.assertTrue(pdf.startswith(b"%PDF"))
+        self.assertEqual(self._pages(pdf), 3)
+        for of in ordres:
+            self.assertIn(of.numero, texte)
+        self.assertIn("Page 3 / 3", texte)
+
+    def test_aucun_of_a_imprimer(self):
+        from .documents import DocumentError, generer_pdf_ordres_fabrication
+
+        with self.assertRaises(DocumentError):
+            generer_pdf_ordres_fabrication([])
+
+    def test_creation_propose_le_lien_d_impression_des_of_crees(self):
+        url = f"/admin/chiffrage/commande/{self.commande.pk}/ordres-fabrication/"
+        reponse = self.client.post(url, {}, follow=True)
+        self.assertContains(reponse, "Imprimer les 3 fiche(s) de fabrication")
+        self.assertContains(reponse, f"/admin/chiffrage/commande/{self.commande.pk}/fiches-fabrication-pdf/?ofs=")
+
+    def test_action_de_la_commande_toutes_ou_selection(self):
+        ordres = creer_ordres_fabrication(self.commande)
+        base = f"/admin/chiffrage/commande/{self.commande.pk}/fiches-fabrication-pdf/"
+        tout = self.client.get(base)
+        self.assertEqual((tout.status_code, tout["Content-Type"]), (200, "application/pdf"))
+        self.assertEqual(self._pages(tout.content), 3)
+        un = self.client.get(f"{base}?ofs={ordres[0].numero}")
+        self.assertEqual(self._pages(un.content), 1)
+
+    def test_commande_sans_of_redirige_avec_message(self):
+        reponse = self.client.get(f"/admin/chiffrage/commande/{self.commande.pk}/fiches-fabrication-pdf/", follow=True)
+        self.assertContains(reponse, "Aucun ordre de fabrication à imprimer")
+
+    def test_action_de_liste_des_of_selectionnes(self):
+        ordres = creer_ordres_fabrication(self.commande)
+        reponse = self.client.post(
+            "/admin/chiffrage/ordrefabrication/",
+            {"action": "action_imprimer_fiches", "_selected_action": [o.pk for o in ordres[:2]]},
+        )
+        self.assertEqual((reponse.status_code, reponse["Content-Type"]), (200, "application/pdf"))
+        self.assertEqual(self._pages(reponse.content), 2)
+
+    def test_api(self):
+        creer_ordres_fabrication(self.commande)
+        reponse = self.client.get(f"/api/v1/commandes/{self.commande.pk}/fiches-fabrication-pdf/")
+        self.assertEqual((reponse.status_code, reponse["Content-Type"]), (200, "application/pdf"))
+        self.assertEqual(self._pages(reponse.content), 3)

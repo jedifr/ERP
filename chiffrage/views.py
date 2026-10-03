@@ -14,6 +14,7 @@ from .documents import (
     generer_pdf_bon_preparation,
     generer_pdf_devis,
     generer_pdf_ordre_fabrication,
+    generer_pdf_ordres_fabrication,
 )
 from .models import Commande, CommandeError, Devis, DevisLigne, DevisLigneOperation, OperationOF, OrdreFabrication
 from .moteur import ChiffrageError, calculer_devis
@@ -150,6 +151,18 @@ class CommandeViewSet(viewsets.ModelViewSet):
         """Bon de préparation (PDF, sans prix)."""
         commande = self.get_object()
         return _reponse_pdf(generer_pdf_bon_preparation, commande, f"preparation-{commande.pk}")
+
+    @action(detail=True, methods=["get"], url_path="fiches-fabrication-pdf")
+    def fiches_fabrication_pdf_action(self, request, pk=None):
+        """Toutes les fiches de fabrication de la commande en un seul PDF."""
+        commande = self.get_object()
+        if not request.user.has_perm("chiffrage.view_ordrefabrication"):
+            raise PermissionDenied("Vous n'avez pas la permission de voir les ordres de fabrication.")
+        return _reponse_pdf(
+            generer_pdf_ordres_fabrication,
+            commande.ordres_fabrication.select_related("article", "commande__client").order_by("numero"),
+            f"fiches-fabrication-{commande.pk}",
+        )
 
     @action(detail=True, methods=["post"], url_path="creer-ordres-fabrication", permission_classes=[IsAuthenticated])
     def creer_ordres_fabrication_action(self, request, pk=None):

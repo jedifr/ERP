@@ -57,6 +57,7 @@ from .documents import (
     generer_pdf_bon_preparation,
     generer_pdf_devis,
     generer_pdf_ordre_fabrication,
+    generer_pdf_ordres_fabrication,
 )
 from .moteur import ChiffrageError, calculer_devis
 from .planning_sync import resynchroniser
@@ -650,7 +651,7 @@ class CommandeAdmin(ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMi
     readonly_fields = ["statut"]
     inlines = [CommandeLigneInline]
     actions = ["action_synchroniser_lignes", "action_annuler"]
-    actions_detail = ["action_creer_ordres", "action_ar_pdf", "action_bon_preparation_pdf"]
+    actions_detail = ["action_creer_ordres", "action_fiches_fabrication_pdf", "action_ar_pdf", "action_bon_preparation_pdf"]
 
     class Media:
         js = ["chiffrage/commande_admin_live.js"]
@@ -697,6 +698,25 @@ class CommandeAdmin(ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMi
     def action_bon_preparation_pdf(self, request, object_id):
         return self._pdf_commande(request, object_id, generer_pdf_bon_preparation, "preparation")
 
+    @unfold_action(description="Fiches de fabrication (PDF)", url_path="fiches-fabrication-pdf")
+    def action_fiches_fabrication_pdf(self, request, object_id):
+        """Toutes les fiches de fabrication de la commande en un seul PDF (ou celles de `?ofs=A,B`)."""
+        commande = get_object_or_404(Commande, pk=object_id)
+        if not (self.has_view_permission(request, commande) and request.user.has_perm("chiffrage.view_ordrefabrication")):
+            raise PermissionDenied
+        ordres = commande.ordres_fabrication.select_related("article", "commande__client").order_by("numero")
+        voulus = [n for n in request.GET.get("ofs", "").split(",") if n]
+        if voulus:
+            ordres = ordres.filter(pk__in=voulus)
+        try:
+            contenu = generer_pdf_ordres_fabrication(ordres)
+        except DocumentError as exc:
+            self.message_user(request, str(exc), level=messages.ERROR)
+            return HttpResponseRedirect(reverse("admin:chiffrage_commande_change", args=[commande.pk]))
+        reponse = HttpResponse(contenu, content_type="application/pdf")
+        reponse["Content-Disposition"] = f'inline; filename="fiches-fabrication-{commande.pk}.pdf"'
+        return reponse
+
     @unfold_action(description="Créer les ordres de fabrication", permissions=["creer_ordres"], url_path="ordres-fabrication")
     def action_creer_ordres(self, request, object_id):
         commande = get_object_or_404(Commande, pk=object_id)
@@ -710,7 +730,15 @@ class CommandeAdmin(ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMi
                 return HttpResponseRedirect(retour)
             self.message_user(
                 request,
-                f"{len(ordres)} ordre(s) de fabrication créé(s) : " + ", ".join(o.numero for o in ordres) + ".",
+                format_html(
+                    "{} ordre(s) de fabrication créé(s) : {}. <a href='{}?ofs={}' target='_blank' class='underline font-semibold'>"
+                    "Imprimer les {} fiche(s) de fabrication (PDF)</a>",
+                    len(ordres),
+                    ", ".join(o.numero for o in ordres),
+                    reverse("admin:chiffrage_commande_action_fiches_fabrication_pdf", args=[commande.pk]),
+                    ",".join(o.numero for o in ordres),
+                    len(ordres),
+                ),
                 level=messages.SUCCESS,
             )
             return HttpResponseRedirect(retour)
@@ -1033,8 +1061,19 @@ class OrdreFabricationAdmin(ExportCsvMixin, CodificationInitialeMixin, ModelAdmi
     search_fields = ["numero", "commande__numero", "article__reference"]
     autocomplete_fields = ["commande", "article"]
     inlines = [ComposantOFInline, OperationOFInline]
-    actions = ["action_resynchroniser"]
+    actions = ["action_resynchroniser", "action_imprimer_fiches"]
     actions_detail = ["action_pdf"]
+
+    @admin.action(description="Imprimer les fiches de fabrication (un seul PDF)")
+    def action_imprimer_fiches(self, request, queryset):
+        try:
+            contenu = generer_pdf_ordres_fabrication(queryset.select_related("article", "commande__client").order_by("numero"))
+        except DocumentError as exc:
+            self.message_user(request, str(exc), level=messages.ERROR)
+            return None
+        reponse = HttpResponse(contenu, content_type="application/pdf")
+        reponse["Content-Disposition"] = 'inline; filename="fiches-fabrication.pdf"'
+        return reponse
 
     @admin.display(description="Lignes de commande couvertes")
     def lignes_commande_display(self, obj):
