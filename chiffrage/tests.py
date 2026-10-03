@@ -3854,3 +3854,130 @@ class RolesMetierModuleATests(_FixtureModuleA, TestCase):
     def test_responsable_voit_le_champ_statut(self):
         self.client.force_login(self._utilisateur("resp-c", "Responsable commercial"))
         self.assertContains(self.client.get("/admin/chiffrage/devis/add/"), 'name="statut"')
+
+
+class AnnulationLivraisonTests(_FixtureModuleA, TestCase):
+    """C-OP-02 : on corrige une livraison en l'annulant (cumul livré, stock et statut de
+    commande rétablis), jamais en éditant ou supprimant ses lignes."""
+
+    def setUp(self):
+        super().setUp()
+        self._valider()
+        self.commande = lancer_en_production(self.devis)
+        self.ligne_cde = self.commande.lignes.get()
+        emplacement = Emplacement.objects.create(code="LIV-ANN")
+        self.lot = Lot.objects.create(article=self.article, emplacement=emplacement)
+        MouvementStock.objects.create(lot=self.lot, type_mouvement="entree", quantite=10, motif="stock")
+
+    def _livrer(self, quantite, numero="LIV-ANN-1"):
+        livraison = Livraison.objects.create(numero=numero, commande=self.commande, date_livraison=datetime.date(2026, 2, 1))
+        ligne = LivraisonLigne.objects.create(livraison=livraison, commande_ligne=self.ligne_cde, quantite_livree=quantite)
+        return livraison, ligne
+
+    def test_annulation_retablit_livre_stock_et_statut(self):
+        livraison, _ = self._livrer(3)  # commande de 3 : soldée
+        self.commande.refresh_from_db()
+        self.assertEqual(self.commande.statut, Commande.Statut.SOLDEE)
+        livraison.annuler(utilisateur=self.user, motif="Erreur de saisie")
+        livraison.refresh_from_db()
+        self.assertEqual(livraison.statut, Livraison.Statut.ANNULEE)
+        self.assertEqual((livraison.motif_annulation, livraison.utilisateur_annulation), ("Erreur de saisie", self.user))
+        self.assertIsNotNone(livraison.date_annulation)
+        self.ligne_cde.refresh_from_db()
+        self.assertEqual(self.ligne_cde.quantite_livree, 0)
+        self.lot.refresh_from_db()
+        self.assertEqual(self.lot.quantite, 10)
+        self.commande.refresh_from_db()
+        self.assertEqual(self.commande.statut, Commande.Statut.EN_COURS)
+
+    def test_annulation_conserve_les_lignes_et_contre_passe_les_sorties(self):
+        livraison, _ = self._livrer(2)
+        livraison.annuler(utilisateur=self.user)
+        self.assertEqual(livraison.lignes.count(), 1)
+        sortie = MouvementStock.objects.get(reference_origine="LIVRAISON-LIV-ANN-1")
+        self.assertTrue(MouvementStock.objects.filter(annule_mouvement=sortie).exists())
+
+    def test_annulation_dune_livraison_en_fifo_sur_plusieurs_lots(self):
+        autre = Lot.objects.create(article=self.article, emplacement=Emplacement.objects.create(code="LIV-ANN-2"))
+        MouvementStock.objects.create(lot=autre, type_mouvement="entree", quantite=10, motif="stock")
+        self.lot.refresh_from_db()
+        livraison, _ = self._livrer(3)
+        livraison.annuler(utilisateur=self.user)
+        self.lot.refresh_from_db()
+        autre.refresh_from_db()
+        self.assertEqual((self.lot.quantite, autre.quantite), (10, 10))
+
+    def test_double_annulation_refusee(self):
+        livraison, _ = self._livrer(1)
+        livraison.annuler()
+        with self.assertRaises(LivraisonError):
+            livraison.annuler()
+        self.ligne_cde.refresh_from_db()
+        self.assertEqual(self.ligne_cde.quantite_livree, 0)
+
+    def test_annulation_refusee_si_la_commande_est_deja_facturee(self):
+        from facturation.models import Facture
+
+        livraison, _ = self._livrer(1)
+        Facture.objects.create(
+            numero="FAC-ANN", commande=self.commande, date_facturation=datetime.date(2026, 2, 5), montant_ht=1, montant_ttc=1
+        )
+        with self.assertRaises(LivraisonError):
+            livraison.annuler()
+        self.ligne_cde.refresh_from_db()
+        self.assertEqual(self.ligne_cde.quantite_livree, 1)
+
+    def test_lignes_et_livraison_immuables(self):
+        livraison, ligne = self._livrer(1)
+        ligne.quantite_livree = 3
+        with self.assertRaises(LivraisonError):
+            ligne.save()
+        with self.assertRaises(LivraisonError):
+            ligne.delete()
+        with self.assertRaises(LivraisonError):
+            livraison.delete()
+        self.ligne_cde.refresh_from_db()
+        self.assertEqual(self.ligne_cde.quantite_livree, 1)
+
+    def test_pas_de_nouvelle_ligne_sur_une_livraison_annulee(self):
+        livraison, _ = self._livrer(1)
+        livraison.annuler()
+        nouvelle = LivraisonLigne(livraison=livraison, commande_ligne=self.ligne_cde, quantite_livree=1)
+        with self.assertRaises(ValidationError):
+            nouvelle.full_clean()
+
+    def test_admin_inline_sans_modification_ni_suppression(self):
+        livraison, ligne = self._livrer(1)
+        page = self.client.get(f"/admin/chiffrage/livraison/{livraison.pk}/change/")
+        self.assertEqual(page.status_code, 200)
+        self.assertNotContains(page, f'name="lignes-0-quantite_livree"' + ' value="1')
+        self.assertEqual(self.client.post(f"/admin/chiffrage/livraison/{livraison.pk}/delete/", {"post": "yes"}).status_code, 403)
+        self.assertEqual(self.client.post(f"/admin/chiffrage/livraisonligne/{ligne.pk}/delete/", {"post": "yes"}).status_code, 403)
+
+    def test_admin_page_et_action_dannulation(self):
+        livraison, _ = self._livrer(2)
+        page = self.client.get(f"/admin/chiffrage/livraison/{livraison.pk}/annuler/")
+        self.assertEqual(page.status_code, 200)
+        self.assertContains(page, "Motif")
+        self.client.post(f"/admin/chiffrage/livraison/{livraison.pk}/annuler/", {"motif": "Mauvaise commande"}, follow=True)
+        livraison.refresh_from_db()
+        self.assertEqual(livraison.statut, Livraison.Statut.ANNULEE)
+        self.lot.refresh_from_db()
+        self.assertEqual(self.lot.quantite, 10)
+
+    def test_annulation_exige_la_permission(self):
+        from django.contrib.auth import get_user_model
+
+        livraison, _ = self._livrer(1)
+        simple = get_user_model().objects.create_user("liv-simple", "l@example.com", "pass1234", is_staff=True)
+        self.client.force_login(simple)
+        self.client.post(f"/admin/chiffrage/livraison/{livraison.pk}/annuler/", {"motif": "x"})
+        livraison.refresh_from_db()
+        self.assertEqual(livraison.statut, Livraison.Statut.VALIDEE)
+
+    def test_historique_de_la_livraison(self):
+        livraison, _ = self._livrer(1)
+        livraison.annuler(utilisateur=self.user, motif="Erreur")
+        derniere = livraison.history.first()
+        self.assertEqual(derniere.statut, Livraison.Statut.ANNULEE)
+        self.assertEqual(derniere.history_change_reason, "Annulation : Erreur")

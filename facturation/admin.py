@@ -11,7 +11,9 @@ from codification.mixins import CodificationInitialeMixin
 from codification.models import RegleCodification
 from comptabilite.generation import GenerationEcritureError, generer_ecriture_facture
 
-from .models import Facture
+from comptes.historique import HistoriqueLectureSeule
+
+from .models import CHAMPS_FIGES, Facture, facture_verrouillee
 
 
 @staff_member_required
@@ -27,14 +29,14 @@ def montants_calcules_commande_view(request, numero):
     montants_ttc = [l.montant_ttc for l in commande.lignes.all() if l.montant_ttc is not None]
     return JsonResponse(
         {
-            "montant_ht": sum(montants) if montants else None,
-            "montant_ttc": sum(montants_ttc) if montants_ttc else None,
+            "montant_ht": round(sum(montants), 2) if montants else None,
+            "montant_ttc": round(sum(montants_ttc), 2) if montants_ttc else None,
         }
     )
 
 
 @admin.register(Facture)
-class FactureAdmin(CodificationInitialeMixin, ModelAdmin):
+class FactureAdmin(CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
     codification_entite = RegleCodification.Entite.FACTURE
 
     list_display = [
@@ -45,6 +47,7 @@ class FactureAdmin(CodificationInitialeMixin, ModelAdmin):
         "montant_ht",
         "montant_ttc",
         "statut_paiement",
+        "date_paiement",
         "mode_creation",
     ]
     list_filter = ["mode_creation", "statut_paiement"]
@@ -55,6 +58,18 @@ class FactureAdmin(CodificationInitialeMixin, ModelAdmin):
 
     class Media:
         js = ["facturation/facture_admin.js"]
+
+    def get_readonly_fields(self, request, obj=None):
+        champs = list(super().get_readonly_fields(request, obj))
+        if obj is not None and obj.pk:
+            champs.append("numero")
+        if facture_verrouillee(obj):
+            # Émise (référence Tiime) ou comptabilisée : seul le paiement reste libre.
+            champs += [champ[:-3] if champ.endswith("_id") else champ for champ in CHAMPS_FIGES]
+        return champs
+
+    def has_delete_permission(self, request, obj=None):
+        return not facture_verrouillee(obj) and super().has_delete_permission(request, obj)
 
     def get_urls(self):
         urls = [

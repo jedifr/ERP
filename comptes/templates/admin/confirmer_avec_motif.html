@@ -1,0 +1,15 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<div class="max-w-xl">
+  <p class="mb-4">{{ explication }}</p>
+  {% if avertissement %}<p class="mb-4 text-orange-700">{{ avertissement }}</p>{% endif %}
+  <form method="post">
+    {% csrf_token %}
+    <label for="id_motif" class="block font-semibold mb-1">Motif</label>
+    <input type="text" id="id_motif" name="motif" maxlength="200" required
+           class="border border-base-200 rounded-default px-3 py-2 w-full mb-4">
+    <button type="submit" class="bg-primary-600 text-white font-semibold px-4 py-2 rounded-default">{{ bouton }}</button>
+    <a href="{{ retour }}" class="ml-4">Retour</a>
+  </form>
+</div>
+{% endblock %}

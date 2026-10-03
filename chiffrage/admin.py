@@ -1,6 +1,7 @@
 from django import forms
 from django.contrib import admin, messages
 from django.http import HttpResponseRedirect
+from django.template.response import TemplateResponse
 from django.urls import path, reverse
 from django.utils.html import format_html
 from comptes.historique import HistoriqueLectureSeule
@@ -596,19 +597,42 @@ class CommandeLigneModificationAdmin(ModelAdmin):
 
 
 class LivraisonLigneInline(TabularInline):
+    """Lignes immuables : on en ajoute (livraison saisie en plusieurs fois) mais on ne
+    modifie ni ne supprime une ligne enregistrée — on annule la livraison."""
+
     model = LivraisonLigne
     extra = 1
     autocomplete_fields = ["commande_ligne"]
 
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def has_add_permission(self, request, obj=None):
+        return (obj is None or obj.statut == Livraison.Statut.VALIDEE) and super().has_add_permission(request, obj)
+
 
 @admin.register(Livraison)
-class LivraisonAdmin(CodificationInitialeMixin, ModelAdmin):
+class LivraisonAdmin(CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
     codification_entite = RegleCodification.Entite.LIVRAISON
 
-    list_display = ["numero", "commande", "date_livraison"]
+    list_display = ["numero", "commande", "date_livraison", "statut"]
+    list_filter = ["statut"]
     search_fields = ["numero", "commande__numero"]
     autocomplete_fields = ["commande"]
     inlines = [LivraisonLigneInline]
+    actions = ["action_annuler"]
+
+    def get_readonly_fields(self, request, obj=None):
+        champs = ["statut", "date_annulation", "motif_annulation", "utilisateur_annulation"]
+        if obj is not None and obj.pk:
+            champs += ["numero", "commande"]
+        return champs
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
     def save_formset(self, request, form, formset, change):
         try:
@@ -616,12 +640,69 @@ class LivraisonAdmin(CodificationInitialeMixin, ModelAdmin):
         except LivraisonError as exc:
             self.message_user(request, str(exc), level=messages.ERROR)
 
+    def get_urls(self):
+        urls = [
+            path(
+                "<str:numero>/annuler/",
+                self.admin_site.admin_view(self.annuler_view),
+                name="chiffrage_livraison_annuler",
+            ),
+        ]
+        return urls + super().get_urls()
+
+    @admin.action(description="Annuler la livraison", permissions=["annuler"])
+    def action_annuler(self, request, queryset):
+        if queryset.count() != 1:
+            self.message_user(request, "Sélectionnez une seule livraison à annuler.", level=messages.ERROR)
+            return None
+        return HttpResponseRedirect(reverse("admin:chiffrage_livraison_annuler", args=[queryset.get().pk]))
+
+    def has_annuler_permission(self, request):
+        return request.user.has_perm("chiffrage.annuler_livraison")
+
+    def annuler_view(self, request, numero):
+        livraison = Livraison.objects.get(pk=numero)
+        retour = reverse("admin:chiffrage_livraison_changelist")
+        if not request.user.has_perm("chiffrage.annuler_livraison"):
+            self.message_user(request, "Vous n'avez pas la permission d'annuler une livraison.", level=messages.ERROR)
+            return HttpResponseRedirect(retour)
+        if request.method == "POST":
+            try:
+                livraison.annuler(utilisateur=request.user, motif=request.POST.get("motif", "").strip())
+            except LivraisonError as exc:
+                self.message_user(request, str(exc), level=messages.ERROR)
+            else:
+                self.message_user(request, f"Livraison {livraison} annulée : quantités livrées et stock rétablis.", level=messages.SUCCESS)
+            return HttpResponseRedirect(retour)
+        return TemplateResponse(
+            request,
+            "admin/confirmer_avec_motif.html",
+            {
+                **self.admin_site.each_context(request),
+                "title": "Annuler une livraison",
+                "explication": (
+                    f"La livraison {livraison} sera annulée : le cumul livré de ses lignes et le stock "
+                    "(sorties contre-passées) sont rétablis, la commande est rouverte. "
+                    "La livraison reste consultable."
+                ),
+                "avertissement": "",
+                "bouton": "Annuler la livraison",
+                "retour": retour,
+            },
+        )
+
 
 @admin.register(LivraisonLigne)
 class LivraisonLigneAdmin(ModelAdmin):
     list_display = ["livraison", "commande_ligne", "quantite_livree"]
     search_fields = ["livraison__numero", "commande_ligne__article__reference"]
     autocomplete_fields = ["livraison", "commande_ligne"]
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 class OperationOFInline(TabularInline):

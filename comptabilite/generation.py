@@ -27,7 +27,7 @@ def _repartition_lignes(facture, parametres):
     paramètres. Repli sur les montants globaux de la facture (compte par
     défaut, sans détail par article) si la commande n'a aucune ligne
     chiffrée (ex. facture ancienne, ou lignes sans prix renseigné)."""
-    regime_fiscal = facture.commande.devis.client.regime_fiscal
+    regime_fiscal = facture.commande.client.regime_fiscal
     groupes = {}
     lignes = facture.commande.lignes.select_related(
         "taux_tva",
@@ -112,7 +112,7 @@ def generer_ecriture_facture(facture):
     groupes = _repartition_lignes(facture, parametres)
     total_ttc = sum(g["ttc"] for g in groupes.values())
 
-    client = facture.commande.devis.client
+    client = facture.commande.client
     comptes_client = getattr(client, "comptes_comptables", None)
     compte_client = (
         comptes_client.compte_client

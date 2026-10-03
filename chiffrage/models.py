@@ -595,19 +595,80 @@ class CommandeLigneModification(models.Model):
 
 
 class Livraison(models.Model):
+    class Statut(models.TextChoices):
+        VALIDEE = "validee", "Validée"
+        ANNULEE = "annulee", "Annulée"
+
     numero = models.CharField("numéro", max_length=50, primary_key=True)
     commande = models.ForeignKey(
         Commande, verbose_name="commande", on_delete=models.PROTECT, related_name="livraisons"
     )
     date_livraison = models.DateField("date de livraison", default=timezone.now)
+    statut = models.CharField("statut", max_length=20, choices=Statut.choices, default=Statut.VALIDEE, editable=False)
+    date_annulation = models.DateTimeField("annulée le", null=True, blank=True, editable=False)
+    motif_annulation = models.CharField("motif d'annulation", max_length=200, blank=True, editable=False)
+    utilisateur_annulation = models.ForeignKey(
+        settings.AUTH_USER_MODEL, verbose_name="annulée par", on_delete=models.SET_NULL, null=True, blank=True,
+        editable=False, related_name="livraisons_annulees",
+    )
+
+    history = HistoricalRecords()
 
     class Meta:
         verbose_name = "Livraison"
         verbose_name_plural = "Livraisons"
         ordering = ["-date_livraison", "numero"]
+        permissions = [("annuler_livraison", "Peut annuler une livraison")]
 
     def __str__(self):
         return self.numero
+
+    def delete(self, *args, **kwargs):
+        raise LivraisonError("Une livraison ne se supprime pas : annulez-la (le stock et le cumul livré sont alors rétablis).")
+
+    def annuler(self, utilisateur=None, motif=""):
+        """Annule la livraison : le cumul livré de chaque ligne, le stock (par
+        contre-passation des sorties, jamais en les supprimant) et le statut de la
+        commande sont rétablis. La livraison et ses lignes restent consultables.
+        Refusée si elle est déjà annulée ou si la commande a déjà été facturée
+        au-delà de ce qui resterait livré (il faut alors d'abord un avoir)."""
+        with transaction.atomic():
+            livraison = Livraison.objects.select_for_update().get(pk=self.pk)
+            if livraison.statut == self.Statut.ANNULEE:
+                raise LivraisonError(f"La livraison « {self} » est déjà annulée.")
+            lignes = list(livraison.lignes.select_related("commande_ligne__article"))
+            self._verifier_non_facturee(lignes)
+            for ligne in lignes:
+                CommandeLigne.objects.filter(pk=ligne.commande_ligne_id).update(
+                    quantite_livree=models.F("quantite_livree") - ligne.quantite_livree
+                )
+            sorties = MouvementStock.objects.filter(
+                reference_origine=f"LIVRAISON-{self.numero}",
+                type_mouvement=MouvementStock.TypeMouvement.SORTIE,
+                contre_passation__isnull=True,
+            )
+            for sortie in sorties:
+                sortie.annuler(utilisateur=utilisateur, motif=f"Annulation de la livraison {self.numero}")
+            # Via save() (pas update()) : l'historique doit enregistrer l'annulation.
+            livraison.statut = self.Statut.ANNULEE
+            livraison.date_annulation = timezone.now()
+            livraison.motif_annulation = motif[:200]
+            livraison.utilisateur_annulation = utilisateur
+            livraison._change_reason = f"Annulation : {motif}"[:100]
+            livraison.save(update_fields=["statut", "date_annulation", "motif_annulation", "utilisateur_annulation"])
+            self.commande.refresh_from_db()
+            self.commande.mettre_a_jour_statut_livraison()
+        self.refresh_from_db()
+
+    def _verifier_non_facturee(self, lignes):
+        """Une commande déjà facturée ne voit plus ses livraisons annulées : il faut
+        d'abord un avoir (le détail du facturé par ligne arrive avec les lignes de
+        facture)."""
+        if self.commande.factures.exists():
+            raise LivraisonError(
+                f"La commande « {self.commande} » est déjà facturée : émettez d'abord un avoir "
+                "pour annuler cette livraison."
+            )
 
 
 class LivraisonLigne(models.Model):
@@ -639,6 +700,8 @@ class LivraisonLigne(models.Model):
         super().clean()
         if self.quantite_livree is not None and self.quantite_livree <= 0:
             raise ValidationError({"quantite_livree": "La quantité livrée doit être positive."})
+        if self.pk is None and self.livraison_id and self.livraison.statut == Livraison.Statut.ANNULEE:
+            raise ValidationError("Cette livraison est annulée : on ne peut plus y ajouter de ligne.")
         if self.pk is None and self.commande_ligne_id:
             if self.commande_ligne.commande.statut == Commande.Statut.ANNULEE:
                 raise ValidationError("Cette commande est annulée : aucune livraison possible.")
@@ -653,11 +716,13 @@ class LivraisonLigne(models.Model):
                     }
                 )
 
+    def delete(self, *args, **kwargs):
+        raise LivraisonError("Une ligne de livraison ne se supprime pas : annulez la livraison.")
+
     def save(self, *args, **kwargs):
         creation = self.pk is None
         if not creation:
-            super().save(*args, **kwargs)
-            return
+            raise LivraisonError("Une ligne de livraison ne se modifie pas : annulez la livraison et saisissez-en une autre.")
         # Tout ou rien : si le lot est ambigu (LivraisonError), ni cette
         # ligne ni la mise à jour du cumul livré ne doivent être enregistrées
         # — sans quoi on se retrouve avec une ligne "fantôme" enregistrée

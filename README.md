@@ -2376,3 +2376,36 @@ installation, lancez `python manage.py synchroniser_groupes` après la mise à j
 Autre défaut corrigé au passage : `comptes` n'ayant pas de modèle, Django
 n'émettait jamais son signal `post_migrate` ; la création des groupes est
 désormais branchée sur celui d'`auth`.
+
+## Recette du module C (livraison et facturation) : priorité 1, intégrité
+
+Tests : `CommandeDirecteTests`, `VerrouFactureTests`, `ValidationFactureTests`,
+`MigrationStatutPaiementTests` (`facturation/tests.py`), `AnnulationLivraisonTests`
+(`chiffrage/tests.py`).
+
+- **Facture émise = facture verrouillée.** Dès que la référence Tiime est
+  renseignée (ou qu'une écriture comptable existe), montants, date, commande,
+  référence et mode de création ne se modifient plus (admin, API, modèle) et la
+  facture ne se supprime plus ; seul le suivi du paiement reste libre. Une erreur
+  se corrige par un avoir (priorité 2). Avant l'émission, tout reste libre, y
+  compris corriger les montants dans la même saisie que la référence.
+- **Statut de paiement structuré** (*À payer*, *Partiellement payée*, *Payée*)
+  avec date de paiement posée automatiquement au passage à « Payée » ; la
+  migration `0003` ramène les anciens textes libres à ces trois valeurs.
+- **Contrôles de saisie** : facture antérieure à la commande ou datée dans le
+  futur, TTC inférieur au HT, montants négatifs, paiement antérieur à la facture ;
+  montants arrondis au centime ; une facture existante n'est jamais remplacée
+  par un POST d'API de même numéro. Historique en lecture seule.
+- **Défaut corrigé : commande sans devis.** L'échéance d'une facture et la
+  génération d'écriture comptable lisaient `commande.devis.client` et plantaient
+  pour une commande créée directement ; elles utilisent `commande.client`.
+- **Livraison immuable et annulable.** Les lignes d'une livraison ne se modifient
+  ni ne se suppriment plus (avant : modifier une quantité ou supprimer une
+  livraison laissait cumul livré et stock faux). L'action « Annuler la livraison »
+  (motif obligatoire, permission `annuler_livraison`) rétablit le cumul livré,
+  contre-passe les sorties de stock (y compris sur plusieurs lots) et rouvre la
+  commande ; la livraison reste consultable avec auteur, date et motif.
+  Refusée si déjà annulée ou si la commande est déjà facturée (avoir d'abord).
+
+**Vérifié** (Playwright) : fiche d'une facture émise — seul le paiement est
+éditable ; page de confirmation d'annulation d'une livraison.
