@@ -10,6 +10,7 @@ from unfold.admin import ModelAdmin, TabularInline
 
 from codification.mixins import CodificationInitialeMixin
 from codification.models import RegleCodification
+from comptes.exports import ExportCsvMixin
 from comptabilite.models import CompteComptable, TiersCompteComptable
 
 from .models import (
@@ -135,7 +136,7 @@ def apercu_compte_comptable_view(request):
 
 
 @admin.register(Tiers)
-class TiersAdmin(CodificationInitialeMixin, ModelAdmin):
+class TiersAdmin(ExportCsvMixin, CodificationInitialeMixin, ModelAdmin):
     codification_entite = RegleCodification.Entite.TIERS
 
     list_display = ["code", "raison_sociale", "type_tiers", "regime_fiscal", "devise", "siret"]
@@ -231,7 +232,7 @@ class AdresseAdmin(ModelAdmin):
 
 
 @admin.register(Contact)
-class ContactAdmin(ModelAdmin):
+class ContactAdmin(ExportCsvMixin, ModelAdmin):
     list_display = [
         "nom",
         "prenom",

@@ -4,6 +4,7 @@ from unfold.admin import ModelAdmin, TabularInline
 from codification.mixins import CodificationInitialeMixin
 from codification.models import RegleCodification
 
+from comptes.exports import ExportCsvMixin
 from .generation import GenerationEcritureAchatError, generer_ecriture_achat
 from .models import (
     AchatsError,
@@ -62,7 +63,7 @@ class LigneCommandeFournisseurInline(TabularInline):
 
 
 @admin.register(CommandeFournisseur)
-class CommandeFournisseurAdmin(CodificationInitialeMixin, ModelAdmin):
+class CommandeFournisseurAdmin(ExportCsvMixin, CodificationInitialeMixin, ModelAdmin):
     codification_entite = RegleCodification.Entite.COMMANDE_FOURNISSEUR
 
     list_display = ["numero", "fournisseur", "date_commande", "date_livraison_prevue", "statut"]
@@ -73,7 +74,7 @@ class CommandeFournisseurAdmin(CodificationInitialeMixin, ModelAdmin):
 
 
 @admin.register(LigneCommandeFournisseur)
-class LigneCommandeFournisseurAdmin(ModelAdmin):
+class LigneCommandeFournisseurAdmin(ExportCsvMixin, ModelAdmin):
     list_display = [
         "commande_fournisseur",
         "article",
@@ -103,7 +104,7 @@ class ReceptionLigneInline(TabularInline):
 
 
 @admin.register(Reception)
-class ReceptionAdmin(CodificationInitialeMixin, ModelAdmin):
+class ReceptionAdmin(ExportCsvMixin, CodificationInitialeMixin, ModelAdmin):
     codification_entite = RegleCodification.Entite.RECEPTION
 
     list_display = ["numero", "commande_fournisseur", "date_reception"]
@@ -126,7 +127,7 @@ class ReceptionLigneAdmin(ModelAdmin):
 
 
 @admin.register(FactureFournisseur)
-class FactureFournisseurAdmin(CodificationInitialeMixin, ModelAdmin):
+class FactureFournisseurAdmin(ExportCsvMixin, CodificationInitialeMixin, ModelAdmin):
     codification_entite = RegleCodification.Entite.FACTURE_FOURNISSEUR
 
     list_display = [

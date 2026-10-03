@@ -9,6 +9,7 @@ from django.urls import path, reverse
 from django.utils import timezone
 from django.utils.html import format_html
 from unfold.decorators import action as unfold_action
+from comptes.exports import ExportCsvMixin
 from comptes.concurrence import VerrouOptimisteMixin
 from comptes.historique import HistoriqueLectureSeule
 from unfold.admin import ModelAdmin, TabularInline
@@ -191,7 +192,7 @@ class ExpireFilter(admin.SimpleListFilter):
 
 
 @admin.register(Devis)
-class DevisAdmin(VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
+class DevisAdmin(ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
     codification_entite = RegleCodification.Entite.DEVIS
     form = DevisAdminForm
 
@@ -401,7 +402,7 @@ class DevisAdmin(VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLect
 
 
 @admin.register(DevisLigne)
-class DevisLigneAdmin(HistoriqueLectureSeule, ModelAdmin):
+class DevisLigneAdmin(ExportCsvMixin, HistoriqueLectureSeule, ModelAdmin):
     form = DevisLigneForm
     list_display = [
         "devis",
@@ -523,7 +524,7 @@ class CommandeLigneInline(TabularInline):
 
 
 @admin.register(Commande)
-class CommandeAdmin(VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
+class CommandeAdmin(ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
     codification_entite = RegleCodification.Entite.COMMANDE
 
     list_display = ["numero", "client", "reference_client", "devis", "date_commande", "statut", "devise"]
@@ -606,7 +607,7 @@ class CommandeAdmin(VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueL
 
 
 @admin.register(CommandeLigne)
-class CommandeLigneAdmin(ModelAdmin):
+class CommandeLigneAdmin(ExportCsvMixin, ModelAdmin):
     form = CommandeLigneForm
     list_display = [
         "commande",
@@ -699,7 +700,7 @@ class LivraisonLigneInline(TabularInline):
 
 
 @admin.register(Livraison)
-class LivraisonAdmin(VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
+class LivraisonAdmin(ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
     codification_entite = RegleCodification.Entite.LIVRAISON
 
     list_display = ["numero", "commande", "date_livraison", "statut"]
@@ -810,7 +811,7 @@ class OperationOFInline(TabularInline):
 
 
 @admin.register(OrdreFabrication)
-class OrdreFabricationAdmin(CodificationInitialeMixin, ModelAdmin):
+class OrdreFabricationAdmin(ExportCsvMixin, CodificationInitialeMixin, ModelAdmin):
     codification_entite = RegleCodification.Entite.ORDRE_FABRICATION
 
     list_display = [

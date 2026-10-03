@@ -939,3 +939,109 @@ class SyntheseQuotidienneTests(TestCase):
         call_command("synthese_quotidienne", "--si-non-vide", "--destinataires", "a@b.fr", stdout=sortie)
         self.assertIn("Rien à signaler", sortie.getvalue())
         self.assertEqual(len(mail.outbox), 0)
+
+
+class ExportCsvTests(TestCase):
+    """Action « Exporter la sélection en CSV » des listes de l'admin."""
+
+    def setUp(self):
+        from django.contrib.auth.models import Permission
+
+        User = get_user_model()
+        self.admin = User.objects.create_superuser("exp-admin", "a@example.com", "Mot-de-passe-solide-1")
+        self.lecteur = User.objects.create_user("exp-lecteur", password="Mot-de-passe-solide-1", is_staff=True)
+        self.lecteur.user_permissions.add(Permission.objects.get(codename="view_tiers"))
+        self.sans_droit = User.objects.create_user("exp-sans", password="Mot-de-passe-solide-1", is_staff=True)
+        self.sans_droit.user_permissions.add(Permission.objects.get(codename="view_adresse"))
+        self.t1 = Tiers.objects.create(code="CLI-EXP-1", raison_sociale="Dupont & Fils")
+        self.t2 = Tiers.objects.create(code="CLI-EXP-2", raison_sociale="=HYPERLINK(\"http://x\")")
+        self.url = reverse("admin:commercial_tiers_changelist")
+
+    def _exporter(self, user, pks):
+        self.client.force_login(user)
+        return self.client.post(
+            self.url, {"action": "exporter_csv", "_selected_action": [str(p) for p in pks]}
+        )
+
+    def test_export_format_excel_francais(self):
+        rep = self._exporter(self.lecteur, [self.t1.pk])
+        self.assertEqual(rep.status_code, 200)
+        self.assertEqual(rep["Content-Type"], "text/csv; charset=utf-8")
+        texte = rep.content.decode("utf-8")
+        self.assertTrue(texte.startswith("﻿"))
+        lignes = texte.lstrip("﻿").strip().split("\r\n")
+        self.assertEqual(len(lignes), 2)
+        self.assertIn("Raison sociale", lignes[0])
+        self.assertIn(";", lignes[0])
+        self.assertIn("CLI-EXP-1;Dupont & Fils", lignes[1])
+
+    def test_formule_neutralisee(self):
+        texte = self._exporter(self.lecteur, [self.t2.pk]).content.decode("utf-8")
+        self.assertIn("'=HYPERLINK", texte)
+        self.assertNotIn(";=HYPERLINK", texte)
+
+    def test_sans_droit_de_voir_pas_d_export(self):
+        rep = self._exporter(self.sans_droit, [self.t1.pk])
+        self.assertIn(rep.status_code, (302, 403))
+        self.assertNotIn(b"CLI-EXP-1", rep.content)
+
+    def test_action_proposee_uniquement_avec_le_droit_de_voir(self):
+        from django.contrib.admin.sites import site
+        from django.test import RequestFactory
+
+        modeladmin = site._registry[Tiers]
+        for user, attendu in ((self.lecteur, True), (self.sans_droit, False)):
+            requete = RequestFactory().get(self.url)
+            requete.user = user
+            self.assertEqual("exporter_csv" in modeladmin.get_actions(requete), attendu)
+
+    def test_limite_de_lignes(self):
+        from . import exports
+
+        ancienne = exports.LIMITE_LIGNES
+        exports.LIMITE_LIGNES = 1
+        try:
+            rep = self._exporter(self.admin, [self.t1.pk, self.t2.pk])
+        finally:
+            exports.LIMITE_LIGNES = ancienne
+        self.assertNotEqual(rep.get("Content-Type"), "text/csv; charset=utf-8")
+
+    def test_export_est_journalise(self):
+        with self.assertLogs("comptes.exports", level="INFO") as journal:
+            self._exporter(self.admin, [self.t1.pk])
+        self.assertIn("exp-admin", journal.output[0])
+
+    def test_valeurs_formatees(self):
+        import datetime
+        import decimal
+
+        from .exports import formater_valeur
+
+        self.assertEqual(formater_valeur(decimal.Decimal("-120.50")), "-120,50")
+        self.assertEqual(formater_valeur(-3), "-3")
+        self.assertEqual(formater_valeur(datetime.date(2026, 10, 3)), "03/10/2026")
+        self.assertEqual(formater_valeur(True), "Oui")
+        self.assertEqual(formater_valeur(None), "")
+        self.assertEqual(formater_valeur("<b>gras</b> &amp; co"), "gras & co")
+        self.assertEqual(formater_valeur("-"), "")
+
+    def test_export_factures_avec_colonnes_calculees(self):
+        """Les colonnes calculées (échéance, relances…) s'exportent sans casser l'export."""
+        aujourdhui = timezone.localdate()
+        devis = Devis.objects.create(numero="DEV-EXP", client=self.t1, date_creation=aujourdhui, statut=Devis.Statut.VALIDE)
+        adr = Adresse.objects.create(tiers=self.t1, est_facturation=True, adresse="1 rue", code_postal="75000", ville="Paris")
+        cde = Commande.objects.create(
+            numero="CDE-EXP", devis=devis, client=self.t1, date_commande=aujourdhui,
+            adresse_facturation=adr, adresse_livraison=adr,
+        )
+        f = Facture.objects.create(numero="FAC-EXP", commande=cde, montant_ht=-100, montant_ttc=-120, date_facturation=aujourdhui)
+        self.client.force_login(self.admin)
+        rep = self.client.post(
+            reverse("admin:facturation_facture_changelist"),
+            {"action": "exporter_csv", "_selected_action": [f.pk]},
+        )
+        self.assertEqual(rep.status_code, 200)
+        texte = rep.content.decode("utf-8")
+        self.assertIn("FAC-EXP", texte)
+        self.assertIn("-100", texte)  # un montant négatif reste un nombre, pas du texte neutralisé
+        self.assertNotIn("'-100", texte)

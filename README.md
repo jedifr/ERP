@@ -2696,3 +2696,15 @@ Le planning reste facultatif (tant que `PLANNING_API_URL` est vide, rien n'est e
 
 À planifier dans le Planificateur de tâches DSM, toutes les 15 minutes :
 `cd /volume1/docker/erp && docker compose exec -T web python manage.py retry_sync_ordres_fabrication`.
+
+## Gap analysis, lot 6 : export CSV des listes
+
+Sur les listes principales (devis et lignes, commandes et lignes, livraisons, ordres de fabrication, factures, lots, mouvements et alertes de stock, tiers, contacts, articles, commandes/réceptions/factures fournisseur et lignes, écritures comptables), cochez des lignes (ou « Sélectionner les N éléments » pour toute la liste filtrée) puis l'action **« Exporter la sélection en CSV (colonnes affichées) »**.
+
+- Le fichier contient exactement les colonnes de la liste (un export ne révèle jamais plus que l'écran, les colonnes réservées à certains droits le restent).
+- Droit nécessaire : « voir » le modèle ; chaque export est tracé dans les logs (`docker compose logs web | grep "Export CSV"`).
+- Format prévu pour Excel/LibreOffice en français : UTF-8 avec BOM, séparateur `;`, virgule décimale, dates JJ/MM/AAAA, nombres négatifs (avoirs) conservés comme nombres.
+- Protection contre l'injection de formule : un texte commençant par `=`, `+`, `-` ou `@` est préfixé d'une apostrophe.
+- Limite de 20 000 lignes par export (filtrer la liste au-delà).
+
+Pour ajouter l'export à une autre liste : `from comptes.exports import ExportCsvMixin` puis `class MonAdmin(ExportCsvMixin, ModelAdmin)`.

@@ -5,6 +5,7 @@ from django.shortcuts import redirect
 from unfold.admin import ModelAdmin, TabularInline
 from unfold.decorators import action
 
+from comptes.exports import ExportCsvMixin
 from .models import (
     ArticleCompteAchat,
     ArticleCompteVente,
@@ -202,7 +203,7 @@ class LigneEcritureInline(TabularInline):
 
 
 @admin.register(EcritureComptable)
-class EcritureComptableAdmin(ModelAdmin):
+class EcritureComptableAdmin(ExportCsvMixin, ModelAdmin):
     list_display = ["piece", "journal", "date_ecriture", "libelle", "total_debit", "total_credit", "est_equilibree"]
     list_filter = ["journal"]
     search_fields = ["piece", "libelle", "facture__numero", "facture_fournisseur__numero"]

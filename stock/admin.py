@@ -9,6 +9,7 @@ from unfold.decorators import action as unfold_action
 from codification.mixins import CodificationInitialeMixin
 from codification.models import RegleCodification
 
+from comptes.exports import ExportCsvMixin
 from comptes.concurrence import VerrouOptimisteMixin
 from comptes.historique import HistoriqueLectureSeule
 
@@ -54,7 +55,7 @@ class EmplacementAdmin(VerrouOptimisteMixin, CodificationInitialeMixin, Historiq
 
 
 @admin.register(Lot)
-class LotAdmin(VerrouOptimisteMixin, HistoriqueLectureSeule, ModelAdmin):
+class LotAdmin(ExportCsvMixin, VerrouOptimisteMixin, HistoriqueLectureSeule, ModelAdmin):
     list_display = ["article", "emplacement", "numero_coulee", "quantite", "cout_unitaire_moyen", "valeur_stock", "statut"]
     list_filter = ["emplacement", "statut"]
     search_fields = ["article__reference", "numero_coulee"]
@@ -96,7 +97,7 @@ class LotAdmin(VerrouOptimisteMixin, HistoriqueLectureSeule, ModelAdmin):
 
 
 @admin.register(MouvementStock)
-class MouvementStockAdmin(ModelAdmin):
+class MouvementStockAdmin(ExportCsvMixin, ModelAdmin):
     list_display = [
         "date_mouvement",
         "article_lot",
@@ -270,7 +271,7 @@ class InventaireAdmin(ModelAdmin):
 
 
 @admin.register(AlerteStock)
-class AlerteStockAdmin(ModelAdmin):
+class AlerteStockAdmin(ExportCsvMixin, ModelAdmin):
     list_display = ["article", "statut", "date_declenchement", "date_traitement"]
     list_filter = ["statut"]
     search_fields = ["article__reference"]

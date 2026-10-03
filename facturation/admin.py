@@ -13,6 +13,7 @@ from codification.mixins import CodificationInitialeMixin
 from codification.models import RegleCodification
 from comptabilite.generation import GenerationEcritureError, generer_ecriture_facture
 
+from comptes.exports import ExportCsvMixin
 from comptes.concurrence import VerrouOptimisteMixin
 from comptes.historique import HistoriqueLectureSeule
 
@@ -109,7 +110,7 @@ class RetardFilter(admin.SimpleListFilter):
 
 
 @admin.register(Facture)
-class FactureAdmin(VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
+class FactureAdmin(ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
     codification_entite = RegleCodification.Entite.FACTURE
 
     list_display = [
