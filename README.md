@@ -2591,3 +2591,28 @@ droits du volume des fichiers déposés) ; pas de CSP (le thème de l'admin util
 en ligne) ; l'API accepte toujours l'authentification de base (désormais protégée par la
 limitation des tentatives) ; les fiches sans historique (tiers, articles…) ne sont pas
 couvertes par le verrouillage optimiste.
+
+## Gap analysis, lot 1 : cycle de vie du devis
+
+Tests : `CycleDeVieDevisTests` (`chiffrage/tests.py`).
+
+- **Validité de l'offre** : à la validation, le devis reçoit une date « valable jusqu'au » (30
+  jours, réglable par `DEVIS_VALIDITE_JOURS`). Une offre expirée ne peut plus devenir une
+  commande tant que sa validité n'est pas prolongée ; repasser un devis en brouillon efface
+  l'échéance. Les devis existants ne reçoivent aucune date (pas d'expiration inventée).
+- **Réponse du client** : *en attente*, *accepté* (posé par la création de la commande, tracé
+  dans l'historique), *refusé* (motif obligatoire), *remplacé* (par une révision). Elles se
+  renseignent sur la fiche d'un devis validé **sans déverrouiller le prix** : seuls la réponse,
+  le motif et la date de validité y restent modifiables. Un devis refusé ou remplacé ne peut
+  pas devenir une commande. La migration marque « accepté » les devis déjà transformés.
+- **Révision** (bouton *Réviser ce devis* sur la fiche) : crée un brouillon `…-R2` (puis `-R3`…)
+  avec le même en-tête et les mêmes lignes, et marque l'original « remplacé » : le prix déjà
+  envoyé n'est jamais réécrit. Refusée pour un brouillon, un devis déjà commandé ou déjà
+  remplacé.
+- **Pilotage** : colonnes *réponse* et *valable jusqu'au*, filtres *Expirés* et *Expirent sous 7
+  jours*, tuiles d'accueil *Devis sans réponse* (et combien à relancer) et *Taux de
+  transformation* (devis acceptés sur envoyés, 90 jours, hors remplacés).
+
+**Vérifié** (Playwright) : liste (statuts de réponse et dates), fiche d'un devis validé
+(réponse et validité modifiables, reste verrouillé, bouton *Réviser*), révision en un clic
+(`DEV-2026-101-R2`), tuiles d'accueil.

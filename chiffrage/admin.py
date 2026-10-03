@@ -1,9 +1,13 @@
+import datetime
+
 from django import forms
 from django.contrib import admin, messages
 from django.http import HttpResponseRedirect
 from django.template.response import TemplateResponse
 from django.urls import path, reverse
+from django.utils import timezone
 from django.utils.html import format_html
+from unfold.decorators import action as unfold_action
 from comptes.concurrence import VerrouOptimisteMixin
 from comptes.historique import HistoriqueLectureSeule
 from unfold.admin import ModelAdmin, TabularInline
@@ -46,6 +50,7 @@ from .production import (
     enregistrer_modification_ligne,
     lancer_en_production,
     lancer_ligne_en_production,
+    reviser_devis,
     synchroniser_lignes_commande,
 )
 from .widgets import DelaiWidget
@@ -139,6 +144,21 @@ class DevisAdminForm(forms.ModelForm):
         fields = "__all__"
         widgets = {"delai": DelaiWidget()}
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        champ = self.fields.get("issue")
+        if champ is not None:
+            champ.required = False  # absent d'un envoi : la valeur actuelle (ou « en attente ») est conservée
+        if champ is not None and self.instance.pk:
+            if self.instance.issue in (Devis.Issue.ACCEPTE, Devis.Issue.REMPLACE):
+                # « Accepté » vient de la création de la commande, « Remplacé » de la révision :
+                # jamais saisis à la main.
+                champ.disabled = True
+            else:
+                champ.choices = [c for c in champ.choices if c[0] in (Devis.Issue.EN_ATTENTE, Devis.Issue.REFUSE)]
+        elif champ is not None:
+            champ.choices = [c for c in champ.choices if c[0] == Devis.Issue.EN_ATTENTE]
+
     def clean(self):
         cleaned = super().clean()
         # À ce stade l'instance porte encore le statut enregistré en base
@@ -151,6 +171,23 @@ class DevisAdminForm(forms.ModelForm):
         return cleaned
 
 
+class ExpireFilter(admin.SimpleListFilter):
+    title = "validité de l'offre"
+    parameter_name = "validite"
+
+    def lookups(self, request, model_admin):
+        return [("expire", "Expirés"), ("bientot", "Expirent sous 7 jours")]
+
+    def queryset(self, request, queryset):
+        aujourdhui = timezone.localdate()
+        en_attente = queryset.filter(statut=Devis.Statut.VALIDE, issue=Devis.Issue.EN_ATTENTE, date_validite__isnull=False)
+        if self.value() == "expire":
+            return en_attente.filter(date_validite__lt=aujourdhui)
+        if self.value() == "bientot":
+            return en_attente.filter(date_validite__gte=aujourdhui, date_validite__lte=aujourdhui + datetime.timedelta(days=7))
+        return queryset
+
+
 @admin.register(Devis)
 class DevisAdmin(VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
     codification_entite = RegleCodification.Entite.DEVIS
@@ -161,6 +198,8 @@ class DevisAdmin(VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLect
         "client",
         "date_creation",
         "statut",
+        "issue",
+        "date_validite",
         "delai",
         "taux_marge_globale",
         "montant_matiere_ht",
@@ -168,7 +207,7 @@ class DevisAdmin(VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLect
         "montant_total_ht",
         "montant_total_ttc",
     ]
-    list_filter = ["statut"]
+    list_filter = ["statut", "issue", ExpireFilter]
     search_fields = ["numero", "client__raison_sociale"]
     autocomplete_fields = ["client", "adresse_facturation", "adresse_livraison", "contact"]
     readonly_fields = [
@@ -179,6 +218,7 @@ class DevisAdmin(VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLect
     ]
     inlines = [DevisLigneInline]
     actions = ["action_recalculer", "action_lancer_en_production"]
+    actions_detail = ["action_reviser"]
 
     def get_readonly_fields(self, request, obj=None):
         champs = list(super().get_readonly_fields(request, obj))
@@ -187,7 +227,10 @@ class DevisAdmin(VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLect
             champs.append("statut")
         if devis_verrouille(obj):
             # Tout sauf le statut, pour pouvoir repasser le devis en brouillon.
-            champs += [f.name for f in Devis._meta.concrete_fields if f.name != "statut"]
+            # La réponse du client et la date de validité ne changent pas le prix engagé : elles
+            # restent modifiables (prolonger une offre, noter un refus).
+            libres = {"statut", "issue", "motif_refus", "date_validite"}
+            champs += [f.name for f in Devis._meta.concrete_fields if f.name not in libres]
         return champs
 
     def save_related(self, request, form, formsets, change):
@@ -319,6 +362,26 @@ class DevisAdmin(VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLect
                 self.message_user(
                     request, f"{devis} : commande {commande} créée.", level=messages.SUCCESS
                 )
+
+
+    @unfold_action(description="Réviser ce devis", permissions=["reviser"], url_path="reviser")
+    def action_reviser(self, request, object_id):
+        devis = Devis.objects.get(pk=object_id)
+        try:
+            revision = reviser_devis(devis)
+        except ChiffrageError as exc:
+            self.message_user(request, str(exc), level=messages.ERROR)
+            return HttpResponseRedirect(reverse("admin:chiffrage_devis_change", args=[devis.pk]))
+        self.message_user(
+            request,
+            f"Révision {revision} créée en brouillon ; {devis} est marqué « remplacé ». "
+            "Modifiez-la, chiffrez-la puis validez-la.",
+            level=messages.SUCCESS,
+        )
+        return HttpResponseRedirect(reverse("admin:chiffrage_devis_change", args=[revision.pk]))
+
+    def has_reviser_permission(self, request, obj=None):
+        return request.user.has_perm("chiffrage.change_devis")
 
 
 @admin.register(DevisLigne)

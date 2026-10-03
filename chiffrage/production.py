@@ -103,6 +103,17 @@ def _creer_commande_et_ordres(devis):
         raise ChiffrageError("Seul un devis validé peut être lancé en production.")
     if Commande.objects.filter(devis=devis).exists():
         raise ChiffrageError(f"Le devis « {devis} » a déjà été lancé en production.")
+    if devis.issue == Devis.Issue.REFUSE:
+        raise ChiffrageError(f"Le devis « {devis} » a été refusé par le client ({devis.motif_refus}).")
+    if devis.issue == Devis.Issue.REMPLACE:
+        revision = devis.revisions.order_by("-revision").first()
+        suite = f" : utilisez « {revision} »" if revision else ""
+        raise ChiffrageError(f"Le devis « {devis} » a été remplacé par une révision{suite}.")
+    if devis.est_expire:
+        raise ChiffrageError(
+            f"L'offre « {devis} » a expiré le {devis.date_validite:%d/%m/%Y} : prolongez sa date de "
+            "validité (si le client confirme) avant de la transformer en commande."
+        )
 
     commande = Commande.objects.create(
         numero=_generer_numero_commande(devis),
@@ -113,6 +124,10 @@ def _creer_commande_et_ordres(devis):
         adresse_livraison=_adresse_principale(devis.client, "est_livraison", "livraison"),
         devise=devis.client.devise,
     )
+
+    devis.issue = Devis.Issue.ACCEPTE
+    devis._change_reason = f"Commande {commande.numero} créée"[:100]
+    devis.save(update_fields=["issue"])
 
     ordres_crees = []
     index = 1
@@ -209,3 +224,54 @@ def synchroniser_lignes_commande(commande):
             )
         )
     return lignes_creees
+
+
+def reviser_devis(devis):
+    """Crée une révision (brouillon) d'un devis validé resté sans commande : même en-tête,
+    mêmes lignes. L'original est marqué « remplacé » (il ne peut plus être transformé en
+    commande) et reste consultable ; le prix déjà envoyé au client n'est jamais réécrit."""
+    import re
+
+    from .models import DevisLigne
+
+    with transaction.atomic():
+        devis = Devis.objects.select_for_update().get(pk=devis.pk)
+        if devis.statut != Devis.Statut.VALIDE:
+            raise ChiffrageError("Seul un devis validé se révise : un brouillon se modifie directement.")
+        if Commande.objects.filter(devis=devis).exists():
+            raise ChiffrageError(f"Le devis « {devis} » est déjà devenu une commande : il ne se révise plus.")
+        if devis.issue == Devis.Issue.REMPLACE:
+            raise ChiffrageError(f"Le devis « {devis} » a déjà été remplacé par une révision.")
+        base = re.sub(r"-R\d+$", "", devis.numero)
+        revision = devis.revision + 1
+        numero = f"{base}-R{revision}"
+        while Devis.objects.filter(pk=numero).exists():
+            revision += 1
+            numero = f"{base}-R{revision}"
+        nouveau = Devis.objects.create(
+            numero=numero,
+            client=devis.client,
+            adresse_facturation=devis.adresse_facturation,
+            adresse_livraison=devis.adresse_livraison,
+            contact=devis.contact,
+            date_creation=timezone.localdate(),
+            statut=Devis.Statut.BROUILLON,
+            taux_marge_globale=devis.taux_marge_globale,
+            delai=devis.delai,
+            devis_origine=devis,
+            revision=revision,
+        )
+        for ligne in devis.lignes.all():
+            DevisLigne.objects.create(
+                devis=nouveau,
+                article=ligne.article,
+                ordre=ligne.ordre,
+                quantite=ligne.quantite,
+                taux_marge_matiere_applique=ligne.taux_marge_matiere_applique,
+                prix_vente_unitaire_force=ligne.prix_vente_unitaire_force,
+                taux_tva=ligne.taux_tva,
+            )
+        devis.issue = Devis.Issue.REMPLACE
+        devis._change_reason = f"Remplacé par {numero}"[:100]
+        devis.save(update_fields=["issue"])
+    return nouveau

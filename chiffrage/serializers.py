@@ -23,8 +23,13 @@ class DevisSerializer(FullCleanModelSerializer):
         statut_actuel = self.instance.statut if self.instance is not None else None
         commandes_existantes = self.instance.commandes.exists() if self.instance is not None else False
         attrs = super().validate(attrs)
+        if attrs.get("issue") in (Devis.Issue.ACCEPTE, Devis.Issue.REMPLACE):
+            raise serializers.ValidationError(
+                {"issue": "« Accepté » vient de la création de la commande, « Remplacé » de la révision."}
+            )
         if statut_actuel == Devis.Statut.VALIDE:
-            if attrs.get("statut", statut_actuel) == Devis.Statut.VALIDE:
+            champs_libres = {"issue", "motif_refus", "date_validite"}
+            if attrs.get("statut", statut_actuel) == Devis.Statut.VALIDE and not set(attrs) <= champs_libres:
                 raise serializers.ValidationError(MESSAGE_DEVIS_VERROUILLE)
             if commandes_existantes:
                 raise serializers.ValidationError(

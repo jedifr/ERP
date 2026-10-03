@@ -1,3 +1,5 @@
+import datetime
+
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
@@ -58,6 +60,27 @@ class Devis(models.Model):
     )
     date_creation = models.DateField("date de création")
     statut = models.CharField("statut", max_length=20, choices=Statut.choices, default=Statut.BROUILLON)
+
+    class Issue(models.TextChoices):
+        EN_ATTENTE = "en_attente", "En attente de réponse"
+        ACCEPTE = "accepte", "Accepté"
+        REFUSE = "refuse", "Refusé"
+        REMPLACE = "remplace", "Remplacé par une révision"
+
+    issue = models.CharField(
+        "réponse du client", max_length=12, choices=Issue.choices, default=Issue.EN_ATTENTE,
+        help_text="Passe à « Accepté » à la création de la commande, à « Remplacé » quand on révise le devis.",
+    )
+    motif_refus = models.CharField("motif du refus", max_length=200, blank=True)
+    date_validite = models.DateField(
+        "valable jusqu'au", null=True, blank=True,
+        help_text="Fin de validité de l'offre. Posée à la validation (30 jours par défaut) ; vide = sans limite.",
+    )
+    devis_origine = models.ForeignKey(
+        "self", verbose_name="révision de", on_delete=models.PROTECT, null=True, blank=True,
+        related_name="revisions", editable=False,
+    )
+    revision = models.PositiveSmallIntegerField("révision", default=1, editable=False)
     taux_marge_globale = models.FloatField(
         "taux de marge globale",
         null=True,
@@ -90,8 +113,43 @@ class Devis(models.Model):
     def __str__(self):
         return self.numero
 
+    @property
+    def est_expire(self):
+        """Offre validée, restée sans réponse, dont la date de validité est dépassée."""
+        return (
+            self.statut == self.Statut.VALIDE
+            and self.issue == self.Issue.EN_ATTENTE
+            and self.date_validite is not None
+            and self.date_validite < timezone.localdate()
+        )
+
+    est_expire.fget.short_description = "Expiré"
+
+    @property
+    def jours_avant_expiration(self):
+        if self.date_validite is None:
+            return None
+        return (self.date_validite - timezone.localdate()).days
+
+    def save(self, *args, **kwargs):
+        avant = Devis.objects.filter(pk=self.pk).values_list("statut", flat=True).first() if self.pk else None
+        if self.statut == self.Statut.VALIDE and avant != self.Statut.VALIDE and self.date_validite is None:
+            # À la validation, l'offre reçoit sa durée de validité (réglable) si elle n'en a pas.
+            jours = getattr(settings, "DEVIS_VALIDITE_JOURS", 30)
+            self.date_validite = timezone.localdate() + datetime.timedelta(days=jours)
+        elif self.statut == self.Statut.BROUILLON and avant == self.Statut.VALIDE:
+            # Repassé en brouillon : l'ancienne échéance ne vaut plus, une nouvelle sera posée à la re-validation.
+            self.date_validite = None
+        super().save(*args, **kwargs)
+
     def clean(self):
         super().clean()
+        if self.issue == self.Issue.REFUSE and not self.motif_refus:
+            raise ValidationError({"motif_refus": "Indiquez le motif du refus."})
+        if self.issue != self.Issue.REFUSE and self.motif_refus and self.issue != self.Issue.REMPLACE:
+            raise ValidationError({"motif_refus": "Un motif de refus n'a de sens que pour un devis refusé."})
+        if self.issue in (self.Issue.ACCEPTE, self.Issue.REFUSE) and self.statut != self.Statut.VALIDE:
+            raise ValidationError({"issue": "Seul un devis validé (envoyé au client) peut être accepté ou refusé."})
         if self.adresse_facturation_id and self.client_id:
             if self.adresse_facturation.tiers_id != self.client_id:
                 raise ValidationError(

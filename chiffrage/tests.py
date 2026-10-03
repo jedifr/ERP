@@ -3981,3 +3981,218 @@ class AnnulationLivraisonTests(_FixtureModuleA, TestCase):
         derniere = livraison.history.first()
         self.assertEqual(derniere.statut, Livraison.Statut.ANNULEE)
         self.assertEqual(derniere.history_change_reason, "Annulation : Erreur")
+
+
+class CycleDeVieDevisTests(_FixtureModuleA, TestCase):
+    """Gap analysis : validité de l'offre, réponse du client (accepté / refusé), révisions."""
+
+    def _expirer(self, jours=2):
+        Devis.objects.filter(pk=self.devis.pk).update(date_validite=datetime.date.today() - datetime.timedelta(days=jours))
+        self.devis.refresh_from_db()
+
+    def test_validation_pose_la_date_de_validite(self):
+        self._valider()
+        self.assertEqual(self.devis.date_validite, datetime.date.today() + datetime.timedelta(days=30))
+        self.assertFalse(self.devis.est_expire)
+        self.assertEqual(self.devis.jours_avant_expiration, 30)
+
+    def test_une_date_saisie_est_conservee_et_un_brouillon_na_pas_de_date(self):
+        self.assertIsNone(self.devis.date_validite)
+        voulue = datetime.date.today() + datetime.timedelta(days=90)
+        self.devis.date_validite = voulue
+        self.devis.statut = Devis.Statut.VALIDE
+        self.devis.save()
+        self.assertEqual(self.devis.date_validite, voulue)
+
+    def test_retour_en_brouillon_efface_lecheance(self):
+        self._valider()
+        self.devis.statut = Devis.Statut.BROUILLON
+        self.devis.save()
+        self.assertIsNone(self.devis.date_validite)
+        self._valider()
+        self.assertEqual(self.devis.date_validite, datetime.date.today() + datetime.timedelta(days=30))
+
+    def test_offre_expiree_ne_devient_pas_une_commande(self):
+        self._valider()
+        self._expirer()
+        self.assertTrue(self.devis.est_expire)
+        with self.assertRaises(ChiffrageError) as cm:
+            lancer_en_production(self.devis)
+        self.assertIn("a expiré", str(cm.exception))
+        self.assertFalse(Commande.objects.filter(devis=self.devis).exists())
+
+    def test_prolonger_la_validite_debloque_la_commande(self):
+        self._valider()
+        self._expirer()
+        self.devis.date_validite = datetime.date.today() + datetime.timedelta(days=15)
+        self.devis.save()
+        self.assertFalse(self.devis.est_expire)
+        lancer_en_production(self.devis)
+
+    def test_la_commande_marque_le_devis_accepte_et_la_trace(self):
+        self._valider()
+        commande = lancer_en_production(self.devis)
+        self.devis.refresh_from_db()
+        self.assertEqual(self.devis.issue, Devis.Issue.ACCEPTE)
+        self.assertEqual(self.devis.history.first().history_change_reason, f"Commande {commande.numero} créée")
+
+    def test_refus_exige_un_motif_et_un_devis_valide(self):
+        self._valider()
+        self.devis.issue = Devis.Issue.REFUSE
+        with self.assertRaises(ValidationError) as cm:
+            self.devis.full_clean()
+        self.assertIn("motif_refus", cm.exception.message_dict)
+        brouillon = Devis(numero="DEV-BR", client=self.tiers, date_creation=datetime.date(2026, 1, 1), issue="refuse", motif_refus="x")
+        with self.assertRaises(ValidationError) as cm:
+            brouillon.full_clean()
+        self.assertIn("issue", cm.exception.message_dict)
+
+    def test_devis_refuse_ne_devient_pas_une_commande(self):
+        self._valider()
+        self.devis.issue = Devis.Issue.REFUSE
+        self.devis.motif_refus = "Trop cher"
+        self.devis.save()
+        with self.assertRaises(ChiffrageError) as cm:
+            lancer_en_production(self.devis)
+        self.assertIn("refusé par le client", str(cm.exception))
+
+    def test_noter_un_refus_depuis_ladmin_sur_un_devis_valide_verrouille(self):
+        self._valider()
+        page = self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/change/")
+        self.assertContains(page, 'name="issue"')
+        self.assertContains(page, 'name="date_validite"')
+        self.assertNotContains(page, 'name="delai"')  # le reste demeure verrouillé
+        self.client.post(
+            f"/admin/chiffrage/devis/{self.devis.pk}/change/",
+            {"statut": "valide", "issue": "refuse", "motif_refus": "Concurrent moins cher",
+             "date_validite": self.devis.date_validite.isoformat(), "lignes-TOTAL_FORMS": "0", "lignes-INITIAL_FORMS": "0"},
+        )
+        self.devis.refresh_from_db()
+        self.assertEqual((self.devis.issue, self.devis.motif_refus), ("refuse", "Concurrent moins cher"))
+
+    def test_prolonger_la_validite_depuis_ladmin(self):
+        self._valider()
+        self._expirer()
+        nouvelle = datetime.date.today() + datetime.timedelta(days=20)
+        self.client.post(
+            f"/admin/chiffrage/devis/{self.devis.pk}/change/",
+            {"statut": "valide", "issue": "en_attente", "date_validite": nouvelle.isoformat(),
+             "lignes-TOTAL_FORMS": "0", "lignes-INITIAL_FORMS": "0"},
+        )
+        self.devis.refresh_from_db()
+        self.assertEqual(self.devis.date_validite, nouvelle)
+
+    def test_issue_accepte_ou_remplace_non_saisissable(self):
+        self._valider()
+        self.client.post(
+            f"/admin/chiffrage/devis/{self.devis.pk}/change/",
+            {"statut": "valide", "issue": "accepte", "lignes-TOTAL_FORMS": "0", "lignes-INITIAL_FORMS": "0"},
+        )
+        self.devis.refresh_from_db()
+        self.assertEqual(self.devis.issue, Devis.Issue.EN_ATTENTE)
+        r = self.client.patch(f"/api/v1/devis/{self.devis.pk}/", data=json.dumps({"issue": "accepte"}), content_type="application/json")
+        self.assertEqual(r.status_code, 400)
+
+    def test_api_noter_un_refus_et_prolonger_sans_deverrouiller_le_reste(self):
+        self._valider()
+        url = f"/api/v1/devis/{self.devis.pk}/"
+        r = self.client.patch(url, data=json.dumps({"issue": "refuse", "motif_refus": "Budget gelé"}), content_type="application/json")
+        self.assertEqual(r.status_code, 200, r.content)
+        r = self.client.patch(url, data=json.dumps({"delai": "demain"}), content_type="application/json")
+        self.assertEqual(r.status_code, 400)
+
+    def test_revision_cree_un_brouillon_et_remplace_loriginal(self):
+        from .production import reviser_devis
+
+        self._valider()
+        revision = reviser_devis(self.devis)
+        self.assertEqual((revision.numero, revision.revision, revision.statut), ("DEV-REC-A-R2", 2, "brouillon"))
+        self.assertEqual(revision.devis_origine, self.devis)
+        self.assertEqual(revision.client, self.devis.client)
+        ligne = revision.lignes.get()
+        self.assertEqual((ligne.article, ligne.quantite), (self.article, 3))
+        self.devis.refresh_from_db()
+        self.assertEqual(self.devis.issue, Devis.Issue.REMPLACE)
+        self.assertEqual(self.devis.history.first().history_change_reason, "Remplacé par DEV-REC-A-R2")
+        self.assertEqual(self.devis.lignes.count(), 1)  # l'original est intact
+
+    def test_revision_de_revision_et_numerotation(self):
+        from .production import reviser_devis
+
+        self._valider()
+        r2 = reviser_devis(self.devis)
+        r2.statut = Devis.Statut.VALIDE
+        r2.save()
+        r3 = reviser_devis(r2)
+        self.assertEqual(r3.numero, "DEV-REC-A-R3")
+
+    def test_devis_remplace_ne_devient_pas_une_commande(self):
+        from .production import reviser_devis
+
+        self._valider()
+        reviser_devis(self.devis)
+        self.devis.refresh_from_db()
+        with self.assertRaises(ChiffrageError) as cm:
+            lancer_en_production(self.devis)
+        self.assertIn("DEV-REC-A-R2", str(cm.exception))
+
+    def test_revision_refusee_dans_les_cas_non_valides(self):
+        from .production import reviser_devis
+
+        with self.assertRaises(ChiffrageError):
+            reviser_devis(self.devis)  # brouillon
+        self._valider()
+        lancer_en_production(self.devis)
+        with self.assertRaises(ChiffrageError):
+            reviser_devis(self.devis)  # déjà commandé
+
+    def test_double_revision_refusee(self):
+        from .production import reviser_devis
+
+        self._valider()
+        reviser_devis(self.devis)
+        with self.assertRaises(ChiffrageError):
+            reviser_devis(Devis.objects.get(pk=self.devis.pk))
+
+    def test_action_admin_reviser(self):
+        self._valider()
+        r = self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/reviser/", follow=True)
+        self.assertContains(r, "Révision")
+        self.assertTrue(Devis.objects.filter(pk="DEV-REC-A-R2").exists())
+
+    def test_filtres_expires_et_bientot(self):
+        self._valider()
+        self._expirer()
+        autre = Devis.objects.create(numero="DEV-BIENTOT", client=self.tiers, date_creation=datetime.date(2026, 1, 1),
+                                      statut="valide", date_validite=datetime.date.today() + datetime.timedelta(days=3))
+        page = self.client.get("/admin/chiffrage/devis/?validite=expire")
+        self.assertContains(page, "DEV-REC-A")
+        self.assertNotContains(page, "DEV-BIENTOT")
+        page = self.client.get("/admin/chiffrage/devis/?validite=bientot")
+        self.assertContains(page, "DEV-BIENTOT")
+
+    def test_tableau_de_bord_taux_de_transformation_et_devis_sans_reponse(self):
+        self._valider()
+        Devis.objects.filter(pk=self.devis.pk).update(date_creation=datetime.date.today())
+        self.devis.refresh_from_db()
+        lancer_en_production(self.devis)  # accepté
+        autre = Devis.objects.create(numero="DEV-ATTENTE", client=self.tiers, date_creation=datetime.date.today(),
+                                      statut="valide", date_validite=datetime.date.today() + datetime.timedelta(days=2))
+        page = self.client.get("/admin/")
+        self.assertContains(page, "Taux de transformation")
+        self.assertContains(page, "50 %")
+        self.assertContains(page, "devis acceptés sur 2 envoyés")
+        self.assertContains(page, "1 à relancer")
+
+    def test_migration_marque_accepte_les_devis_deja_commandes(self):
+        import importlib
+
+        from django.apps import apps
+
+        self._valider()
+        commande = lancer_en_production(self.devis)
+        Devis.objects.filter(pk=self.devis.pk).update(issue="en_attente")
+        migration = importlib.import_module("chiffrage.migrations.0020_cycle_de_vie_devis")
+        migration.devis_deja_commandes_acceptes(apps, None)
+        self.devis.refresh_from_db()
+        self.assertEqual(self.devis.issue, "accepte")

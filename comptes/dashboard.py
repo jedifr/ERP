@@ -25,6 +25,16 @@ def dashboard_callback(request, context):
     devis_valides_mois = Devis.objects.filter(
         statut=Devis.Statut.VALIDE, date_creation__gte=debut_mois
     ).count()
+    il_y_a_90_jours = aujourdhui - datetime.timedelta(days=90)
+    offres = Devis.objects.filter(statut=Devis.Statut.VALIDE, date_creation__gte=il_y_a_90_jours).exclude(
+        issue=Devis.Issue.REMPLACE
+    )
+    nb_offres = offres.count()
+    taux_transformation = (
+        f"{100 * offres.filter(issue=Devis.Issue.ACCEPTE).count() / nb_offres:.0f} %" if nb_offres else "—"
+    )
+    en_attente = Devis.objects.filter(statut=Devis.Statut.VALIDE, issue=Devis.Issue.EN_ATTENTE)
+    a_relancer = en_attente.filter(date_validite__isnull=False, date_validite__lte=aujourdhui + datetime.timedelta(days=7))
     ca_facture_mois = (
         Facture.objects.filter(date_facturation__gte=debut_mois).aggregate(total=Sum("montant_ht"))["total"] or 0
     )
@@ -56,6 +66,23 @@ def dashboard_callback(request, context):
             "value": devis_valides_mois,
             "icon": "task_alt",
             "hint": "ce mois-ci",
+            "link": "admin:chiffrage_devis_changelist",
+            "link_query": "?statut__exact=valide",
+        },
+        {
+            "title": "Devis sans réponse",
+            "value": en_attente.count(),
+            "icon": "hourglass_top",
+            "hint": f"{a_relancer.count()} à relancer (expirés ou sous 7 jours)",
+            "link": "admin:chiffrage_devis_changelist",
+            "link_query": "?statut__exact=valide&issue__exact=en_attente",
+            "attention": a_relancer.exists(),
+        },
+        {
+            "title": "Taux de transformation",
+            "value": taux_transformation,
+            "icon": "trending_up",
+            "hint": f"devis acceptés sur {nb_offres} envoyés (90 j)",
             "link": "admin:chiffrage_devis_changelist",
             "link_query": "?statut__exact=valide",
         },
