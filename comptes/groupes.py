@@ -44,7 +44,7 @@ _RESPONSABLE_COMMERCIAL = [
     "chiffrage.delete_devis", "chiffrage.valider_devis", "chiffrage.annuler_commande",
     "chiffrage.add_livraison", "chiffrage.change_livraison",
     "chiffrage.add_livraisonligne", "chiffrage.change_livraisonligne",
-    "chiffrage.annuler_livraison",
+    "chiffrage.annuler_livraison", "stock.view_lot",  # choix du lot livré (autocomplétion)
 ]
 
 _FACTURATION = [

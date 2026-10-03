@@ -99,7 +99,7 @@ class LigneCommandeFournisseurAdmin(ModelAdmin):
 class ReceptionLigneInline(TabularInline):
     model = ReceptionLigne
     extra = 1
-    autocomplete_fields = ["ligne_commande_fournisseur"]
+    autocomplete_fields = ["ligne_commande_fournisseur", "lot", "emplacement"]
 
 
 @admin.register(Reception)

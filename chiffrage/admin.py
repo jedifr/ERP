@@ -686,7 +686,7 @@ class LivraisonLigneInline(TabularInline):
 
     model = LivraisonLigne
     extra = 1
-    autocomplete_fields = ["commande_ligne"]
+    autocomplete_fields = ["commande_ligne", "lot"]
 
     def has_change_permission(self, request, obj=None):
         return False

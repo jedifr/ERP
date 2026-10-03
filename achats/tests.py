@@ -565,3 +565,195 @@ class GenererEcritureAchatTests(TestCase):
         )
         with self.assertRaises(GenerationEcritureAchatError):
             generer_ecriture_achat(self.facture)
+
+
+class ReceptionTracabiliteTests(TestCase):
+    """Gap analysis : réception sur plusieurs lots, n° de coulée et certificat matière."""
+
+    def setUp(self):
+        ReceptionTests.setUp(self)  # même préparation, sans rejouer les tests de ReceptionTests
+
+    def _reception(self, quantite=10, **kw):
+        return ReceptionLigne.objects.create(
+            reception=self.reception, ligne_commande_fournisseur=self.ligne, quantite_recue=quantite, **kw
+        )
+
+    def test_premiere_reception_cree_le_lot_de_la_coulee(self):
+        emplacement = Emplacement.objects.create(code="TRC-A1")
+        self._reception(40, numero_coulee="C-7781", emplacement=emplacement)
+        lot = Lot.objects.get(article=self.article)
+        self.assertEqual((lot.numero_coulee, lot.emplacement, lot.quantite), ("C-7781", emplacement, 40))
+        mouvement = lot.mouvements.get()
+        self.assertEqual((mouvement.reference_origine, mouvement.cout_unitaire), ("RECEPTION-REC-001", 2.0))
+
+    def test_meme_coulee_complete_son_lot_et_nouvelle_coulee_cree_un_autre(self):
+        emplacement = Emplacement.objects.create(code="TRC-A2")
+        self._reception(10, numero_coulee="C-1", emplacement=emplacement)
+        self._reception(15, numero_coulee="C-1")  # sans emplacement : retrouvé par la coulée
+        self._reception(20, numero_coulee="C-2", emplacement=emplacement)
+        quantites = {l.numero_coulee: l.quantite for l in Lot.objects.filter(article=self.article)}
+        self.assertEqual(quantites, {"C-1": 25, "C-2": 20})
+
+    def test_lot_choisi_explicitement(self):
+        emplacement = Emplacement.objects.create(code="TRC-A3")
+        lot1 = Lot.objects.create(article=self.article, emplacement=emplacement, numero_coulee="L1")
+        Lot.objects.create(article=self.article, emplacement=Emplacement.objects.create(code="TRC-A4"), numero_coulee="L2")
+        self._reception(30, lot=lot1)  # deux lots existent : le choix lève l'ambiguïté
+        lot1.refresh_from_db()
+        self.assertEqual(lot1.quantite, 30)
+
+    def test_lot_dun_autre_article_refuse_sans_rien_enregistrer(self):
+        autre = Article.objects.create(reference="AUTRE-ART", nature=Article.Nature.MATIERE_PREMIERE)
+        lot_autre = Lot.objects.create(article=autre, emplacement=Emplacement.objects.create(code="TRC-A5"))
+        with self.assertRaises(AchatsError):
+            self._reception(10, lot=lot_autre)
+        self.assertEqual(ReceptionLigne.objects.count(), 0)
+
+    def test_echec_de_resolution_du_lot_nenregistre_rien(self):
+        """Avant : la ligne et le cumul reçu restaient enregistrés alors que le lot était introuvable."""
+        with self.assertRaises(AchatsError):
+            self._reception(10, numero_coulee="C-9")  # nouvelle coulée sans emplacement
+        self.assertEqual(ReceptionLigne.objects.count(), 0)
+        self.ligne.refresh_from_db()
+        self.assertEqual(self.ligne.quantite_recue, 0)
+        with self.assertRaises(AchatsError):
+            self._reception(10)  # aucun lot du tout
+        self.ligne.refresh_from_db()
+        self.assertEqual((self.ligne.quantite_recue, ReceptionLigne.objects.count()), (0, 0))
+
+    def test_ambiguite_entre_plusieurs_lots_sans_choix(self):
+        for i in range(2):
+            Lot.objects.create(article=self.article, emplacement=Emplacement.objects.create(code=f"TRC-B{i}"))
+        with self.assertRaises(AchatsError) as cm:
+            self._reception(10)
+        self.assertIn("choisissez le lot de destination", str(cm.exception))
+        self.assertEqual(ReceptionLigne.objects.count(), 0)
+
+    def test_article_non_gere_en_stock_refuse(self):
+        Article.objects.filter(pk=self.article.pk).update(gere_en_stock=False)
+        self.ligne.refresh_from_db()
+        self.ligne.article.refresh_from_db()
+        with self.assertRaises(AchatsError):
+            self._reception(10, emplacement=Emplacement.objects.create(code="TRC-C1"))
+
+    def test_certificat_rattache_au_lot_cree(self):
+        import tempfile
+
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from django.test import override_settings
+
+        with tempfile.TemporaryDirectory() as dossier, override_settings(MEDIA_ROOT=dossier):
+            emplacement = Emplacement.objects.create(code="TRC-D1")
+            self._reception(
+                10, numero_coulee="C-CERT", emplacement=emplacement,
+                certificat=SimpleUploadedFile("cert.pdf", b"%PDF-1.4 certificat 3.1"),
+            )
+            lot = Lot.objects.get(numero_coulee="C-CERT")
+            self.assertTrue(lot.certificat.name.startswith("stock/certificats/"))
+            self.assertEqual(lot.certificat.read(), b"%PDF-1.4 certificat 3.1")
+
+
+class TracabiliteLivraisonTests(TestCase):
+    """Livraison d'une coulée précise, bon de livraison et page de traçabilité."""
+
+    def setUp(self):
+        ReceptionTests.setUp(self)
+        import datetime as dt
+
+        from django.contrib.auth import get_user_model
+
+        from chiffrage.models import Commande, CommandeLigne, Livraison, LivraisonLigne
+
+        self.user = get_user_model().objects.create_superuser("trace-admin", "t@example.com", "pass-mot-de-passe-4")
+        self.client.force_login(self.user)
+        self.emp = Emplacement.objects.create(code="TRL-A1")
+        for coulee, qte in (("C-OLD", 10), ("C-NEW", 10)):
+            ReceptionLigne.objects.create(
+                reception=self.reception, ligne_commande_fournisseur=self.ligne, quantite_recue=qte,
+                numero_coulee=coulee, emplacement=self.emp,
+            )
+        self.lot_old = Lot.objects.get(numero_coulee="C-OLD")
+        self.lot_new = Lot.objects.get(numero_coulee="C-NEW")
+        client = Tiers.objects.create(code="CLI-TRL", raison_sociale="Client Traçabilité", type_tiers=Tiers.TypeTiers.CLIENT)
+        adresse = Adresse.objects.create(tiers=client, est_facturation=True, est_livraison=True, adresse="1 rue", code_postal="75000", ville="Paris")
+        self.commande_client = Commande.objects.create(
+            numero="CDE-TRL", client=client, reference_client="PO", date_commande=dt.date(2026, 1, 1),
+            adresse_facturation=adresse, adresse_livraison=adresse,
+        )
+        self.cl = CommandeLigne.objects.create(commande=self.commande_client, article=self.article, quantite_commandee=12, prix_vente_unitaire=5)
+        self.livraison = Livraison.objects.create(numero="BL-TRL", commande=self.commande_client, date_livraison=dt.date(2026, 2, 1))
+        self.LivraisonLigne = LivraisonLigne
+
+    def test_livraison_dune_coulee_precise(self):
+        self.LivraisonLigne.objects.create(livraison=self.livraison, commande_ligne=self.cl, quantite_livree=4, lot=self.lot_new)
+        self.lot_old.refresh_from_db()
+        self.lot_new.refresh_from_db()
+        self.assertEqual((self.lot_old.quantite, self.lot_new.quantite), (10, 6))  # pas de FIFO : la coulée voulue
+
+    def test_sans_choix_le_fifo_sapplique(self):
+        self.LivraisonLigne.objects.create(livraison=self.livraison, commande_ligne=self.cl, quantite_livree=4)
+        self.lot_old.refresh_from_db()
+        self.assertEqual(self.lot_old.quantite, 6)
+
+    def test_coulee_insuffisante_refuse_toute_la_ligne(self):
+        from chiffrage.models import LivraisonError
+
+        with self.assertRaises(LivraisonError):
+            self.LivraisonLigne.objects.create(livraison=self.livraison, commande_ligne=self.cl, quantite_livree=11, lot=self.lot_new)
+        self.assertEqual(self.LivraisonLigne.objects.count(), 0)
+        self.lot_new.refresh_from_db()
+        self.assertEqual(self.lot_new.quantite, 10)
+
+    def test_lot_dun_autre_article_invalide(self):
+        from django.core.exceptions import ValidationError
+
+        autre = Article.objects.create(reference="AUTRE-TRL", nature=Article.Nature.MATIERE_PREMIERE)
+        lot = Lot.objects.create(article=autre, emplacement=self.emp)
+        ligne = self.LivraisonLigne(livraison=self.livraison, commande_ligne=self.cl, quantite_livree=1, lot=lot)
+        with self.assertRaises(ValidationError) as cm:
+            ligne.full_clean()
+        self.assertIn("lot", cm.exception.message_dict)
+
+    def test_le_bon_de_livraison_imprime_la_coulee(self):
+        from chiffrage.documents import generer_pdf_bon_livraison
+
+        self.LivraisonLigne.objects.create(livraison=self.livraison, commande_ligne=self.cl, quantite_livree=4, lot=self.lot_new)
+        texte = generer_pdf_bon_livraison(self.livraison).decode("latin-1")
+        self.assertIn("C-NEW", texte)
+        self.assertNotIn("C-OLD", texte)
+
+    def test_page_de_tracabilite_du_lot(self):
+        self.LivraisonLigne.objects.create(livraison=self.livraison, commande_ligne=self.cl, quantite_livree=4, lot=self.lot_new)
+        page = self.client.get(f"/admin/stock/lot/{self.lot_new.pk}/tracabilite/")
+        self.assertEqual(page.status_code, 200)
+        for attendu in ("C-NEW", "REC-001", "Fournisseur Test", "BL-TRL", "Client Traçabilité", "CDE-TRL"):
+            self.assertContains(page, attendu)
+        autre = self.client.get(f"/admin/stock/lot/{self.lot_old.pk}/tracabilite/")
+        self.assertNotContains(autre, "BL-TRL")  # l'autre coulée n'est jamais partie
+
+    def test_tracabilite_signale_une_livraison_annulee(self):
+        self.LivraisonLigne.objects.create(livraison=self.livraison, commande_ligne=self.cl, quantite_livree=4, lot=self.lot_new)
+        self.livraison.annuler(utilisateur=self.user, motif="Erreur")
+        page = self.client.get(f"/admin/stock/lot/{self.lot_new.pk}/tracabilite/")
+        self.assertContains(page, "(annulée)")
+
+    def test_recherche_de_lot_par_numero_de_coulee(self):
+        page = self.client.get("/admin/stock/lot/?q=C-NEW")
+        self.assertContains(page, "C-NEW")
+        self.assertNotContains(page, "C-OLD")
+
+    def test_certificat_servi_aux_habilites_seulement(self):
+        import tempfile
+
+        from django.contrib.auth import get_user_model
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from django.test import override_settings
+
+        with tempfile.TemporaryDirectory() as dossier, override_settings(MEDIA_ROOT=dossier):
+            self.lot_new.certificat.save("cert.pdf", SimpleUploadedFile("cert.pdf", b"CERT"), save=True)
+            url = self.lot_new.certificat.url
+            self.assertEqual(self.client.get(url).status_code, 200)
+            self.client.force_login(get_user_model().objects.create_user("sans-droit-cert", "c@example.com", "pass-mot-de-passe-4", is_staff=True))
+            self.assertEqual(self.client.get(url).status_code, 403)
+            self.client.logout()
+            self.assertEqual(self.client.get(url).status_code, 302)

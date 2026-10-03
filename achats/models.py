@@ -1,5 +1,5 @@
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, transaction
 from django.db.models import Q
 from django.utils import timezone
 
@@ -265,6 +265,24 @@ class ReceptionLigne(models.Model):
         related_name="receptions_lignes",
     )
     quantite_recue = models.FloatField("quantité reçue")
+    lot = models.ForeignKey(
+        Lot, verbose_name="lot de destination", on_delete=models.PROTECT, null=True, blank=True,
+        related_name="receptions_lignes",
+        help_text="Lot existant qui reçoit cette quantité. Laisser vide pour le déduire du n° de coulée.",
+    )
+    emplacement = models.ForeignKey(
+        "stock.Emplacement", verbose_name="emplacement", on_delete=models.PROTECT, null=True, blank=True,
+        related_name="receptions_lignes",
+        help_text="Emplacement du lot, nécessaire pour créer un nouveau lot.",
+    )
+    numero_coulee = models.CharField(
+        "n° de coulée", max_length=100, blank=True,
+        help_text="Un n° déjà connu complète son lot ; un nouveau n° crée un lot (traçabilité matière).",
+    )
+    certificat = models.FileField(
+        "certificat matière (3.1)", upload_to="stock/certificats/%Y/", blank=True,
+        help_text="Rattaché au lot de la coulée s'il n'en a pas encore.",
+    )
 
     class Meta:
         verbose_name = "Ligne de réception"
@@ -288,23 +306,31 @@ class ReceptionLigne(models.Model):
 
     def save(self, *args, **kwargs):
         creation = self.pk is None
-        super().save(*args, **kwargs)
-        if creation:
+        if not creation:
+            return super().save(*args, **kwargs)
+        # Tout ou rien : si le lot de destination est introuvable ou ambigu (AchatsError), ni la
+        # ligne ni le cumul reçu ne doivent être enregistrés.
+        with transaction.atomic():
+            super().save(*args, **kwargs)
             self._appliquer()
 
     def _appliquer(self):
         ligne = self.ligne_commande_fournisseur
+
+        # Le lot est résolu AVANT toute mise à jour : s'il échoue, rien n'a bougé.
+        lot = None
+        if ligne.article_id is not None:
+            lot = self._resoudre_lot(ligne.article)
+
         LigneCommandeFournisseur.objects.filter(pk=ligne.pk).update(
             quantite_recue=models.F("quantite_recue") + self.quantite_recue
         )
 
-        if ligne.article_id is None:
-            # Ligne "poste de gestion" (charge générale sans article, ex.
-            # assurance) : pas de stock à mouvementer, seul le cumul
-            # quantite_recue (mis à jour ci-dessus) a un sens ici.
+        if lot is None:
+            # Ligne "poste de gestion" (charge générale sans article, ex. assurance) : pas de
+            # stock à mouvementer, seul le cumul quantite_recue a un sens ici.
             return
 
-        lot = self._lot_unique_pour_article(ligne.article)
         MouvementStock.objects.create(
             lot=lot,
             type_mouvement=MouvementStock.TypeMouvement.ENTREE,
@@ -314,17 +340,49 @@ class ReceptionLigne(models.Model):
             cout_unitaire=ligne.prix_unitaire_achat,
         )
 
+    def _resoudre_lot(self, article):
+        """Lot qui reçoit la marchandise : le lot choisi ; sinon celui de la coulée (créé au besoin,
+        avec son certificat) ; sinon, comme avant, l'unique lot de l'article."""
+        if not article.gere_en_stock:
+            raise AchatsError(f"L'article « {article} » n'est pas géré en stock : pas de lot à alimenter.")
+        if self.lot_id:
+            if self.lot.article_id != article.pk:
+                raise AchatsError(f"Le lot choisi ({self.lot}) n'est pas un lot de l'article « {article} ».")
+            lot = self.lot
+        elif self.numero_coulee or self.emplacement_id:
+            filtres = {"article": article}
+            if self.numero_coulee:
+                filtres["numero_coulee"] = self.numero_coulee
+            if self.emplacement_id:
+                filtres["emplacement"] = self.emplacement
+            lot = Lot.objects.filter(**filtres).order_by("id").first()
+            if lot is None:
+                if not self.emplacement_id:
+                    raise AchatsError(
+                        f"Précisez l'emplacement pour créer le lot de la coulée « {self.numero_coulee} »."
+                    )
+                lot = Lot.objects.create(
+                    article=article, emplacement=self.emplacement, numero_coulee=self.numero_coulee
+                )
+        else:
+            return self._lot_unique_pour_article(article)
+        if self.certificat and not lot.certificat:
+            lot.certificat.name = self.certificat.name
+            lot.save(update_fields=["certificat"])
+        return lot
+
     @staticmethod
     def _lot_unique_pour_article(article):
         lots = list(Lot.objects.filter(article=article))
         if len(lots) == 0:
             raise AchatsError(
-                f"Aucun lot existant pour l'article « {article} ». Créez-en un (module Stock) avant de réceptionner."
+                f"Aucun lot existant pour l'article « {article} ». Indiquez un emplacement (et un n° de "
+                "coulée) pour en créer un, ou créez-le dans le module Stock."
             )
         if len(lots) > 1:
             raise AchatsError(
-                f"Plusieurs lots existent pour l'article « {article} » : réception automatique non "
-                "applicable, mettez à jour le stock manuellement."
+                f"Plusieurs lots existent pour l'article « {article} » : choisissez le lot de destination "
+                "ou indiquez un n° de coulée."
             )
         return lots[0]
 

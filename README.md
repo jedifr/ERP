@@ -2642,3 +2642,32 @@ Tests : `DocumentsPdfTests` (`chiffrage/tests.py`). Nouvelles dépendances : `re
 
 **Vérifié** (rendu des PDF en images) : devis avec logo, en-tête et pied de page légaux, totaux ;
 bon de livraison avec reliquat et cadre de signature.
+
+## Gap analysis, lot 3 : traçabilité matière et réception sur plusieurs lots
+
+Tests : `ReceptionTracabiliteTests`, `TracabiliteLivraisonTests` (`achats/tests.py`),
+`AutocompletionsTracabiliteTests` (`comptes/tests.py`).
+
+- **N° de coulée et certificat 3.1 sur le lot** : deux champs sur chaque lot, recherche par
+  n° de coulée dans la liste des lots. Les certificats sont des fichiers `/media/stock/…`,
+  lisibles seulement avec la permission « voir un lot ».
+- **Réception sur plusieurs lots** (avant : un seul lot par article, sinon la réception était
+  refusée) : chaque ligne de réception peut désigner le lot de destination, ou donner un **n° de
+  coulée** (et un emplacement) — une coulée déjà connue complète son lot, une nouvelle coulée
+  **crée** son lot, et le certificat joint est rattaché au lot. Sans rien préciser, l'ancien
+  comportement subsiste (lot unique de l'article).
+- **Livrer une coulée précise** : champ *Lot livré* sur la ligne de livraison (pour que le
+  certificat remis corresponde à la matière expédiée) ; sans choix, les lots sont toujours
+  consommés du plus ancien au plus récent. Un lot d'un autre article est refusé.
+- **Traçabilité d'un lot** (bouton sur la fiche d'un lot) : d'où il vient (réceptions et
+  fournisseurs) et où il est parti (bons de livraison, clients, commandes, livraisons annulées
+  signalées) — de quoi répondre à un rappel de matière ou à une réclamation. Le **n° de coulée
+  s'imprime sur le bon de livraison**.
+- **Défaut corrigé** : l'enregistrement d'une ligne de réception n'était pas atomique et
+  mettait à jour le cumul reçu avant de chercher le lot. Si aucun lot n'existait (ou s'il y en
+  avait plusieurs), l'erreur était affichée mais la ligne et le cumul restaient enregistrés.
+  Désormais tout ou rien. Le rôle *Responsable commercial* reçoit la consultation des lots
+  (choix du lot livré) : `manage.py synchroniser_groupes` après mise à jour.
+
+**Vérifié** (Playwright) : page de traçabilité du lot C-2026-0455 (réception REC-0099 des Aciers
+du Rhône, livraison BL-0208 chez Métallerie Durand) ; bon de livraison imprimant la coulée.

@@ -801,3 +801,20 @@ class VerrouOptimisteTests(TestCase):
         page = self.client_alice.get("/admin/")
         self.assertContains(page, "comptes/anti_double_clic")
         self.assertContains(page, "comptes/admin_extra")
+
+
+class AutocompletionsTracabiliteTests(TestCase):
+    def test_choix_du_lot_en_reception_et_en_livraison(self):
+        from django.contrib.auth.models import Group
+
+        cas = {
+            "Achats": [("achats", "receptionligne", "lot"), ("achats", "receptionligne", "emplacement")],
+            "Responsable commercial": [("chiffrage", "livraisonligne", "lot")],
+        }
+        for groupe, champs in cas.items():
+            u = get_user_model().objects.create_user(f"u-{groupe[:4]}", "x@example.com", "pass-mot-de-passe-4", is_staff=True)
+            u.groups.add(Group.objects.get(name=groupe))
+            self.client.force_login(u)
+            for app, modele, champ in champs:
+                r = self.client.get("/admin/autocomplete/", {"app_label": app, "model_name": modele, "field_name": champ, "term": ""})
+                self.assertEqual(r.status_code, 200, f"{groupe} : {modele}.{champ}")

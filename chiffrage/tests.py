@@ -4333,3 +4333,18 @@ class DocumentsPdfTests(_FixtureModuleA, TestCase):
         societe.logo.save("logo-test.png", ContentFile(tampon.getvalue()), save=True)
         self.addCleanup(lambda: societe.logo.delete(save=False))
         self.assertIn("/Subtype /Image", self._texte(generer_pdf_devis(self.devis)))
+
+
+class LivraisonDepassementAvecLotTests(_FixtureModuleA, TestCase):
+    """Garde-fou : le contrôle du lot ne doit jamais masquer celui de la quantité commandée."""
+
+    def test_depassement_toujours_detecte_avec_un_lot_choisi(self):
+        self._valider()
+        commande = lancer_en_production(self.devis)
+        ligne = commande.lignes.get()  # 3 commandés
+        lot = Lot.objects.create(article=self.article, emplacement=Emplacement.objects.create(code="DEP-1"))
+        MouvementStock.objects.create(lot=lot, type_mouvement="entree", quantite=50, motif="stock")
+        livraison = Livraison.objects.create(numero="BL-DEP", commande=commande, date_livraison=datetime.date(2026, 2, 1))
+        with self.assertRaises(ValidationError) as cm:
+            LivraisonLigne(livraison=livraison, commande_ligne=ligne, quantite_livree=4, lot=lot).full_clean()
+        self.assertIn("quantite_livree", cm.exception.message_dict)

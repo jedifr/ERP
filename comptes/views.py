@@ -7,6 +7,8 @@ from django.views.static import serve as serve_static
 # n'est lisible que par un compte du personnel (is_staff).
 PERMISSIONS_PAR_DOSSIER = {
     "decoupe": "decoupe.view_piecedecoupe",
+    "stock": "stock.view_lot",  # certificats matière
+    "societe": "comptes.view_societe",  # logo
 }
 
 

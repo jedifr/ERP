@@ -60,6 +60,14 @@ class Lot(models.Model):
         "longueur restante", null=True, blank=True, help_text="Inutilisé en v1"
     )
     statut = models.CharField("statut", max_length=50, blank=True)
+    numero_coulee = models.CharField(
+        "n° de coulée / de lot fournisseur", max_length=100, blank=True, db_index=True,
+        help_text="Traçabilité matière : repris sur le bon de livraison et recherchable.",
+    )
+    certificat = models.FileField(
+        "certificat matière (3.1)", upload_to="stock/certificats/%Y/", blank=True,
+        help_text="Certificat de la coulée (PDF ou image).",
+    )
     cout_unitaire_moyen = models.FloatField(
         "coût unitaire moyen pondéré",
         default=0,

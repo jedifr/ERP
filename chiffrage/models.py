@@ -773,6 +773,11 @@ class LivraisonLigne(models.Model):
         related_name="livraisons_lignes",
     )
     quantite_livree = models.FloatField("quantité livrée")
+    lot = models.ForeignKey(
+        Lot, verbose_name="lot livré", on_delete=models.PROTECT, null=True, blank=True,
+        related_name="livraisons_lignes",
+        help_text="Pour livrer une coulée précise (certificat 3.1). Vide : lots consommés du plus ancien au plus récent.",
+    )
 
     class Meta:
         verbose_name = "Ligne de livraison"
@@ -801,6 +806,8 @@ class LivraisonLigne(models.Model):
                         )
                     }
                 )
+        if self.lot_id and self.commande_ligne_id and self.lot.article_id != self.commande_ligne.article_id:
+            raise ValidationError({"lot": f"Ce lot n'est pas un lot de l'article « {self.commande_ligne.article} »."})
 
     def delete(self, *args, **kwargs):
         raise LivraisonError("Une ligne de livraison ne se supprime pas : annulez la livraison.")
@@ -824,7 +831,7 @@ class LivraisonLigne(models.Model):
         # est faux par défaut pour un FABRIQUE) : dans ce cas la sortie de
         # stock est simplement sautée plutôt que de bloquer la livraison.
         # Plusieurs lots : consommés du plus ancien au plus récent (FIFO).
-        lots = self._lots_fifo(ligne.article)
+        lots = self._lots_a_consommer(ligne.article)
 
         CommandeLigne.objects.filter(pk=ligne.pk).update(
             quantite_livree=models.F("quantite_livree") + self.quantite_livree
@@ -861,6 +868,11 @@ class LivraisonLigne(models.Model):
             raise LivraisonError(
                 f"{exc} Régularisez le stock (entrée ou inventaire) avant de saisir cette livraison."
             ) from exc
+
+    def _lots_a_consommer(self, article):
+        if self.lot_id:
+            return list(Lot.objects.select_for_update().filter(pk=self.lot_id))
+        return self._lots_fifo(article)
 
     @staticmethod
     def _lots_fifo(article):

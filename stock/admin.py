@@ -1,8 +1,10 @@
 from django.contrib import admin, messages
+from django.core.exceptions import PermissionDenied
 from django.http import HttpResponseRedirect
 from django.template.response import TemplateResponse
 from django.urls import path, reverse
 from unfold.admin import ModelAdmin, TabularInline
+from unfold.decorators import action as unfold_action
 
 from codification.mixins import CodificationInitialeMixin
 from codification.models import RegleCodification
@@ -10,6 +12,7 @@ from codification.models import RegleCodification
 from comptes.concurrence import VerrouOptimisteMixin
 from comptes.historique import HistoriqueLectureSeule
 
+from .tracabilite import tracabilite_lot
 from .models import (
     AlerteStock,
     Emplacement,
@@ -52,12 +55,25 @@ class EmplacementAdmin(VerrouOptimisteMixin, CodificationInitialeMixin, Historiq
 
 @admin.register(Lot)
 class LotAdmin(VerrouOptimisteMixin, HistoriqueLectureSeule, ModelAdmin):
-    list_display = ["article", "emplacement", "quantite", "cout_unitaire_moyen", "valeur_stock", "statut"]
+    list_display = ["article", "emplacement", "numero_coulee", "quantite", "cout_unitaire_moyen", "valeur_stock", "statut"]
     list_filter = ["emplacement", "statut"]
-    search_fields = ["article__reference"]
+    search_fields = ["article__reference", "numero_coulee"]
+    actions_detail = ["action_tracabilite"]
     autocomplete_fields = ["article", "emplacement"]
     readonly_fields = ["quantite", "cout_unitaire_moyen", "valeur_stock"]
     inlines = [MouvementStockInline]
+
+    @unfold_action(description="Traçabilité (d'où vient, où est parti)", url_path="tracabilite")
+    def action_tracabilite(self, request, object_id):
+        lot = Lot.objects.select_related("article", "emplacement").get(pk=object_id)
+        if not self.has_view_permission(request, lot):
+            raise PermissionDenied
+        return TemplateResponse(
+            request,
+            "admin/stock/tracabilite.html",
+            {**self.admin_site.each_context(request), "title": f"Traçabilité du lot {lot}", "lot": lot,
+             "trace": tracabilite_lot(lot), "retour": reverse("admin:stock_lot_change", args=[lot.pk])},
+        )
 
     def get_readonly_fields(self, request, obj=None):
         champs = list(super().get_readonly_fields(request, obj))
