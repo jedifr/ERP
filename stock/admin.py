@@ -7,6 +7,7 @@ from unfold.admin import ModelAdmin, TabularInline
 from codification.mixins import CodificationInitialeMixin
 from codification.models import RegleCodification
 
+from comptes.concurrence import VerrouOptimisteMixin
 from comptes.historique import HistoriqueLectureSeule
 
 from .models import (
@@ -42,7 +43,7 @@ class MouvementStockInline(TabularInline):
 
 
 @admin.register(Emplacement)
-class EmplacementAdmin(CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
+class EmplacementAdmin(VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
     codification_entite = RegleCodification.Entite.EMPLACEMENT
 
     list_display = ["code", "libelle"]
@@ -50,7 +51,7 @@ class EmplacementAdmin(CodificationInitialeMixin, HistoriqueLectureSeule, ModelA
 
 
 @admin.register(Lot)
-class LotAdmin(HistoriqueLectureSeule, ModelAdmin):
+class LotAdmin(VerrouOptimisteMixin, HistoriqueLectureSeule, ModelAdmin):
     list_display = ["article", "emplacement", "quantite", "cout_unitaire_moyen", "valeur_stock", "statut"]
     list_filter = ["emplacement", "statut"]
     search_fields = ["article__reference"]

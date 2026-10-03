@@ -2529,3 +2529,38 @@ Tests : `ApiSecuriseeParDefautTests`, `MediaProtegeTests`, `DiagnosticSecuriteTe
 **Vérifié** (Playwright) : 5 échecs puis bon mot de passe → refusé avec le message
 « compte verrouillé, réessayez dans 15 minute(s) » ; bandeau de sécurité sur l'accueil ;
 journal des connexions.
+
+## Recette du module D (sécurité transverse) : priorité 2
+
+Tests : `GestionDesAccesTests`, `AuditDesDroitsTests`, `VerrouOptimisteTests`
+(`comptes/tests.py`).
+
+- **Faille corrigée : élévation de privilèges.** Un compte avec la seule permission « modifier
+  les utilisateurs » pouvait se cocher « superutilisateur » ou s'ajouter à n'importe quel
+  groupe. Utilisateurs et groupes sont désormais réservés aux **superutilisateurs** : qui gère
+  les accès a, de fait, tous les accès. À noter : seuls les superutilisateurs créent des
+  comptes et les rattachent à un groupe.
+- **Audit des droits** (Paramétrage → *Audit des droits*, ou `manage.py audit_droits`) : qui
+  a accès à quoi, comptes sans groupe, jamais connectés ou inactifs depuis 90 jours, nombre de
+  superutilisateurs, et **cumuls de droits incompatibles** (séparation des pouvoirs) — par
+  exemple saisir une facture *et* la comptabiliser, ou saisir un mouvement de stock *et*
+  valider l'inventaire. Rien n'est bloqué : une petite structure cumule souvent les rôles, ici
+  le cumul devient visible pour être décidé. Les rôles *Responsable facturation* et
+  *Responsable stock* cumulent ainsi volontairement certains droits et apparaissent comme tels.
+- **Plus d'écrasement silencieux entre deux onglets ou deux personnes.** Les fiches des devis,
+  commandes, livraisons, factures, lots et emplacements portent un numéro de version (dernière
+  entrée de l'historique, champ caché). Si la fiche a changé depuis l'ouverture de la page,
+  l'enregistrement est refusé avec le nom de l'auteur et l'heure, sans rien perdre : la saisie
+  reste affichée pour être recopiée. Limite connue : seule la fiche parente est versionnée,
+  pas ses lignes en tableau (le recalcul en direct des lignes de devis les enregistre au fil de
+  la saisie). Les fiches sans historique (tiers, articles…) ne sont pas encore couvertes.
+- **Double-clic sur « Enregistrer »** : un seul envoi part. Les envois suivants sont bloqués
+  plutôt que de désactiver le bouton (un bouton désactivé n'est pas transmis, et le serveur
+  perdrait la distinction « Enregistrer » / « Enregistrer et continuer »).
+- **Départ d'un collaborateur** : désactiver le compte coupe immédiatement sa session ; changer
+  son mot de passe invalide ses autres sessions ; la désactivation est tracée dans
+  l'historique de l'utilisateur. Les sessions durent 12 h (`DJANGO_SESSION_HEURES`).
+
+**Vérifié** (Playwright) : deux contextes de navigateur sur la même fiche — le second
+enregistrement est refusé avec « modifiée par bruno-d le … » ; un double-clic envoie une seule
+requête POST.

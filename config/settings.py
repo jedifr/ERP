@@ -5,6 +5,7 @@ Django settings for the ERP maison project.
 import os
 from pathlib import Path
 
+from django.templatetags.static import static
 from django.urls import reverse_lazy
 from dotenv import load_dotenv
 
@@ -233,6 +234,8 @@ LOGGING = {
 # https://unfoldadmin.com/docs/configuration/settings/
 
 UNFOLD = {
+    "STYLES": [lambda request: static("comptes/admin_extra.css")],
+    "SCRIPTS": [lambda request: static("comptes/anti_double_clic.js")],
     "SITE_TITLE": "ERP maison",
     "SITE_HEADER": "ERP maison",
     "SITE_SUBHEADER": "Métallurgie & chaudronnerie",
@@ -484,6 +487,12 @@ UNFOLD = {
                         "title": "Groupes",
                         "icon": "groups",
                         "link": reverse_lazy("admin:auth_group_changelist"),
+                    },
+                    {
+                        "title": "Audit des droits",
+                        "icon": "admin_panel_settings",
+                        "link": reverse_lazy("admin:auth_user_audit_droits"),
+                        "permission": lambda request: request.user.is_superuser,
                     },
                     {
                         "title": "Journal des connexions",

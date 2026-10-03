@@ -1,0 +1,2 @@
+/* Champ caché de version (verrouillage optimiste, voir comptes/concurrence.py) : pas de ligne vide. */
+.field-version_verrou { display: none !important; }

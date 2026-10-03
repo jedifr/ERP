@@ -7,7 +7,10 @@ from unfold.admin import ModelAdmin
 from unfold.forms import UserChangeForm
 from unfold.forms import UserCreationForm as UnfoldUserCreationForm
 
-from . import connexions
+from django.template.response import TemplateResponse
+from django.urls import path
+
+from . import audit_droits, connexions
 from .models import EvenementConnexion
 
 
@@ -32,7 +35,29 @@ class UserCreationForm(UnfoldUserCreationForm):
         self.fields["last_name"].required = False
 
 
-class UserAdmin(DjangoUserAdmin, ModelAdmin):
+class ReserveAuxSuperutilisateurs:
+    """Utilisateurs et groupes : réservés aux superutilisateurs. Avec la seule permission
+    « modifier les utilisateurs », un compte pouvait se cocher « superutilisateur » ou
+    s'ajouter à n'importe quel groupe : élévation de privilèges. Qui peut gérer les accès
+    a, de fait, tous les accès."""
+
+    def has_module_permission(self, request):
+        return request.user.is_superuser
+
+    def has_view_permission(self, request, obj=None):
+        return request.user.is_superuser
+
+    def has_add_permission(self, request):
+        return request.user.is_superuser
+
+    def has_change_permission(self, request, obj=None):
+        return request.user.is_superuser
+
+    def has_delete_permission(self, request, obj=None):
+        return request.user.is_superuser
+
+
+class UserAdmin(ReserveAuxSuperutilisateurs, DjangoUserAdmin, ModelAdmin):
     form = UserChangeForm
     add_form = UserCreationForm
     add_fieldsets = (
@@ -52,8 +77,25 @@ class UserAdmin(DjangoUserAdmin, ModelAdmin):
     )
     list_display = ("username", "first_name", "last_name", "is_staff", "is_active")
 
+    def get_urls(self):
+        urls = [path("audit-droits/", self.admin_site.admin_view(self.audit_droits_view), name="auth_user_audit_droits")]
+        return urls + super().get_urls()
 
-class GroupAdmin(DjangoGroupAdmin, ModelAdmin):
+    def audit_droits_view(self, request):
+        if not request.user.is_superuser:
+            from django.core.exceptions import PermissionDenied
+
+            raise PermissionDenied
+        lignes = audit_droits.rapport()
+        return TemplateResponse(
+            request,
+            "admin/comptes/audit_droits.html",
+            {**self.admin_site.each_context(request), "title": "Audit des droits", "lignes": lignes,
+             "resume": audit_droits.synthese(lignes)},
+        )
+
+
+class GroupAdmin(ReserveAuxSuperutilisateurs, DjangoGroupAdmin, ModelAdmin):
     pass
 
 

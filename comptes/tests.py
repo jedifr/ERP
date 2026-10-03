@@ -573,3 +573,231 @@ class JournalAffichageTests(TestCase):
         self.client.force_login(get_user_model().objects.create_superuser("root3", "r@example.com", "Admin-mot-de-passe-3"))
         page = self.client.get("/admin/comptes/evenementconnexion/?q=cible")
         self.assertContains(page, "VERROUILLÉ")
+
+
+class GestionDesAccesTests(TestCase):
+    """D-AD-01/05 : pas d'élévation de privilèges ; désactivation effective et tracée."""
+
+    def _gestionnaire(self):
+        from django.contrib.auth.models import Permission
+
+        u = get_user_model().objects.create_user("gestionnaire", "g@example.com", "Gestionnaire-Pass-1", is_staff=True)
+        u.user_permissions.set(Permission.objects.filter(
+            content_type__app_label="auth", codename__in=["view_user", "change_user", "add_user", "delete_user", "view_group", "change_group"]
+        ))
+        return u
+
+    def test_un_gestionnaire_ne_peut_pas_sadministrer_lui_meme(self):
+        u = self._gestionnaire()
+        self.client.force_login(u)
+        self.assertEqual(self.client.get(f"/admin/auth/user/{u.pk}/change/").status_code, 403)
+        self.assertEqual(self.client.get("/admin/auth/user/").status_code, 403)
+        self.assertEqual(self.client.get("/admin/auth/group/").status_code, 403)
+        self.client.post(f"/admin/auth/user/{u.pk}/change/", {"username": "gestionnaire", "is_superuser": "on", "is_staff": "on"})
+        u.refresh_from_db()
+        self.assertFalse(u.is_superuser)
+
+    def test_le_superutilisateur_garde_la_gestion(self):
+        self.client.force_login(get_user_model().objects.create_superuser("su-acces", "s@example.com", "Admin-mot-de-passe-3"))
+        self.assertEqual(self.client.get("/admin/auth/user/").status_code, 200)
+        self.assertEqual(self.client.get("/admin/auth/group/").status_code, 200)
+
+    def test_compte_desactive_perd_immediatement_sa_session(self):
+        u = get_user_model().objects.create_user("depart", "d@example.com", "Depart-Pass-9", is_staff=True, is_superuser=True)
+        self.client.force_login(u)
+        self.assertEqual(self.client.get("/admin/").status_code, 200)
+        get_user_model().objects.filter(pk=u.pk).update(is_active=False)
+        r = self.client.get("/admin/")
+        self.assertEqual(r.status_code, 302)
+        self.assertIn("/admin/login/", r.url)
+
+    def test_changement_de_mot_de_passe_invalide_les_autres_sessions(self):
+        from django.test import Client
+
+        u = get_user_model().objects.create_user("mdp", "m@example.com", "Ancien-Pass-1", is_staff=True, is_superuser=True)
+        autre_poste = Client()
+        autre_poste.force_login(u)
+        self.assertEqual(autre_poste.get("/admin/").status_code, 200)
+        u.set_password("Nouveau-Pass-2")
+        u.save()
+        self.assertEqual(autre_poste.get("/admin/").status_code, 302)
+
+    def test_la_session_dure_une_journee_de_travail(self):
+        from django.conf import settings
+
+        self.assertEqual(settings.SESSION_COOKIE_AGE, 12 * 3600)
+
+    def test_desactivation_tracee_dans_lhistorique_de_ladmin(self):
+        from django.contrib.admin.models import LogEntry
+
+        root = get_user_model().objects.create_superuser("root-audit", "r@example.com", "Admin-mot-de-passe-3")
+        cible = get_user_model().objects.create_user("cible-audit", "c@example.com", "Cible-Pass-5", is_staff=True)
+        self.client.force_login(root)
+        self.client.post(
+            f"/admin/auth/user/{cible.pk}/change/",
+            {"username": "cible-audit", "is_staff": "on", "date_joined_0": "2026-01-01", "date_joined_1": "10:00:00"},
+        )
+        cible.refresh_from_db()
+        self.assertFalse(cible.is_active)
+        entree = LogEntry.objects.filter(object_id=str(cible.pk), user=root).first()
+        self.assertIsNotNone(entree)
+        self.assertIn("Active", entree.get_change_message())
+
+
+class AuditDesDroitsTests(TestCase):
+    def _utilisateur(self, nom, groupe=None, **kw):
+        from django.contrib.auth.models import Group
+
+        u = get_user_model().objects.create_user(nom, f"{nom}@example.com", "Pass-mot-de-passe-7", is_staff=True, **kw)
+        if groupe:
+            u.groups.add(Group.objects.get(name=groupe))
+        return u
+
+    def _ligne(self, nom):
+        from .audit_droits import rapport
+
+        return next(l for l in rapport() if l["identifiant"] == nom)
+
+    def test_role_facturation_seul_sans_conflit(self):
+        self._utilisateur("fact-seul", "Facturation")
+        self.assertEqual(self._ligne("fact-seul")["conflits"], [])
+
+    def test_responsable_facturation_cumule_saisie_et_comptabilisation(self):
+        self._utilisateur("resp-f", "Responsable facturation")
+        self.assertIn("Saisir une facture et la comptabiliser", self._ligne("resp-f")["conflits"])
+
+    def test_cumul_par_deux_groupes(self):
+        from django.contrib.auth.models import Group
+
+        u = self._utilisateur("double", "Magasinier")
+        u.groups.add(Group.objects.get(name="Responsable stock"))
+        self.assertIn("Saisir un mouvement de stock et valider l'inventaire", self._ligne("double")["conflits"])
+
+    def test_constats_sans_groupe_jamais_connecte_inactif(self):
+        import datetime
+
+        from django.utils import timezone
+
+        self._utilisateur("sans-groupe")
+        self.assertTrue(any("Aucun groupe" in c for c in self._ligne("sans-groupe")["constats"]))
+        self.assertTrue(any("Jamais connecté" in c for c in self._ligne("sans-groupe")["constats"]))
+        ancien = self._utilisateur("ancien", "Commercial")
+        get_user_model().objects.filter(pk=ancien.pk).update(last_login=timezone.now() - datetime.timedelta(days=120))
+        self.assertTrue(any("Inactif depuis" in c for c in self._ligne("ancien")["constats"]))
+        parti = self._utilisateur("parti", "Commercial")
+        get_user_model().objects.filter(pk=parti.pk).update(is_active=False)
+        self.assertEqual(self._ligne("parti")["conflits"], [])
+        self.assertIn("Désactivé", self._ligne("parti")["constats"])
+
+    def test_superutilisateur_signale_et_synthese(self):
+        from .audit_droits import rapport, synthese
+
+        for i in range(3):
+            get_user_model().objects.create_superuser(f"su-{i}", "s@example.com", "Admin-mot-de-passe-3")
+        resume = synthese(rapport())
+        self.assertEqual(resume["superutilisateurs"], 3)
+        self.assertTrue(resume["trop_de_superutilisateurs"])
+        self.assertIn("Superutilisateur : accès total", self._ligne("su-0")["constats"])
+
+    def test_page_admin_reservee_aux_superutilisateurs(self):
+        self._utilisateur("resp-g", "Responsable facturation")
+        self.client.force_login(get_user_model().objects.create_superuser("root-a", "r@example.com", "Admin-mot-de-passe-3"))
+        page = self.client.get("/admin/auth/user/audit-droits/")
+        self.assertContains(page, "Droits cumulés incompatibles")
+        self.assertContains(page, "Saisir une facture et la comptabiliser")
+        self.client.force_login(self._utilisateur("simple-a"))
+        self.assertEqual(self.client.get("/admin/auth/user/audit-droits/").status_code, 403)
+
+    def test_commande_audit_droits(self):
+        import io
+
+        from django.core.management import call_command
+
+        self._utilisateur("resp-h", "Responsable facturation")
+        sortie = io.StringIO()
+        call_command("audit_droits", stdout=sortie)
+        texte = sortie.getvalue()
+        self.assertIn("resp-h", texte)
+        self.assertIn("Cumul : Saisir une facture et la comptabiliser", texte)
+
+
+class VerrouOptimisteTests(TestCase):
+    """D-NV-01 : deux onglets ouvrent la même fiche ; le second enregistrement périmé est refusé."""
+
+    def setUp(self):
+        from django.test import Client
+
+        from stock.models import Emplacement
+
+        self.emplacement = Emplacement.objects.create(code="CONC-1", libelle="Initial")
+        self.alice = get_user_model().objects.create_superuser("alice", "a@example.com", "Alice-Pass-1234")
+        self.bruno = get_user_model().objects.create_superuser("bruno", "b@example.com", "Bruno-Pass-1234")
+        self.client_alice, self.client_bruno = Client(), Client()
+        self.client_alice.force_login(self.alice)
+        self.client_bruno.force_login(self.bruno)
+        self.url = f"/admin/stock/emplacement/{self.emplacement.pk}/change/"
+
+    def _version(self, client):
+        import re
+
+        html = client.get(self.url).content.decode()
+        return re.search(r'name="version_verrou"[^>]*value="(\d+)"', html).group(1)
+
+    def _enregistrer(self, client, version, libelle):
+        return client.post(self.url, {"code": "CONC-1", "libelle": libelle, "version_verrou": version, "_continue": "1"})
+
+    def test_la_fiche_porte_un_champ_de_version_invisible(self):
+        page = self.client_alice.get(self.url)
+        self.assertContains(page, 'name="version_verrou"')
+        self.assertEqual(self.client_alice.get("/admin/stock/emplacement/add/").content.decode().count("version_verrou"), 0)
+
+    def test_enregistrements_successifs_depuis_une_version_a_jour_passent(self):
+        v = self._version(self.client_alice)
+        self.assertEqual(self._enregistrer(self.client_alice, v, "Un").status_code, 302)
+        v = self._version(self.client_alice)
+        self.assertEqual(self._enregistrer(self.client_alice, v, "Deux").status_code, 302)
+        self.emplacement.refresh_from_db()
+        self.assertEqual(self.emplacement.libelle, "Deux")
+
+    def test_enregistrement_perime_refuse_avec_auteur_et_aucune_perte(self):
+        version_alice = self._version(self.client_alice)
+        version_bruno = self._version(self.client_bruno)
+        self.assertEqual(self._enregistrer(self.client_bruno, version_bruno, "Version de Bruno").status_code, 302)
+        reponse = self._enregistrer(self.client_alice, version_alice, "Version d'Alice")
+        self.assertEqual(reponse.status_code, 200)
+        self.assertContains(reponse, "modifiée par bruno")
+        self.emplacement.refresh_from_db()
+        self.assertEqual(self.emplacement.libelle, "Version de Bruno")
+
+    def test_apres_rechargement_lenregistrement_passe(self):
+        version_alice = self._version(self.client_alice)
+        self._enregistrer(self.client_bruno, self._version(self.client_bruno), "Bruno")
+        self.assertEqual(self._enregistrer(self.client_alice, version_alice, "Alice").status_code, 200)  # refus
+        self.assertEqual(self._enregistrer(self.client_alice, self._version(self.client_alice), "Alice").status_code, 302)
+        self.emplacement.refresh_from_db()
+        self.assertEqual(self.emplacement.libelle, "Alice")
+
+    def test_double_envoi_identique_nest_pas_un_conflit_de_donnees(self):
+        v = self._version(self.client_alice)
+        self.assertEqual(self._enregistrer(self.client_alice, v, "Un").status_code, 302)
+        # Même page rejouée (bouton « Précédent » + nouvel envoi) : refusé proprement, pas d'erreur 500.
+        self.assertEqual(self._enregistrer(self.client_alice, v, "Un").status_code, 200)
+
+    def test_formulaire_sans_champ_de_version_toujours_accepte(self):
+        # Compatibilité : un envoi qui ne porte pas le champ (vieux script, API de test) n'est pas bloqué.
+        self.assertEqual(self.client_alice.post(self.url, {"code": "CONC-1", "libelle": "Sans version", "_continue": "1"}).status_code, 302)
+
+    def test_facture_et_devis_et_commande_sont_proteges_aussi(self):
+        from django.contrib import admin
+
+        from chiffrage.models import Commande, Devis, Livraison
+        from facturation.models import Facture
+        from stock.models import Lot
+
+        for modele in (Devis, Commande, Livraison, Facture, Lot):
+            self.assertIn("VerrouOptimisteMixin", [c.__name__ for c in type(admin.site._registry[modele]).__mro__], modele)
+
+    def test_script_anti_double_clic_charge_sur_les_pages_admin(self):
+        page = self.client_alice.get("/admin/")
+        self.assertContains(page, "comptes/anti_double_clic")
+        self.assertContains(page, "comptes/admin_extra")
