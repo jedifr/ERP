@@ -6,6 +6,7 @@ table dédiée, à l'image de l'app pilotage.
 
 import datetime
 
+from django.conf import settings
 from django.db.models import Sum
 from django.utils import timezone
 
@@ -47,6 +48,12 @@ def dashboard_callback(request, context):
     ]
     montant_en_retard = sum(f.montant_ttc or 0 for f in factures_en_retard)
     alertes_stock_actives = AlerteStock.objects.filter(statut=AlerteStock.Statut.ACTIVE).count()
+    of_non_transmis = (
+        OrdreFabrication.objects.exclude(statut_synchro=OrdreFabrication.StatutSynchro.SYNCHRONISE)
+        if settings.PLANNING_API_URL
+        else OrdreFabrication.objects.none()
+    )
+    of_en_echec = of_non_transmis.filter(statut_synchro=OrdreFabrication.StatutSynchro.ECHEC_PERSISTANT).count()
     of_lances_mois = OrdreFabrication.objects.filter(date_lancement__gte=debut_mois).count()
     pieces_decoupe_mois = PieceDecoupe.objects.filter(
         statut=PieceDecoupe.Statut.OK, date_import__gte=debut_mois
@@ -119,6 +126,19 @@ def dashboard_callback(request, context):
             "hint": "lancés ce mois-ci",
             "link": "admin:chiffrage_ordrefabrication_changelist",
             "link_query": "",
+        },
+        {
+            "title": "Synchro planning",
+            "value": of_non_transmis.count() if settings.PLANNING_API_URL else "—",
+            "icon": "sync_problem" if of_en_echec else "sync",
+            "hint": (
+                (f"OF non transmis dont {of_en_echec} en échec" if of_en_echec else "OF en attente de transmission")
+                if settings.PLANNING_API_URL
+                else "API planning non configurée"
+            ),
+            "link": "admin:chiffrage_ordrefabrication_changelist",
+            "link_query": "?statut_synchro__exact=echec_persistant" if of_en_echec else "",
+            "attention": of_en_echec > 0,
         },
         {
             "title": "Pièces à découper",

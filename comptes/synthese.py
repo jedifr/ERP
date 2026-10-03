@@ -61,10 +61,17 @@ def construire():
     if alertes:
         sections["Alertes de stock actives"] = [f"  - {a.article} depuis le {a.date_declenchement:%d/%m/%Y}" for a in alertes]
 
-    non_transmis = OrdreFabrication.objects.exclude(statut_synchro=OrdreFabrication.StatutSynchro.SYNCHRONISE)
+    # Sans API planning configurée, tous les OF restent « en attente » : rien à signaler.
+    non_transmis = (
+        OrdreFabrication.objects.exclude(statut_synchro=OrdreFabrication.StatutSynchro.SYNCHRONISE)
+        if settings.PLANNING_API_URL
+        else OrdreFabrication.objects.none()
+    )
     if non_transmis:
         sections["Ordres de fabrication non transmis au planning"] = [
-            f"  - {of.numero} ({of.get_statut_synchro_display()}, {of.nombre_tentatives} tentative(s))" for of in non_transmis[:20]
+            f"  - {of.numero} ({of.get_statut_synchro_display()}, {of.nombre_tentatives} tentative(s))"
+            + (f" : {of.derniere_erreur}" if of.derniere_erreur else "")
+            for of in non_transmis[:20]
         ]
     return sections
 

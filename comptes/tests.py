@@ -1,5 +1,5 @@
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -142,6 +142,31 @@ class DashboardCallbackTests(TestCase):
         self.assertTrue(kpis["Alertes de stock"]["attention"])
         self.assertEqual(kpis["Ordres de fabrication"]["value"], 1)
         self.assertEqual(kpis["Pièces à découper"]["value"], 1)
+
+    def test_tuile_synchro_planning_sans_api(self):
+        kpis = {k["title"]: k for k in dashboard_callback(request=None, context={})["kpis"]}
+        self.assertEqual(kpis["Synchro planning"]["value"], "—")
+        self.assertFalse(kpis["Synchro planning"]["attention"])
+
+    @override_settings(PLANNING_API_URL="http://planning.local/api")
+    def test_tuile_synchro_planning_alerte_sur_echec_persistant(self):
+        of = OrdreFabrication.objects.get(numero="OF-DASH")
+        of.statut_synchro = OrdreFabrication.StatutSynchro.ECHEC_PERSISTANT
+        of.derniere_erreur = "timeout"
+        of.save()
+        kpis = {k["title"]: k for k in dashboard_callback(request=None, context={})["kpis"]}
+        self.assertEqual(kpis["Synchro planning"]["value"], 1)
+        self.assertTrue(kpis["Synchro planning"]["attention"])
+        self.assertIn("echec_persistant", kpis["Synchro planning"]["link_query"])
+        from .synthese import construire
+
+        lignes = construire()["Ordres de fabrication non transmis au planning"]
+        self.assertIn("timeout", lignes[0])
+
+    def test_synthese_n_alerte_pas_sur_les_of_si_api_non_configuree(self):
+        from .synthese import construire
+
+        self.assertNotIn("Ordres de fabrication non transmis au planning", construire())
 
 
 class GroupesMetierTests(TestCase):

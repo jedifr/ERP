@@ -821,12 +821,19 @@ class OrdreFabricationAdmin(CodificationInitialeMixin, ModelAdmin):
         "statut",
         "statut_synchro",
         "nombre_tentatives",
+        "erreur_courte",
     ]
     list_filter = ["statut_synchro"]
+    readonly_fields = ["statut_synchro", "nombre_tentatives", "date_derniere_tentative", "derniere_erreur", "prochaine_tentative"]
     search_fields = ["numero", "commande__numero", "article__reference"]
     autocomplete_fields = ["commande", "article"]
     inlines = [OperationOFInline]
     actions = ["action_resynchroniser"]
+
+    @admin.display(description="Dernière erreur")
+    def erreur_courte(self, obj):
+        erreur = obj.derniere_erreur
+        return (erreur[:60] + "…") if len(erreur) > 60 else (erreur or "—")
 
     @admin.action(description="Resynchroniser avec le planning atelier")
     def action_resynchroniser(self, request, queryset):

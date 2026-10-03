@@ -905,6 +905,16 @@ class OrdreFabrication(models.Model):
     )
     nombre_tentatives = models.PositiveIntegerField("nombre de tentatives", default=0)
     date_derniere_tentative = models.DateField("date de dernière tentative", null=True, blank=True)
+    derniere_erreur = models.CharField("dernière erreur de synchronisation", max_length=500, blank=True)
+    prochaine_tentative = models.DateTimeField(
+        "prochaine reprise automatique",
+        null=True,
+        blank=True,
+        help_text="Délai croissant entre deux tentatives ; vide = à reprendre dès la prochaine exécution.",
+    )
+    empreinte_envoyee = models.CharField(
+        "empreinte du dernier envoi réussi", max_length=64, blank=True, editable=False
+    )
 
     class Meta:
         verbose_name = "Ordre de fabrication"

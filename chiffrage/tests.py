@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings
+from django.utils import timezone
 
 from commercial.models import Adresse, Contact, DelaiPropose, Devise, TauxTVA, Tiers
 from stock.models import Emplacement, Lot, MouvementStock
@@ -947,7 +948,7 @@ class PlanningSyncTests(TestCase):
         self.of.refresh_from_db()
         self.assertEqual(self.of.statut_synchro, OrdreFabrication.StatutSynchro.SYNCHRONISE)
         args, kwargs = mock_post.call_args
-        self.assertEqual(kwargs["headers"]["Idempotency-Key"], self.of.numero)
+        self.assertTrue(kwargs["headers"]["Idempotency-Key"].startswith(f"{self.of.numero}-"))
 
     @override_settings(PLANNING_API_URL="http://planning-atelier.local/api")
     def test_synchronisation_http_en_erreur_est_geree(self):
@@ -958,6 +959,123 @@ class PlanningSyncTests(TestCase):
                 from .planning_sync import PlanningSyncClient
 
                 PlanningSyncClient().envoyer_ordre_fabrication(self.of)
+
+    def test_echec_enregistre_l_erreur_et_programme_une_reprise(self):
+        tenter_synchronisation(self.of)
+        self.of.refresh_from_db()
+        self.assertIn("PLANNING_API_URL", self.of.derniere_erreur)
+        self.assertGreater(self.of.prochaine_tentative, timezone.now())
+
+    def test_delai_de_reprise_croissant_et_plafonne(self):
+        from .planning_sync import delai_reprise
+
+        self.assertEqual(delai_reprise(1), datetime.timedelta(minutes=5))
+        self.assertEqual(delai_reprise(3), datetime.timedelta(minutes=20))
+        self.assertEqual(delai_reprise(30), datetime.timedelta(hours=6))
+
+    @override_settings(PLANNING_API_URL="http://planning-atelier.local/api")
+    def test_cle_d_idempotence_stable_puis_changee_si_contenu_modifie(self):
+        cles = []
+        with patch("chiffrage.planning_sync.requests.post") as mock_post:
+            mock_post.return_value.raise_for_status.return_value = None
+            tenter_synchronisation(self.of)
+            tenter_synchronisation(self.of)
+            self.of.quantite = 9
+            self.of.save()
+            tenter_synchronisation(self.of)
+            cles = [c.kwargs["headers"]["Idempotency-Key"] for c in mock_post.call_args_list]
+        self.assertEqual(cles[0], cles[1])
+        self.assertNotEqual(cles[1], cles[2])
+
+    @override_settings(PLANNING_API_URL="http://planning-atelier.local/api")
+    def test_reussite_efface_l_erreur_et_la_reprise(self):
+        tenter_synchronisation(self.of)  # échec simulé : requête réelle impossible -> patch ci-dessous
+        with patch("chiffrage.planning_sync.requests.post") as mock_post:
+            mock_post.return_value.raise_for_status.return_value = None
+            self.assertTrue(tenter_synchronisation(self.of))
+        self.of.refresh_from_db()
+        self.assertEqual(self.of.derniere_erreur, "")
+        self.assertIsNone(self.of.prochaine_tentative)
+        self.assertTrue(self.of.empreinte_envoyee)
+
+    @override_settings(PLANNING_API_URL="http://planning-atelier.local/api")
+    def test_of_modifie_apres_envoi_est_detecte_comme_perime(self):
+        from .planning_sync import a_resynchroniser
+
+        with patch("chiffrage.planning_sync.requests.post") as mock_post:
+            mock_post.return_value.raise_for_status.return_value = None
+            tenter_synchronisation(self.of)
+        self.of.refresh_from_db()
+        self.assertFalse(a_resynchroniser(self.of))
+        self.of.quantite = 12
+        self.of.save()
+        self.assertTrue(a_resynchroniser(self.of))
+
+    def test_empreinte_vide_historique_n_est_pas_consideree_perimee(self):
+        from .planning_sync import a_resynchroniser
+
+        self.of.statut_synchro = OrdreFabrication.StatutSynchro.SYNCHRONISE
+        self.of.save()
+        self.assertFalse(a_resynchroniser(self.of))
+
+
+class CommandeRetrySynchroTests(TestCase):
+    """retry_sync_ordres_fabrication : respect du délai, OF modifiés, échecs persistants."""
+
+    def setUp(self):
+        PlanningSyncTests.setUp(self)
+        from io import StringIO
+
+        self.out = StringIO()
+
+    def _lancer(self, *args):
+        from django.core.management import call_command
+
+        call_command("retry_sync_ordres_fabrication", *args, stdout=self.out)
+        self.of.refresh_from_db()
+
+    @override_settings(PLANNING_API_URL="http://planning-atelier.local/api")
+    def test_reprise_differee_tant_que_le_delai_n_est_pas_ecoule(self):
+        self.of.prochaine_tentative = timezone.now() + datetime.timedelta(hours=1)
+        self.of.save()
+        with patch("chiffrage.planning_sync.requests.post") as mock_post:
+            mock_post.return_value.raise_for_status.return_value = None
+            self._lancer()
+        mock_post.assert_not_called()
+        self.assertEqual(self.of.statut_synchro, OrdreFabrication.StatutSynchro.EN_ATTENTE)
+
+    @override_settings(PLANNING_API_URL="http://planning-atelier.local/api")
+    def test_reprise_apres_delai(self):
+        self.of.prochaine_tentative = timezone.now() - datetime.timedelta(minutes=1)
+        self.of.save()
+        with patch("chiffrage.planning_sync.requests.post") as mock_post:
+            mock_post.return_value.raise_for_status.return_value = None
+            self._lancer()
+        self.assertEqual(self.of.statut_synchro, OrdreFabrication.StatutSynchro.SYNCHRONISE)
+
+    @override_settings(PLANNING_API_URL="http://planning-atelier.local/api")
+    def test_of_synchronise_puis_modifie_est_renvoye(self):
+        with patch("chiffrage.planning_sync.requests.post") as mock_post:
+            mock_post.return_value.raise_for_status.return_value = None
+            tenter_synchronisation(self.of)
+            self.of.quantite = 7
+            self.of.save()
+            self._lancer()
+            self.assertEqual(mock_post.call_count, 2)
+            self.assertEqual(mock_post.call_args.kwargs["json"]["quantite"], 7)
+
+    @override_settings(PLANNING_API_URL="http://planning-atelier.local/api")
+    def test_echecs_persistants_ignores_sauf_option(self):
+        self.of.statut_synchro = OrdreFabrication.StatutSynchro.ECHEC_PERSISTANT
+        self.of.nombre_tentatives = 5
+        self.of.save()
+        with patch("chiffrage.planning_sync.requests.post") as mock_post:
+            mock_post.return_value.raise_for_status.return_value = None
+            self._lancer()
+            mock_post.assert_not_called()
+            self._lancer("--inclure-echecs")
+            mock_post.assert_called_once()
+        self.assertEqual(self.of.statut_synchro, OrdreFabrication.StatutSynchro.SYNCHRONISE)
 
 
 class BuilderTests(TestCase):

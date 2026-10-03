@@ -2682,3 +2682,17 @@ du Rhône, livraison BL-0208 chez Métallerie Durand) ; bon de livraison imprima
 
 Sur le NAS : après mise à jour, lancer `sudo docker compose exec web python manage.py synchroniser_groupes`, puis programmer dans le Planificateur de tâches DSM, chaque matin :
 `cd /volume1/docker/erp && docker compose exec -T web python manage.py synthese_quotidienne --si-non-vide`.
+
+## Gap analysis, lot 5 : fiabilisation de la synchronisation avec le planning atelier
+
+Le planning reste facultatif (tant que `PLANNING_API_URL` est vide, rien n'est envoyé et rien n'est signalé comme anormal). Une fois l'API branchée :
+
+- **Clé d'idempotence liée au contenu** : `Idempotency-Key = <numéro OF>-<empreinte du contenu envoyé>`. Un renvoi après coupure réseau ne crée pas de doublon côté planning ; un OF modifié part avec une nouvelle clé et met donc le planning à jour.
+- **OF modifié après synchronisation** (quantité, date, gamme) : détecté par comparaison d'empreinte et renvoyé automatiquement par la reprise planifiée. Les OF synchronisés avant cette version ne sont pas renvoyés tant qu'ils ne changent pas.
+- **Reprise avec attente croissante** : 5 min, 10, 20… plafonnée à 6 h entre deux tentatives ; après `PLANNING_SYNC_MAX_TENTATIVES` échecs (5 par défaut) l'OF passe en « Échec persistant ».
+- **Dernière erreur conservée** sur chaque OF (colonne « Dernière erreur » de la liste, champ en lecture seule dans la fiche et l'API). Les champs de synchronisation ne sont plus modifiables à la main.
+- **Tuile « Synchro planning »** sur le tableau de bord (rouge s'il y a des échecs persistants, lien direct vers la liste filtrée) et rubrique dédiée dans la synthèse quotidienne.
+- `manage.py retry_sync_ordres_fabrication` : respecte le délai de reprise, renvoie les OF modifiés, verrouille chaque OF (deux exécutions simultanées ne l'envoient pas deux fois). Option `--inclure-echecs` pour retenter les échecs persistants après avoir corrigé la cause.
+
+À planifier dans le Planificateur de tâches DSM, toutes les 15 minutes :
+`cd /volume1/docker/erp && docker compose exec -T web python manage.py retry_sync_ordres_fabrication`.

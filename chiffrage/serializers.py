@@ -76,7 +76,14 @@ class OrdreFabricationSerializer(FullCleanModelSerializer):
     class Meta:
         model = OrdreFabrication
         fields = "__all__"
-        read_only_fields = ["statut_synchro", "nombre_tentatives", "date_derniere_tentative"]
+        read_only_fields = [
+            "statut_synchro",
+            "nombre_tentatives",
+            "date_derniere_tentative",
+            "derniere_erreur",
+            "prochaine_tentative",
+            "empreinte_envoyee",
+        ]
 
 
 class OperationOFSerializer(FullCleanModelSerializer):
