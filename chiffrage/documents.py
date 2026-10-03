@@ -36,7 +36,28 @@ def _bloc_adresse(titre, tiers, adresse, contact=None):
         lignes.append(echapper(f"{adresse.code_postal} {adresse.ville}"))
         if adresse.pays_id:
             lignes.append(echapper(str(adresse.pays)))
+    else:
+        lignes.append("<i>Adresse non renseignée</i>")
     return Paragraph("<br/>".join(lignes), st["normal"])
+
+
+def _bloc_facturation_livraison(client, adresse_facturation, adresse_livraison, contact=None, largeur=174):
+    """Entreprise et adresse de facturation, entreprise et adresse de livraison : toujours les deux
+    blocs, même quand les adresses sont identiques (commun à tous les documents de vente)."""
+    table = Table(
+        [[
+            _bloc_adresse("Facturé à", client, adresse_facturation, contact),
+            _bloc_adresse("Livré à", client, adresse_livraison),
+        ]],
+        colWidths=[largeur / 2 * mm, largeur / 2 * mm],
+    )
+    table.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 0)]))
+    return table
+
+
+def _adresse_ou_principale(client, adresse, champ):
+    """L'adresse choisie, sinon l'adresse principale du client pour ce rôle (est_facturation / est_livraison)."""
+    return adresse or client.adresses.filter(**{champ: True}).order_by("-est_principale", "id").first()
 
 
 def _cadre_signature(libelle):
@@ -80,15 +101,12 @@ def generer_pdf_devis(devis):
             references.append(f"Modification : {devis.motif_revision}")
     titre = f"DEVIS {devis.numero}"
 
-    adresse_fact = devis.adresse_facturation or devis.client.adresses.filter(est_facturation=True).order_by("-est_principale").first()
-    adresse_liv = devis.adresse_livraison
-    blocs = [[_bloc_adresse("Client", devis.client, adresse_fact, devis.contact)]]
-    if adresse_liv and adresse_liv != adresse_fact:
-        blocs[0].append(_bloc_adresse("Livraison", devis.client, adresse_liv))
-    else:
-        blocs[0].append("")
-    client_table = Table(blocs, colWidths=[87 * mm, 87 * mm])
-    client_table.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 0)]))
+    client_table = _bloc_facturation_livraison(
+        devis.client,
+        _adresse_ou_principale(devis.client, devis.adresse_facturation, "est_facturation"),
+        _adresse_ou_principale(devis.client, devis.adresse_livraison, "est_livraison"),
+        devis.contact,
+    )
 
     lignes = []
     par_taux = {}
@@ -198,10 +216,7 @@ def generer_pdf_bon_livraison(livraison):
         [70 * mm, 20 * mm, 24 * mm, 22 * mm, 38 * mm], alignements_droite=(1, 2, 3),
     )
 
-    adresse_liv = commande.adresse_livraison
-    blocs = [[_bloc_adresse("Livré à", commande.client, adresse_liv), _bloc_adresse("Facturé à", commande.client, commande.adresse_facturation)]]
-    client_table = Table(blocs, colWidths=[87 * mm, 87 * mm])
-    client_table.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 0)]))
+    client_table = _bloc_adresses_commande(commande)
 
     elements = [
         entete_societe(societe, st), Spacer(1, 8 * mm),
@@ -220,13 +235,7 @@ def generer_pdf_bon_livraison(livraison):
 
 
 def _bloc_adresses_commande(commande):
-    blocs = [[
-        _bloc_adresse("Facturé à", commande.client, commande.adresse_facturation),
-        _bloc_adresse("Livré à", commande.client, commande.adresse_livraison),
-    ]]
-    table = Table(blocs, colWidths=[87 * mm, 87 * mm])
-    table.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 0)]))
-    return table
+    return _bloc_facturation_livraison(commande.client, commande.adresse_facturation, commande.adresse_livraison)
 
 
 def _designation(ligne):
@@ -363,9 +372,7 @@ def generer_pdf_bon_preparation(commande):
         ["Désignation", "Commandé", "À livrer", "Livraison prévue", "Origine / stock", "Prêt"], lignes,
         [56 * mm, 20 * mm, 18 * mm, 26 * mm, 42 * mm, 12 * mm], alignements_droite=(1, 2, 3, 5),
     )
-    adresse = commande.adresse_livraison
-    blocs = Table([[_bloc_adresse("Livraison", commande.client, adresse)]], colWidths=[174 * mm])
-    blocs.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 0)]))
+    blocs = _bloc_adresses_commande(commande)
     elements = [
         entete_societe(societe, st), Spacer(1, 8 * mm),
         _titre_et_references(titre, references), Spacer(1, 5 * mm),
@@ -432,6 +439,7 @@ def _elements_fiche_fabrication(of, societe, st):
     return titre, [
         entete_societe(societe, st), Spacer(1, 8 * mm),
         _titre_et_references(titre, references), Spacer(1, 5 * mm),
+        _bloc_adresses_commande(of.commande), Spacer(1, 5 * mm),
         resume, Spacer(1, 6 * mm),
         Paragraph("<b>Nomenclature</b>", st["normal"]), Spacer(1, 2 * mm), nomenclature, Spacer(1, 6 * mm),
         Paragraph("<b>Gamme</b>", st["normal"]), Spacer(1, 2 * mm), gamme,

@@ -2774,3 +2774,7 @@ Les révisions déjà créées avant cette version gardent leur numéro `-R2` ; 
 - **Impression de toutes les fiches en une fois** : après « Créer les ordres de fabrication », le message de confirmation propose le lien **« Imprimer les N fiche(s) de fabrication (PDF) »** (un seul PDF, une fiche par page, uniquement les OF qui viennent d'être créés). Le bouton **« Fiches de fabrication (PDF) »** de la fiche commande imprime ensuite tous les OF de la commande, et l'action de liste **« Imprimer les fiches de fabrication »** (liste des ordres de fabrication) ceux que vous sélectionnez. API : `GET /api/v1/commandes/<n>/fiches-fabrication-pdf/`.
 
 **API** : `POST /api/v1/commandes/<n>/creer-ordres-fabrication/` (`{"regrouper": true}` facultatif) ; `POST /api/v1/devis/<n>/lancer-en-production/` ne crée plus que la commande.
+
+## Documents de vente : facturation et livraison toujours indiquées
+
+Tous les PDF de vente — **devis, AR de commande, bon de préparation, bon de livraison** et **fiche de fabrication** — portent désormais deux blocs côte à côte : **« Facturé à »** (nom de l'entreprise et adresse de facturation) et **« Livré à »** (nom de l'entreprise et adresse de livraison), **même quand les deux adresses sont identiques**. Sur un devis dont aucune adresse n'a été choisie, l'adresse principale du client (facturation / livraison) est utilisée ; si le client n'en a aucune, le bloc reste affiché avec la mention « Adresse non renseignée » plutôt que de disparaître. L'ordre est le même partout (facturation à gauche, livraison à droite).

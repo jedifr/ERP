@@ -4866,3 +4866,66 @@ class ImpressionGroupeeOFTests(_FixtureOrdresCommande, TestCase):
         reponse = self.client.get(f"/api/v1/commandes/{self.commande.pk}/fiches-fabrication-pdf/")
         self.assertEqual((reponse.status_code, reponse["Content-Type"]), (200, "application/pdf"))
         self.assertEqual(self._pages(reponse.content), 3)
+
+
+class AdressesSurTousLesDocumentsDeVenteTests(_FixtureOrdresCommande, TestCase):
+    """Entreprise + adresse de facturation ET de livraison sur chaque document de vente, même si identiques."""
+
+    def setUp(self):
+        super().setUp()
+        import re
+
+        self.texte = lambda pdf: re.sub(r"\\([0-7]{3})", lambda m: chr(int(m.group(1), 8)), pdf.decode("latin-1"))
+
+    def _verifier(self, pdf):
+        texte = self.texte(pdf)
+        self.assertIn("Facturé à", texte)
+        self.assertIn("Livré à", texte)
+        # Adresse identique à la facturation et à la livraison : le bloc apparaît bien deux fois.
+        self.assertEqual(texte.count("Client Fabrication"), 2 + texte.count("Client : Client Fabrication"))
+        self.assertEqual(texte.count("1 rue des Forges"), 2)
+        self.assertEqual(texte.count("69000 Lyon"), 2)
+
+    def test_ar_bon_de_preparation_fiche_de_fabrication(self):
+        from .documents import generer_pdf_ar_commande, generer_pdf_bon_preparation, generer_pdf_ordre_fabrication
+
+        of = creer_ordres_fabrication(self.commande)[0]
+        for pdf in (generer_pdf_ar_commande(self.commande), generer_pdf_bon_preparation(self.commande),
+                    generer_pdf_ordre_fabrication(of)):
+            self._verifier(pdf)
+
+    def test_bon_de_livraison(self):
+        from .documents import generer_pdf_bon_livraison
+
+        livraison = Livraison.objects.create(numero="BL-ADR", commande=self.commande, date_livraison=datetime.date(2026, 10, 5))
+        LivraisonLigne.objects.create(livraison=livraison, commande_ligne=self.l4, quantite_livree=10)
+        self._verifier(generer_pdf_bon_livraison(livraison))
+
+    def test_devis_adresses_choisies_ou_par_defaut_et_adresse_manquante(self):
+        from .documents import generer_pdf_devis
+        from .moteur import calculer_devis
+
+        devis = Devis.objects.create(numero="DEV-ADR", client=self.tiers, date_creation=datetime.date(2026, 10, 1))
+        DevisLigne.objects.create(devis=devis, article=self.vis, quantite=10)
+        calculer_devis(devis)
+        self._verifier(generer_pdf_devis(devis))  # aucune adresse choisie : celles par défaut du client
+        # Client sans aucune adresse : les deux blocs restent là, avec la mention explicite.
+        sans = Tiers.objects.create(code="CLI-SANS", raison_sociale="Sans Adresse", type_tiers=Tiers.TypeTiers.CLIENT)
+        devis2 = Devis.objects.create(numero="DEV-ADR2", client=sans, date_creation=datetime.date(2026, 10, 1))
+        DevisLigne.objects.create(devis=devis2, article=self.vis, quantite=10)
+        calculer_devis(devis2)
+        texte = self.texte(generer_pdf_devis(devis2))
+        self.assertEqual(texte.count("Adresse non renseignée"), 2)
+        self.assertIn("Facturé à", texte)
+        self.assertIn("Livré à", texte)
+
+    def test_adresses_differentes_chacune_a_sa_place(self):
+        from commercial.models import Adresse
+        from .documents import generer_pdf_ar_commande
+
+        autre = Adresse.objects.create(tiers=self.tiers, est_livraison=True, adresse="9 quai du Port", code_postal="13000", ville="Marseille")
+        Commande.objects.filter(pk=self.commande.pk).update(adresse_livraison=autre)
+        texte = self.texte(generer_pdf_ar_commande(Commande.objects.get(pk=self.commande.pk)))
+        self.assertIn("1 rue des Forges", texte)
+        self.assertIn("9 quai du Port", texte)
+        self.assertIn("13000 Marseille", texte)
