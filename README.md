@@ -2738,3 +2738,19 @@ Toutes les sociétés ne gèrent pas un stock. Deux niveaux, indépendants :
 - **Pour toute la société** : `DJANGO_STOCK_ACTIF=false` dans `.env` (puis `docker compose up -d`). Disparaissent alors le menu Stock, les écrans Lots / Mouvements / Emplacements / Alertes (accès direct refusé), la tuile « Alertes de stock », la rubrique de la synthèse quotidienne, les champs de stock des articles (géré en stock, stock minimum, quantité de réapprovisionnement) et les champs lot / coulée / certificat des réceptions et des livraisons. Les nouveaux articles ne sont jamais « gérés en stock ». Les données de stock déjà saisies ne sont pas touchées (elles redeviennent visibles si vous réactivez).
 
 Le flux devis → commande → livraison → facture, les achats, la comptabilité et les PDF fonctionnent à l'identique sans stock. Ce que le stock apporte en plus (traçabilité des coulées, coût moyen pondéré, alertes) n'existe évidemment que lorsqu'il est activé.
+
+## Devis : révisions et indices
+
+Un devis validé (envoyé au client) ne se modifie plus. Pour le faire évoluer sans écraser ce qui a été envoyé, on crée un **nouvel indice** :
+
+- Fiche du devis → **« Nouvel indice (réviser) »**. Un **motif** est obligatoire (ce qui change : remise, quantité, délai…).
+- Le nouvel indice (B, puis C… ; AA après Z) est créé en **brouillon**, avec les mêmes lignes, sous le numéro `<devis d'origine>-<indice>` (ex. `DEV-2026-101-B`). Modifiez-le, chiffrez-le, validez-le comme n'importe quel devis (nouvelle date de validité à la validation).
+- L'indice précédent passe à « **remplacé** » : il reste consultable, mais ne peut plus devenir une commande. Il n'est pas compté dans le taux de transformation.
+- Un devis **déjà devenu commande** ne se révise plus : modifiez les lignes de la commande (chaque changement de quantité, prix ou TVA y est tracé).
+- Si vous **supprimez** un indice brouillon abandonné, l'indice précédent redevient valable (retour à « en attente de réponse »).
+- La fiche affiche l'**historique des indices** (numéro, date, statut, réponse du client, motif) et, pour une révision, un **tableau des changements** ligne par ligne par rapport à l'indice précédent (« à chiffrer » tant que le nouvel indice n'est pas recalculé).
+- La liste des devis a une colonne **Indice** et un filtre « Derniers indices seulement ».
+- Le **PDF** d'un indice porte « Indice B », « Annule et remplace DEV-… (indice A) » et « Modification : … ».
+- API : `POST /api/v1/devis/<numéro>/reviser/` avec `{"motif": "..."}` (droit de modifier un devis) ; `indice`, `revision`, `motif_revision` et `devis_origine` sont renvoyés en lecture seule.
+
+Les révisions déjà créées avant cette version gardent leur numéro `-R2` ; leur indice (B) s'affiche normalement.

@@ -13,7 +13,9 @@ from django.utils import timezone
 from comptes.montants import pourcent
 from technique.models import Article, PosteTravail
 
-from .models import Commande, CommandeLigne, CommandeLigneModification, Devis, OperationOF, OrdreFabrication
+from .models import (
+    Commande, CommandeLigne, CommandeLigneModification, Devis, OperationOF, OrdreFabrication, indice_pour,
+)
 from .moteur import ChiffrageError, gamme_active
 from .planning_sync import tenter_synchronisation
 
@@ -238,28 +240,34 @@ def synchroniser_lignes_commande(commande):
     return lignes_creees
 
 
-def reviser_devis(devis):
-    """Crée une révision (brouillon) d'un devis validé resté sans commande : même en-tête,
-    mêmes lignes. L'original est marqué « remplacé » (il ne peut plus être transformé en
-    commande) et reste consultable ; le prix déjà envoyé au client n'est jamais réécrit."""
-    import re
-
+def reviser_devis(devis, motif=""):
+    """Crée un nouvel indice (brouillon) d'un devis validé resté sans commande : même en-tête,
+    mêmes lignes, numéro `<devis d'origine>-<indice>` (B, C…). L'indice précédent est marqué
+    « remplacé » (il ne peut plus être transformé en commande) et reste consultable ; le prix déjà
+    envoyé au client n'est jamais réécrit. Le motif (ce qui change) est obligatoire : il figure
+    sur l'offre et dans l'historique des indices."""
     from .models import DevisLigne
 
+    motif = (motif or "").strip()
+    if not motif:
+        raise ChiffrageError("Indiquez le motif de la révision (ce qui change par rapport à l'indice précédent).")
     with transaction.atomic():
         devis = Devis.objects.select_for_update().get(pk=devis.pk)
         if devis.statut != Devis.Statut.VALIDE:
             raise ChiffrageError("Seul un devis validé se révise : un brouillon se modifie directement.")
         if Commande.objects.filter(devis=devis).exists():
-            raise ChiffrageError(f"Le devis « {devis} » est déjà devenu une commande : il ne se révise plus.")
+            raise ChiffrageError(
+                f"Le devis « {devis} » est déjà devenu une commande : il ne se révise plus "
+                "(modifiez les lignes de la commande, les changements sont tracés)."
+            )
         if devis.issue == Devis.Issue.REMPLACE:
             raise ChiffrageError(f"Le devis « {devis} » a déjà été remplacé par une révision.")
-        base = re.sub(r"-R\d+$", "", devis.numero)
+        base = devis.racine.numero
         revision = devis.revision + 1
-        numero = f"{base}-R{revision}"
+        numero = f"{base}-{indice_pour(revision)}"
         while Devis.objects.filter(pk=numero).exists():
             revision += 1
-            numero = f"{base}-R{revision}"
+            numero = f"{base}-{indice_pour(revision)}"
         nouveau = Devis.objects.create(
             numero=numero,
             client=devis.client,
@@ -272,6 +280,7 @@ def reviser_devis(devis):
             delai=devis.delai,
             devis_origine=devis,
             revision=revision,
+            motif_revision=motif[:200],
         )
         for ligne in devis.lignes.all():
             DevisLigne.objects.create(
@@ -284,6 +293,39 @@ def reviser_devis(devis):
                 taux_tva=ligne.taux_tva,
             )
         devis.issue = Devis.Issue.REMPLACE
-        devis._change_reason = f"Remplacé par {numero}"[:100]
+        devis._change_reason = f"Remplacé par {numero} : {motif}"[:100]
         devis.save(update_fields=["issue"])
     return nouveau
+
+
+def comparer_indices(precedent, courant):
+    """Ce qui change entre deux indices d'un devis, ligne par ligne (par article) :
+    [{"article", "etat": ajoutee|supprimee|modifiee|identique, "avant": (qté, prix HT), "apres": (qté, prix HT)}],
+    plus les totaux HT. Un prix est None tant que l'indice n'est pas (re)chiffré."""
+    def indexer(devis):
+        lignes = {}
+        for ligne in devis.lignes.select_related("article").all():
+            cle = ligne.article_id
+            while cle in lignes:  # même article sur deux lignes : on les distingue
+                cle = f"{cle}#"
+            lignes[cle] = ligne
+        return lignes
+
+    avant, apres = indexer(precedent), indexer(courant)
+    resultat = []
+    for cle in list(avant) + [c for c in apres if c not in avant]:
+        a, b = avant.get(cle), apres.get(cle)
+        va = (a.quantite, a.prix_vente_total) if a else None
+        vb = (b.quantite, b.prix_vente_total) if b else None
+        if a is None:
+            etat = "ajoutee"
+        elif b is None:
+            etat = "supprimee"
+        else:
+            etat = "identique" if va == vb else "modifiee"
+        resultat.append({"article": (a or b).article.reference, "etat": etat, "avant": va, "apres": vb})
+    return {
+        "lignes": resultat,
+        "total_avant": precedent.montant_total_ht,
+        "total_apres": courant.montant_total_ht if all(l.prix_vente_total is not None for l in courant.lignes.all()) else None,
+    }

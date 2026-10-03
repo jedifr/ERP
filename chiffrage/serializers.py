@@ -12,6 +12,8 @@ MESSAGE_DEVIS_VERROUILLE = (
 
 
 class DevisSerializer(FullCleanModelSerializer):
+    indice = serializers.ReadOnlyField()
+
     class Meta:
         model = Devis
         fields = "__all__"

@@ -12,7 +12,7 @@ from .documents import DocumentError, generer_pdf_devis
 from .models import Commande, CommandeError, Devis, DevisLigne, DevisLigneOperation, OperationOF, OrdreFabrication
 from .moteur import ChiffrageError, calculer_devis
 from .planning_sync import resynchroniser
-from .production import lancer_en_production
+from .production import lancer_en_production, reviser_devis
 from .validation import verifier_validation_devis
 from .serializers import (
     CommandeSerializer,
@@ -56,6 +56,19 @@ class DevisViewSet(viewsets.ModelViewSet):
         )
         if raisons:
             raise ValidationError({"statut": raisons})
+
+    @action(detail=True, methods=["post"], url_path="reviser", permission_classes=[IsAuthenticated])
+    def reviser_action(self, request, pk=None):
+        """Nouvel indice du devis : corps `{"motif": "..."}` (obligatoire). Crée un brouillon
+        et marque le devis actuel « remplacé »."""
+        if not request.user.has_perm("chiffrage.change_devis"):
+            raise PermissionDenied("Vous n'avez pas la permission de modifier un devis.")
+        devis = self.get_object()
+        try:
+            revision = reviser_devis(devis, request.data.get("motif", ""))
+        except ChiffrageError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(DevisSerializer(revision).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["get"], url_path="pdf")
     def pdf_action(self, request, pk=None):

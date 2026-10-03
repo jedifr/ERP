@@ -73,7 +73,10 @@ def generer_pdf_devis(devis):
     if devis.date_validite:
         references.append(f"Valable jusqu'au {devis.date_validite:%d/%m/%Y}")
     if devis.devis_origine_id:
-        references.append(f"Annule et remplace {devis.devis_origine_id}")
+        references.append(f"Indice {devis.indice}")
+        references.append(f"Annule et remplace {devis.devis_origine_id} (indice {devis.devis_origine.indice})")
+        if devis.motif_revision:
+            references.append(f"Modification : {devis.motif_revision}")
     titre = f"DEVIS {devis.numero}"
 
     adresse_fact = devis.adresse_facturation or devis.client.adresses.filter(est_facturation=True).order_by("-est_principale").first()

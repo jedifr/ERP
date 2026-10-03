@@ -5,10 +5,12 @@ from django.conf import settings
 from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied
 from django.http import HttpResponse, HttpResponseRedirect
+from django.shortcuts import get_object_or_404
 from django.template.response import TemplateResponse
 from django.urls import path, reverse
 from django.utils import timezone
 from django.utils.html import format_html
+from django.utils.safestring import mark_safe
 from unfold.decorators import action as unfold_action
 from comptes.exports import ExportCsvMixin
 from comptes.montants import pourcent
@@ -45,6 +47,7 @@ from .models import (
     LivraisonLigne,
     OperationOF,
     OrdreFabrication,
+    indice_pour,
 )
 from .documents import DocumentError, generer_pdf_bon_livraison, generer_pdf_devis
 from .moteur import ChiffrageError, calculer_devis
@@ -55,6 +58,7 @@ from .production import (
     enregistrer_modification_ligne,
     lancer_en_production,
     lancer_ligne_en_production,
+    comparer_indices,
     reviser_devis,
     synchroniser_lignes_commande,
 )
@@ -176,6 +180,21 @@ class DevisAdminForm(forms.ModelForm):
         return cleaned
 
 
+class DernierIndiceFilter(admin.SimpleListFilter):
+    title = "indices"
+    parameter_name = "indices"
+
+    def lookups(self, request, model_admin):
+        return [("derniers", "Derniers indices seulement"), ("remplaces", "Indices remplacés")]
+
+    def queryset(self, request, queryset):
+        if self.value() == "derniers":
+            return queryset.exclude(issue=Devis.Issue.REMPLACE)
+        if self.value() == "remplaces":
+            return queryset.filter(issue=Devis.Issue.REMPLACE)
+        return queryset
+
+
 class ExpireFilter(admin.SimpleListFilter):
     title = "validité de l'offre"
     parameter_name = "validite"
@@ -200,6 +219,7 @@ class DevisAdmin(ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin
 
     list_display = [
         "numero",
+        "indice",
         "client",
         "date_creation",
         "statut",
@@ -212,7 +232,7 @@ class DevisAdmin(ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin
         "montant_total_ht",
         "montant_total_ttc",
     ]
-    list_filter = ["statut", "issue", ExpireFilter]
+    list_filter = ["statut", "issue", DernierIndiceFilter, ExpireFilter]
     search_fields = ["numero", "client__raison_sociale"]
     autocomplete_fields = ["client", "adresse_facturation", "adresse_livraison", "contact"]
     readonly_fields = [
@@ -220,6 +240,8 @@ class DevisAdmin(ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin
         "montant_operations_ht_display",
         "montant_total_ht_display",
         "montant_total_ttc_display",
+        "indices_display",
+        "comparaison_display",
     ]
     inlines = [DevisLigneInline]
     actions = ["action_recalculer", "action_lancer_en_production"]
@@ -286,6 +308,66 @@ class DevisAdmin(ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin
     @admin.display(description="Montant total TTC")
     def montant_total_ttc_display(self, obj):
         return format_html('<span id="montant-total-ttc">{}</span>', obj.montant_total_ttc)
+
+    @admin.display(description="Indices de ce devis")
+    def indices_display(self, obj):
+        if obj is None or not obj.pk:
+            return "—"
+        versions = obj.versions()
+        if len(versions) == 1:
+            return format_html("Indice {} (aucune révision).", obj.indice)
+        lignes = []
+        for v in versions:
+            etat = "remplacé" if v.issue == Devis.Issue.REMPLACE else v.get_issue_display()
+            lignes.append(
+                format_html(
+                    "<tr><td class='pr-4'><b>{}</b>{}</td><td class='pr-4'><a href='{}'>{}</a></td><td class='pr-4'>{}</td>"
+                    "<td class='pr-4'>{}</td><td class='pr-4'>{}</td><td>{}</td></tr>",
+                    v.indice,
+                    " (cet indice)" if v.pk == obj.pk else "",
+                    reverse("admin:chiffrage_devis_change", args=[v.pk]),
+                    v.numero,
+                    f"{v.date_creation:%d/%m/%Y}",
+                    v.get_statut_display(),
+                    etat,
+                    v.motif_revision or "offre initiale",
+                )
+            )
+        return format_html(
+            "<table class='text-sm'><tr class='text-left'><th class='pr-4'>Indice</th><th class='pr-4'>Devis</th>"
+            "<th class='pr-4'>Date</th><th class='pr-4'>Statut</th><th class='pr-4'>Réponse</th><th>Modification</th></tr>{}</table>",
+            mark_safe("".join(lignes)),
+        )
+
+    @admin.display(description="Changements depuis l'indice précédent")
+    def comparaison_display(self, obj):
+        if obj is None or not obj.pk or not obj.devis_origine_id:
+            return "—"
+        comparaison = comparer_indices(obj.devis_origine, obj)
+        libelles = {"ajoutee": "ajoutée", "supprimee": "supprimée", "modifiee": "modifiée", "identique": "inchangée"}
+
+        def fmt(valeur):
+            if valeur is None:
+                return "—"
+            quantite, prix = valeur
+            return f"{quantite:g} × " + ("à chiffrer" if prix is None else f"{prix} € HT")
+
+        lignes = [
+            format_html(
+                "<tr><td class='pr-4'>{}</td><td class='pr-4'>{}</td><td class='pr-4'>{}</td><td>{}</td></tr>",
+                ligne["article"], libelles[ligne["etat"]], fmt(ligne["avant"]), fmt(ligne["apres"]),
+            )
+            for ligne in comparaison["lignes"]
+        ]
+        total_apres = comparaison["total_apres"]
+        return format_html(
+            "<table class='text-sm'><tr class='text-left'><th class='pr-4'>Article</th><th class='pr-4'>Évolution</th>"
+            "<th class='pr-4'>Indice {}</th><th>Indice {}</th></tr>{}</table>"
+            "<p class='text-sm mt-2'>Total HT : {} € → {}</p>",
+            obj.devis_origine.indice, obj.indice, mark_safe("".join(lignes)),
+            comparaison["total_avant"],
+            f"{total_apres} €" if total_apres is not None else "à chiffrer",
+        )
 
     def response_add(self, request, obj, post_url_continue=None):
         # Bouton "Enregistrer et ouvrir le constructeur" du formulaire d'ajout :
@@ -383,21 +465,39 @@ class DevisAdmin(ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin
         reponse["Content-Disposition"] = f'inline; filename="devis-{devis.pk}.pdf"'
         return reponse
 
-    @unfold_action(description="Réviser ce devis", permissions=["reviser"], url_path="reviser")
+    @unfold_action(description="Nouvel indice (réviser)", permissions=["reviser"], url_path="reviser")
     def action_reviser(self, request, object_id):
-        devis = Devis.objects.get(pk=object_id)
-        try:
-            revision = reviser_devis(devis)
-        except ChiffrageError as exc:
-            self.message_user(request, str(exc), level=messages.ERROR)
-            return HttpResponseRedirect(reverse("admin:chiffrage_devis_change", args=[devis.pk]))
-        self.message_user(
+        devis = get_object_or_404(Devis, pk=object_id)
+        retour = reverse("admin:chiffrage_devis_change", args=[devis.pk])
+        if request.method == "POST":
+            try:
+                revision = reviser_devis(devis, request.POST.get("motif", ""))
+            except ChiffrageError as exc:
+                self.message_user(request, str(exc), level=messages.ERROR)
+                return HttpResponseRedirect(retour)
+            self.message_user(
+                request,
+                f"Indice {revision.indice} créé en brouillon ({revision}) ; {devis} (indice {devis.indice}) est "
+                "marqué « remplacé ». Modifiez-le, chiffrez-le puis validez-le.",
+                level=messages.SUCCESS,
+            )
+            return HttpResponseRedirect(reverse("admin:chiffrage_devis_change", args=[revision.pk]))
+        return TemplateResponse(
             request,
-            f"Révision {revision} créée en brouillon ; {devis} est marqué « remplacé ». "
-            "Modifiez-la, chiffrez-la puis validez-la.",
-            level=messages.SUCCESS,
+            "admin/confirmer_avec_motif.html",
+            {
+                **self.admin_site.each_context(request),
+                "title": f"Nouvel indice du devis {devis} (indice actuel : {devis.indice})",
+                "explication": (
+                    f"Un nouvel indice ({indice_pour(devis.revision + 1)}) sera créé en brouillon, avec les mêmes lignes. "
+                    f"Le devis {devis} sera marqué « remplacé » : il reste consultable mais ne pourra plus devenir "
+                    "une commande. Indiquez ce qui change : le motif figure sur l'offre envoyée au client."
+                ),
+                "avertissement": "" if devis.statut == Devis.Statut.VALIDE else "Seul un devis validé se révise.",
+                "bouton": "Créer le nouvel indice",
+                "retour": retour,
+            },
         )
-        return HttpResponseRedirect(reverse("admin:chiffrage_devis_change", args=[revision.pk]))
 
     def has_reviser_permission(self, request, obj=None):
         return request.user.has_perm("chiffrage.change_devis")

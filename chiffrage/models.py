@@ -5,6 +5,8 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models, transaction
+from django.db.models.signals import post_delete
+from django.dispatch import receiver
 from django.utils import timezone
 from simple_history.models import HistoricalRecords
 
@@ -30,6 +32,15 @@ def _taux_tva_par_defaut():
     « taux par défaut » dans le référentiel, ou aucun s'il n'y en a pas."""
     defaut = TauxTVA.objects.filter(est_defaut=True).first()
     return defaut.pk if defaut else None
+
+
+def indice_pour(revision):
+    """1 -> A, 2 -> B, … 26 -> Z, 27 -> AA (à la manière des colonnes d'un tableur)."""
+    lettres, n = "", max(int(revision), 1)
+    while n:
+        n, reste = divmod(n - 1, 26)
+        lettres = chr(65 + reste) + lettres
+    return lettres
 
 
 class Devis(models.Model):
@@ -86,6 +97,10 @@ class Devis(models.Model):
         related_name="revisions", editable=False,
     )
     revision = models.PositiveSmallIntegerField("révision", default=1, editable=False)
+    motif_revision = models.CharField(
+        "motif de la révision", max_length=200, blank=True, editable=False,
+        help_text="Ce qui change par rapport à l'indice précédent (renseigné à la création de la révision).",
+    )
     taux_marge_globale = ChampDecimal(
         "taux de marge globale",
         null=True,
@@ -117,6 +132,32 @@ class Devis(models.Model):
 
     def __str__(self):
         return self.numero
+
+    @property
+    def indice(self):
+        """Indice de la version : A pour l'offre initiale, B pour sa première révision, etc."""
+        return indice_pour(self.revision)
+
+    indice.fget.short_description = "Indice"
+
+    @property
+    def racine(self):
+        """Premier devis de la chaîne de révisions (lui-même s'il n'est pas une révision)."""
+        devis = self
+        while devis.devis_origine_id:
+            devis = devis.devis_origine
+        return devis
+
+    def versions(self):
+        """Tous les indices de ce devis (de A au plus récent), y compris celui-ci."""
+        racine = self.racine
+        chaine, courant = [racine], racine
+        while True:
+            suivante = courant.revisions.order_by("revision").first()
+            if suivante is None:
+                return chaine
+            chaine.append(suivante)
+            courant = suivante
 
     @property
     def est_expire(self):
@@ -975,3 +1016,16 @@ class OperationOF(models.Model):
 
     def __str__(self):
         return f"{self.ordre_fabrication} — étape {self.ordre} ({self.poste})"
+
+
+@receiver(post_delete, sender=Devis)
+def _restaurer_indice_precedent(sender, instance, **kwargs):
+    """Une révision brouillon abandonnée (supprimée) rend son indice précédent à nouveau valable :
+    sans cela il resterait « remplacé » par un devis qui n'existe plus."""
+    if not instance.devis_origine_id:
+        return
+    precedent = Devis.objects.filter(pk=instance.devis_origine_id).first()
+    if precedent and precedent.issue == Devis.Issue.REMPLACE and not precedent.revisions.exists():
+        precedent.issue = Devis.Issue.EN_ATTENTE
+        precedent._change_reason = f"Révision {instance.numero} supprimée"[:100]
+        precedent.save(update_fields=["issue"])

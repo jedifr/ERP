@@ -4224,60 +4224,136 @@ class CycleDeVieDevisTests(_FixtureModuleA, TestCase):
         from .production import reviser_devis
 
         self._valider()
-        revision = reviser_devis(self.devis)
-        self.assertEqual((revision.numero, revision.revision, revision.statut), ("DEV-REC-A-R2", 2, "brouillon"))
+        revision = reviser_devis(self.devis, "Quantité portée à 3")
+        self.assertEqual((revision.numero, revision.revision, revision.statut), ("DEV-REC-A-B", 2, "brouillon"))
+        self.assertEqual((revision.indice, self.devis.indice), ("B", "A"))
+        self.assertEqual(revision.motif_revision, "Quantité portée à 3")
         self.assertEqual(revision.devis_origine, self.devis)
         self.assertEqual(revision.client, self.devis.client)
         ligne = revision.lignes.get()
         self.assertEqual((ligne.article, ligne.quantite), (self.article, 3))
         self.devis.refresh_from_db()
         self.assertEqual(self.devis.issue, Devis.Issue.REMPLACE)
-        self.assertEqual(self.devis.history.first().history_change_reason, "Remplacé par DEV-REC-A-R2")
+        self.assertEqual(self.devis.history.first().history_change_reason, "Remplacé par DEV-REC-A-B : Quantité portée à 3")
         self.assertEqual(self.devis.lignes.count(), 1)  # l'original est intact
 
     def test_revision_de_revision_et_numerotation(self):
         from .production import reviser_devis
 
         self._valider()
-        r2 = reviser_devis(self.devis)
+        r2 = reviser_devis(self.devis, "Premier changement")
         r2.statut = Devis.Statut.VALIDE
         r2.save()
-        r3 = reviser_devis(r2)
-        self.assertEqual(r3.numero, "DEV-REC-A-R3")
+        r3 = reviser_devis(r2, "Second changement")
+        self.assertEqual((r3.numero, r3.indice), ("DEV-REC-A-C", "C"))  # numéro bâti sur le devis d'origine
+        self.assertEqual([v.indice for v in r3.versions()], ["A", "B", "C"])
+        self.assertEqual(r3.racine, self.devis)
 
     def test_devis_remplace_ne_devient_pas_une_commande(self):
         from .production import reviser_devis
 
         self._valider()
-        reviser_devis(self.devis)
+        reviser_devis(self.devis, "Changement")
         self.devis.refresh_from_db()
         with self.assertRaises(ChiffrageError) as cm:
             lancer_en_production(self.devis)
-        self.assertIn("DEV-REC-A-R2", str(cm.exception))
+        self.assertIn("DEV-REC-A-B", str(cm.exception))
 
     def test_revision_refusee_dans_les_cas_non_valides(self):
         from .production import reviser_devis
 
         with self.assertRaises(ChiffrageError):
-            reviser_devis(self.devis)  # brouillon
+            reviser_devis(self.devis, "x")  # brouillon
         self._valider()
+        with self.assertRaises(ChiffrageError) as cm:
+            reviser_devis(self.devis, "  ")  # motif obligatoire
+        self.assertIn("motif", str(cm.exception))
         lancer_en_production(self.devis)
         with self.assertRaises(ChiffrageError):
-            reviser_devis(self.devis)  # déjà commandé
+            reviser_devis(self.devis, "x")  # déjà commandé
 
     def test_double_revision_refusee(self):
         from .production import reviser_devis
 
         self._valider()
-        reviser_devis(self.devis)
+        reviser_devis(self.devis, "x")
         with self.assertRaises(ChiffrageError):
-            reviser_devis(Devis.objects.get(pk=self.devis.pk))
+            reviser_devis(Devis.objects.get(pk=self.devis.pk), "y")
 
     def test_action_admin_reviser(self):
         self._valider()
-        r = self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/reviser/", follow=True)
-        self.assertContains(r, "Révision")
-        self.assertTrue(Devis.objects.filter(pk="DEV-REC-A-R2").exists())
+        url = f"/admin/chiffrage/devis/{self.devis.pk}/reviser/"
+        page = self.client.get(url)
+        self.assertContains(page, "Nouvel indice")  # page de saisie du motif, rien n'est encore créé
+        self.assertFalse(Devis.objects.filter(pk="DEV-REC-A-B").exists())
+        r = self.client.post(url, {"motif": "Remise de 5 %"}, follow=True)
+        self.assertContains(r, "Indice B créé")
+        self.assertTrue(Devis.objects.filter(pk="DEV-REC-A-B", motif_revision="Remise de 5 %").exists())
+
+    def test_action_admin_reviser_sans_motif_refusee(self):
+        self._valider()
+        r = self.client.post(f"/admin/chiffrage/devis/{self.devis.pk}/reviser/", {"motif": ""}, follow=True)
+        self.assertContains(r, "motif")
+        self.assertFalse(Devis.objects.filter(pk="DEV-REC-A-B").exists())
+
+    def test_api_reviser(self):
+        self._valider()
+        url = f"/api/v1/devis/{self.devis.pk}/reviser/"
+        self.assertEqual(self.client.post(url, {}, content_type="application/json").status_code, 400)
+        r = self.client.post(url, {"motif": "Délai raccourci"}, content_type="application/json")
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual((r.json()["numero"], r.json()["indice"], r.json()["motif_revision"]), ("DEV-REC-A-B", "B", "Délai raccourci"))
+        self.assertEqual(self.client.get(f"/api/v1/devis/{self.devis.pk}/").json()["indice"], "A")
+
+    def test_supprimer_la_revision_brouillon_rend_l_indice_precedent(self):
+        from .production import reviser_devis
+
+        self._valider()
+        revision = reviser_devis(self.devis, "Essai abandonné")
+        self.devis.refresh_from_db()
+        self.assertEqual(self.devis.issue, Devis.Issue.REMPLACE)
+        revision.delete()
+        self.devis.refresh_from_db()
+        self.assertEqual(self.devis.issue, Devis.Issue.EN_ATTENTE)  # redevient transformable en commande
+
+    def test_comparaison_entre_indices(self):
+        from .production import comparer_indices, reviser_devis
+
+        self._valider()
+        revision = reviser_devis(self.devis, "Quantité doublée")
+        ligne = revision.lignes.get()
+        ligne.quantite = 6
+        ligne.save()
+        comparaison = comparer_indices(self.devis, revision)
+        self.assertEqual([l["etat"] for l in comparaison["lignes"]], ["modifiee"])
+        self.assertEqual(comparaison["lignes"][0]["avant"][0], 3)
+        self.assertEqual(comparaison["lignes"][0]["apres"][0], 6)
+        self.assertIsNone(comparaison["total_apres"])  # pas encore rechiffré
+
+    def test_fiche_affiche_historique_et_comparaison(self):
+        from .production import reviser_devis
+
+        self._valider()
+        revision = reviser_devis(self.devis, "Quantité modifiée")
+        page = self.client.get(f"/admin/chiffrage/devis/{revision.pk}/change/")
+        self.assertContains(page, "Indices de ce devis")
+        self.assertContains(page, "Quantité modifiée")
+        self.assertContains(page, "Changements depuis l")
+        self.assertContains(page, "DEV-REC-A-B")
+
+    def test_filtre_derniers_indices(self):
+        from .production import reviser_devis
+
+        self._valider()
+        reviser_devis(self.devis, "x")
+        page = self.client.get("/admin/chiffrage/devis/?indices=derniers")
+        self.assertContains(page, "DEV-REC-A-B")
+        self.assertNotContains(page, 'href="/admin/chiffrage/devis/DEV-REC-A/change/"')
+
+    def test_indices_au_dela_de_z(self):
+        from .models import indice_pour
+
+        self.assertEqual([indice_pour(n) for n in (1, 2, 26, 27, 28, 52, 53)], ["A", "B", "Z", "AA", "AB", "AZ", "BA"])
 
     def test_filtres_expires_et_bientot(self):
         self._valider()
@@ -4383,9 +4459,13 @@ class DocumentsPdfTests(_FixtureModuleA, TestCase):
         from .production import reviser_devis
 
         self._valider()
-        revision = reviser_devis(self.devis)
+        revision = reviser_devis(self.devis, "Remise commerciale")
         calculer_devis(revision)
-        self.assertIn("Annule et remplace DEV-REC-A", self._texte(generer_pdf_devis(revision)))
+        texte = self._texte(generer_pdf_devis(revision))
+        self.assertIn("Annule et remplace DEV-REC-A", texte)
+        self.assertIn("indice A", texte)
+        self.assertIn("Indice B", texte)
+        self.assertIn("Modification : Remise commerciale", texte)
 
     def test_telechargement_depuis_ladmin_et_lapi(self):
         r = self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/pdf/")
