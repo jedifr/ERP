@@ -1,4 +1,5 @@
 import datetime
+from decimal import Decimal
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -10,6 +11,10 @@ from simple_history.models import HistoricalRecords
 from commercial.models import Adresse, Contact, Devise, TauxTVA, Tiers
 from stock.models import Lot, MouvementStock, StockInsuffisantError
 from technique.models import Article, PosteTravail
+from comptes.champs import ChampDecimal
+from comptes.montants import (
+    MONTANT, PRIX, PRIX_VENTE, TAUX, ZERO, D, D0, arrondir, arrondir_prix_vente, somme,
+)
 
 
 def _strictement_positif(valeur):
@@ -81,12 +86,12 @@ class Devis(models.Model):
         related_name="revisions", editable=False,
     )
     revision = models.PositiveSmallIntegerField("révision", default=1, editable=False)
-    taux_marge_globale = models.FloatField(
+    taux_marge_globale = ChampDecimal(
         "taux de marge globale",
         null=True,
         blank=True,
         validators=[positif_ou_nul],
-        help_text="Optionnel, écrase les marges par défaut",
+        help_text="Optionnel, écrase les marges par défaut", **TAUX,
     )
     delai = models.CharField(
         "délai",
@@ -166,19 +171,19 @@ class Devis(models.Model):
 
     @property
     def montant_matiere_ht(self):
-        return round(sum(ligne.prix_vente_matiere or 0 for ligne in self.lignes.all()), 2)
+        return arrondir(somme(ligne.prix_vente_matiere for ligne in self.lignes.all()))
 
     montant_matiere_ht.fget.short_description = "Montant matière HT"
 
     @property
     def montant_operations_ht(self):
-        return round(sum(ligne.prix_vente_operations for ligne in self.lignes.all()), 2)
+        return arrondir(somme(ligne.prix_vente_operations for ligne in self.lignes.all()))
 
     montant_operations_ht.fget.short_description = "Montant opérations HT (temps machine / main d'œuvre)"
 
     @property
     def montant_total_ht(self):
-        return round(self.montant_matiere_ht + self.montant_operations_ht, 2)
+        return arrondir(self.montant_matiere_ht + self.montant_operations_ht)
 
     montant_total_ht.fget.short_description = "Montant total HT"
 
@@ -187,7 +192,7 @@ class Devis(models.Model):
         """Somme des prix TTC de chaque ligne (chacune avec son propre taux de
         TVA et arrondie au centime) — reflète donc correctement un devis à taux
         de TVA mixtes, et correspond à ce que la facture affichera."""
-        return round(sum(ligne.prix_vente_ttc or 0 for ligne in self.lignes.all()), 2)
+        return arrondir(somme(ligne.prix_vente_ttc for ligne in self.lignes.all()))
 
     montant_total_ttc.fget.short_description = "Montant total TTC"
 
@@ -203,17 +208,17 @@ class DevisLigne(models.Model):
         help_text="Ordre d'affichage (glisser-déposer sur la fiche devis) — repris tel quel sur la commande.",
     )
     quantite = models.FloatField("quantité", validators=[_strictement_positif])
-    cout_matiere_calcule = models.FloatField(
-        "coût matière calculé", null=True, blank=True, editable=False
+    cout_matiere_calcule = ChampDecimal(
+        "coût matière calculé", null=True, blank=True, editable=False, **PRIX,
     )
-    taux_marge_matiere_applique = models.FloatField(
+    taux_marge_matiere_applique = ChampDecimal(
         "taux de marge matière appliqué",
         null=True,
         blank=True,
         validators=[positif_ou_nul],
-        help_text="Pré-rempli depuis l'article, éditable",
+        help_text="Pré-rempli depuis l'article, éditable", **TAUX,
     )
-    prix_vente_unitaire_force = models.FloatField(
+    prix_vente_unitaire_force = ChampDecimal(
         "prix de vente unitaire forcé (HT)",
         null=True,
         blank=True,
@@ -221,10 +226,10 @@ class DevisLigne(models.Model):
         help_text=(
             "Si renseigné, remplace le calcul automatique (coût matière × marge) : "
             "prix de vente matière de la ligne = quantité × ce prix unitaire."
-        ),
+        ), **PRIX,
     )
-    prix_vente_matiere = models.FloatField(
-        "prix de vente matière (HT)", null=True, blank=True, editable=False
+    prix_vente_matiere = ChampDecimal(
+        "prix de vente matière (HT)", null=True, blank=True, editable=False, **MONTANT,
     )
     taux_tva = models.ForeignKey(
         TauxTVA,
@@ -250,7 +255,7 @@ class DevisLigne(models.Model):
     @property
     def prix_vente_operations(self):
         """Prix de vente cumulé des opérations de gamme (temps machine / main d'œuvre)."""
-        return sum(op.prix_vente or 0 for op in self.operations.all())
+        return somme(op.prix_vente for op in self.operations.all())
 
     prix_vente_operations.fget.short_description = "Prix de vente opérations (HT)"
 
@@ -260,7 +265,7 @@ class DevisLigne(models.Model):
         n'a pas été calculé (cohérent avec cout_matiere_calcule/prix_vente_matiere)."""
         if self.prix_vente_matiere is None:
             return None
-        return self.prix_vente_matiere + self.prix_vente_operations
+        return D(self.prix_vente_matiere) + self.prix_vente_operations
 
     prix_vente_total.fget.short_description = "Prix de vente total (matière + opérations, HT)"
 
@@ -271,7 +276,7 @@ class DevisLigne(models.Model):
         None tant que le chiffrage n'a pas été calculé, ou si quantite est nulle."""
         if self.prix_vente_total is None or not self.quantite:
             return None
-        return self.prix_vente_total / self.quantite
+        return arrondir_prix_vente(self.prix_vente_total / D(self.quantite))
 
     prix_vente_unitaire.fget.short_description = "Prix de vente unitaire (HT)"
 
@@ -282,8 +287,8 @@ class DevisLigne(models.Model):
         0 % appliqué si aucun taux de TVA n'est renseigné sur la ligne."""
         if self.prix_vente_total is None:
             return None
-        taux = self.taux_tva.taux if self.taux_tva_id else 0
-        return round(self.prix_vente_total * (1 + taux / 100), 2)
+        taux = D0(self.taux_tva.taux) if self.taux_tva_id else ZERO
+        return arrondir(self.prix_vente_total * (1 + taux / 100))
 
     prix_vente_ttc.fget.short_description = "Prix de vente TTC"
 
@@ -293,7 +298,7 @@ class DevisLigne(models.Model):
         chiffrage matière n'a pas été calculé."""
         if self.cout_matiere_calcule is None:
             return None
-        return self.cout_matiere_calcule + sum(op.cout_calcule or 0 for op in self.operations.all())
+        return D(self.cout_matiere_calcule) + somme(op.cout_calcule for op in self.operations.all())
 
     cout_total.fget.short_description = "Coût total"
 
@@ -303,7 +308,7 @@ class DevisLigne(models.Model):
         typiquement un prix unitaire forcé trop bas."""
         if self.prix_vente_total is None or self.cout_total is None:
             return False
-        return self.prix_vente_total < self.cout_total - 0.005
+        return self.prix_vente_total < self.cout_total - Decimal("0.005")
 
 
 class DevisLigneOperation(models.Model):
@@ -314,15 +319,15 @@ class DevisLigneOperation(models.Model):
         PosteTravail, verbose_name="poste", on_delete=models.PROTECT, related_name="devis_operations"
     )
     ordre = models.PositiveIntegerField("ordre")
-    cout_calcule = models.FloatField("coût calculé", null=True, blank=True, editable=False)
-    taux_marge_applique = models.FloatField(
+    cout_calcule = ChampDecimal("coût calculé", null=True, blank=True, editable=False, **PRIX)
+    taux_marge_applique = ChampDecimal(
         "taux de marge appliqué",
         null=True,
         blank=True,
         validators=[positif_ou_nul],
-        help_text="Pré-rempli depuis le poste, éditable",
+        help_text="Pré-rempli depuis le poste, éditable", **TAUX,
     )
-    prix_vente = models.FloatField("prix de vente (HT)", null=True, blank=True, editable=False)
+    prix_vente = ChampDecimal("prix de vente (HT)", null=True, blank=True, editable=False, **MONTANT)
 
     class Meta:
         verbose_name = "Opération de ligne de devis"
@@ -490,12 +495,12 @@ class CommandeLigne(models.Model):
         help_text="Libellé propre à cette commande, remplace celui de l'article s'il est renseigné.",
     )
     quantite_commandee = models.FloatField("quantité commandée", validators=[positif_ou_nul])
-    prix_vente_unitaire = models.FloatField(
+    prix_vente_unitaire = ChampDecimal(
         "prix de vente unitaire (HT)",
         null=True,
         blank=True,
         validators=[positif_ou_nul],
-        help_text="Pré-rempli depuis le devis à la création de la commande, modifiable ensuite.",
+        help_text="Pré-rempli depuis le devis à la création de la commande, modifiable ensuite.", **PRIX_VENTE,
     )
     taux_tva = models.ForeignKey(
         TauxTVA,
@@ -585,7 +590,7 @@ class CommandeLigne(models.Model):
         devis d'origine."""
         if self.prix_vente_unitaire is None:
             return None
-        return round(self.prix_vente_unitaire * self.quantite_commandee, 2)
+        return arrondir(D(self.prix_vente_unitaire) * D(self.quantite_commandee))
 
     montant_ht.fget.short_description = "Montant HT"
 
@@ -593,8 +598,8 @@ class CommandeLigne(models.Model):
     def montant_ttc(self):
         if self.montant_ht is None:
             return None
-        taux = self.taux_tva.taux if self.taux_tva_id else 0
-        return round(self.montant_ht * (1 + taux / 100), 2)
+        taux = D0(self.taux_tva.taux) if self.taux_tva_id else ZERO
+        return arrondir(self.montant_ht * (1 + taux / 100))
 
     montant_ttc.fget.short_description = "Montant TTC"
 

@@ -65,13 +65,13 @@ class MargeReelleTests(TestCase):
         resultat = marge_reelle_ordre_fabrication(self.of)
 
         self.assertTrue(resultat["donnees_completes"])
-        self.assertAlmostEqual(resultat["prix_vente_prevu_total"], 50)
-        self.assertAlmostEqual(resultat["cout_prevu_total"], 40)
-        self.assertAlmostEqual(resultat["marge_prevue"], 10)
+        self.assertAlmostEqual(float(resultat["prix_vente_prevu_total"]), 50)
+        self.assertAlmostEqual(float(resultat["cout_prevu_total"]), 40)
+        self.assertAlmostEqual(float(resultat["marge_prevue"]), 10)
         # coût réel : matière 30 + opération 18/60*40=12 = 42
-        self.assertAlmostEqual(resultat["cout_reel_total"], 42)
-        self.assertAlmostEqual(resultat["marge_reelle"], 50 - 42)
-        self.assertAlmostEqual(resultat["ecart_marge"], (50 - 42) - 10)
+        self.assertAlmostEqual(float(resultat["cout_reel_total"]), 42)
+        self.assertAlmostEqual(float(resultat["marge_reelle"]), 50 - 42)
+        self.assertAlmostEqual(float(resultat["ecart_marge"]), (50 - 42) - 10)
 
     def test_donnees_incompletes_sans_temps_reel(self):
         resultat = marge_reelle_ordre_fabrication(self.of)
@@ -126,9 +126,9 @@ class TauxChargeTests(TestCase):
         )
         # temps_reel (OperationOF) est en minutes : 10+15=25 min -> converti en
         # heures (25/60) pour rester dans la même unité que capacite_disponible.
-        self.assertAlmostEqual(resultat["temps_reel_cumule"], 25 / 60)
+        self.assertAlmostEqual(float(resultat["temps_reel_cumule"]), 25 / 60)
         self.assertEqual(resultat["capacite_disponible"], 2 * 5 * 7)  # 2 machines * 5 jours * 7h
-        self.assertAlmostEqual(resultat["taux_charge"], (25 / 60) / 70)
+        self.assertAlmostEqual(float(resultat["taux_charge"]), (25 / 60) / 70)
 
     def test_mouvements_hors_periode_exclus(self):
         resultat = taux_charge_poste(

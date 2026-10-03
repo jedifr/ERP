@@ -1,5 +1,7 @@
 from django.core.exceptions import ValidationError
 from django.db import models
+from comptes.champs import ChampDecimal
+from comptes.montants import PRIX, TAUX
 
 
 class Matiere(models.Model):
@@ -67,14 +69,14 @@ class Article(models.Model):
     poids_lineique = models.FloatField(
         "poids linéique", null=True, blank=True, help_text="kg/mètre (profilés vendus au poids)"
     )
-    cout_unitaire = models.FloatField(
-        "coût unitaire", null=True, blank=True, help_text="Coût d'achat (matière première)"
+    cout_unitaire = ChampDecimal(
+        "coût unitaire", null=True, blank=True, help_text="Coût d'achat (matière première)", **PRIX,
     )
-    taux_marge_defaut = models.FloatField(
+    taux_marge_defaut = ChampDecimal(
         "taux de marge par défaut",
         null=True,
         blank=True,
-        help_text="Marge par défaut sur le coût matière (articles fabriqués)",
+        help_text="Marge par défaut sur le coût matière (articles fabriqués)", **TAUX,
     )
     taux_tva = models.ForeignKey(
         "commercial.TauxTVA",
@@ -149,11 +151,11 @@ class PosteTravail(models.Model):
     nombre_machines = models.PositiveIntegerField(
         "nombre de machines", default=1, help_text="Capacité agrégée (usage planning)"
     )
-    taux_marge_defaut = models.FloatField(
+    taux_marge_defaut = ChampDecimal(
         "taux de marge par défaut",
         null=True,
         blank=True,
-        help_text="Marge par défaut sur les opérations de ce poste",
+        help_text="Marge par défaut sur les opérations de ce poste", **TAUX,
     )
 
     class Meta:
@@ -208,7 +210,7 @@ class TarifPoste(DateRangeHistoriqueMixin, models.Model):
     poste = models.ForeignKey(
         PosteTravail, verbose_name="poste", on_delete=models.CASCADE, related_name="tarifs"
     )
-    cout_horaire = models.FloatField("coût horaire", help_text="€/heure")
+    cout_horaire = ChampDecimal("coût horaire", help_text="€/heure", **PRIX)
     date_debut = models.DateField("date de début")
     date_fin = models.DateField("date de fin", null=True, blank=True)
 
@@ -272,8 +274,8 @@ class Gamme(DateRangeHistoriqueMixin, models.Model):
     temps_variable = models.FloatField(
         "temps variable", null=True, blank=True, help_text="Temps unitaire (mode horaire)"
     )
-    cout_forfaitaire = models.FloatField(
-        "coût forfaitaire", null=True, blank=True, help_text="Mode forfaitaire (sous-traitance)"
+    cout_forfaitaire = ChampDecimal(
+        "coût forfaitaire", null=True, blank=True, help_text="Mode forfaitaire (sous-traitance)", **PRIX,
     )
     date_debut = models.DateField("date de début")
     date_fin = models.DateField(

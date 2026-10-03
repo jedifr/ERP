@@ -6,6 +6,7 @@ from unfold.admin import ModelAdmin, TabularInline
 from unfold.decorators import action
 
 from comptes.exports import ExportCsvMixin
+from comptes.montants import ZERO, D0, arrondir, pourcent
 from .models import (
     ArticleCompteAchat,
     ArticleCompteVente,
@@ -183,15 +184,15 @@ class ParametresComptablesAdmin(ModelAdmin):
 class LigneEcritureFormSet(BaseInlineFormSet):
     def clean(self):
         super().clean()
-        total_debit = total_credit = 0
+        total_debit = total_credit = ZERO
         for form in self.forms:
             if not form.cleaned_data or form.cleaned_data.get("DELETE"):
                 continue
-            total_debit += form.cleaned_data.get("debit") or 0
-            total_credit += form.cleaned_data.get("credit") or 0
-        if round(total_debit - total_credit, 2) != 0:
+            total_debit += D0(form.cleaned_data.get("debit"))
+            total_credit += D0(form.cleaned_data.get("credit"))
+        if arrondir(total_debit - total_credit) != 0:
             raise ValidationError(
-                f"L'écriture n'est pas équilibrée : débit {total_debit:g} ≠ crédit {total_credit:g}."
+                f"L'écriture n'est pas équilibrée : débit {pourcent(total_debit)} ≠ crédit {pourcent(total_credit)}."
             )
 
 

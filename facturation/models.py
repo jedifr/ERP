@@ -6,6 +6,8 @@ from django.utils import timezone
 from simple_history.models import HistoricalRecords
 
 from chiffrage.models import Commande
+from comptes.champs import ChampDecimal
+from comptes.montants import MONTANT, PRIX_VENTE, TAUX, ZERO, D, D0, arrondir, pourcent, somme
 
 
 class FactureVerrouilleeError(Exception):
@@ -73,11 +75,11 @@ class Facture(models.Model):
         help_text="Cochez pour facturer avant livraison (acompte, facturation à la commande) : "
         "lève la limite « pas plus que le livré ».",
     )
-    montant_ht = models.FloatField(
-        "montant HT", null=True, blank=True, help_text="Négatif pour un avoir."
+    montant_ht = ChampDecimal(
+        "montant HT", null=True, blank=True, help_text="Négatif pour un avoir.", **MONTANT,
     )
-    montant_ttc = models.FloatField(
-        "montant TTC", null=True, blank=True, help_text="Négatif pour un avoir."
+    montant_ttc = ChampDecimal(
+        "montant TTC", null=True, blank=True, help_text="Négatif pour un avoir.", **MONTANT,
     )
     date_facturation = models.DateField("date de facturation")
 
@@ -130,7 +132,7 @@ class Facture(models.Model):
                     {champ: "Le montant d'un avoir est négatif." if avoir else "Ne peut pas être négatif."}
                 )
         if self.montant_ht is not None and self.montant_ttc is not None:
-            if abs(self.montant_ttc) < abs(self.montant_ht) - 0.005:
+            if abs(D(self.montant_ttc)) < abs(D(self.montant_ht)):
                 raise ValidationError({"montant_ttc": "Le montant TTC ne peut pas être inférieur au montant HT."})
         self._clean_avoir(avoir)
         if self.date_paiement and self.date_facturation and self.date_paiement < self.date_facturation:
@@ -165,10 +167,10 @@ class Facture(models.Model):
             deja_credite = -(
                 origine.avoirs.exclude(pk=self.pk).aggregate(total=models.Sum("montant_ht"))["total"] or 0
             )
-            if -self.montant_ht + deja_credite > origine.montant_ht + 0.005:
+            if -D(self.montant_ht) + D(deja_credite) > D(origine.montant_ht):
                 raise ValidationError(
-                    {"montant_ht": f"Dépasse le montant de la facture d'origine ({origine.montant_ht:g} € HT, "
-                                   f"{deja_credite:g} € déjà crédités)."}
+                    {"montant_ht": f"Dépasse le montant de la facture d'origine ({pourcent(origine.montant_ht)} € HT, "
+                                   f"{pourcent(deja_credite)} € déjà crédités)."}
                 )
 
     @property
@@ -190,13 +192,13 @@ class Facture(models.Model):
         une erreur de saisie. None si pas de lignes ou pas de montant saisi."""
         if self.montant_ht is None or not self.lignes.exists():
             return None
-        return round(self.montant_ht - self.montant_ht_calcule, 2)
+        return arrondir(D(self.montant_ht) - self.montant_ht_calcule)
 
     def save(self, *args, **kwargs):
         if self.montant_ht is not None:
-            self.montant_ht = round(self.montant_ht, 2)
+            self.montant_ht = arrondir(self.montant_ht)
         if self.montant_ttc is not None:
-            self.montant_ttc = round(self.montant_ttc, 2)
+            self.montant_ttc = arrondir(self.montant_ttc)
         if self.statut_paiement == self.StatutPaiement.PAYE and self.date_paiement is None:
             self.date_paiement = timezone.localdate()
         if self.pk is not None and facture_verrouillee(self):
@@ -237,17 +239,17 @@ class Facture(models.Model):
         arrondi...). None si rien n'est chiffré."""
         lignes = self._lignes_pour_montants()
         if lignes:
-            return round(sum(ligne.montant_ht for ligne in lignes), 2)
+            return arrondir(somme(ligne.montant_ht for ligne in lignes))
         montants = [l.montant_ht for l in self.commande.lignes.all() if l.montant_ht is not None]
-        return round(sum(montants), 2) if montants else None
+        return arrondir(somme(montants)) if montants else None
 
     @property
     def montant_ttc_calcule(self):
         lignes = self._lignes_pour_montants()
         if lignes:
-            return round(sum(ligne.montant_ttc for ligne in lignes), 2)
+            return arrondir(somme(ligne.montant_ttc for ligne in lignes))
         montants = [l.montant_ttc for l in self.commande.lignes.all() if l.montant_ttc is not None]
-        return round(sum(montants), 2) if montants else None
+        return arrondir(somme(montants)) if montants else None
 
     def remplir_montants_depuis_les_lignes(self):
         """Renseigne montant_ht/montant_ttc depuis les lignes quand ils sont encore
@@ -278,11 +280,11 @@ class FactureLigne(models.Model):
         "chiffrage.CommandeLigne", verbose_name="ligne de commande", on_delete=models.PROTECT, related_name="lignes_facture"
     )
     quantite = models.FloatField("quantité", validators=[MinValueValidator(0, message="Ne peut pas être négatif.")])
-    prix_unitaire_ht = models.FloatField(
+    prix_unitaire_ht = ChampDecimal(
         "prix unitaire HT", null=True, blank=True, validators=[MinValueValidator(0, message="Ne peut pas être négatif.")],
-        help_text="Repris de la ligne de commande si laissé vide.",
+        help_text="Repris de la ligne de commande si laissé vide.", **PRIX_VENTE,
     )
-    taux_tva = models.FloatField("taux de TVA (%)", null=True, blank=True, help_text="Repris de la ligne de commande si laissé vide.")
+    taux_tva = ChampDecimal("taux de TVA (%)", null=True, blank=True, help_text="Repris de la ligne de commande si laissé vide.", **TAUX)
 
     class Meta:
         verbose_name = "Ligne de facture"
@@ -317,12 +319,12 @@ class FactureLigne(models.Model):
 
     @property
     def montant_ht(self):
-        brut = round(self._prix() * self.quantite, 2)
+        brut = arrondir(D(self._prix()) * D(self.quantite))
         return -brut if self.facture.est_avoir else brut
 
     @property
     def montant_ttc(self):
-        valeur = round(abs(self.montant_ht) * (1 + self._taux() / 100), 2)
+        valeur = arrondir(abs(self.montant_ht) * (1 + D0(self._taux()) / 100))
         return -valeur if self.facture.est_avoir else valeur
 
     def clean(self):

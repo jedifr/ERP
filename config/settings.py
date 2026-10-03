@@ -208,6 +208,9 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # https://www.django-rest-framework.org/api-guide/settings/
 
 REST_FRAMEWORK = {
+    # Les montants sont des Decimal en base ; l'API les renvoie comme des nombres JSON
+    # (comme avant le passage en Decimal), pas comme des chaînes.
+    "COERCE_DECIMAL_TO_STRING": False,
     "DEFAULT_FILTER_BACKENDS": [
         "django_filters.rest_framework.DjangoFilterBackend",
         "rest_framework.filters.SearchFilter",

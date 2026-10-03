@@ -8,6 +8,8 @@ from commercial.models import TauxTVA, Tiers
 from comptabilite.models import PosteGestion
 from stock.models import AlerteStock, Lot, MouvementStock
 from technique.models import Article, DateRangeHistoriqueMixin
+from comptes.champs import ChampDecimal
+from comptes.montants import MONTANT, PRIX, ZERO, D, D0, arrondir
 
 
 class AchatsError(Exception):
@@ -80,9 +82,9 @@ class TarifAchatArticle(DateRangeHistoriqueMixin, models.Model):
     article_fournisseur = models.ForeignKey(
         ArticleFournisseur, verbose_name="fournisseur de l'article", on_delete=models.CASCADE, related_name="tarifs"
     )
-    prix_unitaire = models.FloatField("prix unitaire", help_text="€, prix d'achat proposé par ce fournisseur")
-    frais_port = models.FloatField(
-        "frais de port", null=True, blank=True, help_text="€, forfait de livraison associé à ce tarif (facultatif)"
+    prix_unitaire = ChampDecimal("prix unitaire", help_text="€, prix d'achat proposé par ce fournisseur", **PRIX)
+    frais_port = ChampDecimal(
+        "frais de port", null=True, blank=True, help_text="€, forfait de livraison associé à ce tarif (facultatif)", **MONTANT,
     )
     date_debut = models.DateField("date de début")
     date_fin = models.DateField("date de fin", null=True, blank=True)
@@ -171,7 +173,7 @@ class LigneCommandeFournisseur(models.Model):
         ),
     )
     quantite_commandee = models.FloatField("quantité commandée")
-    prix_unitaire_achat = models.FloatField("prix unitaire d'achat")
+    prix_unitaire_achat = ChampDecimal("prix unitaire d'achat", **PRIX)
     taux_tva = models.ForeignKey(
         TauxTVA,
         verbose_name="taux de TVA",
@@ -196,14 +198,14 @@ class LigneCommandeFournisseur(models.Model):
 
     @property
     def montant_ht(self):
-        return self.prix_unitaire_achat * self.quantite_commandee
+        return arrondir(D(self.prix_unitaire_achat) * D(self.quantite_commandee))
 
     montant_ht.fget.short_description = "Montant HT"
 
     @property
     def montant_ttc(self):
-        taux = self.taux_tva.taux if self.taux_tva_id else 0
-        return self.montant_ht * (1 + taux / 100)
+        taux = D0(self.taux_tva.taux) if self.taux_tva_id else ZERO
+        return arrondir(self.montant_ht * (1 + taux / 100))
 
     montant_ttc.fget.short_description = "Montant TTC"
 
@@ -405,8 +407,8 @@ class FactureFournisseur(models.Model):
         help_text="Numéro de facture tel qu'indiqué par le fournisseur (distinct du numéro interne ci-dessus)",
     )
     date_facture = models.DateField("date de facture")
-    montant_ht = models.FloatField("montant HT", null=True, blank=True)
-    montant_ttc = models.FloatField("montant TTC", null=True, blank=True)
+    montant_ht = ChampDecimal("montant HT", null=True, blank=True, **MONTANT)
+    montant_ttc = ChampDecimal("montant TTC", null=True, blank=True, **MONTANT)
     statut_paiement = models.CharField("statut de paiement", max_length=50, blank=True)
 
     class Meta:

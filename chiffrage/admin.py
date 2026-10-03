@@ -10,6 +10,7 @@ from django.utils import timezone
 from django.utils.html import format_html
 from unfold.decorators import action as unfold_action
 from comptes.exports import ExportCsvMixin
+from comptes.montants import pourcent
 from comptes.concurrence import VerrouOptimisteMixin
 from comptes.historique import HistoriqueLectureSeule
 from unfold.admin import ModelAdmin, TabularInline
@@ -67,12 +68,12 @@ def taux_tva_display(obj):
     des inlines "Lignes de devis" / "Lignes de commande")."""
     if not obj.taux_tva:
         return "—"
-    return f"{obj.taux_tva.taux:g}%"
+    return f"{pourcent(obj.taux_tva.taux)}%"
 
 
 class TauxTVACompactChoiceField(forms.ModelChoiceField):
     def label_from_instance(self, obj):
-        return f"{obj.taux:g}%"
+        return f"{pourcent(obj.taux)}%"
 
 
 class DevisLigneForm(forms.ModelForm):

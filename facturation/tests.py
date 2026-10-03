@@ -1,4 +1,5 @@
 import datetime
+from decimal import Decimal
 
 from django.test import TestCase
 
@@ -94,8 +95,8 @@ class FactureMontantsCalculesTests(TestCase):
             prix_vente_unitaire=40, taux_tva=self.taux20,
         )
         # HT : 1000 + 200 = 1200 ; TTC : 1200 * 1.2 = 1440
-        self.assertAlmostEqual(self.facture.montant_ht_calcule, 1200)
-        self.assertAlmostEqual(self.facture.montant_ttc_calcule, 1440)
+        self.assertAlmostEqual(float(self.facture.montant_ht_calcule), 1200)
+        self.assertAlmostEqual(float(self.facture.montant_ttc_calcule), 1440)
 
     def test_ignore_les_lignes_sans_prix(self):
         CommandeLigne.objects.create(
@@ -103,7 +104,7 @@ class FactureMontantsCalculesTests(TestCase):
             prix_vente_unitaire=100, taux_tva=self.taux20,
         )
         CommandeLigne.objects.create(commande=self.commande, article=self.article, quantite_commandee=3)
-        self.assertAlmostEqual(self.facture.montant_ht_calcule, 1000)
+        self.assertAlmostEqual(float(self.facture.montant_ht_calcule), 1000)
 
     def test_n_ecrase_jamais_montant_ht_saisi_a_la_main(self):
         CommandeLigne.objects.create(
@@ -116,7 +117,7 @@ class FactureMontantsCalculesTests(TestCase):
         self.facture.refresh_from_db()
         self.assertEqual(self.facture.montant_ht, 999)
         self.assertEqual(self.facture.montant_ttc, 1111)
-        self.assertAlmostEqual(self.facture.montant_ht_calcule, 1000)
+        self.assertAlmostEqual(float(self.facture.montant_ht_calcule), 1000)
 
 
 class MontantsCalculesCommandeViewTests(TestCase):
@@ -223,7 +224,7 @@ class CommandeDirecteTests(_FixtureFacturation, TestCase):
         ecriture, creee = generer_ecriture_facture(self._facture())
         self.assertTrue(creee)
         self.assertTrue(ecriture.est_equilibree)
-        self.assertAlmostEqual(ecriture.total_debit, 120)
+        self.assertAlmostEqual(float(ecriture.total_debit), 120)
 
 
 class VerrouFactureTests(_FixtureFacturation, TestCase):
@@ -702,7 +703,7 @@ class EcrituresFactureAvoirTests(_FixtureLignes, TestCase):
         facture = preparer_facture(self.commande)  # 6 sur 10
         ecriture, _ = generer_ecriture_facture(facture)
         self.assertTrue(ecriture.est_equilibree)
-        self.assertAlmostEqual(ecriture.total_debit, 72.0)  # et non 120 (toute la commande)
+        self.assertAlmostEqual(float(ecriture.total_debit), 72.0)  # et non 120 (toute la commande)
 
     def test_deux_factures_du_meme_ordre_ont_chacune_leur_ecriture(self):
         from comptabilite.generation import generer_ecriture_facture
@@ -712,7 +713,7 @@ class EcrituresFactureAvoirTests(_FixtureLignes, TestCase):
         seconde = preparer_facture(self.commande)
         e1, _ = generer_ecriture_facture(premiere)
         e2, _ = generer_ecriture_facture(seconde)
-        self.assertAlmostEqual(e1.total_debit + e2.total_debit, 120.0)
+        self.assertAlmostEqual(float(e1.total_debit + e2.total_debit), 120.0)
 
     def test_avoir_ecriture_en_sens_inverse(self):
         from comptabilite.generation import generer_ecriture_facture
@@ -737,7 +738,7 @@ class EcrituresFactureAvoirTests(_FixtureLignes, TestCase):
         ancienne = self._facture(numero="FAC-ANCIENNE", montant_ht=100, montant_ttc=120)
         ecriture, _ = generer_ecriture_facture(ancienne)
         self.assertTrue(ecriture.est_equilibree)
-        self.assertAlmostEqual(ecriture.total_debit, 120.0)  # lignes de la commande : 10 x 10 HT, 20 %
+        self.assertAlmostEqual(float(ecriture.total_debit), 120.0)  # lignes de la commande : 10 x 10 HT, 20 %
 
 
 class RetardsEtEcartsTests(_FixtureLignes, TestCase):
@@ -781,10 +782,10 @@ class RetardsEtEcartsTests(_FixtureLignes, TestCase):
 
     def test_ecart_entre_montant_saisi_et_lignes(self):
         facture = self._facturer(6, montant_ht=55, montant_ttc=66)  # lignes : 60 HT
-        self.assertEqual(facture.ecart_avec_les_lignes, -5.0)
+        self.assertEqual(facture.ecart_avec_les_lignes, Decimal("-5.00"))
         self.assertIsNone(self._facture("FAC-SL").ecart_avec_les_lignes)  # pas de lignes
         page = self.client.get("/admin/facturation/facture/")
-        self.assertContains(page, "-5 €")
+        self.assertContains(page, "-5.00 €")
 
 
 class RolesFacturationTests(_FixtureLignes, TestCase):
@@ -998,3 +999,77 @@ class RelancesTests(_FixtureLignes, TestCase):
         with redirect_stdout(sortie):
             relancer_facture(self.facture)
         self.assertIn("FAC-REL", sortie.getvalue())
+
+
+class MontantsDecimalTests(_FixtureLignes, TestCase):
+    """Passage en Decimal : arrondi commercial exact, aucun résidu de flottant."""
+
+    def test_arrondi_commercial_demi_vers_le_haut(self):
+        from comptes.montants import arrondir
+
+        # En flottant, round(1.005, 2) donne 1.0 ; l'arrondi commercial donne 1.01.
+        self.assertEqual(arrondir("1.005"), Decimal("1.01"))
+        self.assertEqual(arrondir("2.675"), Decimal("2.68"))
+        self.assertEqual(arrondir("-1.005"), Decimal("-1.01"))
+
+    def test_montant_de_ligne_arrondi_au_centime_demi_vers_le_haut(self):
+        self.ligne.prix_vente_unitaire = Decimal("0.125")
+        self.ligne.save()
+        facture = self._facturer(1)
+        self.assertEqual(facture.lignes.get().montant_ht, Decimal("0.13"))
+
+    def test_prix_unitaire_redonne_le_total_sur_grande_quantite(self):
+        """Un total de devis ramené à l'unité puis remultiplié ne perd pas un centime."""
+        from comptes.montants import arrondir, arrondir_prix_vente, D
+
+        total, quantite = Decimal("123.45"), 1000
+        unitaire = arrondir_prix_vente(total / D(quantite))
+        self.assertEqual(unitaire, Decimal("0.123450"))
+        self.assertEqual(arrondir(unitaire * D(quantite)), total)
+
+    def test_tva_mixte_total_exact_au_centime(self):
+        from comptes.montants import arrondir, ttc
+
+        lignes = [("33.33", "20"), ("12.10", "5.5"), ("0.01", "20"), ("99.99", "10")]
+        total_ttc = sum(ttc(Decimal(ht), Decimal(t)) for ht, t in lignes)
+        # TTC par ligne arrondi puis sommé : jamais de 29 décimales ni de 0.30000000000000004.
+        self.assertEqual(total_ttc, arrondir(total_ttc))
+        self.assertEqual(total_ttc, Decimal("40.00") + Decimal("12.77") + Decimal("0.01") + Decimal("109.99"))
+
+    def test_aucun_champ_monetaire_en_flottant(self):
+        """Garde-fou : un champ de montant, prix, coût, taux, débit ou crédit ne doit plus être un FloatField."""
+        from django.apps import apps
+        from django.db import models
+
+        mots = ("montant", "prix", "cout", "taux_marge", "taux_tva", "debit", "credit", "frais_port")
+        fautifs = []
+        for modele in apps.get_models():
+            for champ in modele._meta.get_fields():
+                if isinstance(champ, models.FloatField) and any(m in champ.name for m in mots):
+                    fautifs.append(f"{modele._meta.label}.{champ.name}")
+        self.assertEqual(fautifs, [])
+
+    def test_valeurs_relues_en_base_sont_des_decimal(self):
+        facture = self._facturer(6, montant_ht=Decimal("60.00"), montant_ttc=Decimal("72.00"))
+        facture.refresh_from_db()
+        self.assertIsInstance(facture.montant_ht, Decimal)
+        self.ligne.refresh_from_db()
+        self.assertIsInstance(self.ligne.prix_vente_unitaire, Decimal)
+
+    def test_api_renvoie_des_nombres_json(self):
+        from django.contrib.auth import get_user_model
+
+        admin = get_user_model().objects.create_superuser("api-dec", "a@example.com", "Mot-de-passe-solide-1")
+        self._facturer(6, montant_ht=Decimal("60.00"), montant_ttc=Decimal("72.00"))
+        self.client.force_login(admin)
+        reponse = self.client.get("/api/v1/factures/FAC-L1/")
+        self.assertEqual(reponse.status_code, 200, reponse.content)
+        self.assertEqual(reponse.json()["montant_ht"], 60.0)
+
+    def test_flottant_assigne_a_la_main_est_converti_proprement(self):
+        """Du code ou des tests anciens peuvent encore affecter 0.1 : pas de 0.1000000 ni d'erreur."""
+        from commercial.models import TauxTVA
+
+        taux = TauxTVA(nom="Test", taux=5.5)
+        taux.full_clean()
+        self.assertEqual(taux.taux, Decimal("5.5"))

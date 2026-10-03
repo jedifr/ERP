@@ -6,6 +6,8 @@ from django.db import models
 from commercial.models import Tiers
 from facturation.models import Facture
 from technique.models import Article
+from comptes.champs import ChampDecimal
+from comptes.montants import MONTANT, arrondir, somme
 
 
 class CompteComptable(models.Model):
@@ -557,15 +559,15 @@ class EcritureComptable(models.Model):
 
     @property
     def total_debit(self):
-        return sum(ligne.debit for ligne in self.lignes.all())
+        return somme(ligne.debit for ligne in self.lignes.all())
 
     @property
     def total_credit(self):
-        return sum(ligne.credit for ligne in self.lignes.all())
+        return somme(ligne.credit for ligne in self.lignes.all())
 
     @property
     def est_equilibree(self):
-        return round(self.total_debit - self.total_credit, 2) == 0
+        return arrondir(self.total_debit - self.total_credit) == 0
 
 
 class LigneEcriture(models.Model):
@@ -588,8 +590,8 @@ class LigneEcriture(models.Model):
         help_text="Axe complémentaire optionnel — atelier, chantier, centre de coût...",
     )
     libelle = models.CharField("libellé", max_length=255, blank=True)
-    debit = models.FloatField("débit", default=0)
-    credit = models.FloatField("crédit", default=0)
+    debit = ChampDecimal("débit", default=0, **MONTANT)
+    credit = ChampDecimal("crédit", default=0, **MONTANT)
 
     class Meta:
         verbose_name = "Ligne d'écriture"

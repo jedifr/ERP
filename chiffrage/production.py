@@ -5,9 +5,12 @@ de la disponibilité du planning atelier (la synchronisation est tentée après
 coup, voir planning_sync.py).
 """
 
+from decimal import Decimal
+
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
+from comptes.montants import pourcent
 from technique.models import Article, PosteTravail
 
 from .models import Commande, CommandeLigne, CommandeLigneModification, Devis, OperationOF, OrdreFabrication
@@ -21,12 +24,21 @@ from .planning_sync import tenter_synchronisation
 CHAMPS_SUIVIS_COMMANDE_LIGNE = ("quantite_commandee", "prix_vente_unitaire", "taux_tva", "designation")
 
 
+def _texte_valeur(valeur):
+    """Valeur lisible et comparable : un Decimal s'écrit sans zéros inutiles (5, pas 5.000000)."""
+    if valeur is None:
+        return ""
+    if isinstance(valeur, Decimal):
+        return pourcent(valeur)
+    return str(valeur)
+
+
 def enregistrer_modification_ligne(commande_ligne, champ, ancienne_valeur, nouvelle_valeur, utilisateur):
     CommandeLigneModification.objects.create(
         commande_ligne=commande_ligne,
         champ=champ,
-        ancienne_valeur="" if ancienne_valeur is None else str(ancienne_valeur),
-        nouvelle_valeur="" if nouvelle_valeur is None else str(nouvelle_valeur),
+        ancienne_valeur=_texte_valeur(ancienne_valeur),
+        nouvelle_valeur=_texte_valeur(nouvelle_valeur),
         utilisateur=utilisateur,
     )
 

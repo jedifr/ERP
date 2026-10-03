@@ -3,6 +3,7 @@
 La facture n'en fait pas partie : la facture légale est émise par Tiime."""
 
 from comptes.models import Societe
+from comptes.montants import ZERO, D0, arrondir, arrondir_prix, pourcent, somme
 from comptes.pdf import (
     GRIS,
     Paragraph,
@@ -87,23 +88,23 @@ def generer_pdf_devis(devis):
 
     lignes = []
     par_taux = {}
-    total_ht = total_ttc = 0.0
+    total_ht = total_ttc = ZERO
     for ligne in lignes_devis:
-        ht = round(ligne.prix_vente_total, 2)
+        ht = arrondir(ligne.prix_vente_total)
         ttc = ligne.prix_vente_ttc
-        taux = ligne.taux_tva.taux if ligne.taux_tva_id else 0
+        taux = D0(ligne.taux_tva.taux) if ligne.taux_tva_id else ZERO
         total_ht += ht
         total_ttc += ttc
-        par_taux[taux] = round(par_taux.get(taux, 0) + (ttc - ht), 2)
+        par_taux[taux] = arrondir(par_taux.get(taux, ZERO) + (ttc - ht))
         designation = f"<b>{echapper(ligne.article.reference)}</b>"
         if ligne.article.libelle:
             designation += f"<br/>{echapper(ligne.article.libelle)}"
-        pu = round(ligne.prix_vente_unitaire, 4) if ligne.prix_vente_unitaire is not None else 0
+        pu = arrondir_prix(ligne.prix_vente_unitaire) if ligne.prix_vente_unitaire is not None else ZERO
         lignes.append([
             Paragraph(designation, st["normal"]),
             Paragraph(quantite(ligne.quantite), st["droite"]),
             Paragraph(montant(pu), st["droite"]),
-            Paragraph(f"{taux:g} %".replace(".", ","), st["droite"]),
+            Paragraph(f"{pourcent(taux)} %".replace(".", ","), st["droite"]),
             Paragraph(montant(ht), st["droite"]),
         ])
     table = tableau_lignes(
@@ -111,10 +112,10 @@ def generer_pdf_devis(devis):
         [80 * mm, 20 * mm, 28 * mm, 16 * mm, 30 * mm], alignements_droite=(1, 2, 3, 4),
     )
 
-    totaux = [["Total HT", montant(round(total_ht, 2))]]
+    totaux = [["Total HT", montant(arrondir(total_ht))]]
     for taux in sorted(par_taux):
-        totaux.append([f"TVA {taux:g} %".replace(".", ","), montant(par_taux[taux])])
-    totaux.append(["Total TTC", montant(round(total_ttc, 2))])
+        totaux.append([f"TVA {pourcent(taux)} %".replace(".", ","), montant(par_taux[taux])])
+    totaux.append(["Total TTC", montant(arrondir(total_ttc))])
     table_totaux = Table(totaux, colWidths=[40 * mm, 34 * mm])
     table_totaux.hAlign = "RIGHT"
     table_totaux.setStyle(TableStyle([

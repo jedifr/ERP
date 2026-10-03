@@ -9,6 +9,7 @@ choix de conception.
 from django.db import transaction
 
 from comptabilite.models import EcritureComptable, LigneEcriture, ParametresComptables
+from comptes.montants import ZERO, arrondir, pourcent
 
 
 class GenerationEcritureAchatError(Exception):
@@ -64,7 +65,7 @@ def _repartition_lignes(facture_fournisseur, parametres):
         cle = (taux, compte_achat.pk, code_analytique.pk if code_analytique else None)
         groupe = groupes.setdefault(
             cle,
-            {"taux": taux, "compte_achat": compte_achat, "code_analytique": code_analytique, "ht": 0.0, "ttc": 0.0},
+            {"taux": taux, "compte_achat": compte_achat, "code_analytique": code_analytique, "ht": ZERO, "ttc": ZERO},
         )
         groupe["ht"] += ligne.montant_ht
         groupe["ttc"] += ligne.montant_ttc
@@ -120,7 +121,7 @@ def generer_ecriture_achat(facture_fournisseur):
             )
 
     groupes = _repartition_lignes(facture_fournisseur, parametres)
-    total_ttc = sum(g["ttc"] for g in groupes.values())
+    total_ttc = sum((g["ttc"] for g in groupes.values()), ZERO)
 
     fournisseur = facture_fournisseur.commande_fournisseur.fournisseur
     comptes_tiers = getattr(fournisseur, "comptes_comptables", None)
@@ -148,7 +149,7 @@ def generer_ecriture_achat(facture_fournisseur):
             montants = groupes[cle]
             taux = montants["taux"]
             libelle = (
-                f"Facture fournisseur {facture_fournisseur.numero} — TVA {taux:g}%"
+                f"Facture fournisseur {facture_fournisseur.numero} — TVA {pourcent(taux)}%"
                 if taux
                 else f"Facture fournisseur {facture_fournisseur.numero}"
             )
@@ -159,7 +160,7 @@ def generer_ecriture_achat(facture_fournisseur):
                 libelle=libelle,
                 debit=montants["ht"],
             )
-            tva = montants["ttc"] - montants["ht"]
+            tva = arrondir(montants["ttc"] - montants["ht"])
             if tva:
                 LigneEcriture.objects.create(
                     ecriture=ecriture,

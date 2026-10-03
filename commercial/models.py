@@ -4,6 +4,8 @@ import re
 
 from django.core.exceptions import ValidationError
 from django.db import models
+from comptes.champs import ChampDecimal
+from comptes.montants import TAUX
 
 
 def valider_iban(iban):
@@ -279,7 +281,7 @@ class TauxTVA(models.Model):
     DevisLigne, dans l'app chiffrage)."""
 
     nom = models.CharField("nom", max_length=50, unique=True, help_text='Ex. "Taux normal"')
-    taux = models.FloatField("taux (%)", help_text="Ex. 20 pour 20 %")
+    taux = ChampDecimal("taux (%)", help_text="Ex. 20 pour 20 %", **TAUX)
     est_defaut = models.BooleanField(
         "taux par défaut",
         default=False,

@@ -2708,3 +2708,24 @@ Sur les listes principales (devis et lignes, commandes et lignes, livraisons, or
 - Limite de 20 000 lignes par export (filtrer la liste au-delà).
 
 Pour ajouter l'export à une autre liste : `from comptes.exports import ExportCsvMixin` puis `class MonAdmin(ExportCsvMixin, ModelAdmin)`.
+
+## Passage des montants en Decimal
+
+Tous les montants, prix, coûts et taux sont désormais des nombres décimaux exacts (`Decimal`, champ `comptes.champs.ChampDecimal`) et non plus des flottants : plus de `0.30000000000000004`, plus d'écart de centimes avec Tiime ou avec les écritures comptables.
+
+**Règles (définies une seule fois dans `comptes/montants.py`)**
+- Montants (HT, TTC, débit, crédit, prix de vente d'une ligne, frais de port) : 2 décimales.
+- Prix et coûts unitaires (achat, coût matière, coût horaire, coût moyen pondéré) : 4 décimales (une vis à 0,0035 € existe).
+- Prix de vente unitaire des lignes de commande et de facture : 6 décimales, pour qu'un total de devis ramené à l'unité redonne exactement le même total une fois remultiplié, même sur de grandes quantités.
+- Taux (TVA, marges) : 2 décimales.
+- Arrondi commercial (0,5 vers le haut : 1,005 → 1,01, alors que le flottant donnait 1,00), appliqué **ligne par ligne** ; les totaux sont la somme des lignes arrondies, ce qui correspond à la facture Tiime. Le prix de vente d'une ligne de devis (matière, chaque opération) est donc arrondi au centime à la source.
+- Les quantités, durées et dimensions (mm, kg, minutes) restent des flottants : ce sont des grandeurs physiques, converties au moment de les multiplier par un prix.
+
+**Ce qui change pour vous**
+- Un montant saisi avec plus de décimales que son champ (ex. 12,345 € sur un montant) est refusé au lieu d'être silencieusement arrondi.
+- Les listes affichent 100,00 au lieu de 100,0 ; l'API et le constructeur de devis renvoient toujours des nombres JSON (pas des chaînes).
+- Les totaux d'un devis peuvent différer d'un centime de l'ancien affichage, car chaque ligne et chaque opération est maintenant arrondie avant d'être additionnée.
+
+**Mise à jour de la base (NAS)** : la migration convertit les colonnes en place (PostgreSQL arrondit les anciennes valeurs au centime, ou à 4/6 décimales pour les prix). Les factures, déjà arrondies à 2 décimales, ne changent pas. **Faites une sauvegarde avant** : `./sauvegarder-nas.sh`, puis `./update-nas.sh claude/project-construction-k7owwb`.
+
+Un test garde-fou (`MontantsDecimalTests.test_aucun_champ_monetaire_en_flottant`) échoue si un champ de montant, prix, coût, taux, débit ou crédit redevient un `FloatField`.

@@ -7,6 +7,8 @@ from django.utils import timezone
 from simple_history.models import HistoricalRecords
 
 from technique.models import Article
+from comptes.champs import ChampDecimal
+from comptes.montants import PRIX, D, D0, arrondir, arrondir_prix
 
 
 # Tolérance de comparaison des quantités (les quantités sont des flottants) et
@@ -68,11 +70,11 @@ class Lot(models.Model):
         "certificat matière (3.1)", upload_to="stock/certificats/%Y/", blank=True,
         help_text="Certificat de la coulée (PDF ou image).",
     )
-    cout_unitaire_moyen = models.FloatField(
+    cout_unitaire_moyen = ChampDecimal(
         "coût unitaire moyen pondéré",
         default=0,
         editable=False,
-        help_text="Recalculé à chaque entrée valorisée (réception, transfert) ; inchangé par les sorties.",
+        help_text="Recalculé à chaque entrée valorisée (réception, transfert) ; inchangé par les sorties.", **PRIX,
     )
 
     history = HistoricalRecords()
@@ -88,7 +90,7 @@ class Lot(models.Model):
     @property
     def valeur_stock(self):
         """Valeur du lot au coût moyen pondéré, arrondie au centime."""
-        return round(max(self.quantite, 0) * self.cout_unitaire_moyen, 2)
+        return arrondir(D(max(self.quantite, 0)) * D0(self.cout_unitaire_moyen))
 
     valeur_stock.fget.short_description = "Valeur du stock"
 
@@ -139,12 +141,12 @@ class MouvementStock(models.Model):
         blank=True,
         help_text="Pointe vers l'OF, la commande fournisseur, etc.",
     )
-    cout_unitaire = models.FloatField(
+    cout_unitaire = ChampDecimal(
         "coût unitaire",
         null=True,
         blank=True,
         validators=[MinValueValidator(0, message="Ne peut pas être négatif.")],
-        help_text="Valorisation d'une entrée (prix d'achat, coût de transfert) ; sert au coût moyen pondéré du lot.",
+        help_text="Valorisation d'une entrée (prix d'achat, coût de transfert) ; sert au coût moyen pondéré du lot.", **PRIX,
     )
     motif = models.CharField(
         "motif",
@@ -222,10 +224,11 @@ class MouvementStock(models.Model):
             champs = {"quantite": nouveau_solde}
             if self.type_mouvement == self.TypeMouvement.ENTREE and self.cout_unitaire is not None:
                 # Coût moyen pondéré : (stock existant × coût moyen + entrée × son coût) / nouveau stock.
-                stock_avant = max(lot.quantite, 0)
-                champs["cout_unitaire_moyen"] = (
-                    stock_avant * lot.cout_unitaire_moyen + self.quantite * self.cout_unitaire
-                ) / (stock_avant + self.quantite)
+                stock_avant = D(max(lot.quantite, 0))
+                champs["cout_unitaire_moyen"] = arrondir_prix(
+                    (stock_avant * D0(lot.cout_unitaire_moyen) + D(self.quantite) * D(self.cout_unitaire))
+                    / (stock_avant + D(self.quantite))
+                )
             Lot.objects.filter(pk=lot.pk).update(**champs)
             lot.refresh_from_db(fields=["quantite", "cout_unitaire_moyen"])
             self.lot = lot

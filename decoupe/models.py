@@ -3,6 +3,8 @@ from django.db import models
 from django.utils import timezone
 
 from technique.models import Article, Matiere
+from comptes.champs import ChampDecimal
+from comptes.montants import MONTANT, D, arrondir
 
 
 class ProfilImportDecoupe(models.Model):
@@ -245,7 +247,7 @@ class ImbricationJob(models.Model):
     surface_pieces_mm2 = models.FloatField(null=True, blank=True)
     surface_feuilles_mm2 = models.FloatField(null=True, blank=True)
     taux_utilisation_pct = models.FloatField(null=True, blank=True)
-    cout_matiere_estime = models.FloatField(null=True, blank=True)
+    cout_matiere_estime = ChampDecimal(null=True, blank=True, **MONTANT)
     pieces_non_placees = models.JSONField(default=list, blank=True)
 
     date_calcul = models.DateTimeField(null=True, blank=True)
@@ -329,7 +331,7 @@ class ImbricationJob(models.Model):
         if not self.nb_feuilles:
             return None
         surface_feuille_m2 = (self.largeur_feuille_mm * self.longueur_feuille_mm) / 1_000_000
-        return self.nb_feuilles * surface_feuille_m2 * article.cout_unitaire
+        return arrondir(D(self.nb_feuilles * surface_feuille_m2) * D(article.cout_unitaire))
 
 
 class ImbricationLigne(models.Model):

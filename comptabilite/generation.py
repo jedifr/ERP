@@ -9,6 +9,8 @@ ArticleCompteAchat, purement déclaratif en attendant.
 
 from django.db import transaction
 
+from comptes.montants import ZERO, arrondir, pourcent
+
 from .models import EcritureComptable, LigneEcriture, ParametresComptables
 
 
@@ -72,7 +74,7 @@ def _repartition_lignes(facture, parametres):
         cle = (taux, compte_vente.pk, code_analytique.pk if code_analytique else None)
         groupe = groupes.setdefault(
             cle,
-            {"taux": taux, "compte_vente": compte_vente, "code_analytique": code_analytique, "ht": 0.0, "ttc": 0.0},
+            {"taux": taux, "compte_vente": compte_vente, "code_analytique": code_analytique, "ht": ZERO, "ttc": ZERO},
         )
         groupe["ht"] += montant_ht
         groupe["ttc"] += montant_ttc
@@ -128,7 +130,7 @@ def generer_ecriture_facture(facture):
             )
 
     groupes = _repartition_lignes(facture, parametres)
-    total_ttc = round(sum(g["ttc"] for g in groupes.values()), 2)
+    total_ttc = arrondir(sum((g["ttc"] for g in groupes.values()), ZERO))
     # Un avoir (montants négatifs) passe en sens inverse d'une facture : Clients au
     # crédit, Ventes et TVA au débit. Les montants des lignes restent positifs.
     avoir = total_ttc < 0
@@ -160,8 +162,8 @@ def generer_ecriture_facture(facture):
             montants = groupes[cle]
             taux = montants["taux"]
             nature = "Avoir" if avoir else "Facture"
-            libelle = f"{nature} {facture.numero} — TVA {taux:g}%" if taux else f"{nature} {facture.numero}"
-            ht = round(abs(montants["ht"]), 2)
+            libelle = f"{nature} {facture.numero} — TVA {pourcent(taux)}%" if taux else f"{nature} {facture.numero}"
+            ht = arrondir(abs(montants["ht"]))
             if ht:
                 LigneEcriture.objects.create(
                     ecriture=ecriture,
@@ -170,7 +172,7 @@ def generer_ecriture_facture(facture):
                     libelle=libelle,
                     **{sens_vente: ht},
                 )
-            tva = round(abs(montants["ttc"]) - abs(montants["ht"]), 2)
+            tva = arrondir(abs(montants["ttc"]) - abs(montants["ht"]))
             if tva:
                 LigneEcriture.objects.create(
                     ecriture=ecriture,

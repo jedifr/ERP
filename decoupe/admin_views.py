@@ -3,7 +3,7 @@ import tempfile
 from pathlib import Path
 
 from django.contrib.admin.views.decorators import staff_member_required
-from django.http import JsonResponse
+from comptes.http import JsonResponse
 from django.views.decorators.http import require_http_methods
 
 from .models import ImbricationJob, PieceDecoupe, ProfilImportDecoupe, RegleProfilImportDecoupe

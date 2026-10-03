@@ -14,6 +14,7 @@ from codification.models import RegleCodification
 from comptabilite.generation import GenerationEcritureError, generer_ecriture_facture
 
 from comptes.exports import ExportCsvMixin
+from comptes.montants import arrondir, pourcent, somme
 from comptes.concurrence import VerrouOptimisteMixin
 from comptes.historique import HistoriqueLectureSeule
 
@@ -35,8 +36,8 @@ def montants_calcules_commande_view(request, numero):
     montants_ttc = [l.montant_ttc for l in commande.lignes.all() if l.montant_ttc is not None]
     return JsonResponse(
         {
-            "montant_ht": round(sum(montants), 2) if montants else None,
-            "montant_ttc": round(sum(montants_ttc), 2) if montants_ttc else None,
+            "montant_ht": float(arrondir(somme(montants))) if montants else None,
+            "montant_ttc": float(arrondir(somme(montants_ttc))) if montants_ttc else None,
         }
     )
 
@@ -52,11 +53,11 @@ class FactureLigneInline(TabularInline):
 
     @admin.display(description="Montant HT")
     def montant_ht_display(self, obj):
-        return f"{obj.montant_ht:g}" if obj and obj.pk else "—"
+        return f"{pourcent(obj.montant_ht)}" if obj and obj.pk else "—"
 
     @admin.display(description="Montant TTC")
     def montant_ttc_display(self, obj):
-        return f"{obj.montant_ttc:g}" if obj and obj.pk else "—"
+        return f"{pourcent(obj.montant_ttc)}" if obj and obj.pk else "—"
 
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
         # Seules les lignes de la commande de la facture sont proposées (une fois la
@@ -206,7 +207,7 @@ class FactureAdmin(ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMix
         ecart = obj.ecart_avec_les_lignes
         if ecart is None:
             return "—"
-        return "0" if abs(ecart) < 0.005 else f"{ecart:+g} €"
+        return "0" if ecart == 0 else f"{ecart:+} €"
 
     @admin.display(description="Montants calculés depuis la commande (indicatif)")
     def montants_calcules_display(self, obj):
@@ -215,7 +216,7 @@ class FactureAdmin(ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMix
         ht = obj.montant_ht_calcule
         if ht is None:
             return "—"
-        return f"HT : {ht:g} € — TTC : {obj.montant_ttc_calcule:g} €"
+        return f"HT : {pourcent(ht)} € — TTC : {pourcent(obj.montant_ttc_calcule)} €"
 
     @admin.action(description="Générer l'écriture comptable", permissions=["ecrire"])
     def action_generer_ecriture(self, request, queryset):
@@ -268,7 +269,7 @@ class FactureAdmin(ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMix
                 return HttpResponseRedirect(reverse("admin:facturation_facture_preparer"))
             self.message_user(
                 request,
-                f"Facture {facture} préparée ({facture.montant_ht:g} € HT). "
+                f"Facture {facture} préparée ({pourcent(facture.montant_ht)} € HT). "
                 "Renseignez la référence Tiime une fois émise.",
                 level=messages.SUCCESS,
             )
@@ -314,7 +315,7 @@ class FactureAdmin(ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMix
                 return HttpResponseRedirect(retour)
             self.message_user(
                 request,
-                f"Avoir {avoir} créé ({avoir.montant_ht:g} € HT). Émettez-le dans Tiime puis renseignez sa référence.",
+                f"Avoir {avoir} créé ({pourcent(avoir.montant_ht)} € HT). Émettez-le dans Tiime puis renseignez sa référence.",
                 level=messages.SUCCESS,
             )
             return HttpResponseRedirect(reverse("admin:facturation_facture_change", args=[avoir.pk]))

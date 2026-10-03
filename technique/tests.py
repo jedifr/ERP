@@ -1,3 +1,4 @@
+from decimal import Decimal
 import datetime
 
 from django.core.exceptions import ValidationError
@@ -196,7 +197,7 @@ class DupliquerArticleTests(TestCase):
         self.assertEqual(copie.libelle, "Tôle laminée à froid")
         self.assertEqual(copie.nature, article.nature)
         self.assertEqual(copie.matiere, acier)
-        self.assertEqual(copie.cout_unitaire, 1.2)
+        self.assertEqual(copie.cout_unitaire, Decimal("1.2"))
         self.assertEqual(copie.stock_mini, 10)
         self.assertNotEqual(copie.pk, article.pk)
 

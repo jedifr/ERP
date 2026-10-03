@@ -1,5 +1,6 @@
 import datetime
 import json
+from decimal import Decimal
 from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
@@ -101,10 +102,10 @@ class CoutMatiereTests(TestCase):
         # 0.5 m2 * 50.0 * 1 = 25.0
         # total par unité = 37.142
         cout_unitaire = cout_matiere_article(parent, 1)
-        self.assertAlmostEqual(cout_unitaire, 37.142, places=3)
+        self.assertAlmostEqual(float(cout_unitaire), 37.142, places=3)
 
         cout_total = cout_matiere_article(parent, 3)
-        self.assertAlmostEqual(cout_total, 111.426, places=3)
+        self.assertAlmostEqual(float(cout_total), 111.426, places=3)
 
     def test_cout_matiere_premiere_directe(self):
         vis = Article.objects.create(
@@ -113,7 +114,7 @@ class CoutMatiereTests(TestCase):
             unite_cout=Article.UniteCout.PIECE,
             cout_unitaire=0.10,
         )
-        self.assertAlmostEqual(cout_matiere_article(vis, 100), 10.0)
+        self.assertAlmostEqual(float(cout_matiere_article(vis, 100)), 10.0)
 
     def test_composant_sans_cout_unitaire_leve_erreur(self):
         parent = Article.objects.create(reference="PIECE-02", nature=Article.Nature.FABRIQUE)
@@ -131,7 +132,7 @@ class CoutMatiereTests(TestCase):
             article = Article.objects.create(
                 reference=f"ART-{nature}", nature=nature, unite_cout=Article.UniteCout.PIECE, cout_unitaire=3.0
             )
-            self.assertAlmostEqual(cout_matiere_article(article, 4), 12.0)
+            self.assertAlmostEqual(float(cout_matiere_article(article, 4)), 12.0)
 
 
 class CalculerDevisTests(TestCase):
@@ -170,18 +171,18 @@ class CalculerDevisTests(TestCase):
     def test_calcul_matiere_et_marge_defaut(self):
         calculer_devis(self.devis)
         self.ligne.refresh_from_db()
-        self.assertAlmostEqual(self.ligne.cout_matiere_calcule, 111.426, places=3)
+        self.assertAlmostEqual(float(self.ligne.cout_matiere_calcule), 111.426, places=3)
         self.assertEqual(self.ligne.taux_marge_matiere_applique, 20)
-        self.assertAlmostEqual(self.ligne.prix_vente_matiere, 111.426 * 1.2, places=3)
+        self.assertEqual(self.ligne.prix_vente_matiere, Decimal("133.71"))  # arrondi au centime
 
     def test_calcul_operations_gamme(self):
         calculer_devis(self.devis)
         operation = self.ligne.operations.get(ordre=1)
         # temps_fixe/temps_variable sont en MINUTES : (10 + 5*3) = 25 min,
         # converties en heures avant le tarif horaire -> 25/60 * 50 = 20.8333...
-        self.assertAlmostEqual(operation.cout_calcule, 25 / 60 * 50)
+        self.assertEqual(operation.cout_calcule, Decimal("20.8333"))
         self.assertEqual(operation.taux_marge_applique, 15)
-        self.assertAlmostEqual(operation.prix_vente, 25 / 60 * 50 * 1.15)
+        self.assertEqual(operation.prix_vente, Decimal("23.96"))
 
     def test_marge_globale_ecrase_les_defauts(self):
         self.devis.taux_marge_globale = 10
@@ -210,7 +211,7 @@ class CalculerDevisTests(TestCase):
         calculer_devis(self.devis)
         operation = self.ligne.operations.get(ordre=1)
         # 25 min converties en heures -> 25/60 * 60 = 25
-        self.assertAlmostEqual(operation.cout_calcule, 25 / 60 * 60)
+        self.assertAlmostEqual(float(operation.cout_calcule), 25 / 60 * 60)
 
     def test_aucun_tarif_valide_leve_erreur(self):
         TarifPoste.objects.filter(poste=self.poste_horaire).delete()
@@ -225,15 +226,15 @@ class CalculerDevisTests(TestCase):
         # quantite=3 * prix forcé 50 = 150, au lieu de 111.426 * 1.2 = 133.7112
         self.assertEqual(self.ligne.prix_vente_matiere, 150)
         # le coût matière reste calculé normalement (juste le prix de vente est forcé)
-        self.assertAlmostEqual(self.ligne.cout_matiere_calcule, 111.426, places=3)
+        self.assertAlmostEqual(float(self.ligne.cout_matiere_calcule), 111.426, places=3)
 
     def test_prix_vente_total_ligne_integre_les_operations(self):
         calculer_devis(self.devis)
         self.ligne.refresh_from_db()
         # matière : 111.426 * 1.2 = 133.7112 ; opération : 25/60*50 * 1.15 = 23.9583...
         operation_attendue = 25 / 60 * 50 * 1.15
-        self.assertAlmostEqual(self.ligne.prix_vente_operations, operation_attendue)
-        self.assertAlmostEqual(self.ligne.prix_vente_total, 133.7112 + operation_attendue, places=3)
+        self.assertEqual(self.ligne.prix_vente_operations, Decimal("23.96"))
+        self.assertEqual(self.ligne.prix_vente_total, Decimal("133.71") + Decimal("23.96"))
 
     def test_prix_vente_total_ligne_none_si_matiere_non_calculee(self):
         self.assertIsNone(self.ligne.prix_vente_matiere)
@@ -243,7 +244,7 @@ class CalculerDevisTests(TestCase):
         calculer_devis(self.devis)
         self.ligne.refresh_from_db()
         # quantite=3 ; prix_vente_unitaire = prix_vente_total / 3
-        self.assertAlmostEqual(self.ligne.prix_vente_unitaire, self.ligne.prix_vente_total / 3)
+        self.assertAlmostEqual(float(self.ligne.prix_vente_unitaire), float(self.ligne.prix_vente_total) / 3, places=5)
 
     def test_prix_vente_unitaire_none_si_matiere_non_calculee(self):
         self.assertIsNone(self.ligne.prix_vente_unitaire)
@@ -252,9 +253,9 @@ class CalculerDevisTests(TestCase):
         calculer_devis(self.devis)
         operation_attendue = 25 / 60 * 50 * 1.15
         # Les montants affichés sont arrondis au centime (comme sur la facture).
-        self.assertEqual(self.devis.montant_matiere_ht, 133.71)
-        self.assertEqual(self.devis.montant_operations_ht, round(operation_attendue, 2))
-        self.assertEqual(self.devis.montant_total_ht, round(133.71 + round(operation_attendue, 2), 2))
+        self.assertEqual(self.devis.montant_matiere_ht, Decimal("133.71"))
+        self.assertEqual(self.devis.montant_operations_ht, Decimal("23.96"))
+        self.assertEqual(self.devis.montant_total_ht, Decimal("157.67"))
 
 
 class ResoudreTauxTvaTests(TestCase):
@@ -331,15 +332,15 @@ class PrevisualiserLigneCommandeTests(TestCase):
     def test_article_matiere_premiere(self):
         # coût = 10 * 3 = 30 ; prix = 30 * 1.20 = 36 ; unitaire = 36 / 3 = 12
         resultat = previsualiser_ligne_commande(self.matiere, 3, datetime.date(2026, 1, 1))
-        self.assertAlmostEqual(resultat["montant_ht"], 36)
-        self.assertAlmostEqual(resultat["prix_vente_unitaire"], 12)
+        self.assertAlmostEqual(float(resultat["montant_ht"]), 36)
+        self.assertAlmostEqual(float(resultat["prix_vente_unitaire"]), 12)
 
     def test_article_fabrique_matiere_et_operations(self):
         # matière : coût = (2*10)*2 = 40 ; prix = 40*1.25 = 50
         # opération : 6 min/pièce * 2 pièces = 12 min -> 12/60*60 = 12 ; prix = 12*1.10 = 13.2
         resultat = previsualiser_ligne_commande(self.fabrique, 2, datetime.date(2026, 1, 1))
-        self.assertAlmostEqual(resultat["montant_ht"], 50 + 13.2)
-        self.assertAlmostEqual(resultat["prix_vente_unitaire"], (50 + 13.2) / 2)
+        self.assertAlmostEqual(float(resultat["montant_ht"]), 50 + 13.2)
+        self.assertAlmostEqual(float(resultat["prix_vente_unitaire"]), (50 + 13.2) / 2)
 
     def test_quantite_nulle_prix_unitaire_none(self):
         resultat = previsualiser_ligne_commande(self.matiere, 0, datetime.date(2026, 1, 1))
@@ -410,7 +411,7 @@ class LancerEnProductionTests(TestCase):
 
         operation = of.operations.get(ordre=1)
         # (5 + 2*2) = 9
-        self.assertAlmostEqual(operation.temps_prevu, 9)
+        self.assertAlmostEqual(float(operation.temps_prevu), 9)
 
     def test_cree_une_ligne_de_commande_par_ligne_de_devis(self):
         # Une CommandeLigne par ligne de devis, quelle que soit la nature de
@@ -1268,9 +1269,9 @@ class DevisBuilderViewTests(TestCase):
         # matière : 3 * (5 * 0.2) = 3, marge 10% -> prix_vente_matiere = 3.3
         # opération : 3 * 50 (étape forfaitaire) = 150, marge par défaut du poste (0%) -> 150
         self.assertEqual(data["cout_matiere_calcule"], 3)
-        self.assertAlmostEqual(data["prix_vente_operations"], 150)
-        self.assertAlmostEqual(data["prix_vente_total"], 153.3, places=3)
-        self.assertAlmostEqual(data["montant_total_ht"], 153.3, places=3)
+        self.assertAlmostEqual(float(data["prix_vente_operations"]), 150)
+        self.assertAlmostEqual(float(data["prix_vente_total"]), 153.3, places=3)
+        self.assertAlmostEqual(float(data["montant_total_ht"]), 153.3, places=3)
 
     def test_etape_datee_apres_le_devis_est_silencieusement_ignoree(self):
         # Documente le mécanisme derrière la régression signalée par
@@ -1600,10 +1601,10 @@ class RecalculerLigneAvecOperationsTests(TestCase):
         # matière : 111.426 * 1.2 = 133.7112
         # opération : (10 + 5*3) = 25 min -> 25/60*50 = 20.8333..., marge 15% -> 23.9583...
         operation_attendue = 25 / 60 * 50 * 1.15
-        self.assertAlmostEqual(data["prix_vente_matiere"], 133.7112, places=3)
-        self.assertAlmostEqual(data["prix_vente_operations"], operation_attendue)
-        self.assertAlmostEqual(data["prix_vente_total"], 133.7112 + operation_attendue, places=3)
-        self.assertAlmostEqual(data["montant_total_ht"], 133.7112 + operation_attendue, places=3)
+        self.assertAlmostEqual(float(data["prix_vente_matiere"]), 133.71)
+        self.assertAlmostEqual(float(data["prix_vente_operations"]), 23.96)
+        self.assertAlmostEqual(float(data["prix_vente_total"]), 133.71 + 23.96)
+        self.assertAlmostEqual(float(data["montant_total_ht"]), 133.71 + 23.96)
 
 
 class DevisDelaiTests(TestCase):
@@ -1785,9 +1786,9 @@ class PrevisualiserLigneTests(TestCase):
         # matière : 111.426 * 1.2 = 133.7112
         # opération : (10+5*3) = 25 min -> 25/60*50 = 20.8333..., marge 15% -> 23.9583...
         operation_attendue = 25 / 60 * 50 * 1.15
-        self.assertAlmostEqual(resultat["prix_vente_matiere"], 133.7112, places=3)
-        self.assertAlmostEqual(resultat["prix_vente_operations"], operation_attendue)
-        self.assertAlmostEqual(resultat["prix_vente_total"], 133.7112 + operation_attendue, places=3)
+        self.assertAlmostEqual(float(resultat["prix_vente_matiere"]), 133.71)
+        self.assertAlmostEqual(float(resultat["prix_vente_operations"]), 23.96)
+        self.assertAlmostEqual(float(resultat["prix_vente_total"]), 133.71 + 23.96)
         self.assertEqual(DevisLigne.objects.count(), 0)
         self.assertEqual(DevisLigneOperation.objects.count(), 0)
 
@@ -1926,7 +1927,7 @@ class PrevisualiserLigneNouveauDevisViewTests(TestCase):
         data = response.json()
         self.assertEqual(data["cout_matiere_calcule"], 10)
         # marge par défaut de l'article : 10% -> 10 * 1.10 = 11
-        self.assertAlmostEqual(data["prix_vente_matiere"], 11)
+        self.assertAlmostEqual(float(data["prix_vente_matiere"]), 11)
         # rien n'a été créé en base (ni Devis, ni DevisLigne)
         self.assertEqual(Devis.objects.count(), 0)
         self.assertEqual(DevisLigne.objects.count(), 0)
@@ -1971,7 +1972,7 @@ class PrevisualiserLigneNouveauDevisViewTests(TestCase):
             content_type="application/json",
         )
         self.assertEqual(response.status_code, 200, response.content)
-        self.assertAlmostEqual(response.json()["prix_vente_matiere"], 11)
+        self.assertAlmostEqual(float(response.json()["prix_vente_matiere"]), 11)
 
     def test_article_introuvable_400(self):
         response = self.client.post(
@@ -2109,7 +2110,7 @@ class TauxTvaEtPrixTtcTests(TestCase):
         ligne.refresh_from_db()
         # cout=2*10=20, pas de marge -> prix_vente_matiere=20 ; TTC = 20 * 1.055 = 21.1
         self.assertEqual(ligne.prix_vente_matiere, 20)
-        self.assertAlmostEqual(ligne.prix_vente_ttc, 21.1, places=3)
+        self.assertAlmostEqual(float(ligne.prix_vente_ttc), 21.1, places=3)
 
     def test_prix_vente_ttc_sans_taux_egal_au_ht(self):
         ligne = DevisLigne.objects.create(
@@ -2127,7 +2128,7 @@ class TauxTvaEtPrixTtcTests(TestCase):
             devis=self.devis, article=self.article, quantite=2, taux_tva=self.taux_reduit
         )  # 20 HT -> 21.1 TTC
         calculer_devis(self.devis)
-        self.assertAlmostEqual(self.devis.montant_total_ttc, 12 + 21.1, places=3)
+        self.assertAlmostEqual(float(self.devis.montant_total_ttc), 12 + 21.1, places=3)
 
     def test_previsualiser_ligne_inclut_le_ttc(self):
         resultat = previsualiser_ligne(self.devis, self.article, 3, taux_tva=self.taux_normal)
@@ -2181,8 +2182,8 @@ class TauxTvaViewsTests(TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         data = response.json()
         # 2*10=20 HT -> 20*1.055=21.1 TTC
-        self.assertAlmostEqual(data["prix_vente_ttc"], 21.1, places=3)
-        self.assertAlmostEqual(data["montant_total_ttc"], 21.1, places=3)
+        self.assertAlmostEqual(float(data["prix_vente_ttc"]), 21.1, places=3)
+        self.assertAlmostEqual(float(data["montant_total_ttc"]), 21.1, places=3)
         self.ligne.refresh_from_db()
         self.assertEqual(self.ligne.taux_tva, self.taux_reduit)
 
@@ -2458,11 +2459,11 @@ class LigneCommandeLiveCalcViewTests(TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         data = response.json()
         # coût = 10*5=50 ; prix = 50*1.10 = 55 ; unitaire = 11
-        self.assertAlmostEqual(data["prix_vente_unitaire"], 11)
+        self.assertAlmostEqual(float(data["prix_vente_unitaire"]), 11)
         self.assertEqual(data["taux_tva_suggere"]["id"], self.taux_reduit.pk)
 
         ligne.refresh_from_db()
-        self.assertAlmostEqual(ligne.prix_vente_unitaire, 11)
+        self.assertAlmostEqual(float(ligne.prix_vente_unitaire), 11)
         self.assertEqual(ligne.quantite_commandee, 5)
 
     def test_recalcul_ne_touche_pas_le_prix_dune_ligne_avec_devis_ligne(self):
@@ -2481,7 +2482,7 @@ class LigneCommandeLiveCalcViewTests(TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         ligne.refresh_from_db()
         self.assertEqual(ligne.quantite_commandee, 8)
-        self.assertAlmostEqual(ligne.prix_vente_unitaire, 99.0)
+        self.assertAlmostEqual(float(ligne.prix_vente_unitaire), 99.0)
 
     def test_recalcul_avec_prix_explicite_ne_recalcule_pas(self):
         ligne = CommandeLigne.objects.create(
@@ -2494,7 +2495,7 @@ class LigneCommandeLiveCalcViewTests(TestCase):
         )
         self.assertEqual(response.status_code, 200, response.content)
         ligne.refresh_from_db()
-        self.assertAlmostEqual(ligne.prix_vente_unitaire, 42)
+        self.assertAlmostEqual(float(ligne.prix_vente_unitaire), 42)
 
     def test_previsualiser_ligne_commande_existante(self):
         response = self.client.post(
@@ -2505,7 +2506,7 @@ class LigneCommandeLiveCalcViewTests(TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         data = response.json()
         # coût = 10*4=40 ; prix = 40*1.10=44 ; unitaire = 11
-        self.assertAlmostEqual(data["prix_vente_unitaire"], 11)
+        self.assertAlmostEqual(float(data["prix_vente_unitaire"]), 11)
         self.assertEqual(data["taux_tva_suggere"]["id"], self.taux_reduit.pk)
         self.assertFalse(CommandeLigne.objects.filter(commande=self.commande, quantite_commandee=4).exists())
 
@@ -2525,7 +2526,7 @@ class LigneCommandeLiveCalcViewTests(TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         data = response.json()
         # coût = 10*2=20 ; prix = 20*1.10=22 ; unitaire = 11
-        self.assertAlmostEqual(data["prix_vente_unitaire"], 11)
+        self.assertAlmostEqual(float(data["prix_vente_unitaire"]), 11)
         self.assertEqual(data["taux_tva_suggere"]["id"], self.taux_reduit.pk)
 
     def test_previsualiser_ligne_nouvelle_commande_sans_client_pas_de_suggestion_tva(self):
@@ -3008,12 +3009,12 @@ class SurchargesCommandeLigneTests(TestCase):
 
     def test_montant_recalcule_depuis_les_valeurs_de_la_ligne(self):
         self.assertEqual(self.ligne.montant_ht, 50.0)
-        self.assertAlmostEqual(self.ligne.montant_ttc, 55.0)
+        self.assertAlmostEqual(float(self.ligne.montant_ttc), 55.0)
 
         self.ligne.prix_vente_unitaire = 8.0
         self.ligne.save()
         self.assertEqual(self.ligne.montant_ht, 80.0)
-        self.assertAlmostEqual(self.ligne.montant_ttc, 88.0)
+        self.assertAlmostEqual(float(self.ligne.montant_ttc), 88.0)
 
     def test_montant_none_sans_prix(self):
         ligne_sans_prix = CommandeLigne.objects.create(
@@ -3059,7 +3060,7 @@ class LancerLigneEnProductionTests(TestCase):
         self.assertEqual(of.quantite, 5)
         operation = of.operations.get(ordre=1)
         # (10 + 1*5) = 15
-        self.assertAlmostEqual(operation.temps_prevu, 15)
+        self.assertAlmostEqual(float(operation.temps_prevu), 15)
 
     def test_refuse_si_article_pas_fabrique(self):
         ligne = CommandeLigne.objects.create(
@@ -3151,7 +3152,7 @@ class CommandeLigneAuditAdminTests(TestCase):
         self.assertEqual(response.status_code, 200, response.content)
 
         modification = CommandeLigneModification.objects.get(commande_ligne=ligne, champ="prix_vente_unitaire")
-        self.assertEqual(modification.ancienne_valeur, "5.0")
+        self.assertEqual(modification.ancienne_valeur, "5")
         self.assertEqual(modification.nouvelle_valeur, "7.5")
         self.assertEqual(modification.utilisateur, self.user)
 
@@ -3718,7 +3719,7 @@ class ArrondisMontantsTests(_FixtureModuleA, TestCase):
         for prix in (0.1, 0.2):
             DevisLigne.objects.create(devis=devis, article=self.article, quantite=1, prix_vente_unitaire_force=prix)
         calculer_devis(devis)
-        self.assertEqual(devis.montant_total_ht, 0.3)
+        self.assertEqual(devis.montant_total_ht, Decimal("0.30"))
 
 
 class ValidationDuDevisTests(_FixtureModuleA, TestCase):

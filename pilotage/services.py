@@ -12,6 +12,7 @@ from django.db.models import Sum
 
 from chiffrage.models import OperationOF
 from chiffrage.moteur import tarif_poste_valide
+from comptes.montants import ZERO, D, D0, arrondir, arrondir_prix, somme
 from technique.models import PosteTravail
 
 
@@ -38,7 +39,7 @@ def cout_reel_operation(operation_of):
         tarif = tarif_poste_valide(poste, operation_of.ordre_fabrication.date_lancement)
         # temps_reel (OperationOF) est en MINUTES, comme temps_prevu — voir
         # cout_etape_gamme() dans chiffrage/moteur.py pour la même conversion.
-        return (operation_of.temps_reel / 60) * tarif.cout_horaire
+        return arrondir_prix(D(operation_of.temps_reel) / 60 * D(tarif.cout_horaire))
 
     # Forfaitaire (ex. sous-traitance) : prix fixé à l'avance, ne varie pas avec les
     # données réelles remontées — on reprend le coût déjà calculé au chiffrage.
@@ -52,32 +53,32 @@ def marge_reelle_ordre_fabrication(of):
     à partir des données remontées sur les opérations de l'OF."""
     ligne = _devis_ligne(of)
 
-    cout_matiere = ligne.cout_matiere_calcule or 0
-    prix_vente_matiere = ligne.prix_vente_matiere or 0
+    cout_matiere = D0(ligne.cout_matiere_calcule)
+    prix_vente_matiere = D0(ligne.prix_vente_matiere)
 
     operations_prevues = list(ligne.operations.all())
-    cout_operations_prevu = sum(op.cout_calcule or 0 for op in operations_prevues)
-    prix_vente_operations_prevu = sum(op.prix_vente or 0 for op in operations_prevues)
+    cout_operations_prevu = somme(op.cout_calcule for op in operations_prevues)
+    prix_vente_operations_prevu = somme(op.prix_vente for op in operations_prevues)
 
     operations_of = list(of.operations.all())
     couts_reels = [cout_reel_operation(op) for op in operations_of]
     donnees_completes = all(c is not None for c in couts_reels)
-    cout_operations_reel = sum(c or 0 for c in couts_reels)
+    cout_operations_reel = somme(couts_reels)
 
     cout_prevu_total = cout_matiere + cout_operations_prevu
     prix_vente_prevu_total = prix_vente_matiere + prix_vente_operations_prevu
     cout_reel_total = cout_matiere + cout_operations_reel
 
-    marge_prevue = prix_vente_prevu_total - cout_prevu_total
-    marge_reelle = prix_vente_prevu_total - cout_reel_total  # prix de vente figé au devis
+    marge_prevue = arrondir(prix_vente_prevu_total - cout_prevu_total)
+    marge_reelle = arrondir(prix_vente_prevu_total - cout_reel_total)  # prix de vente figé au devis
 
     return {
         "ordre_fabrication": of.numero,
         "donnees_completes": donnees_completes,
-        "prix_vente_prevu_total": prix_vente_prevu_total,
-        "cout_prevu_total": cout_prevu_total,
+        "prix_vente_prevu_total": arrondir(prix_vente_prevu_total),
+        "cout_prevu_total": arrondir(cout_prevu_total),
         "marge_prevue": marge_prevue,
-        "cout_reel_total": cout_reel_total,
+        "cout_reel_total": arrondir(cout_reel_total),
         "marge_reelle": marge_reelle,
         "ecart_marge": marge_reelle - marge_prevue,
     }
