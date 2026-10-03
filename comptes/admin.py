@@ -11,7 +11,7 @@ from django.template.response import TemplateResponse
 from django.urls import path
 
 from . import audit_droits, connexions
-from .models import EvenementConnexion
+from .models import EvenementConnexion, Societe
 
 
 class UserCreationForm(UnfoldUserCreationForm):
@@ -138,3 +138,25 @@ class EvenementConnexionAdmin(ModelAdmin):
 
     def has_debloquer_permission(self, request):
         return request.user.has_perm("comptes.debloquer_compte")
+
+
+@admin.register(Societe)
+class SocieteAdmin(ModelAdmin):
+    """Fiche unique : identité de l'entreprise pour les documents PDF."""
+
+    def has_add_permission(self, request):
+        return not Societe.objects.exists() and super().has_add_permission(request)
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def changelist_view(self, request, extra_context=None):
+        # Une seule fiche : on y va directement.
+        from django.shortcuts import redirect
+
+        if request.method == "GET" and "_changelist_filters" not in request.GET:
+            fiche = Societe.charger()
+            from django.urls import reverse
+
+            return redirect(reverse("admin:comptes_societe_change", args=[fiche.pk]))
+        return super().changelist_view(request, extra_context)

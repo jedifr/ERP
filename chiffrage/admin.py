@@ -2,7 +2,8 @@ import datetime
 
 from django import forms
 from django.contrib import admin, messages
-from django.http import HttpResponseRedirect
+from django.core.exceptions import PermissionDenied
+from django.http import HttpResponse, HttpResponseRedirect
 from django.template.response import TemplateResponse
 from django.urls import path, reverse
 from django.utils import timezone
@@ -42,6 +43,7 @@ from .models import (
     OperationOF,
     OrdreFabrication,
 )
+from .documents import DocumentError, generer_pdf_bon_livraison, generer_pdf_devis
 from .moteur import ChiffrageError, calculer_devis
 from .planning_sync import resynchroniser
 from .validation import verifier_validation_devis
@@ -218,7 +220,7 @@ class DevisAdmin(VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLect
     ]
     inlines = [DevisLigneInline]
     actions = ["action_recalculer", "action_lancer_en_production"]
-    actions_detail = ["action_reviser"]
+    actions_detail = ["action_pdf", "action_reviser"]
 
     def get_readonly_fields(self, request, obj=None):
         champs = list(super().get_readonly_fields(request, obj))
@@ -363,6 +365,20 @@ class DevisAdmin(VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLect
                     request, f"{devis} : commande {commande} créée.", level=messages.SUCCESS
                 )
 
+
+    @unfold_action(description="PDF du devis", url_path="pdf")
+    def action_pdf(self, request, object_id):
+        devis = Devis.objects.get(pk=object_id)
+        if not self.has_view_permission(request, devis):
+            raise PermissionDenied
+        try:
+            contenu = generer_pdf_devis(devis)
+        except DocumentError as exc:
+            self.message_user(request, str(exc), level=messages.ERROR)
+            return HttpResponseRedirect(reverse("admin:chiffrage_devis_change", args=[devis.pk]))
+        reponse = HttpResponse(contenu, content_type="application/pdf")
+        reponse["Content-Disposition"] = f'inline; filename="devis-{devis.pk}.pdf"'
+        return reponse
 
     @unfold_action(description="Réviser ce devis", permissions=["reviser"], url_path="reviser")
     def action_reviser(self, request, object_id):
@@ -692,6 +708,21 @@ class LivraisonAdmin(VerrouOptimisteMixin, CodificationInitialeMixin, Historique
     autocomplete_fields = ["commande"]
     inlines = [LivraisonLigneInline]
     actions = ["action_annuler"]
+    actions_detail = ["action_pdf"]
+
+    @unfold_action(description="Bon de livraison (PDF)", url_path="pdf")
+    def action_pdf(self, request, object_id):
+        livraison = Livraison.objects.get(pk=object_id)
+        if not self.has_view_permission(request, livraison):
+            raise PermissionDenied
+        try:
+            contenu = generer_pdf_bon_livraison(livraison)
+        except DocumentError as exc:
+            self.message_user(request, str(exc), level=messages.ERROR)
+            return HttpResponseRedirect(reverse("admin:chiffrage_livraison_change", args=[livraison.pk]))
+        reponse = HttpResponse(contenu, content_type="application/pdf")
+        reponse["Content-Disposition"] = f'inline; filename="bl-{livraison.pk}.pdf"'
+        return reponse
 
     def get_readonly_fields(self, request, obj=None):
         champs = ["statut", "date_annulation", "motif_annulation", "utilisateur_annulation"]

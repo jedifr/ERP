@@ -1,4 +1,5 @@
 from django.db import transaction
+from django.http import HttpResponse
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -7,6 +8,7 @@ from rest_framework.response import Response
 
 from comptes.permissions import ModelPermissionsAvecLecture
 
+from .documents import DocumentError, generer_pdf_devis
 from .models import Commande, CommandeError, Devis, DevisLigne, DevisLigneOperation, OperationOF, OrdreFabrication
 from .moteur import ChiffrageError, calculer_devis
 from .planning_sync import resynchroniser
@@ -54,6 +56,18 @@ class DevisViewSet(viewsets.ModelViewSet):
         )
         if raisons:
             raise ValidationError({"statut": raisons})
+
+    @action(detail=True, methods=["get"], url_path="pdf")
+    def pdf_action(self, request, pk=None):
+        """Offre au format PDF (la lecture exige la permission « voir » du devis)."""
+        devis = self.get_object()
+        try:
+            contenu = generer_pdf_devis(devis)
+        except DocumentError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        reponse = HttpResponse(contenu, content_type="application/pdf")
+        reponse["Content-Disposition"] = f'inline; filename="devis-{devis.pk}.pdf"'
+        return reponse
 
     @action(detail=True, methods=["post"], url_path="recalculer", permission_classes=[IsAuthenticated])
     def recalculer(self, request, pk=None):

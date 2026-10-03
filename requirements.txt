@@ -10,3 +10,5 @@ django-unfold==0.91.0
 ezdxf==1.4.4
 shapely==2.1.2
 django-simple-history==3.13.0
+reportlab==5.0.1
+pillow==12.3.0

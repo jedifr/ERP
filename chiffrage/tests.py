@@ -4196,3 +4196,140 @@ class CycleDeVieDevisTests(_FixtureModuleA, TestCase):
         migration.devis_deja_commandes_acceptes(apps, None)
         self.devis.refresh_from_db()
         self.assertEqual(self.devis.issue, "accepte")
+
+
+class DocumentsPdfTests(_FixtureModuleA, TestCase):
+    """Gap analysis : devis et bon de livraison au format PDF."""
+
+    def setUp(self):
+        super().setUp()
+        from comptes.models import Societe
+
+        societe = Societe.charger()
+        societe.raison_sociale = "Chaudronnerie Dupont"
+        societe.forme_juridique = "SAS"
+        societe.siret = "12345678900011"
+        societe.tva_intracommunautaire = "FR12345678900"
+        societe.mentions_devis = "Paiement a 30 jours - penalites de retard 3 fois le taux legal"
+        societe.save()
+        calculer_devis(self.devis)
+
+    def _texte(self, pdf):
+        return pdf.decode("latin-1")
+
+    def test_pdf_du_devis_valide(self):
+        from .documents import generer_pdf_devis
+
+        self._valider()
+        pdf = generer_pdf_devis(self.devis)
+        texte = self._texte(pdf)
+        self.assertTrue(pdf.startswith(b"%PDF"))
+        for attendu in ("DEVIS DEV-REC-A", "Chaudronnerie Dupont", "ART-REC-A", "Client Recette A", "Total HT", "Total TTC",
+                        "Bon pour accord", "SIRET 12345678900011", "Valable jusqu"):
+            self.assertIn(attendu, texte, attendu)
+        self.assertNotIn("PROVISOIRE", texte)
+
+    def test_montants_du_devis_dans_le_pdf(self):
+        from .documents import generer_pdf_devis
+
+        # coût 10 x 3 = 30 ; marge 10 % -> 33,00 HT ; TVA par défaut -> TTC
+        texte = self._texte(generer_pdf_devis(self.devis))
+        self.assertIn("33,00", texte)
+
+    def test_devis_brouillon_marque_provisoire(self):
+        from .documents import generer_pdf_devis
+
+        self.assertIn("PROVISOIRE", self._texte(generer_pdf_devis(self.devis)))
+
+    def test_devis_non_chiffre_ou_vide_refuse(self):
+        from .documents import DocumentError, generer_pdf_devis
+
+        DevisLigne.objects.filter(pk=self.ligne.pk).update(prix_vente_matiere=None)
+        with self.assertRaises(DocumentError):
+            generer_pdf_devis(Devis.objects.get(pk=self.devis.pk))
+        vide = Devis.objects.create(numero="DEV-VIDE", client=self.tiers, date_creation=datetime.date(2026, 1, 1))
+        with self.assertRaises(DocumentError):
+            generer_pdf_devis(vide)
+
+    def test_texte_utilisateur_echappe(self):
+        from .documents import generer_pdf_devis
+
+        self.devis.delai = "<b>9 semaines</b> & plus"
+        self.devis.save()
+        pdf = generer_pdf_devis(self.devis)  # ne doit pas lever d'erreur de balisage
+        self.assertIn("9 semaines", self._texte(pdf))
+
+    def test_revision_mentionne_le_devis_remplace(self):
+        from .documents import generer_pdf_devis
+        from .production import reviser_devis
+
+        self._valider()
+        revision = reviser_devis(self.devis)
+        calculer_devis(revision)
+        self.assertIn("Annule et remplace DEV-REC-A", self._texte(generer_pdf_devis(revision)))
+
+    def test_telechargement_depuis_ladmin_et_lapi(self):
+        r = self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/pdf/")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r["Content-Type"], "application/pdf")
+        self.assertTrue(r.content.startswith(b"%PDF"))
+        r = self.client.get(f"/api/v1/devis/{self.devis.pk}/pdf/")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("devis-DEV-REC-A.pdf", r["Content-Disposition"])
+
+    def test_pdf_reserve_aux_comptes_habilites(self):
+        from django.contrib.auth import get_user_model
+
+        simple = get_user_model().objects.create_user("pdf-nu", "p@example.com", "pass-mot-de-passe-4", is_staff=True)
+        self.client.force_login(simple)
+        self.assertEqual(self.client.get(f"/api/v1/devis/{self.devis.pk}/pdf/").status_code, 403)
+        self.assertEqual(self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/pdf/").status_code, 403)
+
+    def test_message_clair_si_le_pdf_est_impossible(self):
+        vide = Devis.objects.create(numero="DEV-VIDE2", client=self.tiers, date_creation=datetime.date(2026, 1, 1))
+        r = self.client.get(f"/admin/chiffrage/devis/{vide.pk}/pdf/", follow=True)
+        self.assertContains(r, "aucune ligne")
+
+    def _livraison(self, quantite=2):
+        self._valider()
+        commande = lancer_en_production(self.devis)
+        livraison = Livraison.objects.create(numero="BL-PDF-1", commande=commande, date_livraison=datetime.date(2026, 2, 1))
+        LivraisonLigne.objects.create(livraison=livraison, commande_ligne=commande.lignes.get(), quantite_livree=quantite)
+        return livraison
+
+    def test_pdf_du_bon_de_livraison(self):
+        from .documents import generer_pdf_bon_livraison
+
+        livraison = self._livraison()
+        texte = self._texte(generer_pdf_bon_livraison(livraison))
+        for attendu in ("BON DE LIVRAISON BL-PDF-1", "ART-REC-A", "Reliquat", "Marchandise re", "Commande : CDE-DEV-REC-A"):
+            self.assertIn(attendu, texte, attendu)
+        self.assertNotIn("ANNUL", texte)
+
+    def test_bon_de_livraison_annule_filigrane(self):
+        from .documents import generer_pdf_bon_livraison
+
+        livraison = self._livraison()
+        livraison.annuler(utilisateur=self.user, motif="x")
+        self.assertIn("ANNUL", self._texte(generer_pdf_bon_livraison(livraison)))
+
+    def test_telechargement_du_bon_de_livraison_depuis_ladmin(self):
+        livraison = self._livraison()
+        r = self.client.get(f"/admin/chiffrage/livraison/{livraison.pk}/pdf/")
+        self.assertEqual((r.status_code, r["Content-Type"]), (200, "application/pdf"))
+
+    def test_logo_integre_quand_il_existe(self):
+        import io
+
+        from django.core.files.base import ContentFile
+        from PIL import Image
+
+        from comptes.models import Societe
+        from .documents import generer_pdf_devis
+
+        tampon = io.BytesIO()
+        Image.new("RGB", (200, 80), (180, 83, 9)).save(tampon, "PNG")
+        societe = Societe.charger()
+        societe.logo.save("logo-test.png", ContentFile(tampon.getvalue()), save=True)
+        self.addCleanup(lambda: societe.logo.delete(save=False))
+        self.assertIn("/Subtype /Image", self._texte(generer_pdf_devis(self.devis)))

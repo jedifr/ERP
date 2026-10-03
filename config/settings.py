@@ -489,6 +489,11 @@ UNFOLD = {
                         "link": reverse_lazy("admin:auth_group_changelist"),
                     },
                     {
+                        "title": "Société (en-tête des documents)",
+                        "icon": "business",
+                        "link": reverse_lazy("admin:comptes_societe_changelist"),
+                    },
+                    {
                         "title": "Audit des droits",
                         "icon": "admin_panel_settings",
                         "link": reverse_lazy("admin:auth_user_audit_droits"),

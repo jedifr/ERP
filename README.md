@@ -2616,3 +2616,29 @@ Tests : `CycleDeVieDevisTests` (`chiffrage/tests.py`).
 **Vérifié** (Playwright) : liste (statuts de réponse et dates), fiche d'un devis validé
 (réponse et validité modifiables, reste verrouillé, bouton *Réviser*), révision en un clic
 (`DEV-2026-101-R2`), tuiles d'accueil.
+
+## Gap analysis, lot 2 : documents PDF (devis, bon de livraison) et fiche Société
+
+Tests : `DocumentsPdfTests` (`chiffrage/tests.py`). Nouvelles dépendances : `reportlab`, `pillow`
+(auditées, aucune vulnérabilité connue).
+
+- **Fiche Société** (Paramétrage → *Société*) : raison sociale, adresse, contacts, SIRET, TVA
+  intracommunautaire, capital, RCS, IBAN/BIC, **logo**, et les mentions imprimées sur les devis
+  (conditions de vente, pénalités de retard…) et les bons de livraison. Une seule fiche. **À
+  remplir avant d'imprimer le premier document.**
+- **Devis en PDF** (bouton *PDF du devis* sur la fiche, ou `GET /api/v1/devis/<n>/pdf/`) :
+  en-tête société, client et adresses, lignes avec prix unitaire HT, TVA par taux, totaux HT /
+  TVA / TTC, délai, conditions de règlement du client, date de validité, mention « Annule et
+  remplace » pour une révision, cadre « Bon pour accord » à signer. Un devis non validé est
+  marqué **PROVISOIRE** en filigrane ; un devis vide ou dont une ligne n'est pas chiffrée n'est
+  pas imprimable (message explicite : un prix absent n'est pas un prix de 0).
+- **Bon de livraison en PDF** (bouton *Bon de livraison (PDF)* sur la fiche d'une livraison) :
+  adresses de livraison et de facturation, référence de commande client, quantités livrée /
+  commandée / **reliquat**, colonne *N° de coulée* (alimentée au lot suivant), cadre de
+  signature du destinataire ; filigrane **ANNULÉ** si la livraison l'est.
+- La **facture** n'est pas concernée : la facture légale est émise par Tiime.
+- Les textes saisis par les utilisateurs sont échappés avant d'entrer dans le PDF (pas de
+  balisage injecté). Le téléchargement exige la permission « voir » du devis / de la livraison.
+
+**Vérifié** (rendu des PDF en images) : devis avec logo, en-tête et pied de page légaux, totaux ;
+bon de livraison avec reliquat et cadre de signature.
