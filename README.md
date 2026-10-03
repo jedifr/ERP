@@ -2564,3 +2564,30 @@ Tests : `GestionDesAccesTests`, `AuditDesDroitsTests`, `VerrouOptimisteTests`
 **Vérifié** (Playwright) : deux contextes de navigateur sur la même fiche — le second
 enregistrement est refusé avec « modifiée par bruno-d le … » ; un double-clic envoie une seule
 requête POST.
+
+## Recette du module D (sécurité transverse) : priorité 3, sauvegarde et dépendances
+
+- **Dépendances** : `pip-audit` sur `requirements.txt` ne signale aucune vulnérabilité connue.
+- **Sauvegarde et restauration** (les données n'étaient sauvegardées nulle part) :
+  - `./sauvegarder-nas.sh [dossier] [nombre]` : dump compressé de la base + archive des
+    fichiers déposés (plans DXF/DWG), vérifie leur intégrité, refuse une sauvegarde vide,
+    garde les 14 dernières (dossier par défaut : `/volume1/docker/erp_sauvegardes`). À lancer
+    à la main, ou chaque nuit via le Planificateur de tâches de DSM (script défini par
+    l'utilisateur : `cd /volume1/docker/erp && ./sauvegarder-nas.sh`). **Copiez ce dossier hors
+    du NAS** : une sauvegarde qui ne vit que sur le NAS ne protège pas d'une panne du NAS.
+  - `./restaurer-nas.sh fichier_base.sql.gz [fichiers.tar.gz]` : remplace la base par la
+    sauvegarde, après confirmation (taper `RESTAURER`) et sauvegarde de sécurité de l'état
+    actuel dans `erp_sauvegardes/avant_restauration`.
+  - `update-nas.sh` lance désormais la sauvegarde avant chaque mise à jour (effective à partir
+    de la mise à jour *suivante*) ; en cas d'échec il demande confirmation. Passer outre :
+    `ERP_UPDATE_SANS_SAUVEGARDE=1 ./update-nas.sh ...`.
+  - Testé de bout en bout (avec un faux `docker` branché sur une base locale) : sauvegarde,
+    rotation, destruction volontaire de données, restauration. Ce test a révélé un défaut du
+    premier jet (un `ls` final en échec faisait avorter la restauration), corrigé.
+
+**Hors périmètre, à connaître** : pas d'authentification à deux facteurs (django-otp, chantier
+à part) ; le conteneur tourne en root (le passer en utilisateur dédié demande d'adapter les
+droits du volume des fichiers déposés) ; pas de CSP (le thème de l'admin utilise des scripts
+en ligne) ; l'API accepte toujours l'authentification de base (désormais protégée par la
+limitation des tentatives) ; les fiches sans historique (tiers, articles…) ne sont pas
+couvertes par le verrouillage optimiste.

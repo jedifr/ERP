@@ -36,6 +36,19 @@ TARBALL="${PARENT_DIR}/${PROJECT_NAME}_update.tar.gz"
 echo "==> Mise à jour de l'ERP — branche : ${BRANCH}"
 echo "==> Dossier projet : ${PROJECT_DIR}"
 
+# Sauvegarde de la base et des fichiers AVANT de toucher à quoi que ce soit (si le script de
+# sauvegarde est présent). Un échec n'est pas ignoré en silence : on demande confirmation.
+# Pour passer outre sans question : ERP_UPDATE_SANS_SAUVEGARDE=1 ./update-nas.sh ...
+if [ -x "${PROJECT_DIR}/sauvegarder-nas.sh" ] && [ -z "$ERP_UPDATE_SANS_SAUVEGARDE" ]; then
+    echo "==> Sauvegarde avant mise à jour..."
+    if ! (cd "$PROJECT_DIR" && ./sauvegarder-nas.sh); then
+        echo "!! La sauvegarde a échoué." >&2
+        printf "Continuer quand même la mise à jour ? (o/N) "
+        read -r reponse
+        [ "$reponse" = "o" ] || { echo "Mise à jour annulée."; exit 1; }
+    fi
+fi
+
 echo "==> Téléchargement..."
 rm -rf "$NEW_DIR" "$TARBALL"
 curl -fL -o "$TARBALL" "https://codeload.github.com/${REPO}/tar.gz/refs/heads/${BRANCH}"
