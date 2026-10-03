@@ -75,6 +75,7 @@ INSTALLED_APPS = [
     "django_filters",
     "codification",
     "comptes",
+    "documents",
     "technique",
     "decoupe",
     "commercial",
@@ -516,6 +517,12 @@ UNFOLD = {
                         "title": "Société (en-tête des documents)",
                         "icon": "business",
                         "link": reverse_lazy("admin:comptes_societe_changelist"),
+                    },
+                    {
+                        "title": "Modèles de documents (PDF)",
+                        "icon": "edit_document",
+                        "link": reverse_lazy("admin:documents_modeledocument_changelist"),
+                        "permission": lambda request: request.user.is_superuser,
                     },
                     {
                         "title": "Audit des droits",

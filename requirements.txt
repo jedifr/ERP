@@ -12,3 +12,4 @@ shapely==2.1.2
 django-simple-history==3.13.0
 reportlab==5.0.1
 pillow==12.3.0
+weasyprint==70.0

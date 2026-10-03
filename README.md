@@ -2778,3 +2778,22 @@ Les révisions déjà créées avant cette version gardent leur numéro `-R2` ; 
 ## Documents de vente : facturation et livraison toujours indiquées
 
 Tous les PDF de vente — **devis, AR de commande, bon de préparation, bon de livraison** et **fiche de fabrication** — portent désormais deux blocs côte à côte : **« Facturé à »** (nom de l'entreprise et adresse de facturation) et **« Livré à »** (nom de l'entreprise et adresse de livraison), **même quand les deux adresses sont identiques**. Sur un devis dont aucune adresse n'a été choisie, l'adresse principale du client (facturation / livraison) est utilisée ; si le client n'en a aucune, le bloc reste affiché avec la mention « Adresse non renseignée » plutôt que de disparaître. L'ordre est le même partout (facturation à gauche, livraison à droite).
+
+## Modèles de documents PDF (éditeur visuel GrapesJS)
+
+Les PDF de vente (**devis, AR de commande, bon de préparation, bon de livraison, fiche de fabrication**) peuvent être **mis en page librement** dans un éditeur visuel : menu **Paramétrage → Modèles de documents (PDF)**, réservé aux **superutilisateurs** (un modèle est du HTML rendu côté serveur : c'est un droit d'administration).
+
+**Principe**
+- Chaque document a **un modèle**, créé automatiquement avec la mise en page par défaut (identique aux PDF d'origine). Tant que la case **« Utiliser ce modèle pour les PDF »** n'est pas cochée, le PDF d'origine est utilisé : on peut éditer, tester et ne basculer qu'une fois satisfait.
+- L'éditeur (GrapesJS, embarqué dans l'application, fonctionne hors ligne) permet de glisser-déposer des blocs (colonnes, titres, images, cadres, séparateurs), de styler chaque élément (police, couleurs, marges, bordures, positions…) et de réorganiser la page. Onglet **Blocs et variables** : les éléments du document (en-tête société, titre et références, « Facturé à / Livré à », tableau des lignes, totaux, mentions, signature, pied de page répété, filigrane, saut de page) et les **variables** (`{{ societe.nom }}`, `{{ facturation.adresse_html }}`, `{{ totaux.ttc }}`…) à déposer dans la page.
+- **Aperçu PDF** : avec des données d'exemple, ou avec un **vrai devis / une vraie commande / livraison / OF** choisi dans la liste, sans rien enregistrer.
+- **Enregistrer** (Ctrl+S) : le modèle est d'abord rendu avec des données d'exemple ; s'il ne peut pas l'être, il n'est pas enregistré. Les variables inconnues (faute de frappe) sont signalées. Chaque enregistrement est **historisé** (menu Historique). **« Revenir au modèle par défaut »** recharge la mise en page d'origine (à enregistrer pour la conserver).
+- Repli de sécurité : si un modèle actif échoue au rendu pour une raison technique, **le PDF d'origine est produit** et l'erreur est journalisée ; les refus métier (ligne sans prix, devis vide…) restent identiques.
+
+**Répéter et afficher conditionnellement** (onglet *Propriétés* d'un élément) : `Répéter sur` = `lignes` (une ligne de tableau par ligne de document ; `Nom de l'élément` = `ligne`), `Afficher si` = une variable (ex. `delai`, ou `!delai` pour l'inverse). Variables de ligne : `ligne.designation_html`, `ligne.quantite`, `ligne.pu_ht`, `ligne.total_ht`, `ligne.livraison_prevue`… (liste complète dans l'éditeur). Il n'y a volontairement **aucun langage de programmation** dans les modèles : seulement `{{ variable }}`, « répéter » et « afficher si ». Les scripts, gestionnaires d'événements, formulaires et ressources externes (fichiers locaux, adresses http) sont ignorés ou bloqués ; seules les images intégrées au document (`data:`) sont chargées.
+
+**Limites** : les marges de page (A4, 15 / 18 / 26 mm) et la numérotation « Page x / y » sont fixes ; le texte de pagination se règle donc dans le code, pas dans l'éditeur. La mise en page de l'éditeur approche la page A4 : **le PDF d'aperçu fait foi** (retours à la ligne, sauts de page).
+
+**Technique / déploiement** : rendu HTML → PDF par **WeasyPrint** (`requirements.txt`), qui exige Pango et des polices dans l'image Docker (`Dockerfile` mis à jour : `docker compose up -d --build`, c'est ce que fait `update-nas.sh`). GrapesJS 0.23 (licence BSD-3) est fourni dans `documents/static/documents/vendor/`. Pour mettre à jour cette bibliothèque : remplacer ces deux fichiers **en retirant la ligne `//# sourceMappingURL=…` en fin de `grapes.min.js`**, sinon `collectstatic` échoue.
+
+Envoyez-moi vos modèles papier ou Word : je reproduis leur mise en page comme modèle par défaut.

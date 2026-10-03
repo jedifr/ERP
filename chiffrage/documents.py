@@ -2,6 +2,8 @@
 
 La facture n'en fait pas partie : la facture légale est émise par Tiime."""
 
+from functools import wraps
+
 from comptes.models import Societe
 from comptes.montants import ZERO, D0, arrondir, arrondir_prix, pourcent, somme
 from comptes.pdf import (
@@ -24,6 +26,22 @@ from comptes.pdf import (
 
 class DocumentError(Exception):
     """Document non générable dans l'état actuel."""
+
+
+def _personnalisable(type_document, multiple=False):
+    """Si un modèle de document actif existe (app `documents`, éditeur GrapesJS), il remplace ce PDF
+    d'origine ; sinon, ou en cas d'échec technique du modèle, le PDF d'origine est produit."""
+
+    def decorateur(fonction):
+        @wraps(fonction)
+        def enveloppe(objet):
+            from documents.rendu import personnalisable
+
+            return personnalisable(type_document, multiple)(fonction)(objet)
+
+        return enveloppe
+
+    return decorateur
 
 
 def _bloc_adresse(titre, tiers, adresse, contact=None):
@@ -79,6 +97,7 @@ def _titre_et_references(titre, references):
     return refs
 
 
+@_personnalisable("devis")
 def generer_pdf_devis(devis):
     """PDF de l'offre. Un devis non validé est imprimable mais marqué « PROVISOIRE » ; un devis
     dont une ligne n'est pas chiffrée n'est pas imprimable (un prix absent n'est pas un prix de 0)."""
@@ -182,6 +201,7 @@ def _tracabilite(ligne_livraison):
     return sorted(references)
 
 
+@_personnalisable("bon_livraison")
 def generer_pdf_bon_livraison(livraison):
     st = styles()
     societe = Societe.charger()
@@ -250,6 +270,7 @@ def _date_ou_tiret(date):
     return f"{date:%d/%m/%Y}" if date else "—"
 
 
+@_personnalisable("ar_commande")
 def generer_pdf_ar_commande(commande):
     """Accusé de réception de commande, à envoyer au client : lignes, prix, dates de livraison prévues.
     Une ligne sans prix n'est pas imprimable (un prix absent n'est pas un prix de 0)."""
@@ -336,6 +357,7 @@ def _stock_disponible(ligne):
     return f"{total:g} en stock" + (f" (coulées : {', '.join(coulees)})" if coulees else "")
 
 
+@_personnalisable("bon_preparation")
 def generer_pdf_bon_preparation(commande):
     """Bon de préparation (document interne, sans prix) : ce qu'il faut préparer, fabriquer ou prélever
     pour cette commande, avec les dates de livraison prévues et les ordres de fabrication liés."""
@@ -446,12 +468,14 @@ def _elements_fiche_fabrication(of, societe, st):
     ]
 
 
+@_personnalisable("fiche_fabrication")
 def generer_pdf_ordre_fabrication(of):
     """Fiche de fabrication : quantité, livraison prévue, nomenclature (composants) et gamme (opérations)."""
     titre, elements = _elements_fiche_fabrication(of, Societe.charger(), styles())
     return construire_pdf(elements, titre)
 
 
+@_personnalisable("fiche_fabrication", multiple=True)
 def generer_pdf_ordres_fabrication(ordres):
     """Toutes les fiches de fabrication dans un seul PDF, une par page (impression en une fois)."""
     ordres = list(ordres)
