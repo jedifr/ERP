@@ -36,6 +36,17 @@ _RESPONSABLE_COMMERCIAL = [
     "chiffrage.delete_devis", "chiffrage.valider_devis", "chiffrage.annuler_commande",
     "chiffrage.add_livraison", "chiffrage.change_livraison",
     "chiffrage.add_livraisonligne", "chiffrage.change_livraisonligne",
+    "chiffrage.annuler_livraison",
+]
+
+_FACTURATION = [
+    "commercial.view_tiers", "commercial.view_adresse",
+    "chiffrage.view_commande", "chiffrage.view_commandeligne",
+    "chiffrage.view_livraison", "chiffrage.view_livraisonligne",
+    "facturation.view_facture", "facturation.add_facture", "facturation.change_facture",
+    "facturation.view_factureligne", "facturation.add_factureligne", "facturation.change_factureligne",
+    "facturation.delete_factureligne",
+    "comptabilite.view_ecriturecomptable", "comptabilite.view_ligneecriture",
 ]
 
 _MAGASINIER = [
@@ -58,6 +69,7 @@ GROUPES_PAR_DEFAUT = {
         "chiffrage.valider_vente_sous_cout",
         "stock.view_lot", "stock.view_mouvementstock", "stock.view_inventaire", "stock.view_transfert",
         "stock.view_emplacement",
+        "facturation.view_facture", "facturation.view_factureligne",
     ],
     "Atelier": [
         "technique.view_article", "technique.view_postetravail",
@@ -65,6 +77,13 @@ GROUPES_PAR_DEFAUT = {
         "chiffrage.view_ordrefabrication", "chiffrage.change_ordrefabrication",
         "chiffrage.view_operationof", "chiffrage.change_operationof",
         "stock.view_lot", "stock.view_emplacement",
+    ],
+    "Facturation": _FACTURATION,
+    "Responsable facturation": [
+        *_FACTURATION,
+        "facturation.delete_facture", "facturation.creer_avoir", "facturation.facturer_avant_livraison",
+        "comptabilite.add_ecriturecomptable", "comptabilite.add_ligneecriture",
+        "comptabilite.view_comptecomptable", "comptabilite.view_journalcomptable",
     ],
     "Magasinier": _MAGASINIER,
     "Responsable stock": [

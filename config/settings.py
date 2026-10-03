@@ -87,6 +87,10 @@ MIDDLEWARE = [
 # L'historique est en lecture seule (voir chiffrage.admin.HistoriqueLectureSeule).
 SIMPLE_HISTORY_REVERT_DISABLED = True
 
+# Connexion directe sur /admin/login/ (sans ?next=) : revenir à l'accueil de l'admin plutôt
+# que sur /accounts/profile/ (Django par défaut), qui n'existe pas ici (404).
+LOGIN_REDIRECT_URL = "/admin/"
+
 ROOT_URLCONF = "config.urls"
 
 TEMPLATES = [

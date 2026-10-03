@@ -173,6 +173,23 @@ class Facture(models.Model):
     def est_avoir(self):
         return self.type_document == self.TypeDocument.AVOIR
 
+    @property
+    def est_en_retard(self):
+        """Facture (jamais un avoir) non soldée dont l'échéance calculée est dépassée.
+        Faux si l'échéance est inconnue (client sans délai de paiement chiffré)."""
+        if self.est_avoir or self.statut_paiement == self.StatutPaiement.PAYE:
+            return False
+        echeance = self.date_echeance
+        return echeance is not None and echeance < timezone.localdate()
+
+    @property
+    def ecart_avec_les_lignes(self):
+        """Montant HT saisi (Tiime) moins le total des lignes : signale une remise ou
+        une erreur de saisie. None si pas de lignes ou pas de montant saisi."""
+        if self.montant_ht is None or not self.lignes.exists():
+            return None
+        return round(self.montant_ht - self.montant_ht_calcule, 2)
+
     def save(self, *args, **kwargs):
         if self.montant_ht is not None:
             self.montant_ht = round(self.montant_ht, 2)

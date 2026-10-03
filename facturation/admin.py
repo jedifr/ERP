@@ -74,6 +74,22 @@ class FactureLigneInline(TabularInline):
         return not facture_verrouillee(obj) and super().has_delete_permission(request, obj)
 
 
+class RetardFilter(admin.SimpleListFilter):
+    title = "échéance"
+    parameter_name = "retard"
+
+    def lookups(self, request, model_admin):
+        return [("en_retard", "En retard de paiement")]
+
+    def queryset(self, request, queryset):
+        if self.value() == "en_retard":
+            candidates = queryset.exclude(statut_paiement=Facture.StatutPaiement.PAYE).filter(
+                type_document=Facture.TypeDocument.FACTURE
+            )
+            return queryset.filter(pk__in=[f.pk for f in candidates if f.est_en_retard])
+        return queryset
+
+
 @admin.register(Facture)
 class FactureAdmin(CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
     codification_entite = RegleCodification.Entite.FACTURE
@@ -85,12 +101,13 @@ class FactureAdmin(CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin
         "date_echeance_display",
         "montant_ht",
         "montant_ttc",
+        "ecart_display",
         "type_document",
         "statut_paiement",
         "date_paiement",
         "mode_creation",
     ]
-    list_filter = ["type_document", "mode_creation", "statut_paiement"]
+    list_filter = ["type_document", "mode_creation", "statut_paiement", RetardFilter]
     search_fields = ["numero", "reference_tiime", "commande__numero"]
     autocomplete_fields = ["commande"]
     actions = ["action_generer_ecriture"]
@@ -127,7 +144,18 @@ class FactureAdmin(CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin
 
     @admin.display(description="Échéance")
     def date_echeance_display(self, obj):
-        return obj.date_echeance or "—"
+        echeance = obj.date_echeance
+        if echeance is None:
+            return "—"
+        texte = echeance.strftime("%d/%m/%Y")
+        return f"{texte} (en retard)" if obj.est_en_retard else texte
+
+    @admin.display(description="Écart / lignes")
+    def ecart_display(self, obj):
+        ecart = obj.ecart_avec_les_lignes
+        if ecart is None:
+            return "—"
+        return "0" if abs(ecart) < 0.005 else f"{ecart:+g} €"
 
     @admin.display(description="Montants calculés depuis la commande (indicatif)")
     def montants_calcules_display(self, obj):
@@ -138,7 +166,7 @@ class FactureAdmin(CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin
             return "—"
         return f"HT : {ht:g} € — TTC : {obj.montant_ttc_calcule:g} €"
 
-    @admin.action(description="Générer l'écriture comptable")
+    @admin.action(description="Générer l'écriture comptable", permissions=["ecrire"])
     def action_generer_ecriture(self, request, queryset):
         creees = existantes = 0
         for facture in queryset:
@@ -214,6 +242,9 @@ class FactureAdmin(CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin
     @unfold_action(description="Créer un avoir", permissions=["creer_avoir"], url_path="creer-avoir")
     def action_creer_avoir(self, request, object_id):
         return HttpResponseRedirect(reverse("admin:facturation_facture_avoir", args=[object_id]))
+
+    def has_ecrire_permission(self, request):
+        return request.user.has_perm("comptabilite.add_ecriturecomptable")
 
     def has_creer_avoir_permission(self, request, obj=None):
         return request.user.has_perm("facturation.creer_avoir")

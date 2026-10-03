@@ -2454,3 +2454,35 @@ de nouvelles sur la même commande.
 **Vérifié** (Playwright) : page « Préparer une facture » (commande livrée 8 sur 20,
 non facturée) ; facture préparée avec sa ligne (8 × 12,50 = 100 € HT, 120 € TTC)
 et les boutons « Créer un avoir » / « Historique ».
+
+## Recette du module C : priorité 3, impayés, écarts, rôles
+
+Tests : `RetardsEtEcartsTests`, `RolesFacturationTests` (`facturation/tests.py`),
+`CodesDesGroupesTests`, `ConnexionDirecteTests` (`comptes/tests.py`).
+
+- **Impayés visibles** : une facture (jamais un avoir) non soldée dont
+  l'échéance calculée est dépassée est « en retard » — mention dans la colonne
+  Échéance, filtre « En retard de paiement » sur la liste, et tuile *Factures en
+  retard* du tableau de bord (nombre et montant TTC à relancer). Le « CA
+  facturé » du mois est désormais net d'avoirs. Les relances automatiques
+  (envoi d'e-mails) ne sont pas incluses : il n'y a pas d'infrastructure d'envoi.
+- **Écart avec les lignes** : colonne de la liste des factures qui signale la
+  différence entre le montant HT saisi (Tiime) et le total des lignes (remise,
+  erreur de recopie).
+- **Rôles** : *Facturation* (prépare et saisit les factures, consulte la
+  comptabilité) et *Responsable facturation* (+ avoirs, facturation anticipée,
+  génération des écritures comptables). *Responsable commercial* peut annuler une
+  livraison. L'action « Générer l'écriture comptable » exige désormais la
+  permission d'ajouter une écriture. API des factures et de leurs lignes soumise
+  aux permissions du modèle.
+- **Après la mise à jour** : `python manage.py synchroniser_groupes` pour ajouter
+  les nouvelles permissions aux groupes déjà créés (ajout seulement). Un test
+  vérifie désormais que chaque code de permission des groupes existe : une faute
+  de frappe serait sinon ignorée en silence (une avait été commise puis détectée
+  ici sur `LigneEcriture`).
+- **Connexion directe** sur `/admin/login/` sans paramètre `next` : retour à
+  l'accueil de l'admin au lieu d'une page 404 (`/accounts/profile/`).
+
+**Vérifié** (Playwright) : liste des factures (échéance « en retard », colonne
+d'écart, bouton « Préparer une facture ») et tableau de bord (1 facture en retard,
+120 € TTC à relancer, CA net d'avoirs).

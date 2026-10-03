@@ -738,3 +738,112 @@ class EcrituresFactureAvoirTests(_FixtureLignes, TestCase):
         ecriture, _ = generer_ecriture_facture(ancienne)
         self.assertTrue(ecriture.est_equilibree)
         self.assertAlmostEqual(ecriture.total_debit, 120.0)  # lignes de la commande : 10 x 10 HT, 20 %
+
+
+class RetardsEtEcartsTests(_FixtureLignes, TestCase):
+    """C-MG-01 / C-MG-02 : impayés visibles, écart Tiime/lignes signalé."""
+
+    def setUp(self):
+        super().setUp()
+        self.tiers.conditions_paiement = ConditionPaiement.objects.create(libelle="30 jours", nombre_jours=30)
+        self.tiers.save()
+
+    def _ancienne(self, numero, jours_depuis_facture, **kw):
+        date = datetime.date.today() - datetime.timedelta(days=jours_depuis_facture)
+        return Facture.objects.create(
+            numero=numero, commande=self.commande, date_facturation=max(date, datetime.date(2026, 1, 1)),
+            montant_ht=100, montant_ttc=120, **kw,
+        )
+
+    def test_en_retard_apres_lecheance(self):
+        self.assertTrue(self._ancienne("FAC-R1", 45).est_en_retard)
+        self.assertFalse(self._ancienne("FAC-R2", 10).est_en_retard)
+
+    def test_payee_ou_avoir_ou_echeance_inconnue_jamais_en_retard(self):
+        self.assertFalse(self._ancienne("FAC-R3", 60, statut_paiement="paye").est_en_retard)
+        self.tiers.conditions_paiement = None
+        self.tiers.save()
+        self.commande.refresh_from_db()
+        self.assertFalse(self._ancienne("FAC-R4", 60).est_en_retard)
+
+    def test_filtre_admin_en_retard(self):
+        self._ancienne("FAC-RETARD", 60)
+        self._ancienne("FAC-OK", 5)
+        page = self.client.get("/admin/facturation/facture/?retard=en_retard")
+        self.assertContains(page, "FAC-RETARD")
+        self.assertNotContains(page, "FAC-OK")
+
+    def test_tableau_de_bord_compte_les_retards(self):
+        self._ancienne("FAC-RETARD", 60)
+        page = self.client.get("/admin/")
+        self.assertContains(page, "Factures en retard")
+        self.assertContains(page, "120 € TTC à relancer")
+
+    def test_ecart_entre_montant_saisi_et_lignes(self):
+        facture = self._facturer(6, montant_ht=55, montant_ttc=66)  # lignes : 60 HT
+        self.assertEqual(facture.ecart_avec_les_lignes, -5.0)
+        self.assertIsNone(self._facture("FAC-SL").ecart_avec_les_lignes)  # pas de lignes
+        page = self.client.get("/admin/facturation/facture/")
+        self.assertContains(page, "-5 €")
+
+
+class RolesFacturationTests(_FixtureLignes, TestCase):
+    def _utilisateur(self, nom, groupe=None):
+        from django.contrib.auth.models import Group
+
+        utilisateur = get_user_model().objects.create_user(nom, f"{nom}@example.com", "pass1234", is_staff=True)
+        if groupe:
+            utilisateur.groups.add(Group.objects.get(name=groupe))
+        return utilisateur
+
+    def test_api_sans_permission(self):
+        self.client.force_login(self._utilisateur("rien-fact"))
+        self.assertEqual(self.client.get("/api/v1/factures/").status_code, 403)
+        self.assertEqual(self.client.get("/api/v1/facture-lignes/").status_code, 403)
+
+    def test_facturation_prepare_mais_ne_cree_pas_davoir(self):
+        self.client.force_login(self._utilisateur("fact-a", "Facturation"))
+        self.assertEqual(self.client.get("/api/v1/factures/").status_code, 200)
+        r = self.client.post("/api/v1/factures/preparer/", data=json.dumps({"commande": self.commande.pk}), content_type="application/json")
+        self.assertEqual(r.status_code, 201, r.content)
+        facture = Facture.objects.get()
+        facture.reference_tiime = "TIIME-R"
+        facture.save()
+        self.assertEqual(self.client.post(f"/api/v1/factures/{facture.pk}/avoir/", data=json.dumps({"motif": "x"}), content_type="application/json").status_code, 403)
+        anticipee = self.client.post("/api/v1/factures/preparer/", data=json.dumps({"commande": self.commande.pk, "anticipee": True}), content_type="application/json")
+        self.assertEqual(anticipee.status_code, 403)
+
+    def test_responsable_facturation_cree_un_avoir(self):
+        self.client.force_login(self._utilisateur("resp-fact", "Responsable facturation"))
+        facture = preparer_facture(self.commande)
+        facture.reference_tiime = "TIIME-S"
+        facture.save()
+        r = self.client.post(f"/api/v1/factures/{facture.pk}/avoir/", data=json.dumps({"motif": "Erreur"}), content_type="application/json")
+        self.assertEqual(r.status_code, 201, r.content)
+
+    def test_admin_autocompletion_et_pages_pour_le_role_facturation(self):
+        self.client.force_login(self._utilisateur("fact-b", "Facturation"))
+        r = self.client.get("/admin/autocomplete/", {"app_label": "facturation", "model_name": "facture", "field_name": "commande", "term": ""})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(self.client.get("/admin/facturation/facture/").status_code, 200)
+        self.assertEqual(self.client.get("/admin/facturation/facture/preparer/").status_code, 200)
+        self.assertEqual(self.client.get("/admin/facturation/facture/add/").status_code, 200)
+
+    def test_generation_decriture_reservee_aux_habilites(self):
+        facture = preparer_facture(self.commande)
+        self.client.force_login(self._utilisateur("fact-c", "Facturation"))
+        self.client.post("/admin/facturation/facture/", {"action": "action_generer_ecriture", "_selected_action": [facture.pk]}, follow=True)
+        self.assertFalse(EcritureComptable.objects.filter(facture=facture).exists())
+        self.client.force_login(self._utilisateur("fact-d", "Responsable facturation"))
+        from comptabilite.pcg import importer_pcg
+
+        importer_pcg()
+        self.client.post("/admin/facturation/facture/", {"action": "action_generer_ecriture", "_selected_action": [facture.pk]}, follow=True)
+        self.assertTrue(EcritureComptable.objects.filter(facture=facture).exists())
+
+    def test_responsable_commercial_peut_annuler_une_livraison(self):
+        from django.contrib.auth.models import Group
+
+        codes = set(Group.objects.get(name="Responsable commercial").permissions.values_list("codename", flat=True))
+        self.assertIn("annuler_livraison", codes)
+        self.assertNotIn("annuler_livraison", set(Group.objects.get(name="Commercial").permissions.values_list("codename", flat=True)))

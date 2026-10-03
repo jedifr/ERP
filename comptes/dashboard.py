@@ -26,6 +26,14 @@ def dashboard_callback(request, context):
     ca_facture_mois = (
         Facture.objects.filter(date_facturation__gte=debut_mois).aggregate(total=Sum("montant_ht"))["total"] or 0
     )
+    factures_en_retard = [
+        f
+        for f in Facture.objects.filter(type_document=Facture.TypeDocument.FACTURE)
+        .exclude(statut_paiement=Facture.StatutPaiement.PAYE)
+        .select_related("commande__client__conditions_paiement")
+        if f.est_en_retard
+    ]
+    montant_en_retard = sum(f.montant_ttc or 0 for f in factures_en_retard)
     alertes_stock_actives = AlerteStock.objects.filter(statut=AlerteStock.Statut.ACTIVE).count()
     of_lances_mois = OrdreFabrication.objects.filter(date_lancement__gte=debut_mois).count()
     pieces_decoupe_mois = PieceDecoupe.objects.filter(
@@ -53,9 +61,18 @@ def dashboard_callback(request, context):
             "title": "CA facturé",
             "value": f"{ca_facture_mois:,.0f} €".replace(",", " "),
             "icon": "payments",
-            "hint": "ce mois-ci (HT)",
+            "hint": "ce mois-ci (HT, net d'avoirs)",
             "link": "admin:facturation_facture_changelist",
             "link_query": "",
+        },
+        {
+            "title": "Factures en retard",
+            "value": len(factures_en_retard),
+            "icon": "schedule",
+            "hint": f"{montant_en_retard:,.0f} € TTC à relancer".replace(",", " "),
+            "link": "admin:facturation_facture_changelist",
+            "link_query": "?retard=en_retard",
+            "attention": bool(factures_en_retard),
         },
         {
             "title": "Alertes de stock",

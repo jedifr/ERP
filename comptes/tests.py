@@ -208,3 +208,31 @@ class GroupesMetierTests(TestCase):
         call_command("synchroniser_groupes", stdout=__import__("io").StringIO())
         self.assertTrue(groupe.permissions.filter(pk=retiree.pk).exists())
         self.assertTrue(groupe.permissions.filter(pk=supplementaire.pk).exists())
+
+
+class CodesDesGroupesTests(TestCase):
+    def test_chaque_permission_declaree_existe(self):
+        """Une faute de frappe dans un code serait ignorée en silence : le groupe
+        resterait sans la permission voulue."""
+        from django.contrib.auth.models import Permission
+
+        from .groupes import GROUPES_PAR_DEFAUT
+
+        existantes = {
+            f"{app}.{code}"
+            for app, code in Permission.objects.values_list("content_type__app_label", "codename")
+        }
+        manquantes = {
+            (groupe, code)
+            for groupe, codes in GROUPES_PAR_DEFAUT.items()
+            for code in codes
+            if code not in existantes
+        }
+        self.assertEqual(manquantes, set())
+
+
+class ConnexionDirecteTests(TestCase):
+    def test_connexion_sans_next_arrive_sur_laccueil_de_ladmin(self):
+        get_user_model().objects.create_superuser("direct", "d@example.com", "pass1234")
+        r = self.client.post("/admin/login/", {"username": "direct", "password": "pass1234"})
+        self.assertRedirects(r, "/admin/", fetch_redirect_response=False)
