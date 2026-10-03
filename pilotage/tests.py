@@ -4,7 +4,7 @@ from django.test import TestCase
 
 from chiffrage.models import Commande, Devis, DevisLigne, OperationOF, OrdreFabrication
 from chiffrage.moteur import calculer_devis
-from chiffrage.production import lancer_en_production
+from chiffrage.production import creer_ordres_fabrication, lancer_en_production
 from commercial.models import Adresse, Tiers
 from technique.models import Article, Nomenclature, PosteTravail, TarifPoste
 
@@ -52,6 +52,7 @@ class MargeReelleTests(TestCase):
         calculer_devis(self.devis)
 
         self.commande = lancer_en_production(self.devis)
+        creer_ordres_fabrication(self.commande)
         self.of = self.commande.ordres_fabrication.get()
         self.operation_of = self.of.operations.get(ordre=1)
 

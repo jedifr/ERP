@@ -1,0 +1,52 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<div class="max-w-4xl">
+  <p class="mb-4">
+    Commande <strong>{{ commande.numero }}</strong> — {{ commande.client.raison_sociale }}.
+    Un ordre de fabrication est créé par ligne d'article fabriqué ; la quantité commandée, la date de livraison prévue,
+    la gamme et la nomenclature de l'article sont reprises automatiquement. Les lignes qui ont déjà un ordre sont ignorées.
+  </p>
+
+  {% if plan %}
+  <form method="get" class="mb-4">
+    <label class="inline-flex items-center gap-2">
+      <input type="checkbox" name="regrouper" value="1" {% if regrouper %}checked{% endif %} onchange="this.form.submit()">
+      Regrouper les lignes du même article en un seul ordre (quantités additionnées)
+    </label>
+    {% if a_des_doublons %}<span class="ml-2 text-sm text-orange-700">Certains articles sont commandés sur plusieurs lignes.</span>{% endif %}
+  </form>
+
+  <table class="w-full text-sm mb-6">
+    <thead>
+      <tr class="text-left border-b border-base-200">
+        <th class="py-2 pr-4">Ordre à créer</th><th class="pr-4">Article</th><th class="pr-4">Lignes de commande</th>
+        <th class="pr-4 text-right">Quantité</th><th>Livraison prévue</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for element in plan %}
+      <tr class="border-b border-base-100">
+        <td class="py-2 pr-4">{{ forloop.counter }}</td>
+        <td class="pr-4"><strong>{{ element.article.reference }}</strong>{% if element.article.libelle %} — {{ element.article.libelle }}{% endif %}</td>
+        <td class="pr-4">{% for l in element.lignes %}n° {{ l.pk }} ({{ l.quantite_commandee|floatformat:"-3" }}){% if not forloop.last %}, {% endif %}{% endfor %}</td>
+        <td class="pr-4 text-right">{{ element.quantite|floatformat:"-3" }}</td>
+        <td>{{ element.date_livraison_prevue|date:"d/m/Y"|default:"—" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <form method="post">
+    {% csrf_token %}
+    {% if regrouper %}<input type="hidden" name="regrouper" value="1">{% endif %}
+    <button type="submit" class="bg-primary-600 text-white font-semibold px-4 py-2 rounded-default">
+      Créer {{ plan|length }} ordre{{ plan|length|pluralize }} de fabrication
+    </button>
+    <a href="{{ retour }}" class="ml-4">Retour</a>
+  </form>
+  {% else %}
+  <p class="mb-4 text-orange-700">{{ raison }}</p>
+  <a href="{{ retour }}">Retour</a>
+  {% endif %}
+</div>
+{% endblock %}

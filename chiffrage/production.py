@@ -14,7 +14,7 @@ from comptes.montants import pourcent
 from technique.models import Article, PosteTravail
 
 from .models import (
-    Commande, CommandeLigne, CommandeLigneModification, Devis, OperationOF, OrdreFabrication, indice_pour,
+    ComposantOF, Commande, CommandeLigne, CommandeLigneModification, Devis, OperationOF, OrdreFabrication, indice_pour,
 )
 from .moteur import ChiffrageError, gamme_active
 from .planning_sync import tenter_synchronisation
@@ -59,23 +59,67 @@ def _generer_numero_commande(devis):
     return f"CDE-{devis.numero}"
 
 
-def _generer_numero_of(commande, index):
-    return f"OF-{commande.numero}-{index}"
+def _prochain_numero_of(commande):
+    """OF-<commande>-<n>, premier numéro libre (jamais de collision, même après suppression d'un OF)."""
+    n = commande.ordres_fabrication.count() + 1
+    while OrdreFabrication.objects.filter(pk=f"OF-{commande.numero}-{n}").exists():
+        n += 1
+    return f"OF-{commande.numero}-{n}"
 
 
-def _creer_ordre_fabrication(commande, article, quantite, date_reference, index):
-    """Crée l'OF et ses opérations de gamme pour (commande, article,
-    quantite) — factorisé entre lancer_en_production (toutes les lignes
-    d'un coup) et lancer_ligne_en_production (une seule ligne, ajoutée
-    après coup sans repasser par tout le devis)."""
+def _date_reference(ligne):
+    """Date à laquelle la gamme et les tarifs sont lus : celle du devis d'origine, sinon de la commande."""
+    return ligne.devis_ligne.devis.date_creation if ligne.devis_ligne_id else ligne.commande.date_commande
+
+
+def _lignes_a_fabriquer(commande, lignes=None):
+    """Lignes de commande d'articles fabriqués qui n'ont pas encore d'ordre de fabrication."""
+    candidates = lignes if lignes is not None else commande.lignes.select_related("article", "devis_ligne__devis").all()
+    return [
+        ligne
+        for ligne in candidates
+        if ligne.article.nature == Article.Nature.FABRIQUE
+        and ligne.quantite_commandee
+        and not ligne.ordres_fabrication.exists()
+    ]
+
+
+def planifier_ordres_fabrication(commande, regrouper=False, lignes=None):
+    """Ce qu'on créerait, sans rien écrire : [{"article", "lignes", "quantite", "date_livraison_prevue"}].
+    Un ordre par ligne de commande ; avec `regrouper`, un seul ordre par article (quantités additionnées)."""
+    a_fabriquer = _lignes_a_fabriquer(commande, lignes)
+    groupes = {}
+    for ligne in a_fabriquer:
+        cle = ligne.article_id if regrouper else ligne.pk
+        groupes.setdefault(cle, []).append(ligne)
+    plan = []
+    for lignes_groupe in groupes.values():
+        dates = [l.date_livraison_prevue for l in lignes_groupe if l.date_livraison_prevue]
+        plan.append(
+            {
+                "article": lignes_groupe[0].article,
+                "lignes": lignes_groupe,
+                "quantite": sum(l.quantite_commandee for l in lignes_groupe),
+                "date_livraison_prevue": min(dates) if dates else None,
+            }
+        )
+    return plan
+
+
+def _creer_ordre_fabrication(commande, element_plan):
+    """Crée l'OF, sa gamme (opérations), sa nomenclature (composants) et le lien avec les lignes
+    de commande couvertes, pour un élément de `planifier_ordres_fabrication`."""
+    article, quantite = element_plan["article"], element_plan["quantite"]
     of = OrdreFabrication.objects.create(
-        numero=_generer_numero_of(commande, index),
+        numero=_prochain_numero_of(commande),
         commande=commande,
         article=article,
         quantite=quantite,
         date_lancement=timezone.now().date(),
+        date_livraison_prevue=element_plan["date_livraison_prevue"],
     )
-    for etape in gamme_active(article, date_reference):
+    of.lignes_commande.set(element_plan["lignes"])
+    for etape in gamme_active(article, _date_reference(element_plan["lignes"][0])):
         temps_prevu = None
         if etape.poste.mode_calcul == PosteTravail.ModeCalcul.HORAIRE:
             temps_prevu = (etape.temps_fixe or 0) + (etape.temps_variable or 0) * quantite
@@ -85,13 +129,46 @@ def _creer_ordre_fabrication(commande, article, quantite, date_reference, index)
             ordre=etape.ordre,
             temps_prevu=temps_prevu,
         )
+    for n in article.composants.select_related("article_composant"):
+        ComposantOF.objects.create(
+            ordre_fabrication=of,
+            article=n.article_composant,
+            quantite_par_unite=n.quantite,
+            quantite_necessaire=n.quantite * quantite,
+            longueur_mm=n.longueur_mm,
+            largeur_mm=n.largeur_mm,
+        )
     return of
+
+
+def creer_ordres_fabrication(commande, regrouper=False, lignes=None):
+    """Crée les ordres de fabrication d'une commande client : un par ligne d'article fabriqué
+    (ou un par article avec `regrouper`), quantité commandée reprise, date de livraison prévue,
+    gamme et nomenclature copiées. Rejouable : seules les lignes sans ordre sont traitées, donc
+    jamais de doublon (une ligne ajoutée plus tard se lance en recliquant)."""
+    with transaction.atomic():
+        commande = Commande.objects.select_for_update().get(pk=commande.pk)
+        if commande.statut == Commande.Statut.ANNULEE:
+            raise ChiffrageError(f"La commande « {commande} » est annulée.")
+        plan = planifier_ordres_fabrication(commande, regrouper, lignes)
+        if not plan:
+            raise ChiffrageError(
+                "Aucun ordre de fabrication à créer : la commande n'a pas de ligne d'article fabriqué "
+                "sans ordre (les lignes déjà couvertes par un ordre sont ignorées)."
+            )
+        ordres = [_creer_ordre_fabrication(commande, element) for element in plan]
+
+    # Hors transaction : la synchro planning est un appel réseau, qui ne doit ni retenir
+    # le verrou de la commande ni faire échouer la création locale.
+    for of in ordres:
+        tenter_synchronisation(of)
+    return ordres
 
 
 def lancer_en_production(devis):
     try:
         with transaction.atomic():
-            commande, ordres_crees = _creer_commande_et_ordres(devis)
+            commande = _creer_commande_et_ordres(devis)
     except IntegrityError as exc:
         # Filet de sécurité : le numéro de commande dérive du devis, donc un
         # numéro déjà pris ailleurs finit ici plutôt qu'en erreur 500.
@@ -100,11 +177,7 @@ def lancer_en_production(devis):
             "ou lancement déjà en cours."
         ) from exc
 
-    # Hors transaction : la synchro planning est un appel réseau, qui ne doit
-    # ni retenir le verrou du devis ni faire échouer la création locale.
-    for of in ordres_crees:
-        tenter_synchronisation(of)
-
+    # Les ordres de fabrication se créent ensuite depuis la commande (creer_ordres_fabrication).
     return commande
 
 
@@ -143,8 +216,6 @@ def _creer_commande_et_ordres(devis):
     devis._change_reason = f"Commande {commande.numero} créée"[:100]
     devis.save(update_fields=["issue"])
 
-    ordres_crees = []
-    index = 1
     for ligne in devis.lignes.select_related("article").all():
         # Une ligne de commande par ligne de devis, quelle que soit la nature
         # de l'article : c'est elle qui porte le suivi de livraison (partielle,
@@ -161,46 +232,21 @@ def _creer_commande_et_ordres(devis):
             taux_tva=ligne.taux_tva,
         )
 
-        if ligne.article.nature != Article.Nature.FABRIQUE:
-            continue
-
-        of = _creer_ordre_fabrication(commande, ligne.article, ligne.quantite, devis.date_creation, index)
-        index += 1
-        ordres_crees.append(of)
-
-    return commande, ordres_crees
+    return commande
 
 
 def lancer_ligne_en_production(commande_ligne):
-    """Crée l'ordre de fabrication d'UNE ligne de commande précise, sans
-    repasser par lancer_en_production (qui traite tout le devis d'un coup).
-    Sert notamment à une ligne ajoutée après coup pour représenter une
-    augmentation de quantité (plutôt que de modifier une ligne dont l'OF a
-    déjà été lancé, qui laisserait ses temps machine basés sur l'ancienne
-    quantité — voir CommandeLigne)."""
+    """Crée l'ordre de fabrication d'UNE ligne de commande précise (ligne ajoutée après coup pour
+    une augmentation de quantité, par exemple). Refusé si la ligne est déjà couverte par un ordre."""
     article = commande_ligne.article
     if article.nature != Article.Nature.FABRIQUE:
         raise ChiffrageError(f"« {article} » n'est pas un article fabriqué : pas d'ordre de fabrication à créer.")
-    if OrdreFabrication.objects.filter(commande=commande_ligne.commande, article=article).exists():
+    if commande_ligne.ordres_fabrication.exists():
         raise ChiffrageError(
-            f"Un ordre de fabrication existe déjà pour « {article} » sur la commande "
-            f"« {commande_ligne.commande} »."
+            f"La ligne « {article} » de la commande « {commande_ligne.commande} » a déjà un ordre de fabrication "
+            f"({', '.join(o.numero for o in commande_ligne.ordres_fabrication.all())})."
         )
-
-    date_reference = (
-        commande_ligne.devis_ligne.devis.date_creation
-        if commande_ligne.devis_ligne_id
-        else commande_ligne.commande.date_commande
-    )
-
-    with transaction.atomic():
-        index = commande_ligne.commande.ordres_fabrication.count() + 1
-        of = _creer_ordre_fabrication(
-            commande_ligne.commande, article, commande_ligne.quantite_commandee, date_reference, index
-        )
-
-    tenter_synchronisation(of)
-    return of
+    return creer_ordres_fabrication(commande_ligne.commande, lignes=[commande_ligne])[0]
 
 
 def synchroniser_lignes_commande(commande):

@@ -26,7 +26,7 @@ class PlanningSyncError(Exception):
 
 
 def construire_payload(of):
-    return {
+    payload = {
         "numero": of.numero,
         "article": of.article_id,
         "quantite": float(of.quantite),
@@ -36,6 +36,15 @@ def construire_payload(of):
             for op in of.operations.order_by("ordre")
         ],
     }
+    # Ajoutés seulement s'ils existent : le contenu (donc l'empreinte) des OF antérieurs ne change pas.
+    if of.date_livraison_prevue:
+        payload["date_livraison_prevue"] = of.date_livraison_prevue.isoformat()
+    composants = [
+        {"article": c.article_id, "quantite": float(c.quantite_necessaire)} for c in of.composants.order_by("id")
+    ]
+    if composants:
+        payload["composants"] = composants
+    return payload
 
 
 def empreinte(payload):

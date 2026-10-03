@@ -36,6 +36,7 @@ from .builder_views import (
 )
 from .models import (
     Commande,
+    ComposantOF,
     CommandeLigne,
     CommandeLigneModification,
     CommandeError,
@@ -49,7 +50,14 @@ from .models import (
     OrdreFabrication,
     indice_pour,
 )
-from .documents import DocumentError, generer_pdf_bon_livraison, generer_pdf_devis
+from .documents import (
+    DocumentError,
+    generer_pdf_ar_commande,
+    generer_pdf_bon_livraison,
+    generer_pdf_bon_preparation,
+    generer_pdf_devis,
+    generer_pdf_ordre_fabrication,
+)
 from .moteur import ChiffrageError, calculer_devis
 from .planning_sync import resynchroniser
 from .validation import verifier_validation_devis
@@ -59,6 +67,8 @@ from .production import (
     lancer_en_production,
     lancer_ligne_en_production,
     comparer_indices,
+    creer_ordres_fabrication,
+    planifier_ordres_fabrication,
     reviser_devis,
     synchroniser_lignes_commande,
 )
@@ -438,7 +448,7 @@ class DevisAdmin(ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin
             else:
                 self.message_user(request, f"{devis} : chiffrage recalculé.", level=messages.SUCCESS)
 
-    @admin.action(description="Lancer en production")
+    @admin.action(description="Créer la commande")
     def action_lancer_en_production(self, request, queryset):
         for devis in queryset:
             try:
@@ -447,7 +457,9 @@ class DevisAdmin(ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin
                 self.message_user(request, f"{devis} : {exc}", level=messages.ERROR)
             else:
                 self.message_user(
-                    request, f"{devis} : commande {commande} créée.", level=messages.SUCCESS
+                    request,
+                    f"{devis} : commande {commande} créée. Ouvrez-la pour créer les ordres de fabrication.",
+                    level=messages.SUCCESS,
                 )
 
 
@@ -565,12 +577,12 @@ def _logger_modifications_ligne(form, utilisateur):
 def _avertir_si_augmentation_apres_of(request, ligne, ancienne_quantite):
     if ancienne_quantite is None or ligne.quantite_commandee <= ancienne_quantite:
         return
-    if OrdreFabrication.objects.filter(commande=ligne.commande, article=ligne.article).exists():
+    if ligne.pk and ligne.ordres_fabrication.exists():
         messages.warning(
             request,
             f"« {ligne.article} » : quantité augmentée alors qu'un ordre de fabrication existe déjà pour "
-            "cette commande — il ne sera pas recalculé. Ajoutez plutôt une nouvelle ligne pour la quantité "
-            "supplémentaire (elle pourra être lancée en production séparément).",
+            "cette ligne — il ne sera pas recalculé. Ajoutez plutôt une nouvelle ligne pour la quantité "
+            "supplémentaire (elle pourra être lancée en production séparément)."
         )
 
 
@@ -638,6 +650,7 @@ class CommandeAdmin(ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMi
     readonly_fields = ["statut"]
     inlines = [CommandeLigneInline]
     actions = ["action_synchroniser_lignes", "action_annuler"]
+    actions_detail = ["action_creer_ordres", "action_ar_pdf", "action_bon_preparation_pdf"]
 
     class Media:
         js = ["chiffrage/commande_admin_live.js"]
@@ -662,6 +675,67 @@ class CommandeAdmin(ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMi
             ),
         ]
         return urls + super().get_urls()
+
+    def _pdf_commande(self, request, object_id, generateur, prefixe):
+        commande = get_object_or_404(Commande, pk=object_id)
+        if not self.has_view_permission(request, commande):
+            raise PermissionDenied
+        try:
+            contenu = generateur(commande)
+        except DocumentError as exc:
+            self.message_user(request, str(exc), level=messages.ERROR)
+            return HttpResponseRedirect(reverse("admin:chiffrage_commande_change", args=[commande.pk]))
+        reponse = HttpResponse(contenu, content_type="application/pdf")
+        reponse["Content-Disposition"] = f'inline; filename="{prefixe}-{commande.pk}.pdf"'
+        return reponse
+
+    @unfold_action(description="AR de commande (PDF)", url_path="ar-pdf")
+    def action_ar_pdf(self, request, object_id):
+        return self._pdf_commande(request, object_id, generer_pdf_ar_commande, "ar")
+
+    @unfold_action(description="Bon de préparation (PDF)", url_path="bon-preparation-pdf")
+    def action_bon_preparation_pdf(self, request, object_id):
+        return self._pdf_commande(request, object_id, generer_pdf_bon_preparation, "preparation")
+
+    @unfold_action(description="Créer les ordres de fabrication", permissions=["creer_ordres"], url_path="ordres-fabrication")
+    def action_creer_ordres(self, request, object_id):
+        commande = get_object_or_404(Commande, pk=object_id)
+        retour = reverse("admin:chiffrage_commande_change", args=[commande.pk])
+        regrouper = (request.POST if request.method == "POST" else request.GET).get("regrouper") == "1"
+        if request.method == "POST":
+            try:
+                ordres = creer_ordres_fabrication(commande, regrouper=regrouper)
+            except ChiffrageError as exc:
+                self.message_user(request, str(exc), level=messages.ERROR)
+                return HttpResponseRedirect(retour)
+            self.message_user(
+                request,
+                f"{len(ordres)} ordre(s) de fabrication créé(s) : " + ", ".join(o.numero for o in ordres) + ".",
+                level=messages.SUCCESS,
+            )
+            return HttpResponseRedirect(retour)
+        plan = planifier_ordres_fabrication(commande, regrouper=regrouper)
+        a_des_doublons = len(planifier_ordres_fabrication(commande, False)) != len(planifier_ordres_fabrication(commande, True))
+        raison = (
+            f"La commande {commande} est annulée."
+            if commande.statut == Commande.Statut.ANNULEE
+            else "Aucune ligne d'article fabriqué sans ordre de fabrication : rien à créer."
+        )
+        if commande.statut == Commande.Statut.ANNULEE:
+            plan = []
+        return TemplateResponse(
+            request,
+            "admin/chiffrage/creer_ordres_fabrication.html",
+            {
+                **self.admin_site.each_context(request),
+                "title": f"Créer les ordres de fabrication de {commande}",
+                "commande": commande, "plan": plan, "regrouper": regrouper,
+                "a_des_doublons": a_des_doublons, "raison": raison, "retour": retour,
+            },
+        )
+
+    def has_creer_ordres_permission(self, request, obj=None):
+        return request.user.has_perm("chiffrage.add_ordrefabrication")
 
     @admin.action(description="Synchroniser les lignes depuis le devis")
     def action_synchroniser_lignes(self, request, queryset):
@@ -913,6 +987,26 @@ class LivraisonLigneAdmin(ModelAdmin):
 class OperationOFInline(TabularInline):
     model = OperationOF
     extra = 0
+    verbose_name_plural = "Gamme (opérations)"
+
+
+class ComposantOFInline(TabularInline):
+    """Nomenclature figée à la création de l'ordre : lecture seule."""
+
+    model = ComposantOF
+    extra = 0
+    verbose_name_plural = "Nomenclature (composants à sortir)"
+    fields = ["article", "longueur_mm", "largeur_mm", "quantite_par_unite", "quantite_necessaire"]
+    readonly_fields = fields
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(OrdreFabrication)
@@ -924,17 +1018,39 @@ class OrdreFabricationAdmin(ExportCsvMixin, CodificationInitialeMixin, ModelAdmi
         "commande",
         "article",
         "quantite",
+        "date_livraison_prevue",
         "statut",
         "statut_synchro",
         "nombre_tentatives",
         "erreur_courte",
     ]
     list_filter = ["statut_synchro"]
-    readonly_fields = ["statut_synchro", "nombre_tentatives", "date_derniere_tentative", "derniere_erreur", "prochaine_tentative"]
+    readonly_fields = [
+        "statut_synchro", "nombre_tentatives", "date_derniere_tentative", "derniere_erreur", "prochaine_tentative",
+        "lignes_commande_display",
+    ]
+    exclude = ["lignes_commande"]
     search_fields = ["numero", "commande__numero", "article__reference"]
     autocomplete_fields = ["commande", "article"]
-    inlines = [OperationOFInline]
+    inlines = [ComposantOFInline, OperationOFInline]
     actions = ["action_resynchroniser"]
+    actions_detail = ["action_pdf"]
+
+    @admin.display(description="Lignes de commande couvertes")
+    def lignes_commande_display(self, obj):
+        if obj is None or not obj.pk:
+            return "—"
+        lignes = obj.lignes_commande.select_related("article")
+        return ", ".join(f"{l.article} × {l.quantite_commandee:g}" for l in lignes) or "—"
+
+    @unfold_action(description="Fiche de fabrication (PDF)", url_path="pdf")
+    def action_pdf(self, request, object_id):
+        of = get_object_or_404(OrdreFabrication, pk=object_id)
+        if not self.has_view_permission(request, of):
+            raise PermissionDenied
+        reponse = HttpResponse(generer_pdf_ordre_fabrication(of), content_type="application/pdf")
+        reponse["Content-Disposition"] = f'inline; filename="of-{of.pk}.pdf"'
+        return reponse
 
     @admin.display(description="Dernière erreur")
     def erreur_courte(self, obj):

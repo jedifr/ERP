@@ -35,7 +35,12 @@ from .moteur import (
 )
 from .validation import verifier_validation_devis
 from .planning_sync import PlanningSyncError, resynchroniser, tenter_synchronisation
-from .production import lancer_en_production, lancer_ligne_en_production, synchroniser_lignes_commande
+from .production import (
+    creer_ordres_fabrication,
+    lancer_en_production,
+    lancer_ligne_en_production,
+    synchroniser_lignes_commande,
+)
 
 
 def _creer_composants_nomenclature(parent):
@@ -402,12 +407,15 @@ class LancerEnProductionTests(TestCase):
         commande = lancer_en_production(self.devis)
         self.assertEqual(Commande.objects.count(), 1)
         self.assertEqual(commande.devis, self.devis)
+        # Le devis ne crée plus que la commande : les OF se créent ensuite depuis la commande.
+        self.assertEqual(commande.ordres_fabrication.count(), 0)
 
-        ordres = list(commande.ordres_fabrication.all())
+        ordres = creer_ordres_fabrication(commande)
         self.assertEqual(len(ordres), 1)
         of = ordres[0]
         self.assertEqual(of.article, self.article_fabrique)
         self.assertEqual(of.quantite, 2)
+        self.assertEqual(list(of.lignes_commande.all()), list(commande.lignes.filter(article=self.article_fabrique)))
 
         operation = of.operations.get(ordre=1)
         # (5 + 2*2) = 9
@@ -441,7 +449,7 @@ class LancerEnProductionTests(TestCase):
         self.assertIsNone(commande.devise)
 
     def test_of_reste_en_attente_sans_api_planning_configuree(self):
-        of = lancer_en_production(self.devis).ordres_fabrication.first()
+        of = creer_ordres_fabrication(lancer_en_production(self.devis))[0]
         self.assertEqual(of.statut_synchro, OrdreFabrication.StatutSynchro.EN_ATTENTE)
         self.assertEqual(of.nombre_tentatives, 1)
 
@@ -3069,16 +3077,24 @@ class LancerLigneEnProductionTests(TestCase):
         with self.assertRaises(ChiffrageError):
             lancer_ligne_en_production(ligne)
 
-    def test_refuse_si_of_deja_existant_pour_cet_article(self):
+    def test_refuse_si_la_ligne_a_deja_un_of(self):
         ligne = CommandeLigne.objects.create(
             commande=self.commande, article=self.article_fabrique, quantite_commandee=5,
         )
         lancer_ligne_en_production(ligne)
-        ligne_supplementaire = CommandeLigne.objects.create(
+        with self.assertRaises(ChiffrageError):
+            lancer_ligne_en_production(ligne)
+
+    def test_une_autre_ligne_du_meme_article_a_son_propre_of(self):
+        premiere = CommandeLigne.objects.create(
+            commande=self.commande, article=self.article_fabrique, quantite_commandee=5,
+        )
+        lancer_ligne_en_production(premiere)
+        seconde = CommandeLigne.objects.create(
             commande=self.commande, article=self.article_fabrique, quantite_commandee=2,
         )
-        with self.assertRaises(ChiffrageError):
-            lancer_ligne_en_production(ligne_supplementaire)
+        of = lancer_ligne_en_production(seconde)
+        self.assertEqual((of.quantite, list(of.lignes_commande.all())), (2, [seconde]))
 
 
 class CommandeLigneAuditAdminTests(TestCase):
@@ -4547,3 +4563,247 @@ class LivraisonDepassementAvecLotTests(_FixtureModuleA, TestCase):
         with self.assertRaises(ValidationError) as cm:
             LivraisonLigne(livraison=livraison, commande_ligne=ligne, quantite_livree=4, lot=lot).full_clean()
         self.assertIn("quantite_livree", cm.exception.message_dict)
+
+
+class _FixtureOrdresCommande:
+    """Commande avec deux lignes du même article fabriqué (F), une autre fabriquée (G) et une matière achetée."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        self.admin = get_user_model().objects.create_superuser("of-admin", "o@example.com", "pass-mot-de-passe-6")
+        self.client.force_login(self.admin)
+        self.tiers = Tiers.objects.create(code="CLI-OF", raison_sociale="Client Fabrication", type_tiers=Tiers.TypeTiers.CLIENT)
+        adresse = Adresse.objects.create(
+            tiers=self.tiers, est_facturation=True, est_livraison=True, adresse="1 rue des Forges",
+            code_postal="69000", ville="Lyon", est_principale=True,
+        )
+        self.tole = Article.objects.create(reference="TOLE-OF", nature=Article.Nature.MATIERE_PREMIERE, cout_unitaire=2)
+        self.vis = Article.objects.create(reference="VIS-OF", nature=Article.Nature.MATIERE_PREMIERE, cout_unitaire=0.1)
+        self.f = Article.objects.create(reference="PIECE-F", libelle="Flasque", nature=Article.Nature.FABRIQUE)
+        self.g = Article.objects.create(reference="PIECE-G", nature=Article.Nature.FABRIQUE)
+        poste_decoupe = PosteTravail.objects.create(nom="Découpe laser", mode_calcul=PosteTravail.ModeCalcul.HORAIRE)
+        poste_plieuse = PosteTravail.objects.create(nom="Plieuse", mode_calcul=PosteTravail.ModeCalcul.HORAIRE)
+        TarifPoste.objects.create(poste=poste_decoupe, cout_horaire=60, date_debut=datetime.date(2020, 1, 1))
+        TarifPoste.objects.create(poste=poste_plieuse, cout_horaire=50, date_debut=datetime.date(2020, 1, 1))
+        for ordre, poste, fixe, variable in ((1, poste_decoupe, 10, 2), (2, poste_plieuse, 5, 1)):
+            Gamme.objects.create(article=self.f, poste=poste, ordre=ordre, temps_fixe=fixe, temps_variable=variable,
+                                 date_debut=datetime.date(2020, 1, 1))
+        Nomenclature.objects.create(article_parent=self.f, article_composant=self.tole, quantite=1, longueur_mm=500, largeur_mm=300)
+        Nomenclature.objects.create(article_parent=self.f, article_composant=self.vis, quantite=4)
+        self.commande = Commande.objects.create(
+            numero="CDE-OF", client=self.tiers, reference_client="BC-4411", date_commande=datetime.date(2026, 10, 1),
+            adresse_facturation=adresse, adresse_livraison=adresse,
+        )
+        taux = TauxTVA.objects.create(nom="Normal OF", taux=20)
+        mk = lambda article, qte, jour, prix: CommandeLigne.objects.create(
+            commande=self.commande, article=article, quantite_commandee=qte, prix_vente_unitaire=prix, taux_tva=taux,
+            date_livraison_prevue=datetime.date(2026, 12, jour) if jour else None,
+        )
+        self.l1 = mk(self.f, 3, 20, 100)
+        self.l2 = mk(self.f, 2, 10, 100)
+        self.l3 = mk(self.g, 4, None, 50)
+        self.l4 = mk(self.vis, 100, 5, 1)
+
+
+class OrdresDepuisCommandeTests(_FixtureOrdresCommande, TestCase):
+    def test_un_of_par_ligne_fabriquee_quantites_dates_gamme_et_nomenclature(self):
+        ordres = creer_ordres_fabrication(self.commande)
+        self.assertEqual(len(ordres), 3)  # F, F, G — pas d'OF pour la matière achetée
+        of1 = next(o for o in ordres if list(o.lignes_commande.all()) == [self.l1])
+        self.assertEqual((of1.article, of1.quantite, of1.date_livraison_prevue), (self.f, 3, datetime.date(2026, 12, 20)))
+        # Gamme : 10 + 2×3 = 16 min à la découpe, 5 + 1×3 = 8 min à la plieuse.
+        self.assertEqual([(o.poste.nom, o.temps_prevu) for o in of1.operations.order_by("ordre")], [("Découpe laser", 16), ("Plieuse", 8)])
+        # Nomenclature : quantités par pièce × quantité à fabriquer.
+        composants = {c.article_id: c for c in of1.composants.all()}
+        self.assertEqual(composants["TOLE-OF"].quantite_necessaire, 3)
+        self.assertEqual((composants["TOLE-OF"].longueur_mm, composants["TOLE-OF"].largeur_mm), (500, 300))
+        self.assertEqual((composants["VIS-OF"].quantite_par_unite, composants["VIS-OF"].quantite_necessaire), (4, 12))
+        of_g = next(o for o in ordres if o.article == self.g)
+        self.assertIsNone(of_g.date_livraison_prevue)  # aucune date saisie sur la ligne
+        self.assertEqual(of_g.composants.count(), 0)
+
+    def test_regroupement_des_lignes_du_meme_article(self):
+        ordres = creer_ordres_fabrication(self.commande, regrouper=True)
+        self.assertEqual(len(ordres), 2)
+        of_f = next(o for o in ordres if o.article == self.f)
+        self.assertEqual(of_f.quantite, 5)
+        self.assertEqual(set(of_f.lignes_commande.all()), {self.l1, self.l2})
+        self.assertEqual(of_f.date_livraison_prevue, datetime.date(2026, 12, 10))  # la plus proche
+        self.assertEqual(of_f.operations.get(ordre=1).temps_prevu, 20)  # 10 + 2×5
+        self.assertEqual(of_f.composants.get(article="VIS-OF").quantite_necessaire, 20)
+
+    def test_rejouer_ne_cree_pas_de_doublon_puis_complete_les_lignes_ajoutees(self):
+        creer_ordres_fabrication(self.commande)
+        with self.assertRaises(ChiffrageError) as cm:
+            creer_ordres_fabrication(self.commande)
+        self.assertIn("Aucun ordre", str(cm.exception))
+        self.assertEqual(self.commande.ordres_fabrication.count(), 3)
+        nouvelle = CommandeLigne.objects.create(commande=self.commande, article=self.g, quantite_commandee=7)
+        ordres = creer_ordres_fabrication(self.commande)
+        self.assertEqual([(o.quantite, list(o.lignes_commande.all())) for o in ordres], [(7, [nouvelle])])
+        self.assertEqual(len({o.numero for o in self.commande.ordres_fabrication.all()}), 4)
+
+    def test_commande_annulee_refusee_et_planification_sans_ecriture(self):
+        from .production import planifier_ordres_fabrication
+
+        plan = planifier_ordres_fabrication(self.commande, regrouper=True)
+        self.assertEqual(len(plan), 2)
+        self.assertEqual(OrdreFabrication.objects.count(), 0)  # un aperçu n'écrit rien
+        Commande.objects.filter(pk=self.commande.pk).update(statut=Commande.Statut.ANNULEE)
+        with self.assertRaises(ChiffrageError):
+            creer_ordres_fabrication(Commande.objects.get(pk=self.commande.pk))
+
+    def test_la_nomenclature_de_l_of_est_figee(self):
+        of = creer_ordres_fabrication(self.commande)[0]
+        Nomenclature.objects.filter(article_parent=self.f).delete()
+        self.assertEqual(of.composants.count(), 2)
+
+    def test_payload_planning_avec_date_et_composants_et_inchange_pour_les_anciens_of(self):
+        from .planning_sync import construire_payload
+
+        of = next(o for o in creer_ordres_fabrication(self.commande) if o.article == self.f)
+        payload = construire_payload(of)
+        self.assertEqual(payload["date_livraison_prevue"], of.date_livraison_prevue.isoformat())
+        self.assertEqual({c["article"]: c["quantite"] for c in payload["composants"]}, {"TOLE-OF": of.quantite, "VIS-OF": of.quantite * 4})
+        ancien = OrdreFabrication.objects.create(
+            numero="OF-ANCIEN", commande=self.commande, article=self.g, quantite=1, date_lancement=datetime.date(2026, 1, 1)
+        )
+        self.assertNotIn("composants", construire_payload(ancien))
+        self.assertNotIn("date_livraison_prevue", construire_payload(ancien))
+
+    def test_admin_apercu_puis_creation_avec_regroupement(self):
+        url = f"/admin/chiffrage/commande/{self.commande.pk}/ordres-fabrication/"
+        page = self.client.get(url)
+        self.assertContains(page, "Créer 3 ordres de fabrication")
+        page = self.client.get(url + "?regrouper=1")
+        self.assertContains(page, "Créer 2 ordres de fabrication")
+        self.assertEqual(OrdreFabrication.objects.count(), 0)
+        reponse = self.client.post(url, {"regrouper": "1"}, follow=True)
+        self.assertContains(reponse, "2 ordre(s) de fabrication créé(s)")
+        self.assertEqual(self.commande.ordres_fabrication.count(), 2)
+        # Plus rien à créer : la page l'explique au lieu de proposer un bouton.
+        self.assertContains(self.client.get(url), "rien à créer")
+
+    def test_fiche_of_affiche_date_nomenclature_et_gamme(self):
+        of = creer_ordres_fabrication(self.commande, regrouper=True)[0]
+        page = self.client.get(f"/admin/chiffrage/ordrefabrication/{of.pk}/change/")
+        for attendu in ("Nomenclature", "TOLE-OF", "Gamme", "Découpe laser", "Lignes de commande couvertes"):
+            self.assertContains(page, attendu)
+
+    def test_api_creer_les_of_et_droits(self):
+        url = f"/api/v1/commandes/{self.commande.pk}/creer-ordres-fabrication/"
+        reponse = self.client.post(url, {"regrouper": True}, content_type="application/json")
+        self.assertEqual(reponse.status_code, 201, reponse.content)
+        donnees = reponse.json()
+        self.assertEqual(len(donnees), 2)
+        f = next(o for o in donnees if o["article"] == "PIECE-F")
+        self.assertEqual((f["quantite"], f["date_livraison_prevue"], len(f["composants"])), (5.0, "2026-12-10", 2))
+        self.assertEqual(self.client.post(url, {}, content_type="application/json").status_code, 400)  # plus rien à créer
+        from django.contrib.auth import get_user_model
+
+        lecteur = get_user_model().objects.create_user("lecteur-of", password="pass-mot-de-passe-7")
+        self.client.force_login(lecteur)
+        self.assertEqual(self.client.post(url, {}, content_type="application/json").status_code, 403)
+
+    def test_devis_lance_en_production_ne_cree_que_la_commande(self):
+        from .production import lancer_en_production
+
+        devis = Devis.objects.create(numero="DEV-OF", client=self.tiers, date_creation=datetime.date(2026, 10, 1), statut=Devis.Statut.VALIDE)
+        DevisLigne.objects.create(devis=devis, article=self.f, quantite=2)
+        commande = lancer_en_production(devis)
+        self.assertEqual(commande.ordres_fabrication.count(), 0)
+        self.assertEqual(len(creer_ordres_fabrication(commande)), 1)
+
+
+class DocumentsCommandeTests(_FixtureOrdresCommande, TestCase):
+    """AR de commande, bon de préparation et fiche de fabrication (PDF)."""
+
+    def setUp(self):
+        super().setUp()
+        from comptes.models import Societe
+
+        societe = Societe.charger()
+        societe.raison_sociale = "Chaudronnerie Dupont"
+        societe.mentions_commande = "Conditions generales de vente disponibles sur demande"
+        societe.save()
+
+    def _texte(self, pdf):
+        # Le texte d'un PDF ReportLab écrit les accents en octal (\351 = é) : on les remet.
+        import re
+
+        brut = pdf.decode("latin-1")
+        return re.sub(r"\\([0-7]{3})", lambda m: chr(int(m.group(1), 8)), brut).replace("\\(", "(").replace("\\)", ")")
+
+    def test_ar_de_commande(self):
+        from .documents import generer_pdf_ar_commande
+
+        pdf = generer_pdf_ar_commande(self.commande)
+        texte = self._texte(pdf)
+        self.assertTrue(pdf.startswith(b"%PDF"))
+        for attendu in ("ACCUSÉ DE RÉCEPTION DE COMMANDE CDE-OF", "Chaudronnerie Dupont", "Client Fabrication", "BC-4411", "PIECE-F", "Flasque",
+                        "20/12/2026", "10/12/2026", "Total HT", "Total TTC", "Conditions generales", "1 rue des Forges"):
+            self.assertIn(attendu, texte, attendu)
+        # 3×100 + 2×100 + 4×50 + 100×1 = 800 € HT ; 960 € TTC
+        self.assertIn("800,00", texte)
+        self.assertIn("960,00", texte)
+        self.assertNotIn("ANNUL", texte)
+
+    def test_ar_refuse_une_ligne_sans_prix_et_marque_une_commande_annulee(self):
+        from .documents import DocumentError, generer_pdf_ar_commande
+
+        CommandeLigne.objects.filter(pk=self.l3.pk).update(prix_vente_unitaire=None)
+        with self.assertRaises(DocumentError) as cm:
+            generer_pdf_ar_commande(Commande.objects.get(pk=self.commande.pk))
+        self.assertIn("PIECE-G", str(cm.exception))
+        CommandeLigne.objects.filter(pk=self.l3.pk).update(prix_vente_unitaire=50)
+        Commande.objects.filter(pk=self.commande.pk).update(statut=Commande.Statut.ANNULEE)
+        self.assertIn("ANNUL", self._texte(generer_pdf_ar_commande(Commande.objects.get(pk=self.commande.pk))))
+
+    def test_bon_de_preparation_sans_prix_avec_of_et_dates(self):
+        from .documents import generer_pdf_bon_preparation
+
+        creer_ordres_fabrication(self.commande, regrouper=True)
+        texte = self._texte(generer_pdf_bon_preparation(self.commande))
+        for attendu in ("BON DE PRÉPARATION CDE-OF", "BC-4411", "PIECE-F", "VIS-OF", "OF-CDE-OF-1", "10/12/2026", "Préparé par"):
+            self.assertIn(attendu, texte, attendu)
+        for interdit in ("Total HT", "PU HT", "TVA", "800,00"):
+            self.assertNotIn(interdit, texte, interdit)
+
+    def test_bon_de_preparation_signale_les_of_a_creer(self):
+        from .documents import generer_pdf_bon_preparation
+
+        self.assertIn("OF à créer", self._texte(generer_pdf_bon_preparation(self.commande)))
+
+    def test_fiche_de_fabrication(self):
+        from .documents import generer_pdf_ordre_fabrication
+
+        of = next(o for o in creer_ordres_fabrication(self.commande, regrouper=True) if o.article == self.f)
+        texte = self._texte(generer_pdf_ordre_fabrication(of))
+        for attendu in ("ORDRE DE FABRICATION", of.numero, "PIECE-F", "TOLE-OF", "VIS-OF", "500 × 300", "Nomenclature",
+                        "Gamme", "Découpe laser", "Plieuse", "20 min", "10/12/2026"):
+            self.assertIn(attendu, texte, attendu)
+
+    def test_telechargements_admin_et_api(self):
+        of = creer_ordres_fabrication(self.commande)[0]
+        for url in (
+            f"/admin/chiffrage/commande/{self.commande.pk}/ar-pdf/",
+            f"/admin/chiffrage/commande/{self.commande.pk}/bon-preparation-pdf/",
+            f"/admin/chiffrage/ordrefabrication/{of.pk}/pdf/",
+            f"/api/v1/commandes/{self.commande.pk}/ar-pdf/",
+            f"/api/v1/commandes/{self.commande.pk}/bon-preparation-pdf/",
+            f"/api/v1/ordres-fabrication/{of.pk}/pdf/",
+        ):
+            reponse = self.client.get(url)
+            self.assertEqual(reponse.status_code, 200, url)
+            self.assertEqual(reponse["Content-Type"], "application/pdf", url)
+
+    def test_magasinier_peut_telecharger_le_bon_de_preparation(self):
+        from django.contrib.auth import get_user_model
+        from django.contrib.auth.models import Group
+
+        magasinier = get_user_model().objects.create_user("magasin-of", password="pass-mot-de-passe-8", is_staff=True)
+        magasinier.groups.add(Group.objects.get(name="Magasinier"))
+        self.client.force_login(magasinier)
+        reponse = self.client.get(f"/admin/chiffrage/commande/{self.commande.pk}/bon-preparation-pdf/")
+        self.assertEqual(reponse.status_code, 200)

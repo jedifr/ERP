@@ -8,11 +8,17 @@ from rest_framework.response import Response
 
 from comptes.permissions import ModelPermissionsAvecLecture
 
-from .documents import DocumentError, generer_pdf_devis
+from .documents import (
+    DocumentError,
+    generer_pdf_ar_commande,
+    generer_pdf_bon_preparation,
+    generer_pdf_devis,
+    generer_pdf_ordre_fabrication,
+)
 from .models import Commande, CommandeError, Devis, DevisLigne, DevisLigneOperation, OperationOF, OrdreFabrication
 from .moteur import ChiffrageError, calculer_devis
 from .planning_sync import resynchroniser
-from .production import lancer_en_production, reviser_devis
+from .production import creer_ordres_fabrication, lancer_en_production, reviser_devis
 from .validation import verifier_validation_devis
 from .serializers import (
     CommandeSerializer,
@@ -133,6 +139,32 @@ class CommandeViewSet(viewsets.ModelViewSet):
     filterset_fields = ["devis", "statut"]
     search_fields = ["numero"]
 
+    @action(detail=True, methods=["get"], url_path="ar-pdf")
+    def ar_pdf_action(self, request, pk=None):
+        """Accusé de réception de commande (PDF)."""
+        commande = self.get_object()
+        return _reponse_pdf(generer_pdf_ar_commande, commande, f"ar-{commande.pk}")
+
+    @action(detail=True, methods=["get"], url_path="bon-preparation-pdf")
+    def bon_preparation_pdf_action(self, request, pk=None):
+        """Bon de préparation (PDF, sans prix)."""
+        commande = self.get_object()
+        return _reponse_pdf(generer_pdf_bon_preparation, commande, f"preparation-{commande.pk}")
+
+    @action(detail=True, methods=["post"], url_path="creer-ordres-fabrication", permission_classes=[IsAuthenticated])
+    def creer_ordres_fabrication_action(self, request, pk=None):
+        """Crée les ordres de fabrication manquants : un par ligne d'article fabriqué, ou un par
+        article avec `{"regrouper": true}`."""
+        commande = self.get_object()
+        if not request.user.has_perm("chiffrage.add_ordrefabrication"):
+            raise PermissionDenied("Vous n'avez pas la permission de créer un ordre de fabrication.")
+        regrouper = str(request.data.get("regrouper", "")).lower() in ("1", "true", "oui")
+        try:
+            ordres = creer_ordres_fabrication(commande, regrouper=regrouper)
+        except ChiffrageError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(OrdreFabricationSerializer(ordres, many=True).data, status=status.HTTP_201_CREATED)
+
     @action(detail=True, methods=["post"], url_path="annuler", permission_classes=[IsAuthenticated])
     def annuler_action(self, request, pk=None):
         commande = self.get_object()
@@ -145,12 +177,28 @@ class CommandeViewSet(viewsets.ModelViewSet):
         return Response(CommandeSerializer(commande).data)
 
 
+def _reponse_pdf(generateur, objet, nom):
+    try:
+        contenu = generateur(objet)
+    except DocumentError as exc:
+        return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    reponse = HttpResponse(contenu, content_type="application/pdf")
+    reponse["Content-Disposition"] = f'inline; filename="{nom}.pdf"'
+    return reponse
+
+
 class OrdreFabricationViewSet(viewsets.ModelViewSet):
     permission_classes = [ModelPermissionsAvecLecture]
     queryset = OrdreFabrication.objects.select_related("commande", "article").all()
     serializer_class = OrdreFabricationSerializer
     filterset_fields = ["commande", "article", "statut_synchro"]
     search_fields = ["numero"]
+
+    @action(detail=True, methods=["get"], url_path="pdf")
+    def pdf_action(self, request, pk=None):
+        """Fiche de fabrication (PDF) : nomenclature et gamme."""
+        of = self.get_object()
+        return _reponse_pdf(generer_pdf_ordre_fabrication, of, f"of-{of.pk}")
 
     @action(detail=True, methods=["post"], url_path="resynchroniser", permission_classes=[IsAuthenticated])
     def resynchroniser_action(self, request, pk=None):

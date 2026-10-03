@@ -942,6 +942,14 @@ class OrdreFabrication(models.Model):
     )
     quantite = models.FloatField("quantité")
     date_lancement = models.DateField("date de lancement")
+    date_livraison_prevue = models.DateField(
+        "livraison prévue", null=True, blank=True,
+        help_text="Date de livraison la plus proche parmi les lignes de commande couvertes (reprise à la création).",
+    )
+    lignes_commande = models.ManyToManyField(
+        "CommandeLigne", verbose_name="lignes de commande couvertes", related_name="ordres_fabrication", blank=True,
+        help_text="Plusieurs lignes d'un même article peuvent être regroupées dans un seul ordre.",
+    )
     statut = models.CharField("statut", max_length=50, blank=True, help_text="Statut de production")
     statut_synchro = models.CharField(
         "statut de synchronisation",
@@ -977,6 +985,31 @@ class OrdreFabrication(models.Model):
             raise ValidationError(
                 {"article": "Un ordre de fabrication ne peut porter que sur un article fabriqué."}
             )
+
+
+class ComposantOF(models.Model):
+    """Nomenclature de l'OF : composants à sortir/approvisionner pour la quantité à fabriquer.
+    Copie figée à la création (une modification ultérieure de la nomenclature de l'article ne
+    change pas un ordre déjà lancé), comme les opérations de gamme."""
+
+    ordre_fabrication = models.ForeignKey(
+        OrdreFabrication, verbose_name="ordre de fabrication", on_delete=models.CASCADE, related_name="composants"
+    )
+    article = models.ForeignKey(
+        Article, verbose_name="composant", on_delete=models.PROTECT, related_name="utilisations_of"
+    )
+    quantite_par_unite = models.FloatField("quantité par pièce", help_text="Telle que définie dans la nomenclature")
+    quantite_necessaire = models.FloatField("quantité nécessaire", help_text="Quantité par pièce × quantité à fabriquer")
+    longueur_mm = models.FloatField("longueur (mm)", null=True, blank=True)
+    largeur_mm = models.FloatField("largeur (mm)", null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Composant d'ordre de fabrication"
+        verbose_name_plural = "Composants d'ordre de fabrication"
+        ordering = ["ordre_fabrication", "id"]
+
+    def __str__(self):
+        return f"{self.ordre_fabrication} — {self.article} × {self.quantite_necessaire:g}"
 
 
 class OperationOF(models.Model):

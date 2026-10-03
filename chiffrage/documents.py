@@ -216,3 +216,226 @@ def generer_pdf_bon_livraison(livraison):
     return construire_pdf(
         elements, titre, filigrane="ANNULÉ" if livraison.statut == livraison.Statut.ANNULEE else ""
     )
+
+
+def _bloc_adresses_commande(commande):
+    blocs = [[
+        _bloc_adresse("Facturé à", commande.client, commande.adresse_facturation),
+        _bloc_adresse("Livré à", commande.client, commande.adresse_livraison),
+    ]]
+    table = Table(blocs, colWidths=[87 * mm, 87 * mm])
+    table.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 0)]))
+    return table
+
+
+def _designation(ligne):
+    texte = f"<b>{echapper(ligne.article.reference)}</b>"
+    libelle = ligne.designation or ligne.article.libelle
+    if libelle:
+        texte += f"<br/>{echapper(libelle)}"
+    return texte
+
+
+def _date_ou_tiret(date):
+    return f"{date:%d/%m/%Y}" if date else "—"
+
+
+def generer_pdf_ar_commande(commande):
+    """Accusé de réception de commande, à envoyer au client : lignes, prix, dates de livraison prévues.
+    Une ligne sans prix n'est pas imprimable (un prix absent n'est pas un prix de 0)."""
+    st = styles()
+    societe = Societe.charger()
+    lignes_commande = list(commande.lignes.select_related("article", "taux_tva").all())
+    if not lignes_commande:
+        raise DocumentError("Cette commande n'a aucune ligne.")
+    sans_prix = [l.article.reference for l in lignes_commande if l.prix_vente_unitaire is None]
+    if sans_prix:
+        raise DocumentError("Lignes sans prix de vente : " + ", ".join(sans_prix) + ".")
+
+    titre = f"ACCUSÉ DE RÉCEPTION DE COMMANDE {commande.numero}"
+    references = [f"Date de commande : {commande.date_commande:%d/%m/%Y}"]
+    if commande.reference_client:
+        references.append(f"Votre référence : {commande.reference_client}")
+    if commande.devis_id:
+        references.append(f"Notre offre : {commande.devis_id} (indice {commande.devis.indice})")
+
+    lignes, par_taux = [], {}
+    total_ht = total_ttc = ZERO
+    for ligne in lignes_commande:
+        ht, ttc = ligne.montant_ht, ligne.montant_ttc
+        taux = D0(ligne.taux_tva.taux) if ligne.taux_tva_id else ZERO
+        total_ht += ht
+        total_ttc += ttc
+        par_taux[taux] = arrondir(par_taux.get(taux, ZERO) + (ttc - ht))
+        lignes.append([
+            Paragraph(_designation(ligne), st["normal"]),
+            Paragraph(quantite(ligne.quantite_commandee), st["droite"]),
+            Paragraph(montant(arrondir_prix(ligne.prix_vente_unitaire)), st["droite"]),
+            Paragraph(f"{pourcent(taux)} %".replace(".", ","), st["droite"]),
+            Paragraph(montant(ht), st["droite"]),
+            Paragraph(_date_ou_tiret(ligne.date_livraison_prevue), st["droite"]),
+        ])
+    table = tableau_lignes(
+        ["Désignation", "Qté", "PU HT", "TVA", "Total HT", "Livraison prévue"], lignes,
+        [60 * mm, 16 * mm, 26 * mm, 14 * mm, 28 * mm, 30 * mm], alignements_droite=(1, 2, 3, 4, 5),
+    )
+    totaux = [["Total HT", montant(arrondir(total_ht))]]
+    for taux in sorted(par_taux):
+        totaux.append([f"TVA {pourcent(taux)} %".replace(".", ","), montant(par_taux[taux])])
+    totaux.append(["Total TTC", montant(arrondir(total_ttc))])
+    table_totaux = Table(totaux, colWidths=[40 * mm, 34 * mm])
+    table_totaux.hAlign = "RIGHT"
+    table_totaux.setStyle(TableStyle([
+        ("ALIGN", (1, 0), (1, -1), "RIGHT"), ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+        ("LINEABOVE", (0, -1), (-1, -1), 0.8, GRIS), ("FONTSIZE", (0, 0), (-1, -1), 9),
+    ]))
+
+    conditions = []
+    paiement = getattr(commande.client, "conditions_paiement", None)
+    if paiement:
+        conditions.append(f"<b>Règlement :</b> {echapper(paiement.libelle)}")
+    elements = [
+        entete_societe(societe, st), Spacer(1, 8 * mm),
+        _titre_et_references(titre, references), Spacer(1, 5 * mm),
+        _bloc_adresses_commande(commande), Spacer(1, 6 * mm),
+        Paragraph("Nous accusons réception de votre commande et vous en remercions. Elle sera livrée aux dates indiquées ci-dessous.", st["normal"]),
+        Spacer(1, 4 * mm), table, Spacer(1, 4 * mm), table_totaux, Spacer(1, 6 * mm),
+    ]
+    if conditions:
+        elements += [Paragraph("<br/>".join(conditions), st["normal"]), Spacer(1, 4 * mm)]
+    if societe.mentions_commande:
+        elements += [Paragraph(echapper(societe.mentions_commande), st["petit"]), Spacer(1, 4 * mm)]
+    return construire_pdf(
+        elements, titre, filigrane="ANNULÉE" if commande.statut == commande.Statut.ANNULEE else ""
+    )
+
+
+def _stock_disponible(ligne):
+    """« 12 en stock (lots : C-123, C-456) » pour une ligne d'article géré en stock, sinon chaîne vide."""
+    from django.conf import settings
+
+    from stock.models import Lot, stock_actif_pour
+
+    if not settings.STOCK_ACTIF or not stock_actif_pour(ligne.article):
+        return ""
+    lots = list(Lot.objects.filter(article=ligne.article, quantite__gt=0).order_by("id"))
+    if not lots:
+        return "Rien en stock"
+    total = sum(l.quantite for l in lots)
+    coulees = [l.numero_coulee for l in lots if l.numero_coulee]
+    return f"{total:g} en stock" + (f" (coulées : {', '.join(coulees)})" if coulees else "")
+
+
+def generer_pdf_bon_preparation(commande):
+    """Bon de préparation (document interne, sans prix) : ce qu'il faut préparer, fabriquer ou prélever
+    pour cette commande, avec les dates de livraison prévues et les ordres de fabrication liés."""
+    st = styles()
+    societe = Societe.charger()
+    lignes_commande = list(commande.lignes.select_related("article").prefetch_related("ordres_fabrication").all())
+    if not lignes_commande:
+        raise DocumentError("Cette commande n'a aucune ligne.")
+
+    titre = f"BON DE PRÉPARATION {commande.numero}"
+    dates = [l.date_livraison_prevue for l in lignes_commande if l.date_livraison_prevue]
+    references = [f"Client : {commande.client.raison_sociale}"]
+    if commande.reference_client:
+        references.append(f"Réf. client : {commande.reference_client}")
+    references.append(f"À livrer le : {_date_ou_tiret(min(dates) if dates else None)}")
+
+    lignes = []
+    for ligne in lignes_commande:
+        reste = max(ligne.quantite_commandee - ligne.quantite_livree, 0)
+        ordres = ", ".join(o.numero for o in ligne.ordres_fabrication.all())
+        if ligne.article.nature == ligne.article.Nature.FABRIQUE:
+            origine = ordres or "OF à créer"
+        else:
+            origine = _stock_disponible(ligne) or "Achat / prélèvement"
+        lignes.append([
+            Paragraph(_designation(ligne), st["normal"]),
+            Paragraph(quantite(ligne.quantite_commandee), st["droite"]),
+            Paragraph(quantite(reste), st["droite"]),
+            Paragraph(_date_ou_tiret(ligne.date_livraison_prevue), st["droite"]),
+            Paragraph(echapper(origine), st["normal"]),
+            Paragraph("[   ]", st["droite"]),
+        ])
+    table = tableau_lignes(
+        ["Désignation", "Commandé", "À livrer", "Livraison prévue", "Origine / stock", "Prêt"], lignes,
+        [56 * mm, 20 * mm, 18 * mm, 26 * mm, 42 * mm, 12 * mm], alignements_droite=(1, 2, 3, 5),
+    )
+    adresse = commande.adresse_livraison
+    blocs = Table([[_bloc_adresse("Livraison", commande.client, adresse)]], colWidths=[174 * mm])
+    blocs.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 0)]))
+    elements = [
+        entete_societe(societe, st), Spacer(1, 8 * mm),
+        _titre_et_references(titre, references), Spacer(1, 5 * mm),
+        blocs, Spacer(1, 6 * mm), table, Spacer(1, 8 * mm),
+        Paragraph("Préparé par : ____________________    Date : ____________________", st["normal"]),
+    ]
+    return construire_pdf(
+        elements, titre, filigrane="ANNULÉE" if commande.statut == commande.Statut.ANNULEE else ""
+    )
+
+
+def generer_pdf_ordre_fabrication(of):
+    """Fiche de fabrication : quantité, livraison prévue, nomenclature (composants) et gamme (opérations)."""
+    st = styles()
+    societe = Societe.charger()
+    titre = f"ORDRE DE FABRICATION {of.numero}"
+    references = [
+        f"Commande : {of.commande_id}",
+        f"Client : {of.commande.client.raison_sociale}",
+        f"Lancé le : {of.date_lancement:%d/%m/%Y}",
+        f"Livraison prévue : {_date_ou_tiret(of.date_livraison_prevue)}",
+    ]
+    article = of.article
+    resume = Paragraph(
+        f"<b>{echapper(article.reference)}</b>"
+        + (f" — {echapper(article.libelle)}" if article.libelle else "")
+        + f"<br/>Quantité à fabriquer : <b>{quantite(of.quantite)}</b>",
+        st["normal"],
+    )
+
+    composants = list(of.composants.select_related("article").all())
+    if composants:
+        lignes_nomenclature = []
+        for c in composants:
+            dimensions = " × ".join(f"{v:g}" for v in (c.longueur_mm, c.largeur_mm) if v)
+            lignes_nomenclature.append([
+                Paragraph(f"<b>{echapper(c.article.reference)}</b>" + (f"<br/>{echapper(c.article.libelle)}" if c.article.libelle else ""), st["normal"]),
+                Paragraph(echapper(dimensions) or "—", st["normal"]),
+                Paragraph(quantite(c.quantite_par_unite), st["droite"]),
+                Paragraph(quantite(c.quantite_necessaire), st["droite"]),
+            ])
+        nomenclature = tableau_lignes(
+            ["Composant", "Dimensions (mm)", "Par pièce", "À sortir"], lignes_nomenclature,
+            [80 * mm, 38 * mm, 26 * mm, 30 * mm], alignements_droite=(2, 3),
+        )
+    else:
+        nomenclature = Paragraph("Aucun composant dans la nomenclature.", st["petit"])
+
+    operations = list(of.operations.select_related("poste").all())
+    if operations:
+        lignes_gamme = [
+            [
+                Paragraph(str(op.ordre), st["droite"]),
+                Paragraph(echapper(op.poste.nom), st["normal"]),
+                Paragraph(f"{op.temps_prevu:g} min".replace(".", ",") if op.temps_prevu is not None else "—", st["droite"]),
+                Paragraph("[   ]", st["droite"]),
+            ]
+            for op in operations
+        ]
+        gamme = tableau_lignes(
+            ["N°", "Poste / opération", "Temps prévu", "Fait"], lignes_gamme,
+            [16 * mm, 100 * mm, 32 * mm, 26 * mm], alignements_droite=(0, 2, 3),
+        )
+    else:
+        gamme = Paragraph("Aucune opération de gamme.", st["petit"])
+
+    elements = [
+        entete_societe(societe, st), Spacer(1, 8 * mm),
+        _titre_et_references(titre, references), Spacer(1, 5 * mm),
+        resume, Spacer(1, 6 * mm),
+        Paragraph("<b>Nomenclature</b>", st["normal"]), Spacer(1, 2 * mm), nomenclature, Spacer(1, 6 * mm),
+        Paragraph("<b>Gamme</b>", st["normal"]), Spacer(1, 2 * mm), gamme,
+    ]
+    return construire_pdf(elements, titre)

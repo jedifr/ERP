@@ -2754,3 +2754,22 @@ Un devis validé (envoyé au client) ne se modifie plus. Pour le faire évoluer 
 - API : `POST /api/v1/devis/<numéro>/reviser/` avec `{"motif": "..."}` (droit de modifier un devis) ; `indice`, `revision`, `motif_revision` et `devis_origine` sont renvoyés en lecture seule.
 
 Les révisions déjà créées avant cette version gardent leur numéro `-R2` ; leur indice (B) s'affiche normalement.
+
+## Commandes clients : AR, bon de préparation et ordres de fabrication
+
+**Flux** : devis validé → **« Créer la commande »** (le devis ne crée plus que la commande et ses lignes) → sur la fiche de la commande, **« Créer les ordres de fabrication »**.
+
+**Ordres de fabrication (OF)**
+- Un OF par ligne de commande d'**article fabriqué** (les matières achetées et services n'en ont pas). La **quantité commandée** est reprise automatiquement.
+- Une page d'aperçu montre ce qui sera créé avant validation. La case **« Regrouper les lignes du même article »** fusionne les lignes d'un même article en un seul OF (quantités additionnées, date de livraison la plus proche).
+- Chaque OF reprend : la **date de livraison prévue** (la plus proche des lignes couvertes), la **gamme** (opérations, postes, temps prévus calculés sur la quantité) et la **nomenclature** (composants à sortir = quantité par pièce × quantité à fabriquer, avec longueur/largeur). Gamme et nomenclature sont **figées** à la création : modifier ensuite la fiche article ne change pas un OF déjà lancé.
+- Le bouton est **rejouable sans doublon** : seules les lignes sans OF sont traitées (une ligne ajoutée plus tard se lance en recliquant). Chaque OF garde la liste des lignes de commande qu'il couvre.
+- Les OF sont envoyés au planning atelier (date de livraison et composants inclus dans le message ; les OF antérieurs ne sont pas renvoyés pour autant).
+- Droit : « ajouter un ordre de fabrication » (Responsable commercial, Direction, Atelier). Après mise à jour : `docker compose exec web python manage.py synchroniser_groupes`.
+
+**Documents PDF** (fiche de la commande ; API `GET /api/v1/commandes/<n>/ar-pdf/` et `/bon-preparation-pdf/`)
+- **AR de commande** : à envoyer au client — lignes, prix HT/TTC, TVA, **date de livraison prévue par ligne**, adresses de facturation et de livraison, sa référence de commande, l'offre d'origine (avec indice), conditions de règlement et mentions (nouveau champ « mentions sur les accusés de réception » de la fiche Société). Refusé si une ligne n'a pas de prix ; filigrane « ANNULÉE » si la commande l'est.
+- **Bon de préparation** : document interne **sans prix** — quantités commandées et à livrer, date prévue, OF liés (ou « OF à créer »), stock disponible et n° de coulée pour les articles gérés en stock, case « Prêt » et zone de signature. Accessible au Magasinier.
+- **Fiche de fabrication** (fiche de l'OF ; `GET /api/v1/ordres-fabrication/<n>/pdf/`) : quantité, livraison prévue, nomenclature et gamme avec cases « Fait ».
+
+**API** : `POST /api/v1/commandes/<n>/creer-ordres-fabrication/` (`{"regrouper": true}` facultatif) ; `POST /api/v1/devis/<n>/lancer-en-production/` ne crée plus que la commande.

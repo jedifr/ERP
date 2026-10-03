@@ -2,7 +2,7 @@ from rest_framework import serializers
 
 from technique.serializers import FullCleanModelSerializer
 
-from .models import Commande, Devis, DevisLigne, DevisLigneOperation, OperationOF, OrdreFabrication
+from .models import Commande, ComposantOF, Devis, DevisLigne, DevisLigneOperation, OperationOF, OrdreFabrication
 
 
 MESSAGE_DEVIS_VERROUILLE = (
@@ -74,11 +74,20 @@ class CommandeSerializer(FullCleanModelSerializer):
         read_only_fields = ["statut"]
 
 
+class ComposantOFSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ComposantOF
+        fields = ["article", "longueur_mm", "largeur_mm", "quantite_par_unite", "quantite_necessaire"]
+
+
 class OrdreFabricationSerializer(FullCleanModelSerializer):
+    composants = ComposantOFSerializer(many=True, read_only=True)
+
     class Meta:
         model = OrdreFabrication
         fields = "__all__"
         read_only_fields = [
+            "lignes_commande",
             "statut_synchro",
             "nombre_tentatives",
             "date_derniere_tentative",

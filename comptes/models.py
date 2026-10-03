@@ -54,6 +54,10 @@ class Societe(models.Model):
         "mentions sur les devis", blank=True,
         help_text="Conditions de vente, pénalités de retard, etc., imprimées en bas du devis.",
     )
+    mentions_commande = models.TextField(
+        "mentions sur les accusés de réception de commande", blank=True,
+        help_text="Ex. conditions générales de vente, réserve de propriété.",
+    )
     mentions_livraison = models.TextField("mentions sur les bons de livraison", blank=True)
 
     class Meta:

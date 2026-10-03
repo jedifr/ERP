@@ -45,6 +45,9 @@ _RESPONSABLE_COMMERCIAL = [
     "chiffrage.add_livraison", "chiffrage.change_livraison",
     "chiffrage.add_livraisonligne", "chiffrage.change_livraisonligne",
     "chiffrage.annuler_livraison", "stock.view_lot",  # choix du lot livré (autocomplétion)
+    # Lancer la fabrication d'une commande (bouton « Créer les ordres de fabrication »).
+    "chiffrage.add_ordrefabrication", "chiffrage.view_ordrefabrication",
+    "chiffrage.view_operationof", "chiffrage.view_composantof",
 ]
 
 _FACTURATION = [
@@ -68,6 +71,8 @@ _MAGASINIER = [
     "stock.view_inventaireligne", "stock.add_inventaireligne", "stock.change_inventaireligne",
     "stock.delete_inventaireligne",
     "stock.view_alertestock", "stock.change_alertestock",
+    # Bon de préparation d'une commande (PDF).
+    "chiffrage.view_commande", "chiffrage.view_commandeligne",
 ]
 
 _METHODES = [
@@ -112,8 +117,8 @@ GROUPES_PAR_DEFAUT = {
     "Atelier": [
         "technique.view_article", "technique.view_postetravail",
         "chiffrage.view_commande", "chiffrage.view_commandeligne",
-        "chiffrage.view_ordrefabrication", "chiffrage.change_ordrefabrication",
-        "chiffrage.view_operationof", "chiffrage.change_operationof",
+        "chiffrage.view_ordrefabrication", "chiffrage.change_ordrefabrication", "chiffrage.add_ordrefabrication",
+        "chiffrage.view_operationof", "chiffrage.change_operationof", "chiffrage.view_composantof",
         "stock.view_lot", "stock.view_emplacement",
     ],
     "Facturation": _FACTURATION,
