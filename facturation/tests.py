@@ -359,3 +359,382 @@ class MigrationStatutPaiementTests(TestCase):
                "non payé": "a_payer", "": "a_payer", "en attente": "a_payer", "Réglé": "paye"}
         valeurs = {texte: migration.normaliser_vers(texte) for texte in cas}
         self.assertEqual(valeurs, cas)
+
+
+from chiffrage.models import Livraison, LivraisonLigne
+
+from .models import FactureLigne
+from .services import FacturationError, creer_avoir, lignes_a_facturer, preparer_facture, reste_a_facturer
+
+
+class _FixtureLignes(_FixtureFacturation):
+    """Commande de 10 pièces à 10 € HT (TVA 20 %), dont 6 livrées."""
+
+    def setUp(self):
+        super().setUp()
+        self._livrer(6)
+
+    def _livrer(self, quantite, numero=None):
+        numero = numero or f"BL-F-{Livraison.objects.count() + 1}"
+        livraison = Livraison.objects.create(numero=numero, commande=self.commande, date_livraison=datetime.date(2026, 1, 20))
+        LivraisonLigne.objects.create(livraison=livraison, commande_ligne=self.ligne, quantite_livree=quantite)
+        self.ligne.refresh_from_db()
+        return livraison
+
+    def _facturer(self, quantite, numero="FAC-L1", **kw):
+        facture = Facture.objects.create(
+            numero=numero, commande=self.commande, date_facturation=datetime.date(2026, 2, 1), **kw
+        )
+        ligne = FactureLigne(facture=facture, commande_ligne=self.ligne, quantite=quantite)
+        ligne.full_clean()
+        ligne.save()
+        return facture
+
+
+class LignesDeFactureTests(_FixtureLignes, TestCase):
+    """C-OP-05 / C-OP-06 : on ne facture ni plus que livré, ni deux fois la même chose."""
+
+    def test_facturation_du_livre_accepte_et_montants_deduits_des_lignes(self):
+        facture = self._facturer(6)
+        facture.remplir_montants_depuis_les_lignes()
+        facture.refresh_from_db()
+        self.assertEqual((facture.montant_ht, facture.montant_ttc), (60.0, 72.0))
+
+    def test_facturer_plus_que_le_livre_est_refuse(self):
+        ligne = FactureLigne(
+            facture=Facture.objects.create(numero="FAC-X", commande=self.commande, date_facturation=datetime.date(2026, 2, 1)),
+            commande_ligne=self.ligne, quantite=7,
+        )
+        with self.assertRaises(ValidationError) as cm:
+            ligne.full_clean()
+        self.assertIn("quantite", cm.exception.message_dict)
+        self.assertIn("il reste 6 à facturer", cm.exception.message_dict["quantite"][0])
+
+    def test_deux_factures_cumulees_ne_depassent_pas_le_livre(self):
+        self._facturer(4, "FAC-A")
+        self.assertEqual(self.ligne.quantite_facturee, 4)
+        self.assertEqual(self.ligne.reste_a_facturer, 2)
+        facture_b = Facture.objects.create(numero="FAC-B", commande=self.commande, date_facturation=datetime.date(2026, 2, 2))
+        with self.assertRaises(ValidationError):
+            FactureLigne(facture=facture_b, commande_ligne=self.ligne, quantite=3).full_clean()
+        FactureLigne(facture=facture_b, commande_ligne=self.ligne, quantite=2).full_clean()
+
+    def test_une_livraison_supplementaire_libere_de_la_capacite(self):
+        self._facturer(6, "FAC-A")
+        self.assertEqual(reste_a_facturer(self.ligne), 0)
+        self._livrer(3)
+        self.assertEqual(reste_a_facturer(self.ligne), 3)
+
+    def test_facturation_anticipee_limitee_au_commande(self):
+        facture = Facture.objects.create(
+            numero="FAC-ANT", commande=self.commande, date_facturation=datetime.date(2026, 2, 1), anticipee=True
+        )
+        FactureLigne(facture=facture, commande_ligne=self.ligne, quantite=10).full_clean()
+        with self.assertRaises(ValidationError):
+            FactureLigne(facture=facture, commande_ligne=self.ligne, quantite=11).full_clean()
+
+    def test_ligne_dune_autre_commande_refusee(self):
+        autre = Commande.objects.create(
+            numero="CDE-AUTRE", client=self.tiers, reference_client="X", date_commande=datetime.date(2026, 1, 1),
+            adresse_facturation=self.adresse, adresse_livraison=self.adresse,
+        )
+        ligne_autre = CommandeLigne.objects.create(commande=autre, article=self.article, quantite_commandee=5, prix_vente_unitaire=1)
+        facture = Facture.objects.create(numero="FAC-Y", commande=self.commande, date_facturation=datetime.date(2026, 2, 1))
+        with self.assertRaises(ValidationError) as cm:
+            FactureLigne(facture=facture, commande_ligne=ligne_autre, quantite=1).full_clean()
+        self.assertIn("commande_ligne", cm.exception.message_dict)
+
+    def test_prix_et_tva_figes_sur_la_ligne(self):
+        facture = self._facturer(2)
+        self.ligne.prix_vente_unitaire = 99
+        self.ligne.save()
+        ligne = facture.lignes.get()
+        self.assertEqual((ligne.prix_unitaire_ht, ligne.taux_tva, ligne.montant_ht), (10.0, 20.0, 20.0))
+
+    def test_lignes_figees_une_fois_la_facture_emise(self):
+        facture = self._facturer(2)
+        facture.reference_tiime = "TIIME-L"
+        facture.save()
+        ligne = facture.lignes.get()
+        ligne.quantite = 3
+        with self.assertRaises(FactureVerrouilleeError):
+            ligne.save()
+        with self.assertRaises(FactureVerrouilleeError):
+            ligne.delete()
+        with self.assertRaises(ValidationError):
+            FactureLigne(facture=facture, commande_ligne=self.ligne, quantite=1).full_clean()
+
+    def test_montants_saisis_jamais_ecrases(self):
+        facture = self._facturer(6, montant_ht=55, montant_ttc=66)
+        self.assertFalse(facture.remplir_montants_depuis_les_lignes())
+        facture.refresh_from_db()
+        self.assertEqual(facture.montant_ht, 55)
+
+    def test_api_lignes_refuse_le_depassement(self):
+        facture = Facture.objects.create(numero="FAC-API", commande=self.commande, date_facturation=datetime.date(2026, 2, 1))
+        r = self.client.post(
+            "/api/v1/facture-lignes/",
+            data=json.dumps({"facture": facture.pk, "commande_ligne": self.ligne.pk, "quantite": 9}),
+            content_type="application/json",
+        )
+        self.assertEqual(r.status_code, 400, r.content)
+        r = self.client.post(
+            "/api/v1/facture-lignes/",
+            data=json.dumps({"facture": facture.pk, "commande_ligne": self.ligne.pk, "quantite": 6}),
+            content_type="application/json",
+        )
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(r.json()["montant_ht"], 60.0)
+
+
+class AvoirsTests(_FixtureLignes, TestCase):
+    """C-OP-04 : correction d'une facture émise par un avoir lié, jamais par modification."""
+
+    def _facture_emise(self, quantite=6, numero="FAC-E"):
+        facture = self._facturer(quantite, numero)
+        facture.remplir_montants_depuis_les_lignes()
+        facture.reference_tiime = f"TIIME-{numero}"
+        facture.save()
+        return facture
+
+    def test_avoir_total_negatif_lie_a_la_facture(self):
+        facture = self._facture_emise()
+        avoir = creer_avoir(facture, "Marchandise non conforme", utilisateur=self.user)
+        self.assertEqual(avoir.type_document, "avoir")
+        self.assertEqual(avoir.facture_origine, facture)
+        self.assertEqual((avoir.montant_ht, avoir.montant_ttc), (-60.0, -72.0))
+        self.assertEqual(avoir.motif, "Marchandise non conforme")
+        self.assertEqual(avoir.numero, "AV-FAC-E")
+        avoir.full_clean()
+
+    def test_avoir_rouvre_le_reste_a_facturer(self):
+        facture = self._facture_emise()
+        self.assertEqual(reste_a_facturer(self.ligne), 0)
+        creer_avoir(facture, "Erreur de prix")
+        self.assertEqual(self.ligne.quantite_facturee, 0)
+        self.assertEqual(reste_a_facturer(self.ligne), 6)
+
+    def test_avoir_partiel_puis_solde_puis_plus_rien(self):
+        facture = self._facture_emise()
+        partiel = Facture.objects.create(
+            numero="AV-PARTIEL", commande=self.commande, type_document="avoir", facture_origine=facture,
+            motif="Remise", date_facturation=datetime.date(2026, 2, 3),
+        )
+        ligne = FactureLigne(facture=partiel, commande_ligne=self.ligne, quantite=2)
+        ligne.full_clean()
+        ligne.save()
+        solde = creer_avoir(facture, "Solde")
+        self.assertEqual(solde.lignes.get().quantite, 4)
+        with self.assertRaises(FacturationError):
+            creer_avoir(facture, "Encore")
+
+    def test_avoir_ne_depasse_pas_la_facture(self):
+        facture = self._facture_emise()
+        avoir = Facture.objects.create(
+            numero="AV-TROP", commande=self.commande, type_document="avoir", facture_origine=facture,
+            motif="x", date_facturation=datetime.date(2026, 2, 3),
+        )
+        with self.assertRaises(ValidationError):
+            FactureLigne(facture=avoir, commande_ligne=self.ligne, quantite=7).full_clean()
+
+    def test_avoir_refuse_sur_facture_non_emise_ou_sur_un_avoir(self):
+        brouillon = self._facturer(2, "FAC-BR")
+        with self.assertRaises(FacturationError):
+            creer_avoir(brouillon, "x")
+        avoir = creer_avoir(self._facture_emise(quantite=4), "x")
+        avoir.reference_tiime = "TIIME-AV"
+        avoir.save()
+        with self.assertRaises(FacturationError):
+            creer_avoir(avoir, "x")
+
+    def test_motif_obligatoire(self):
+        with self.assertRaises(FacturationError):
+            creer_avoir(self._facture_emise(), "  ")
+
+    def test_regles_de_coherence_dun_avoir(self):
+        facture = self._facture_emise()
+
+        def erreurs(**kw):
+            donnees = dict(numero="AV-T", commande=self.commande, type_document="avoir", facture_origine=facture,
+                           motif="m", date_facturation=datetime.date(2026, 2, 3), montant_ht=-10, montant_ttc=-12)
+            donnees.update(kw)
+            with self.assertRaises(ValidationError) as cm:
+                Facture(**donnees).full_clean()
+            return cm.exception.message_dict
+
+        self.assertIn("montant_ht", erreurs(montant_ht=10, montant_ttc=12))
+        self.assertIn("facture_origine", erreurs(facture_origine=None))
+        self.assertIn("motif", erreurs(motif=""))
+        self.assertIn("date_facturation", erreurs(date_facturation=datetime.date(2026, 1, 15)))
+        self.assertIn("montant_ht", erreurs(montant_ht=-100, montant_ttc=-120))
+        with self.assertRaises(ValidationError) as cm:
+            Facture(numero="F-X", commande=self.commande, facture_origine=facture, date_facturation=datetime.date(2026, 2, 3)).full_clean()
+        self.assertIn("facture_origine", cm.exception.message_dict)
+
+    def test_la_facture_deja_creditee_reste_intacte_et_non_supprimable(self):
+        facture = self._facture_emise()
+        creer_avoir(facture, "x")
+        facture.refresh_from_db()
+        self.assertEqual(facture.montant_ht, 60.0)
+        with self.assertRaises(FactureVerrouilleeError):
+            facture.delete()
+
+    def test_annulation_de_livraison_possible_apres_avoir_integral(self):
+        livraison = Livraison.objects.first()
+        facture = self._facture_emise()
+        with self.assertRaises(Exception):
+            livraison.annuler()
+        creer_avoir(facture, "Livraison annulée")
+        livraison.annuler()
+        self.ligne.refresh_from_db()
+        self.assertEqual(self.ligne.quantite_livree, 0)
+
+    def test_api_avoir_et_permission(self):
+        facture = self._facture_emise()
+        simple = get_user_model().objects.create_user("api-simple-f", "s@example.com", "pass1234", is_staff=True)
+        self.client.force_login(simple)
+        self.assertEqual(self.client.post(f"/api/v1/factures/{facture.pk}/avoir/", data={"motif": "x"}).status_code, 403)
+        self.client.force_login(self.user)
+        r = self.client.post(f"/api/v1/factures/{facture.pk}/avoir/", data=json.dumps({"motif": "Retour"}), content_type="application/json")
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(r.json()["montant_ht"], -60.0)
+        again = self.client.post(f"/api/v1/factures/{facture.pk}/avoir/", data=json.dumps({"motif": "Encore"}), content_type="application/json")
+        self.assertEqual(again.status_code, 400)
+
+    def test_admin_page_et_creation_davoir(self):
+        facture = self._facture_emise()
+        page = self.client.get(f"/admin/facturation/facture/{facture.pk}/avoir/")
+        self.assertEqual(page.status_code, 200)
+        self.assertContains(page, "Motif")
+        self.client.post(f"/admin/facturation/facture/{facture.pk}/avoir/", {"motif": "Erreur"}, follow=True)
+        self.assertTrue(Facture.objects.filter(type_document="avoir", facture_origine=facture).exists())
+
+
+class PreparerFactureTests(_FixtureLignes, TestCase):
+    """Facture brouillon du livré non facturé : numéro, lignes, montants."""
+
+    def test_prepare_le_livre_non_facture(self):
+        facture = preparer_facture(self.commande)
+        self.assertEqual(facture.numero, "FAC-00001")  # règle de codification « Facture » préconfigurée
+        self.assertEqual(facture.mode_creation, "automatique")
+        self.assertEqual(facture.lignes.get().quantite, 6)
+        self.assertEqual((facture.montant_ht, facture.montant_ttc), (60.0, 72.0))
+        self.assertFalse(facture_verrouillee(facture))
+
+    def test_seconde_preparation_ne_prend_que_le_nouveau_livre(self):
+        preparer_facture(self.commande)
+        with self.assertRaises(FacturationError):
+            preparer_facture(self.commande)
+        self._livrer(3)
+        facture = preparer_facture(self.commande)
+        self.assertEqual(facture.numero, "FAC-00002")  # le compteur de codification a avancé
+        self.assertEqual(facture.lignes.get().quantite, 3)
+
+    def test_numero_de_repli_sans_regle_de_codification(self):
+        from codification.models import RegleCodification
+
+        RegleCodification.objects.filter(pk="facture").delete()
+        self.assertEqual(preparer_facture(self.commande).numero, "FAC-CDE-FACT")
+        self._livrer(2)
+        self.assertEqual(preparer_facture(self.commande).numero, "FAC-CDE-FACT-2")
+
+    def test_rien_a_facturer_sans_livraison(self):
+        autre = Commande.objects.create(
+            numero="CDE-RIEN", client=self.tiers, reference_client="X", date_commande=datetime.date(2026, 1, 1),
+            adresse_facturation=self.adresse, adresse_livraison=self.adresse,
+        )
+        CommandeLigne.objects.create(commande=autre, article=self.article, quantite_commandee=5, prix_vente_unitaire=1)
+        with self.assertRaises(FacturationError):
+            preparer_facture(autre)
+
+    def test_commande_annulee_refusee(self):
+        self.commande.statut = Commande.Statut.ANNULEE
+        self.commande.save()
+        with self.assertRaises(FacturationError):
+            preparer_facture(self.commande)
+
+    def test_anticipee_prend_tout_le_commande(self):
+        facture = preparer_facture(self.commande, anticipee=True)
+        self.assertEqual(facture.lignes.get().quantite, 10)
+        self.assertTrue(facture.anticipee)
+
+    def test_vue_admin_liste_et_prepare(self):
+        page = self.client.get("/admin/facturation/facture/preparer/")
+        self.assertEqual(page.status_code, 200)
+        self.assertContains(page, "CDE-FACT")
+        self.client.post("/admin/facturation/facture/preparer/", {"commande": self.commande.pk}, follow=True)
+        self.assertTrue(Facture.objects.filter(commande=self.commande, mode_creation="automatique").exists())
+        page = self.client.get("/admin/facturation/facture/preparer/")
+        self.assertContains(page, "Rien à facturer")
+
+    def test_api_preparer(self):
+        r = self.client.post("/api/v1/factures/preparer/", data=json.dumps({"commande": self.commande.pk}), content_type="application/json")
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(self.client.post("/api/v1/factures/preparer/", data=json.dumps({"commande": self.commande.pk}), content_type="application/json").status_code, 400)
+
+    def test_anticipee_exige_la_permission(self):
+        simple = get_user_model().objects.create_user("antic", "a@example.com", "pass1234", is_staff=True)
+        from django.contrib.auth.models import Permission
+
+        simple.user_permissions.set(Permission.objects.filter(codename__in=["add_facture", "view_facture"]))
+        self.client.force_login(simple)
+        r = self.client.post("/api/v1/factures/preparer/", data=json.dumps({"commande": self.commande.pk, "anticipee": True}), content_type="application/json")
+        self.assertEqual(r.status_code, 403)
+
+    def test_indicateurs_sur_la_ligne_de_commande_dans_ladmin(self):
+        preparer_facture(self.commande)
+        page = self.client.get(f"/admin/chiffrage/commande/{self.commande.pk}/change/")
+        self.assertContains(page, "Livré non facturé")
+
+
+class EcrituresFactureAvoirTests(_FixtureLignes, TestCase):
+    """C-TD-01 : l'écriture suit ce que la facture facture réellement."""
+
+    def setUp(self):
+        super().setUp()
+        from comptabilite.pcg import importer_pcg
+
+        importer_pcg()
+
+    def test_facture_partielle_ne_comptabilise_que_le_facture(self):
+        from comptabilite.generation import generer_ecriture_facture
+
+        facture = preparer_facture(self.commande)  # 6 sur 10
+        ecriture, _ = generer_ecriture_facture(facture)
+        self.assertTrue(ecriture.est_equilibree)
+        self.assertAlmostEqual(ecriture.total_debit, 72.0)  # et non 120 (toute la commande)
+
+    def test_deux_factures_du_meme_ordre_ont_chacune_leur_ecriture(self):
+        from comptabilite.generation import generer_ecriture_facture
+
+        premiere = preparer_facture(self.commande)
+        self._livrer(4)
+        seconde = preparer_facture(self.commande)
+        e1, _ = generer_ecriture_facture(premiere)
+        e2, _ = generer_ecriture_facture(seconde)
+        self.assertAlmostEqual(e1.total_debit + e2.total_debit, 120.0)
+
+    def test_avoir_ecriture_en_sens_inverse(self):
+        from comptabilite.generation import generer_ecriture_facture
+
+        facture = preparer_facture(self.commande)
+        facture.reference_tiime = "TIIME-C"
+        facture.save()
+        avoir = creer_avoir(facture, "Retour")
+        ecriture, _ = generer_ecriture_facture(avoir)
+        self.assertTrue(ecriture.est_equilibree)
+        client = ecriture.lignes.get(compte__code="411")
+        self.assertEqual((client.debit, client.credit), (0, 72.0))
+        vente = ecriture.lignes.get(compte__code="706")
+        self.assertEqual((vente.debit, vente.credit), (60.0, 0))
+        tva = ecriture.lignes.get(compte__code="44571")
+        self.assertEqual((tva.debit, tva.credit), (12.0, 0))
+        self.assertTrue(ecriture.libelle.startswith("Avoir"))
+
+    def test_facture_sans_lignes_garde_le_comportement_historique(self):
+        from comptabilite.generation import generer_ecriture_facture
+
+        ancienne = self._facture(numero="FAC-ANCIENNE", montant_ht=100, montant_ttc=120)
+        ecriture, _ = generer_ecriture_facture(ancienne)
+        self.assertTrue(ecriture.est_equilibree)
+        self.assertAlmostEqual(ecriture.total_debit, 120.0)  # lignes de la commande : 10 x 10 HT, 20 %

@@ -497,6 +497,24 @@ class CommandeLigne(models.Model):
     reliquat.fget.short_description = "Reliquat"
 
     @property
+    def quantite_facturee(self):
+        """Quantité nette facturée (factures moins avoirs, brouillons compris)."""
+        from facturation.models import FactureLigne
+
+        return FactureLigne.cumul_facture(self)
+
+    quantite_facturee.fget.short_description = "Quantité facturée"
+
+    @property
+    def reste_a_facturer(self):
+        """Livré mais pas encore facturé."""
+        if self.quantite_commandee is None:
+            return None
+        return max(round(self.quantite_livree - self.quantite_facturee, 6), 0)
+
+    reste_a_facturer.fget.short_description = "Livré non facturé"
+
+    @property
     def entierement_livree(self):
         return self.reliquat is not None and self.reliquat <= 0
 
@@ -661,13 +679,23 @@ class Livraison(models.Model):
         self.refresh_from_db()
 
     def _verifier_non_facturee(self, lignes):
-        """Une commande déjà facturée ne voit plus ses livraisons annulées : il faut
-        d'abord un avoir (le détail du facturé par ligne arrive avec les lignes de
-        facture)."""
-        if self.commande.factures.exists():
+        """Annuler cette livraison ne doit pas laisser plus de quantité facturée (nette
+        d'avoirs) que ce qui resterait livré : sinon il faut d'abord un avoir."""
+        from facturation.models import FactureLigne
+
+        for ligne in lignes:
+            facture = FactureLigne.cumul_facture(ligne.commande_ligne)
+            restant_livre = ligne.commande_ligne.quantite_livree - ligne.quantite_livree
+            if facture > restant_livre + 1e-9:
+                raise LivraisonError(
+                    f"« {ligne.commande_ligne.article} » est déjà facturé à hauteur de {facture:g} : "
+                    "émettez d'abord un avoir pour annuler cette livraison."
+                )
+        # Facture antérieure aux lignes de facture : on ne sait pas ce qu'elle porte.
+        if self.commande.factures.filter(lignes__isnull=True, type_document="facture").exists():
             raise LivraisonError(
-                f"La commande « {self.commande} » est déjà facturée : émettez d'abord un avoir "
-                "pour annuler cette livraison."
+                f"La commande « {self.commande} » porte une facture sans lignes : "
+                "émettez d'abord un avoir pour annuler cette livraison."
             )
 
 

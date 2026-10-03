@@ -2409,3 +2409,48 @@ Tests : `CommandeDirecteTests`, `VerrouFactureTests`, `ValidationFactureTests`,
 
 **Vérifié** (Playwright) : fiche d'une facture émise — seul le paiement est
 éditable ; page de confirmation d'annulation d'une livraison.
+
+## Recette du module C : priorité 2, lignes de facture, avoirs, cohérence livraison/facture
+
+Tests : `LignesDeFactureTests`, `AvoirsTests`, `PreparerFactureTests`,
+`EcrituresFactureAvoirTests` (`facturation/tests.py`).
+
+- **Lignes de facture** (`FactureLigne`) : ce qu'une facture facture réellement
+  (quantité d'une ligne de commande, prix et TVA figés au moment de la
+  facturation). Elles donnent, par ligne de commande, le **déjà facturé** (net
+  d'avoirs, brouillons compris) et le **livré non facturé**, désormais affichés sur
+  la commande. On ne peut pas facturer plus que le **livré** (ni deux fois la même
+  quantité d'une facture à l'autre) ; la case « facturation anticipée »
+  (permission `facturer_avant_livraison`) lève cette limite jusqu'au commandé,
+  pour un acompte ou une facturation à la commande. Les lignes se figent avec la
+  facture émise ; les montants HT/TTC de la facture sont repris des lignes quand
+  ils sont laissés vides (jamais écrasés s'ils sont saisis : Tiime fait foi).
+- **Préparer une facture** (bouton sur la liste des factures, ou
+  `POST /api/v1/factures/preparer/`) : crée une facture brouillon avec le livré non
+  encore facturé d'une commande, numérotée par la règle de codification
+  « Facture » (repli `FAC-<commande>`). Reste à renseigner la référence Tiime une
+  fois la facture émise.
+- **Avoirs** : type de document *Avoir*, lié à sa facture d'origine, motif
+  obligatoire, montants négatifs, quantités limitées à ce que la facture portait
+  (net des avoirs déjà faits), pas d'avoir sur un avoir. Bouton « Créer un avoir »
+  sur la fiche d'une facture émise (permission `creer_avoir`, API
+  `POST /api/v1/factures/<n>/avoir/`) : crédite le solde restant ; un avoir
+  partiel se saisit à la main. Un avoir rouvre le « reste à facturer » et permet
+  d'annuler la livraison correspondante.
+- **Écritures comptables fondées sur la facture** : une facture partielle ne
+  comptabilise plus toute la commande, deux factures d'une même commande ont
+  chacune leur écriture juste, et un avoir génère l'écriture inverse (Clients au
+  crédit, Ventes et TVA au débit). Les factures sans lignes gardent l'ancien
+  calcul.
+- **Annulation de livraison** : contrôle précis (facturé net par ligne contre ce
+  qui resterait livré) au lieu du refus global de la priorité 1.
+
+**À savoir à la mise à jour** : les factures *antérieures* n'ont pas de lignes et
+ne comptent donc pas dans le « déjà facturé » — l'écran « Préparer une facture »
+leur proposerait de refacturer le livré. Pour chaque facture existante, ajoutez
+ses lignes dans l'admin (quantités effectivement facturées) avant d'en préparer
+de nouvelles sur la même commande.
+
+**Vérifié** (Playwright) : page « Préparer une facture » (commande livrée 8 sur 20,
+non facturée) ; facture préparée avec sa ligne (8 × 12,50 = 100 € HT, 120 € TTC)
+et les boutons « Créer un avoir » / « Historique ».

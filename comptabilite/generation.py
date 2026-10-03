@@ -29,22 +29,40 @@ def _repartition_lignes(facture, parametres):
     chiffrée (ex. facture ancienne, ou lignes sans prix renseigné)."""
     regime_fiscal = facture.commande.client.regime_fiscal
     groupes = {}
-    lignes = facture.commande.lignes.select_related(
-        "taux_tva",
-        "article__compte_vente_override__compte_vente",
-        "article__compte_vente_override__code_analytique",
-        "article__compte_vente_override__poste_gestion",
+    # Facture avec ses propres lignes (ce qu'elle facture réellement, signé pour un
+    # avoir) : on s'appuie sur elles. Sinon — facture ancienne sans lignes — repli
+    # historique sur les lignes de la commande.
+    lignes_facture = list(
+        facture.lignes.select_related(
+            "commande_ligne__article__compte_vente_override__compte_vente",
+            "commande_ligne__article__compte_vente_override__code_analytique",
+            "commande_ligne__article__compte_vente_override__poste_gestion",
+            "commande_ligne__taux_tva",
+        )
     )
-    for ligne in lignes.all():
-        if ligne.montant_ht is None or ligne.montant_ttc is None:
-            continue
-        taux = ligne.taux_tva.taux if ligne.taux_tva_id else 0
-        override = getattr(ligne.article, "compte_vente_override", None)
+    if lignes_facture:
+        sources = [
+            (ligne.commande_ligne.article, ligne._taux(), ligne.montant_ht, ligne.montant_ttc)
+            for ligne in lignes_facture
+        ]
+    else:
+        sources = [
+            (ligne.article, ligne.taux_tva.taux if ligne.taux_tva_id else 0, ligne.montant_ht, ligne.montant_ttc)
+            for ligne in facture.commande.lignes.select_related(
+                "taux_tva",
+                "article__compte_vente_override__compte_vente",
+                "article__compte_vente_override__code_analytique",
+                "article__compte_vente_override__poste_gestion",
+            )
+            if ligne.montant_ht is not None and ligne.montant_ttc is not None
+        ]
+    for article, taux, montant_ht, montant_ttc in sources:
+        override = getattr(article, "compte_vente_override", None)
         if override is not None:
             compte_vente = override.resoudre_compte_vente(regime_fiscal)
             if compte_vente is None:
                 raise GenerationEcritureError(
-                    f"« {ligne.article} » : le poste de gestion « {override.poste_gestion} » n'a pas de "
+                    f"« {article} » : le poste de gestion « {override.poste_gestion} » n'a pas de "
                     f"compte de vente configuré pour le régime fiscal « {regime_fiscal} »."
                 )
             code_analytique = override.resoudre_code_analytique()
@@ -56,8 +74,8 @@ def _repartition_lignes(facture, parametres):
             cle,
             {"taux": taux, "compte_vente": compte_vente, "code_analytique": code_analytique, "ht": 0.0, "ttc": 0.0},
         )
-        groupe["ht"] += ligne.montant_ht
-        groupe["ttc"] += ligne.montant_ttc
+        groupe["ht"] += montant_ht
+        groupe["ttc"] += montant_ttc
 
     if groupes:
         return groupes
@@ -110,7 +128,11 @@ def generer_ecriture_facture(facture):
             )
 
     groupes = _repartition_lignes(facture, parametres)
-    total_ttc = sum(g["ttc"] for g in groupes.values())
+    total_ttc = round(sum(g["ttc"] for g in groupes.values()), 2)
+    # Un avoir (montants négatifs) passe en sens inverse d'une facture : Clients au
+    # crédit, Ventes et TVA au débit. Les montants des lignes restent positifs.
+    avoir = total_ttc < 0
+    sens_client, sens_vente = ("credit", "debit") if avoir else ("debit", "credit")
 
     client = facture.commande.client
     comptes_client = getattr(client, "comptes_comptables", None)
@@ -125,33 +147,36 @@ def generer_ecriture_facture(facture):
             journal=parametres.journal_ventes,
             date_ecriture=facture.date_facturation,
             piece=facture.numero,
-            libelle=f"Facture {facture.numero}",
+            libelle=f"{'Avoir' if avoir else 'Facture'} {facture.numero}",
             facture=facture,
         )
         LigneEcriture.objects.create(
             ecriture=ecriture,
             compte=compte_client,
-            libelle=f"Facture {facture.numero}",
-            debit=total_ttc,
+            libelle=f"{'Avoir' if avoir else 'Facture'} {facture.numero}",
+            **{sens_client: abs(total_ttc)},
         )
         for cle in sorted(groupes, key=lambda c: (c[0] is None, c[0] or 0, c[1], c[2] or "")):
             montants = groupes[cle]
             taux = montants["taux"]
-            libelle = f"Facture {facture.numero} — TVA {taux:g}%" if taux else f"Facture {facture.numero}"
-            LigneEcriture.objects.create(
-                ecriture=ecriture,
-                compte=montants["compte_vente"],
-                code_analytique=montants["code_analytique"],
-                libelle=libelle,
-                credit=montants["ht"],
-            )
-            tva = montants["ttc"] - montants["ht"]
+            nature = "Avoir" if avoir else "Facture"
+            libelle = f"{nature} {facture.numero} — TVA {taux:g}%" if taux else f"{nature} {facture.numero}"
+            ht = round(abs(montants["ht"]), 2)
+            if ht:
+                LigneEcriture.objects.create(
+                    ecriture=ecriture,
+                    compte=montants["compte_vente"],
+                    code_analytique=montants["code_analytique"],
+                    libelle=libelle,
+                    **{sens_vente: ht},
+                )
+            tva = round(abs(montants["ttc"]) - abs(montants["ht"]), 2)
             if tva:
                 LigneEcriture.objects.create(
                     ecriture=ecriture,
                     compte=parametres.compte_tva_collectee_defaut,
                     libelle=libelle,
-                    credit=tva,
+                    **{sens_vente: tva},
                 )
 
     return ecriture, True

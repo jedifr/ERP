@@ -2,7 +2,7 @@ from rest_framework import serializers
 
 from technique.serializers import FullCleanModelSerializer
 
-from .models import CHAMPS_FIGES, Facture, facture_verrouillee
+from .models import CHAMPS_FIGES, Facture, FactureLigne, facture_verrouillee
 
 
 class FactureSerializer(FullCleanModelSerializer):
@@ -20,6 +20,11 @@ class FactureSerializer(FullCleanModelSerializer):
             Facture.objects.filter(pk=self.instance.pk).values(*CHAMPS_FIGES).first() if verrouillee else None
         )
         attrs = super().validate(attrs)
+        request = self.context.get("request")
+        if attrs.get("anticipee") and request is not None and not request.user.has_perm(
+            "facturation.facturer_avant_livraison"
+        ):
+            raise serializers.ValidationError({"anticipee": "Vous n'avez pas la permission de facturer avant livraison."})
         if verrouillee:
             for champ in CHAMPS_FIGES:
                 nom = champ[:-3] if champ.endswith("_id") else champ
@@ -30,3 +35,12 @@ class FactureSerializer(FullCleanModelSerializer):
                             {nom: "Facture émise ou comptabilisée : ce champ ne se modifie plus (corrigez par un avoir)."}
                         )
         return attrs
+
+
+class FactureLigneSerializer(FullCleanModelSerializer):
+    montant_ht = serializers.ReadOnlyField()
+    montant_ttc = serializers.ReadOnlyField()
+
+    class Meta:
+        model = FactureLigne
+        fields = "__all__"

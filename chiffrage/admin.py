@@ -422,6 +422,8 @@ class CommandeLigneInline(TabularInline):
         "quantite_livree",
         "reliquat",
         "entierement_livree",
+        "quantite_facturee",
+        "reste_a_facturer",
     ]
     readonly_fields = [
         "montant_ht",
@@ -431,6 +433,8 @@ class CommandeLigneInline(TabularInline):
         "quantite_livree",
         "reliquat",
         "entierement_livree",
+        "quantite_facturee",
+        "reste_a_facturer",
     ]
 
     @admin.display(description="Date de livraison possible (appro)")
