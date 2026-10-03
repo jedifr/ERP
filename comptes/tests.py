@@ -818,3 +818,99 @@ class AutocompletionsTracabiliteTests(TestCase):
             for app, modele, champ in champs:
                 r = self.client.get("/admin/autocomplete/", {"app_label": app, "model_name": modele, "field_name": champ, "term": ""})
                 self.assertEqual(r.status_code, 200, f"{groupe} : {modele}.{champ}")
+
+
+class SyntheseQuotidienneTests(TestCase):
+    def setUp(self):
+        import datetime
+
+        from chiffrage.models import Commande, Devis
+        from commercial.models import Adresse, ConditionPaiement, Tiers
+        from facturation.models import Facture
+        from stock.models import AlerteStock
+        from technique.models import Article
+
+        tiers = Tiers.objects.create(
+            code="CLI-SYN", raison_sociale="Client Synthèse", type_tiers="client",
+            conditions_paiement=ConditionPaiement.objects.create(libelle="30 j syn", nombre_jours=30),
+        )
+        adresse = Adresse.objects.create(tiers=tiers, est_facturation=True, est_livraison=True, adresse="1 rue", code_postal="75000", ville="Paris")
+        commande = Commande.objects.create(
+            numero="CDE-SYN", client=tiers, reference_client="X", date_commande=datetime.date(2026, 1, 1),
+            adresse_facturation=adresse, adresse_livraison=adresse,
+        )
+        Facture.objects.create(numero="FAC-SYN", commande=commande, date_facturation=datetime.date(2026, 1, 15),
+                               montant_ht=100, montant_ttc=120, reference_tiime="T")
+        Devis.objects.create(numero="DEV-SYN", client=tiers, date_creation=datetime.date(2026, 1, 1), statut="valide",
+                             date_validite=datetime.date.today() + datetime.timedelta(days=2))
+        article = Article.objects.create(reference="ART-SYN", nature="matiere_premiere")
+        AlerteStock.objects.create(article=article)
+
+    def test_contenu_de_la_synthese(self):
+        from comptes import synthese
+
+        sections = synthese.construire()
+        texte = synthese.composer(sections)
+        for attendu in ("FAC-SYN", "Client Synthèse", "120 €", "DEV-SYN", "ART-SYN", "FACTURES EN RETARD"):
+            self.assertIn(attendu, texte, attendu)
+
+    def test_synthese_vide_quand_rien_a_signaler(self):
+        from comptes import synthese
+        from facturation.models import Facture
+
+        Facture.objects.update(statut_paiement="paye")
+        from chiffrage.models import Devis
+        from stock.models import AlerteStock
+
+        Devis.objects.all().delete()
+        AlerteStock.objects.all().delete()
+        self.assertEqual(synthese.construire(), {})
+
+    def test_commande_envoie_aux_destinataires_et_refuse_sans_destinataire(self):
+        import io
+
+        from django.core import mail
+        from django.core.management import call_command
+        from django.core.management.base import CommandError
+        from django.test import override_settings
+
+        with override_settings(SYNTHESE_DESTINATAIRES=[]):
+            with self.assertRaises(CommandError):
+                call_command("synthese_quotidienne", stdout=io.StringIO())
+            call_command("synthese_quotidienne", "--destinataires", "dir@example.com,compta@example.com", stdout=io.StringIO())
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["dir@example.com", "compta@example.com"])
+        self.assertIn("point(s) à traiter", mail.outbox[0].subject)
+
+    def test_destinataires_par_defaut_groupe_direction_ou_reglage(self):
+        from django.contrib.auth.models import Group
+        from django.test import override_settings
+
+        from comptes import synthese
+
+        u = get_user_model().objects.create_user("dir-syn", "directeur@example.com", "pass-mot-de-passe-4")
+        u.groups.add(Group.objects.get(name="Direction"))
+        with override_settings(SYNTHESE_DESTINATAIRES=[]):
+            self.assertEqual(synthese.destinataires(), ["directeur@example.com"])
+        with override_settings(SYNTHESE_DESTINATAIRES=["x@example.com"]):
+            self.assertEqual(synthese.destinataires(), ["x@example.com"])
+
+    def test_option_afficher_et_si_non_vide(self):
+        import io
+
+        from django.core import mail
+        from django.core.management import call_command
+
+        sortie = io.StringIO()
+        call_command("synthese_quotidienne", "--afficher", stdout=sortie)
+        self.assertIn("FAC-SYN", sortie.getvalue())
+        self.assertEqual(len(mail.outbox), 0)
+        from facturation.models import Facture
+        from chiffrage.models import Devis
+        from stock.models import AlerteStock
+
+        Facture.objects.update(statut_paiement="paye"); Devis.objects.all().delete(); AlerteStock.objects.all().delete()
+        sortie = io.StringIO()
+        call_command("synthese_quotidienne", "--si-non-vide", "--destinataires", "a@b.fr", stdout=sortie)
+        self.assertIn("Rien à signaler", sortie.getvalue())
+        self.assertEqual(len(mail.outbox), 0)

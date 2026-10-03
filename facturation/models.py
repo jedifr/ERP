@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models
@@ -102,6 +103,7 @@ class Facture(models.Model):
         verbose_name_plural = "Factures"
         ordering = ["-date_facturation", "numero"]
         permissions = [
+            ("relancer_facture", "Peut envoyer une relance de paiement"),
             ("creer_avoir", "Peut créer un avoir"),
             ("facturer_avant_livraison", "Peut faire une facturation anticipée (avant livraison)"),
         ]
@@ -383,3 +385,29 @@ class FactureLigne(models.Model):
         if facture_verrouillee(self.facture):
             raise FactureVerrouilleeError("Facture émise ou comptabilisée : ses lignes ne se suppriment plus.")
         return super().delete(*args, **kwargs)
+
+
+class RelanceFacture(models.Model):
+    """Trace d'une relance de paiement envoyée (ou tentée) pour une facture : niveau, destinataire,
+    texte exact. Consultation seule."""
+
+    facture = models.ForeignKey(Facture, verbose_name="facture", on_delete=models.CASCADE, related_name="relances")
+    niveau = models.PositiveSmallIntegerField("niveau", help_text="1 rappel, 2 relance, 3 dernière relance")
+    destinataire = models.EmailField("destinataire")
+    objet = models.CharField("objet", max_length=200)
+    corps = models.TextField("message")
+    envoyee = models.BooleanField("envoyée", default=True)
+    erreur = models.CharField("erreur d'envoi", max_length=255, blank=True)
+    date_envoi = models.DateTimeField("date", auto_now_add=True)
+    utilisateur = models.ForeignKey(
+        settings.AUTH_USER_MODEL, verbose_name="envoyée par", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="relances_envoyees",
+    )
+
+    class Meta:
+        verbose_name = "Relance de paiement"
+        verbose_name_plural = "Relances de paiement"
+        ordering = ["-date_envoi", "-id"]
+
+    def __str__(self):
+        return f"Relance {self.niveau} — {self.facture_id}"

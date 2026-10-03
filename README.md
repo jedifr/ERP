@@ -2671,3 +2671,14 @@ Tests : `ReceptionTracabiliteTests`, `TracabiliteLivraisonTests` (`achats/tests.
 
 **Vérifié** (Playwright) : page de traçabilité du lot C-2026-0455 (réception REC-0099 des Aciers
 du Rhône, livraison BL-0208 chez Métallerie Durand) ; bon de livraison imprimant la coulée.
+
+## Gap analysis, lot 4 : relances de paiement par e-mail et synthèse quotidienne
+
+**Relances de paiement.** Sur la liste des factures, sélectionnez les factures en retard puis l'action « Envoyer une relance de paiement » (droit `relancer_facture`, donné aux groupes Facturation, Responsable facturation et Direction). Le message part au contact du client dont la fonction contient compta/factur/financ, sinon au contact principal, sinon au premier contact avec une adresse. Trois niveaux de ton (courtois, ferme, mise en demeure) selon le nombre de relances déjà envoyées ; l'IBAN et les coordonnées de la fiche Société sont ajoutés. Refus explicites : avoir, facture payée, facture non émise, facture pas encore en retard, relance déjà envoyée il y a moins de `DJANGO_RELANCE_DELAI_MIN_JOURS` jours (7 par défaut), client sans adresse e-mail. Un échec d'envoi est journalisé (`envoyee = non`, motif) et ne compte pas comme une relance. L'historique est visible sur la fiche facture (onglet « Relances de paiement », lecture seule) et la colonne « Relances » de la liste.
+
+**Synthèse quotidienne.** `python manage.py synthese_quotidienne` envoie un e-mail récapitulatif : factures en retard, devis expirés ou expirant sous 7 jours. Options : `--afficher` (affiche sans envoyer), `--destinataires a@x.fr,b@x.fr`, `--si-non-vide` (n'envoie rien s'il n'y a rien à signaler). Destinataires par défaut : `DJANGO_SYNTHESE_DESTINATAIRES`.
+
+**Configuration e-mail** (fichier `.env`) : `DJANGO_EMAIL_HOST`, `DJANGO_EMAIL_PORT`, `DJANGO_EMAIL_USER`, `DJANGO_EMAIL_PASSWORD`, `DJANGO_EMAIL_TLS`, `DJANGO_EMAIL_EXPEDITEUR`. Sans `DJANGO_EMAIL_HOST`, les messages s'affichent seulement dans les logs (mode test, rien n'est envoyé).
+
+Sur le NAS : après mise à jour, lancer `sudo docker compose exec web python manage.py synchroniser_groupes`, puis programmer dans le Planificateur de tâches DSM, chaque matin :
+`cd /volume1/docker/erp && docker compose exec -T web python manage.py synthese_quotidienne --si-non-vide`.

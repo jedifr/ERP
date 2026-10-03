@@ -16,7 +16,8 @@ from comptabilite.generation import GenerationEcritureError, generer_ecriture_fa
 from comptes.concurrence import VerrouOptimisteMixin
 from comptes.historique import HistoriqueLectureSeule
 
-from .models import CHAMPS_FIGES, Facture, FactureLigne, facture_verrouillee
+from .models import CHAMPS_FIGES, Facture, FactureLigne, RelanceFacture, facture_verrouillee
+from .relances import RelanceError, relancer_facture
 from .services import FacturationError, creer_avoir, lignes_a_facturer, preparer_facture
 
 
@@ -75,6 +76,22 @@ class FactureLigneInline(TabularInline):
         return not facture_verrouillee(obj) and super().has_delete_permission(request, obj)
 
 
+class RelanceFactureInline(TabularInline):
+    """Historique des relances de la facture : consultation seule."""
+
+    model = RelanceFacture
+    extra = 0
+    fields = ["date_envoi", "niveau", "destinataire", "objet", "envoyee", "erreur", "utilisateur"]
+    readonly_fields = fields
+    can_delete = False
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+
 class RetardFilter(admin.SimpleListFilter):
     title = "échéance"
     parameter_name = "retard"
@@ -103,6 +120,7 @@ class FactureAdmin(VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLe
         "montant_ht",
         "montant_ttc",
         "ecart_display",
+        "relances_display",
         "type_document",
         "statut_paiement",
         "date_paiement",
@@ -111,14 +129,17 @@ class FactureAdmin(VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLe
     list_filter = ["type_document", "mode_creation", "statut_paiement", RetardFilter]
     search_fields = ["numero", "reference_tiime", "commande__numero"]
     autocomplete_fields = ["commande"]
-    actions = ["action_generer_ecriture"]
+    actions = ["action_generer_ecriture", "action_relancer"]
     actions_list = ["action_preparer_facture"]
     actions_detail = ["action_creer_avoir"]
     readonly_fields = ["montants_calcules_display"]
-    inlines = [FactureLigneInline]
+    inlines = [FactureLigneInline, RelanceFactureInline]
 
     class Media:
         js = ["facturation/facture_admin.js"]
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).prefetch_related("relances")
 
     def get_formsets_with_inlines(self, request, obj=None):
         request._facture_en_cours = obj
@@ -150,6 +171,34 @@ class FactureAdmin(VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLe
             return "—"
         texte = echeance.strftime("%d/%m/%Y")
         return f"{texte} (en retard)" if obj.est_en_retard else texte
+
+    @admin.display(description="Relances")
+    def relances_display(self, obj):
+        envoyees = [r for r in obj.relances.all() if r.envoyee]
+        if not envoyees:
+            return "—"
+        derniere = max(envoyees, key=lambda r: r.date_envoi)
+        return f"{len(envoyees)} (dernière le {derniere.date_envoi:%d/%m/%Y})"
+
+    @admin.action(description="Envoyer une relance de paiement", permissions=["relancer"])
+    def action_relancer(self, request, queryset):
+        envoyees = 0
+        for facture in queryset:
+            try:
+                relance = relancer_facture(facture, utilisateur=request.user)
+            except RelanceError as exc:
+                self.message_user(request, str(exc), level=messages.ERROR)
+                continue
+            envoyees += 1
+            self.message_user(
+                request, f"{facture} : relance de niveau {relance.niveau} envoyée à {relance.destinataire}.",
+                level=messages.SUCCESS,
+            )
+        if not envoyees:
+            self.message_user(request, "Aucune relance envoyée.", level=messages.WARNING)
+
+    def has_relancer_permission(self, request):
+        return request.user.has_perm("facturation.relancer_facture")
 
     @admin.display(description="Écart / lignes")
     def ecart_display(self, obj):

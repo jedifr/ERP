@@ -138,6 +138,22 @@ DATABASES = {
 }
 
 
+# E-mail (relances de paiement, synthèse quotidienne). Sans serveur SMTP configuré, les messages
+# sont écrits dans les journaux (`docker compose logs web`) au lieu d'être envoyés : rien ne
+# part par erreur tant que DJANGO_EMAIL_HOST n'est pas renseigné.
+EMAIL_HOST = os.environ.get("DJANGO_EMAIL_HOST", "")
+EMAIL_BACKEND = (
+    "django.core.mail.backends.smtp.EmailBackend" if EMAIL_HOST else "django.core.mail.backends.console.EmailBackend"
+)
+EMAIL_PORT = int(os.environ.get("DJANGO_EMAIL_PORT", "587"))
+EMAIL_HOST_USER = os.environ.get("DJANGO_EMAIL_USER", "")
+EMAIL_HOST_PASSWORD = os.environ.get("DJANGO_EMAIL_PASSWORD", "")
+EMAIL_USE_TLS = _env_bool("DJANGO_EMAIL_TLS", True)
+DEFAULT_FROM_EMAIL = os.environ.get("DJANGO_EMAIL_EXPEDITEUR", "erp@localhost")
+# Délai minimal entre deux relances d'une même facture (jours) et destinataires de la synthèse.
+RELANCE_DELAI_MIN_JOURS = int(os.environ.get("DJANGO_RELANCE_DELAI_MIN_JOURS", "7"))
+SYNTHESE_DESTINATAIRES = [e.strip() for e in os.environ.get("DJANGO_SYNTHESE_DESTINATAIRES", "").split(",") if e.strip()]
+
 # Authentification : refus après trop d'échecs (voir comptes.connexions). Réglable ici.
 AUTHENTICATION_BACKENDS = ["comptes.auth.ModelBackendProtege"]
 CONNEXION_ECHECS_MAX = int(os.environ.get("DJANGO_CONNEXION_ECHECS_MAX", "5"))

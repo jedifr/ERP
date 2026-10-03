@@ -847,3 +847,154 @@ class RolesFacturationTests(_FixtureLignes, TestCase):
         codes = set(Group.objects.get(name="Responsable commercial").permissions.values_list("codename", flat=True))
         self.assertIn("annuler_livraison", codes)
         self.assertNotIn("annuler_livraison", set(Group.objects.get(name="Commercial").permissions.values_list("codename", flat=True)))
+
+
+from django.core import mail
+from django.test import override_settings
+
+from commercial.models import Contact
+
+from .models import RelanceFacture
+from .relances import RelanceError, choisir_destinataire, niveau_suivant, relancer_facture
+
+
+class RelancesTests(_FixtureLignes, TestCase):
+    """Gap analysis : relances de paiement par e-mail, 3 niveaux, tracées."""
+
+    def setUp(self):
+        super().setUp()
+        self.tiers.conditions_paiement = ConditionPaiement.objects.create(libelle="30 jours r", nombre_jours=30)
+        self.tiers.save()
+        self.commande.refresh_from_db()
+        self.contact = Contact.objects.create(tiers=self.tiers, nom="Martin", prenom="Léa", email="lea@client.fr", est_principal=True)
+        self.facture = Facture.objects.create(
+            numero="FAC-REL", commande=self.commande, date_facturation=datetime.date(2026, 1, 15),
+            montant_ht=100, montant_ttc=120, reference_tiime="TIIME-REL",
+        )
+
+    def test_relance_de_niveau_1_envoyee_et_tracee(self):
+        relance = relancer_facture(self.facture, utilisateur=self.user)
+        self.assertEqual((relance.niveau, relance.destinataire, relance.envoyee), (1, "lea@client.fr", True))
+        self.assertEqual(len(mail.outbox), 1)
+        message = mail.outbox[0]
+        self.assertEqual(message.to, ["lea@client.fr"])
+        self.assertIn("FAC-REL", message.subject)
+        self.assertIn("120,00 € TTC", message.body)
+        self.assertIn("14/02/2026", message.body)  # échéance
+        self.assertEqual(relance.utilisateur, self.user)
+        self.assertEqual(self.facture.relances.count(), 1)
+
+    def test_niveaux_successifs_et_delai_minimal(self):
+        import datetime as dt
+
+        from django.utils import timezone
+
+        relancer_facture(self.facture)
+        with self.assertRaises(RelanceError) as cm:
+            relancer_facture(self.facture)  # trop tôt
+        self.assertIn("attendez 7 jours", str(cm.exception))
+        for niveau_attendu in (2, 3, 3):
+            RelanceFacture.objects.update(date_envoi=timezone.now() - dt.timedelta(days=8))
+            self.assertEqual(relancer_facture(self.facture).niveau, niveau_attendu)
+
+    def test_le_ton_monte_avec_le_niveau(self):
+        import datetime as dt
+
+        from django.utils import timezone
+
+        for _ in range(3):
+            relancer_facture(self.facture)
+            RelanceFacture.objects.update(date_envoi=timezone.now() - dt.timedelta(days=8))
+        sujets = [m.subject for m in mail.outbox]
+        self.assertTrue(sujets[0].startswith("Rappel"))
+        self.assertTrue(sujets[1].startswith("Relance"))
+        self.assertTrue(sujets[2].startswith("Dernière relance"))
+        self.assertIn("recouvrement", mail.outbox[2].body)
+
+    def test_refus_facture_payee_avoir_non_emise_ou_pas_en_retard(self):
+        Facture.objects.filter(pk="FAC-REL").update(statut_paiement="paye")
+        self.facture.refresh_from_db()
+        with self.assertRaises(RelanceError):
+            relancer_facture(self.facture)
+        Facture.objects.filter(pk="FAC-REL").update(statut_paiement="a_payer", reference_tiime="")
+        self.facture.refresh_from_db()
+        with self.assertRaises(RelanceError) as cm:
+            relancer_facture(self.facture)
+        self.assertIn("pas encore émise", str(cm.exception))
+        recente = Facture.objects.create(numero="FAC-NEUVE", commande=self.commande, date_facturation=datetime.date.today(),
+                                          montant_ht=1, montant_ttc=1, reference_tiime="T")
+        with self.assertRaises(RelanceError) as cm:
+            relancer_facture(recente)
+        self.assertIn("pas en retard", str(cm.exception))
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_aucune_adresse_email_refusee(self):
+        Contact.objects.all().delete()
+        with self.assertRaises(RelanceError) as cm:
+            relancer_facture(self.facture)
+        self.assertIn("Aucun contact", str(cm.exception))
+
+    def test_choix_du_destinataire_comptabilite_puis_principal(self):
+        autre = Contact.objects.create(tiers=self.tiers, nom="Durand", email="compta@client.fr", fonction="Responsable comptabilité")
+        self.assertEqual(choisir_destinataire(self.tiers), autre)
+        autre.delete()
+        self.assertEqual(choisir_destinataire(self.tiers), self.contact)
+        Contact.objects.create(tiers=self.tiers, nom="Sans mail")
+        self.assertEqual(choisir_destinataire(self.tiers), self.contact)
+
+    def test_echec_denvoi_trace_et_ne_compte_pas_comme_relance(self):
+        from unittest.mock import patch
+
+        with patch("django.core.mail.EmailMessage.send", side_effect=OSError("SMTP injoignable")):
+            with self.assertRaises(RelanceError):
+                relancer_facture(self.facture)
+        relance = self.facture.relances.get()
+        self.assertFalse(relance.envoyee)
+        self.assertIn("SMTP injoignable", relance.erreur)
+        self.assertEqual(niveau_suivant(self.facture), 1)  # la relance ratée ne fait pas monter le niveau
+        self.assertEqual(relancer_facture(self.facture).niveau, 1)  # et ne bloque pas une nouvelle tentative
+
+    def test_signature_et_iban_de_la_societe(self):
+        from comptes.models import Societe
+
+        societe = Societe.charger()
+        societe.raison_sociale, societe.iban, societe.email = "Chaudronnerie Dupont", "FR76 1234", "compta@dupont.fr"
+        societe.save()
+        relancer_facture(self.facture)
+        self.assertIn("Chaudronnerie Dupont", mail.outbox[0].body)
+        self.assertIn("IBAN FR76 1234", mail.outbox[0].body)
+        self.assertEqual(mail.outbox[0].reply_to, ["compta@dupont.fr"])
+
+    def test_action_admin_et_historique_sur_la_fiche(self):
+        self.client.post("/admin/facturation/facture/", {"action": "action_relancer", "_selected_action": [self.facture.pk]}, follow=True)
+        self.assertEqual(len(mail.outbox), 1)
+        page = self.client.get(f"/admin/facturation/facture/{self.facture.pk}/change/")
+        self.assertContains(page, "lea@client.fr")
+        liste = self.client.get("/admin/facturation/facture/")
+        self.assertContains(liste, "1 (dernière le")
+
+    def test_action_reservee_aux_habilites(self):
+        simple = get_user_model().objects.create_user("rel-nu", "r@example.com", "pass-mot-de-passe-4", is_staff=True)
+        from django.contrib.auth.models import Permission
+
+        simple.user_permissions.set(Permission.objects.filter(codename__in=["view_facture", "change_facture"]))
+        self.client.force_login(simple)
+        self.client.post("/admin/facturation/facture/", {"action": "action_relancer", "_selected_action": [self.facture.pk]}, follow=True)
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_groupes_facturation_peuvent_relancer(self):
+        from django.contrib.auth.models import Group
+
+        for nom in ("Facturation", "Responsable facturation"):
+            codes = set(Group.objects.get(name=nom).permissions.values_list("codename", flat=True))
+            self.assertIn("relancer_facture", codes)
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.console.EmailBackend")
+    def test_sans_smtp_le_message_va_dans_les_journaux(self):
+        import io
+        from contextlib import redirect_stdout
+
+        sortie = io.StringIO()
+        with redirect_stdout(sortie):
+            relancer_facture(self.facture)
+        self.assertIn("FAC-REL", sortie.getvalue())

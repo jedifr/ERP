@@ -54,6 +54,7 @@ _FACTURATION = [
     "facturation.view_facture", "facturation.add_facture", "facturation.change_facture",
     "facturation.view_factureligne", "facturation.add_factureligne", "facturation.change_factureligne",
     "facturation.delete_factureligne",
+    "facturation.view_relancefacture", "facturation.relancer_facture",
     "comptabilite.view_ecriturecomptable", "comptabilite.view_ligneecriture",
 ]
 
