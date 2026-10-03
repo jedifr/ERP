@@ -836,7 +836,7 @@ class LivraisonLigne(models.Model):
         # est faux par défaut pour un FABRIQUE) : dans ce cas la sortie de
         # stock est simplement sautée plutôt que de bloquer la livraison.
         # Plusieurs lots : consommés du plus ancien au plus récent (FIFO).
-        lots = self._lots_a_consommer(ligne.article)
+        lots = self._lots_a_consommer(ligne.article) if settings.STOCK_ACTIF else []
 
         CommandeLigne.objects.filter(pk=ligne.pk).update(
             quantite_livree=models.F("quantite_livree") + self.quantite_livree

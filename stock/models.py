@@ -22,6 +22,12 @@ def arrondir_quantite(valeur):
     return round(valeur, DECIMALES_QUANTITE)
 
 
+def stock_actif_pour(article):
+    """Le stock ne concerne cet article que si la gestion de stock est activée (réglage global
+    DJANGO_STOCK_ACTIF) ET que l'article est « géré en stock »."""
+    return bool(settings.STOCK_ACTIF and article.gere_en_stock)
+
+
 class StockInsuffisantError(Exception):
     """Sortie supérieure à la quantité disponible dans le lot."""
 
@@ -465,7 +471,7 @@ def stock_total(article):
 def evaluer_alerte_stock(article):
     """Ouvre ou clôture automatiquement l'alerte de seuil d'un article, selon
     son stock total actuel comparé à `Article.stock_mini`."""
-    if not article.gere_en_stock or article.stock_mini is None:
+    if not stock_actif_pour(article) or article.stock_mini is None:
         return
 
     total = stock_total(article)

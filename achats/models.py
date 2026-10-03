@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from django.db.models import Q
@@ -6,7 +7,7 @@ from django.utils import timezone
 from chiffrage.models import CommandeLigne
 from commercial.models import TauxTVA, Tiers
 from comptabilite.models import PosteGestion
-from stock.models import AlerteStock, Lot, MouvementStock
+from stock.models import AlerteStock, Lot, MouvementStock, stock_actif_pour
 from technique.models import Article, DateRangeHistoriqueMixin
 from comptes.champs import ChampDecimal
 from comptes.montants import MONTANT, PRIX, ZERO, D, D0, arrondir
@@ -345,8 +346,12 @@ class ReceptionLigne(models.Model):
     def _resoudre_lot(self, article):
         """Lot qui reçoit la marchandise : le lot choisi ; sinon celui de la coulée (créé au besoin,
         avec son certificat) ; sinon, comme avant, l'unique lot de l'article."""
-        if not article.gere_en_stock:
-            raise AchatsError(f"L'article « {article} » n'est pas géré en stock : pas de lot à alimenter.")
+        if not stock_actif_pour(article):
+            # Pas de stock (société sans gestion de stock, ou article non géré en stock) : la réception
+            # n'enregistre que la quantité reçue. Désigner un lot pour un tel article est une erreur.
+            if settings.STOCK_ACTIF and (self.lot_id or self.numero_coulee or self.emplacement_id):
+                raise AchatsError(f"L'article « {article} » n'est pas géré en stock : pas de lot à alimenter.")
+            return None
         if self.lot_id:
             if self.lot.article_id != article.pk:
                 raise AchatsError(f"Le lot choisi ({self.lot}) n'est pas un lot de l'article « {article} ».")

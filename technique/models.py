@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
 from comptes.champs import ChampDecimal
@@ -134,7 +135,8 @@ class Article(models.Model):
 
     def save(self, *args, **kwargs):
         if self.gere_en_stock is None:
-            self.gere_en_stock = self.nature == self.Nature.MATIERE_PREMIERE
+            # Par défaut seule une matière première se gère en stock — et jamais si la société n'a pas de stock.
+            self.gere_en_stock = bool(settings.STOCK_ACTIF and self.nature == self.Nature.MATIERE_PREMIERE)
         super().save(*args, **kwargs)
 
 

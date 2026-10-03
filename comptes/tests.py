@@ -1045,3 +1045,30 @@ class ExportCsvTests(TestCase):
         self.assertIn("FAC-EXP", texte)
         self.assertIn("-100", texte)  # un montant négatif reste un nombre, pas du texte neutralisé
         self.assertNotIn("'-100", texte)
+
+
+class StockActifMenuTests(TestCase):
+    """Le menu « Stock » disparaît quand DJANGO_STOCK_ACTIF=false (réglage lu au démarrage)."""
+
+    def _titres_menu(self, valeur):
+        import json
+        import os
+        import subprocess
+        import sys
+
+        code = (
+            "import json, os, django; os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings'); django.setup();"
+            "from django.conf import settings;"
+            "print(json.dumps([g['title'] for g in settings.UNFOLD['SIDEBAR']['navigation']]))"
+        )
+        env = {**os.environ, "DJANGO_STOCK_ACTIF": valeur}
+        sortie = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, check=True)
+        return json.loads(sortie.stdout.strip().splitlines()[-1])
+
+    def test_menu_stock_present_par_defaut(self):
+        self.assertIn("Stock", self._titres_menu("true"))
+
+    def test_menu_stock_masque_si_desactive(self):
+        titres = self._titres_menu("false")
+        self.assertNotIn("Stock", titres)
+        self.assertIn("Facturation", titres)

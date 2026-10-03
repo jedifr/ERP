@@ -2,7 +2,7 @@ import datetime
 
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from chiffrage.models import Commande, CommandeLigne, Devis
 from commercial.models import Adresse, TauxTVA, Tiers
@@ -757,3 +757,99 @@ class TracabiliteLivraisonTests(TestCase):
             self.assertEqual(self.client.get(url).status_code, 403)
             self.client.logout()
             self.assertEqual(self.client.get(url).status_code, 302)
+
+
+class StockOptionnelTests(TestCase):
+    """La gestion de stock est facultative : par article, et globalement (DJANGO_STOCK_ACTIF)."""
+
+    def setUp(self):
+        ReceptionTests.setUp(self)
+        from django.contrib.auth import get_user_model
+
+        self.admin = get_user_model().objects.create_superuser("sans-stock", "s@example.com", "pass-mot-de-passe-5")
+
+    def _recevoir(self, quantite=50, **kw):
+        return ReceptionLigne.objects.create(
+            reception=self.reception, ligne_commande_fournisseur=self.ligne, quantite_recue=quantite, **kw
+        )
+
+    def test_article_non_gere_en_stock_se_recoit_sans_lot(self):
+        self.article.gere_en_stock = False
+        self.article.save()
+        self._recevoir()
+        self.ligne.refresh_from_db()
+        self.assertEqual(self.ligne.quantite_recue, 50)
+        self.assertEqual(MouvementStock.objects.count(), 0)
+
+    def test_lot_designe_pour_un_article_non_gere_est_refuse(self):
+        self.article.gere_en_stock = False
+        self.article.save()
+        emp = Emplacement.objects.create(code="SANS-A1")
+        with self.assertRaises(AchatsError):
+            self._recevoir(numero_coulee="C-1", emplacement=emp)
+
+    @override_settings(STOCK_ACTIF=False)
+    def test_sans_gestion_de_stock_la_reception_ne_touche_pas_au_stock(self):
+        # Même un article « géré en stock » (donnée héritée) et sans lot : on ne note que la quantité reçue.
+        self.assertTrue(self.article.gere_en_stock)
+        self._recevoir()
+        self.ligne.refresh_from_db()
+        self.assertEqual(self.ligne.quantite_recue, 50)
+        self.assertEqual(MouvementStock.objects.count(), 0)
+
+    @override_settings(STOCK_ACTIF=False)
+    def test_sans_gestion_de_stock_un_nouvel_article_n_est_pas_gere_en_stock(self):
+        neuf = Article.objects.create(reference="MP-SANS-STOCK", nature=Article.Nature.MATIERE_PREMIERE)
+        self.assertFalse(neuf.gere_en_stock)
+
+    @override_settings(STOCK_ACTIF=False)
+    def test_sans_gestion_de_stock_la_livraison_ne_consomme_aucun_lot(self):
+        import datetime as dt
+
+        from chiffrage.models import Commande, CommandeLigne, Livraison, LivraisonLigne
+
+        emp = Emplacement.objects.create(code="SANS-B1")
+        lot = Lot.objects.create(article=self.article, emplacement=emp, quantite=10)
+        client = Tiers.objects.create(code="CLI-SS", raison_sociale="Client", type_tiers=Tiers.TypeTiers.CLIENT)
+        adr = Adresse.objects.create(tiers=client, est_facturation=True, est_livraison=True, adresse="1 rue", code_postal="75000", ville="Paris")
+        cde = Commande.objects.create(
+            numero="CDE-SS", client=client, reference_client="PO", date_commande=dt.date(2026, 1, 1),
+            adresse_facturation=adr, adresse_livraison=adr,
+        )
+        cl = CommandeLigne.objects.create(commande=cde, article=self.article, quantite_commandee=5, prix_vente_unitaire=5)
+        bl = Livraison.objects.create(numero="BL-SS", commande=cde, date_livraison=dt.date(2026, 2, 1))
+        LivraisonLigne.objects.create(livraison=bl, commande_ligne=cl, quantite_livree=3)
+        lot.refresh_from_db()
+        cl.refresh_from_db()
+        self.assertEqual(lot.quantite, 10)  # stock intact
+        self.assertEqual(cl.quantite_livree, 3)  # mais la livraison est bien enregistrée
+
+    @override_settings(STOCK_ACTIF=False)
+    def test_ecrans_de_stock_masques(self):
+        self.client.force_login(self.admin)
+        self.assertEqual(self.client.get("/admin/stock/lot/").status_code, 403)
+        # Le menu latéral est construit au démarrage selon DJANGO_STOCK_ACTIF (config/settings.py).
+
+    @override_settings(STOCK_ACTIF=False)
+    def test_champs_de_stock_masques_sur_l_article_et_la_reception(self):
+        self.client.force_login(self.admin)
+        fiche = self.client.get(f"/admin/technique/article/{self.article.pk}/change/").content.decode()
+        self.assertNotIn('name="gere_en_stock"', fiche)
+        self.assertNotIn('name="stock_mini"', fiche)
+        reception = self.client.get(f"/admin/achats/reception/{self.reception.pk}/change/").content.decode()
+        self.assertNotIn("numero_coulee", reception)
+
+    def test_avec_gestion_de_stock_tout_reste_visible(self):
+        self.client.force_login(self.admin)
+        self.assertEqual(self.client.get("/admin/stock/lot/").status_code, 200)
+        fiche = self.client.get(f"/admin/technique/article/{self.article.pk}/change/").content.decode()
+        self.assertIn('name="gere_en_stock"', fiche)
+
+    @override_settings(STOCK_ACTIF=False)
+    def test_synthese_et_tuile_sans_alertes_de_stock(self):
+        from comptes.dashboard import dashboard_callback
+        from comptes.synthese import construire
+
+        titres = [k["title"] for k in dashboard_callback(request=None, context={})["kpis"]]
+        self.assertNotIn("Alertes de stock", titres)
+        self.assertNotIn("Alertes de stock actives", construire())

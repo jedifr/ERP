@@ -47,7 +47,9 @@ def dashboard_callback(request, context):
         if f.est_en_retard
     ]
     montant_en_retard = sum(f.montant_ttc or 0 for f in factures_en_retard)
-    alertes_stock_actives = AlerteStock.objects.filter(statut=AlerteStock.Statut.ACTIVE).count()
+    alertes_stock_actives = (
+        AlerteStock.objects.filter(statut=AlerteStock.Statut.ACTIVE).count() if settings.STOCK_ACTIF else 0
+    )
     of_non_transmis = (
         OrdreFabrication.objects.exclude(statut_synchro=OrdreFabrication.StatutSynchro.SYNCHRONISE)
         if settings.PLANNING_API_URL
@@ -149,6 +151,8 @@ def dashboard_callback(request, context):
             "link_query": "",
         },
     ]
+    if not settings.STOCK_ACTIF:
+        context["kpis"] = [k for k in context["kpis"] if k["title"] != "Alertes de stock"]
     context["dashboard_date"] = aujourdhui
     if getattr(getattr(request, "user", None), "is_superuser", False):
         context["alertes_securite"] = diagnostics()

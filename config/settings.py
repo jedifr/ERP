@@ -18,6 +18,11 @@ def _env_bool(name, default=False):
     return os.environ.get(name, str(default)).strip().lower() in ("1", "true", "yes", "on")
 
 
+# Gestion de stock optionnelle : toutes les sociétés n'en ont pas. Mettre DJANGO_STOCK_ACTIF=false
+# pour la désactiver entièrement (menu, tableau de bord, réceptions et livraisons sans lots).
+# Même activée, elle reste facultative article par article (case « géré en stock »).
+STOCK_ACTIF = _env_bool("DJANGO_STOCK_ACTIF", True)
+
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "django-insecure-change-me-in-production")
 
@@ -528,3 +533,7 @@ UNFOLD = {
         ],
     },
 }
+
+
+if not STOCK_ACTIF:
+    UNFOLD["SIDEBAR"]["navigation"] = [g for g in UNFOLD["SIDEBAR"]["navigation"] if g.get("title") != "Stock"]

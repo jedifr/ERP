@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.contrib import admin, messages
 from unfold.admin import ModelAdmin, TabularInline
 
@@ -101,6 +102,11 @@ class ReceptionLigneInline(TabularInline):
     model = ReceptionLigne
     extra = 1
     autocomplete_fields = ["ligne_commande_fournisseur", "lot", "emplacement"]
+
+    def get_exclude(self, request, obj=None):
+        # Sans gestion de stock : une réception ne note que la quantité reçue (ni lot, ni coulée, ni certificat).
+        sans_stock = ["lot", "emplacement", "numero_coulee", "certificat"]
+        return sans_stock if not settings.STOCK_ACTIF else super().get_exclude(request, obj)
 
 
 @admin.register(Reception)

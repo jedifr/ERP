@@ -57,7 +57,11 @@ def construire():
             for d in offres
         ]
 
-    alertes = AlerteStock.objects.filter(statut=AlerteStock.Statut.ACTIVE).select_related("article")
+    alertes = (
+        AlerteStock.objects.filter(statut=AlerteStock.Statut.ACTIVE).select_related("article")
+        if settings.STOCK_ACTIF
+        else AlerteStock.objects.none()
+    )
     if alertes:
         sections["Alertes de stock actives"] = [f"  - {a.article} depuis le {a.date_declenchement:%d/%m/%Y}" for a in alertes]
 

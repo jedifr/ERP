@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.contrib import admin, messages
 from django.contrib.admin.views.decorators import staff_member_required
 from django.shortcuts import get_object_or_404, redirect
@@ -99,6 +100,20 @@ class ArticleAdmin(ExportCsvMixin, ModelAdmin):
 
     class Media:
         js = ["technique/article_admin.js"]
+
+    _CHAMPS_STOCK = ("gere_en_stock", "stock_mini", "quantite_reappro")
+
+    def get_exclude(self, request, obj=None):
+        exclus = list(super().get_exclude(request, obj) or [])
+        return exclus + list(self._CHAMPS_STOCK) if not settings.STOCK_ACTIF else exclus or None
+
+    def get_list_display(self, request):
+        colonnes = super().get_list_display(request)
+        return colonnes if settings.STOCK_ACTIF else [c for c in colonnes if c not in self._CHAMPS_STOCK]
+
+    def get_list_filter(self, request):
+        filtres = super().get_list_filter(request)
+        return filtres if settings.STOCK_ACTIF else [f for f in filtres if f not in self._CHAMPS_STOCK]
 
     def get_urls(self):
         urls = [

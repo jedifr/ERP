@@ -2729,3 +2729,12 @@ Tous les montants, prix, coûts et taux sont désormais des nombres décimaux ex
 **Mise à jour de la base (NAS)** : la migration convertit les colonnes en place (PostgreSQL arrondit les anciennes valeurs au centime, ou à 4/6 décimales pour les prix). Les factures, déjà arrondies à 2 décimales, ne changent pas. **Faites une sauvegarde avant** : `./sauvegarder-nas.sh`, puis `./update-nas.sh claude/project-construction-k7owwb`.
 
 Un test garde-fou (`MontantsDecimalTests.test_aucun_champ_monetaire_en_flottant`) échoue si un champ de montant, prix, coût, taux, débit ou crédit redevient un `FloatField`.
+
+## Gestion de stock optionnelle
+
+Toutes les sociétés ne gèrent pas un stock. Deux niveaux, indépendants :
+
+- **Par article** : la case « Géré en stock » (cochée par défaut pour une matière première, décochée pour un fabriqué). Une réception ou une livraison d'un article non géré enregistre seulement la quantité reçue / livrée, sans lot ni mouvement. Désigner un lot pour un article non géré reste refusé (erreur de saisie).
+- **Pour toute la société** : `DJANGO_STOCK_ACTIF=false` dans `.env` (puis `docker compose up -d`). Disparaissent alors le menu Stock, les écrans Lots / Mouvements / Emplacements / Alertes (accès direct refusé), la tuile « Alertes de stock », la rubrique de la synthèse quotidienne, les champs de stock des articles (géré en stock, stock minimum, quantité de réapprovisionnement) et les champs lot / coulée / certificat des réceptions et des livraisons. Les nouveaux articles ne sont jamais « gérés en stock ». Les données de stock déjà saisies ne sont pas touchées (elles redeviennent visibles si vous réactivez).
+
+Le flux devis → commande → livraison → facture, les achats, la comptabilité et les PDF fonctionnent à l'identique sans stock. Ce que le stock apporte en plus (traçabilité des coulées, coût moyen pondéré, alertes) n'existe évidemment que lorsqu'il est activé.

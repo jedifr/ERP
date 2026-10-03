@@ -1,6 +1,7 @@
 import datetime
 
 from django import forms
+from django.conf import settings
 from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied
 from django.http import HttpResponse, HttpResponseRedirect
@@ -689,6 +690,9 @@ class LivraisonLigneInline(TabularInline):
     model = LivraisonLigne
     extra = 1
     autocomplete_fields = ["commande_ligne", "lot"]
+
+    def get_exclude(self, request, obj=None):
+        return ["lot"] if not settings.STOCK_ACTIF else super().get_exclude(request, obj)
 
     def has_change_permission(self, request, obj=None):
         return False

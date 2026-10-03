@@ -10,6 +10,7 @@ from codification.mixins import CodificationInitialeMixin
 from codification.models import RegleCodification
 
 from comptes.exports import ExportCsvMixin
+from django.conf import settings
 from comptes.concurrence import VerrouOptimisteMixin
 from comptes.historique import HistoriqueLectureSeule
 
@@ -46,8 +47,28 @@ class MouvementStockInline(TabularInline):
         return False
 
 
+class StockOptionnelMixin:
+    """Société sans gestion de stock (DJANGO_STOCK_ACTIF=false) : ces écrans disparaissent
+    (menu, accueil et accès direct)."""
+
+    def has_module_permission(self, request):
+        return settings.STOCK_ACTIF and super().has_module_permission(request)
+
+    def has_view_permission(self, request, obj=None):
+        return settings.STOCK_ACTIF and super().has_view_permission(request, obj)
+
+    def has_add_permission(self, request):
+        return settings.STOCK_ACTIF and super().has_add_permission(request)
+
+    def has_change_permission(self, request, obj=None):
+        return settings.STOCK_ACTIF and super().has_change_permission(request, obj)
+
+    def has_delete_permission(self, request, obj=None):
+        return settings.STOCK_ACTIF and super().has_delete_permission(request, obj)
+
+
 @admin.register(Emplacement)
-class EmplacementAdmin(VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
+class EmplacementAdmin(StockOptionnelMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
     codification_entite = RegleCodification.Entite.EMPLACEMENT
 
     list_display = ["code", "libelle"]
@@ -55,7 +76,7 @@ class EmplacementAdmin(VerrouOptimisteMixin, CodificationInitialeMixin, Historiq
 
 
 @admin.register(Lot)
-class LotAdmin(ExportCsvMixin, VerrouOptimisteMixin, HistoriqueLectureSeule, ModelAdmin):
+class LotAdmin(StockOptionnelMixin, ExportCsvMixin, VerrouOptimisteMixin, HistoriqueLectureSeule, ModelAdmin):
     list_display = ["article", "emplacement", "numero_coulee", "quantite", "cout_unitaire_moyen", "valeur_stock", "statut"]
     list_filter = ["emplacement", "statut"]
     search_fields = ["article__reference", "numero_coulee"]
@@ -97,7 +118,7 @@ class LotAdmin(ExportCsvMixin, VerrouOptimisteMixin, HistoriqueLectureSeule, Mod
 
 
 @admin.register(MouvementStock)
-class MouvementStockAdmin(ExportCsvMixin, ModelAdmin):
+class MouvementStockAdmin(StockOptionnelMixin, ExportCsvMixin, ModelAdmin):
     list_display = [
         "date_mouvement",
         "article_lot",
@@ -190,7 +211,7 @@ class MouvementStockAdmin(ExportCsvMixin, ModelAdmin):
 
 
 @admin.register(Transfert)
-class TransfertAdmin(ModelAdmin):
+class TransfertAdmin(StockOptionnelMixin, ModelAdmin):
     """Déplacer du stock d'un emplacement à un autre : saisie seule, jamais modifiable."""
 
     list_display = ["date_transfert", "lot_source", "emplacement_cible", "quantite", "motif", "utilisateur"]
@@ -233,7 +254,7 @@ class InventaireLigneInline(TabularInline):
 
 
 @admin.register(Inventaire)
-class InventaireAdmin(ModelAdmin):
+class InventaireAdmin(StockOptionnelMixin, ModelAdmin):
     list_display = ["__str__", "statut", "commentaire", "utilisateur_validation", "date_validation"]
     list_filter = ["statut"]
     readonly_fields = ["statut", "utilisateur_validation", "date_validation"]
@@ -271,7 +292,7 @@ class InventaireAdmin(ModelAdmin):
 
 
 @admin.register(AlerteStock)
-class AlerteStockAdmin(ExportCsvMixin, ModelAdmin):
+class AlerteStockAdmin(StockOptionnelMixin, ExportCsvMixin, ModelAdmin):
     list_display = ["article", "statut", "date_declenchement", "date_traitement"]
     list_filter = ["statut"]
     search_fields = ["article__reference"]
