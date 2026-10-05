@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
@@ -5,6 +7,13 @@ from django.utils import timezone
 from technique.models import Article, Matiere
 from comptes.champs import ChampDecimal
 from comptes.montants import MONTANT, D, arrondir
+
+
+# Valeurs en Decimal « à une décimale » : le formulaire compare le texte ("3.0") de la valeur enregistrée à celui du choix.
+QUALITES_COUPE = [
+    (Decimal("1.5"), "1,5 — Extra brut"), (Decimal("2.0"), "2 — Brut"), (Decimal("3.0"), "3 — Moyen+"),
+    (Decimal("4.0"), "4 — Fin"), (Decimal("5.0"), "5 — Extra fin"),
+]
 
 
 class ProfilImportDecoupe(models.Model):
@@ -97,6 +106,10 @@ class PieceDecoupe(models.Model):
         default=dict,
         blank=True,
         help_text="Classement calque → rôle choisi à la main pour cette pièce (prioritaire sur le profil d'import)",
+    )
+    qualite_coupe = models.DecimalField(
+        "qualité de coupe", max_digits=2, decimal_places=1, default=Decimal("3.0"), choices=QUALITES_COUPE,
+        help_text="Niveau de qualité du jet d'eau (1,5 extra brut → 5 extra fin) : plus c'est fin, plus la coupe est lente.",
     )
     pas_rotation_deg = models.PositiveSmallIntegerField(
         choices=PasRotation.choices,
@@ -373,3 +386,93 @@ class ImbricationPlacement(models.Model):
 
     def __str__(self):
         return f"{self.piece} — feuille {self.numero_feuille} @ ({self.x_mm:g}, {self.y_mm:g})"
+
+
+class ParametreCoupe(models.Model):
+    """Paramètres de coupe d'une matière à une épaisseur donnée, pour un procédé (aujourd'hui le jet d'eau, repris du
+    logiciel de la machine) : vitesses par niveau de qualité (VitesseCoupe), perçage, marquage, intervalle entre
+    pièces. Servent à estimer le temps de découpe d'une pièce (voir services/temps.py)."""
+
+    class Procede(models.TextChoices):
+        JET_EAU = "jet_eau", "Jet d'eau (eau + abrasif)"
+
+    class ModePercage(models.TextChoices):
+        STATIONNAIRE_HP = "stationnaire_hp", "Stationnaire haute pression"
+        STATIONNAIRE_BP = "stationnaire_bp", "Stationnaire basse pression"
+        CIRCULAIRE_HP = "circulaire_hp", "Circulaire haute pression"
+        CIRCULAIRE_BP = "circulaire_bp", "Circulaire basse pression"
+
+    procede = models.CharField("procédé", max_length=10, choices=Procede.choices, default=Procede.JET_EAU)
+    matiere = models.ForeignKey(Matiere, verbose_name="matière", on_delete=models.PROTECT, related_name="parametres_coupe")
+    epaisseur_mm = models.FloatField("épaisseur (mm)")
+    poste = models.ForeignKey(
+        "technique.PosteTravail", verbose_name="poste de travail", on_delete=models.PROTECT, null=True, blank=True,
+        related_name="parametres_coupe", help_text="Machine de coupe : son tarif horaire valorise le temps calculé dans la gamme.",
+    )
+    usinabilite = models.FloatField("usinabilité", null=True, blank=True, help_text="Indice d'usinabilité du logiciel de la machine (information)")
+
+    # Perçage et marquage
+    mode_percage = models.CharField("mode de perçage", max_length=16, choices=ModePercage.choices, default=ModePercage.STATIONNAIRE_HP)
+    percage_stationnaire_hp_s = models.FloatField("perçage stationnaire HP (s)", default=0)
+    percage_stationnaire_bp_s = models.FloatField("perçage stationnaire BP (s)", default=0)
+    percage_circulaire_hp_tours = models.FloatField("perçage circulaire HP (tours)", default=0)
+    percage_circulaire_bp_tours = models.FloatField("perçage circulaire BP (tours)", default=0)
+    diametre_percage_mm = models.FloatField("diamètre de perçage (mm)", default=1.4)
+    temporisation_pointage_s = models.FloatField("temporisation de pointage (s)", default=0)
+    temporisation_marquage_s = models.FloatField("temporisation de marquage (s)", default=0)
+    vitesse_marquage_mm_min = models.FloatField("vitesse de marquage (mm/min)", default=4000)
+    percement_lineaire_mm = models.FloatField("percement linéaire (mm)", default=0, help_text="Amorce de coupe avant le contour")
+    chevauchement_mm = models.FloatField("chevauchement (mm)", default=0, help_text="Recouvrement à la fermeture d'un contour")
+    intervalle_pieces_mm = models.FloatField("intervalle entre pièces (mm)", default=4, help_text="Espacement utilisé pour l'imbrication")
+
+    # Réglages de calcul
+    rayon_pleine_vitesse_mm = models.FloatField(
+        "rayon de pleine vitesse (mm)", default=25,
+        help_text="Un arc de rayon supérieur est coupé à la vitesse élevée ; en dessous la vitesse décroît jusqu'à la vitesse basse.",
+    )
+    seuil_angle_coin_deg = models.FloatField("angle d'un coin (°)", default=30, help_text="Au-delà de ce changement de direction, c'est un coin (ralentissement)")
+    coefficient_ajustement = models.FloatField(
+        "coefficient d'ajustement", default=1,
+        help_text="Multiplie le temps calculé : à caler sur les temps réellement donnés par le logiciel de la machine.",
+    )
+
+    class Meta:
+        verbose_name = "Paramètre de coupe"
+        verbose_name_plural = "Paramètres de coupe"
+        ordering = ["procede", "matiere", "epaisseur_mm"]
+        constraints = [
+            models.UniqueConstraint(fields=["procede", "matiere", "epaisseur_mm"], name="unique_parametre_coupe")
+        ]
+
+    def __str__(self):
+        return f"{self.matiere} {self.epaisseur_mm:g} mm ({self.get_procede_display()})"
+
+
+class VitesseCoupe(models.Model):
+    """Vitesses d'un ParametreCoupe pour un niveau de qualité (une ligne par niveau, comme dans le logiciel de la machine)."""
+
+    parametre = models.ForeignKey(ParametreCoupe, verbose_name="paramètre de coupe", on_delete=models.CASCADE, related_name="vitesses")
+    qualite = models.DecimalField("qualité", max_digits=2, decimal_places=1, choices=QUALITES_COUPE)
+    vitesse_haute_mm_min = models.FloatField("vitesse élevée (mm/min)")
+    vitesse_basse_mm_min = models.FloatField("vitesse basse (mm/min)")
+    paliers = models.PositiveSmallIntegerField("paliers (N)", default=1, help_text="Nombre de paliers de vitesse entre la basse et l'élevée dans les courbes")
+    distance_acceleration_mm = models.FloatField("distance d'accélération A (mm)", default=0)
+    distance_deceleration_mm = models.FloatField("distance de décélération R (mm)", default=0)
+    coefficient_haut = models.FloatField("coefficient haut", default=1)
+    coefficient_bas = models.FloatField("coefficient bas", default=1)
+    facteur_arc = models.FloatField("facteur par arc", default=1)
+
+    class Meta:
+        verbose_name = "Vitesse de coupe"
+        verbose_name_plural = "Vitesses de coupe"
+        ordering = ["parametre", "qualite"]
+        constraints = [models.UniqueConstraint(fields=["parametre", "qualite"], name="unique_vitesse_coupe")]
+
+    def __str__(self):
+        return f"{self.parametre} — qualité {self.qualite}"
+
+    def clean(self):
+        super().clean()
+        if self.vitesse_haute_mm_min is not None and self.vitesse_basse_mm_min is not None:
+            if self.vitesse_basse_mm_min <= 0 or self.vitesse_haute_mm_min < self.vitesse_basse_mm_min:
+                raise ValidationError("La vitesse basse doit être positive et inférieure ou égale à la vitesse élevée.")

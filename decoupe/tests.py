@@ -1067,3 +1067,174 @@ class ReglesCalquesManuellesTests(TestCase):
         piece.importer_geometrie()
         piece.refresh_from_db()
         self.assertEqual(piece.nb_contours_interieurs, 0)
+
+
+class TempsDeDecoupeTests(TestCase):
+    """Estimation du temps de découpe (jet d'eau) depuis la géométrie et les paramètres de coupe."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        from technique.models import PosteTravail
+
+        from .models import ParametreCoupe, VitesseCoupe
+
+        self.user = get_user_model().objects.create_superuser("temps-admin", "t@example.com", "pass-mot-de-passe-14")
+        self.client.force_login(self.user)
+        self.matiere = Matiere.objects.create(nom="Steel", densite=7800)
+        self.poste = PosteTravail.objects.create(nom="Jet d'eau", mode_calcul=PosteTravail.ModeCalcul.HORAIRE)
+        self.parametre = ParametreCoupe.objects.create(
+            matiere=self.matiere, epaisseur_mm=10, poste=self.poste, percage_stationnaire_hp_s=10, temporisation_pointage_s=0.5,
+            percement_lineaire_mm=6, chevauchement_mm=6, vitesse_marquage_mm_min=5000, temporisation_marquage_s=1,
+        )
+        for qualite, haute, basse in ((3, 154.9, 80.7), (4, 111.3, 66.2)):
+            VitesseCoupe.objects.create(
+                parametre=self.parametre, qualite=qualite, vitesse_haute_mm_min=haute, vitesse_basse_mm_min=basse, paliers=3,
+                distance_acceleration_mm=3, distance_deceleration_mm=3,
+            )
+        self.article = Article.objects.create(reference="FLASQUE-JET", nature=Article.Nature.FABRIQUE)
+        self.piece = PieceDecoupe.objects.create(
+            nom="Plaque 100x50", fichier_source="decoupe/sources/x.dxf", format_source="dxf", statut=PieceDecoupe.Statut.OK,
+            matiere=self.matiere, epaisseur=10, article=self.article, largeur_mm=100, hauteur_mm=50, surface_mm2=5000,
+            perimetre_decoupe_mm=300,
+            contour_json={"exterieur": [[0, 0], [100, 0], [100, 50], [0, 50]], "trous": []},
+        )
+
+    def test_rectangle_sans_trou(self):
+        from .services.temps import estimer_temps_decoupe
+
+        e = estimer_temps_decoupe(self.piece)
+        coupe = 300 / (154.9 / 60) + 4 * 6 * (1 / (80.7 / 60) - 1 / (154.9 / 60)) + 12 / (80.7 / 60)
+        self.assertAlmostEqual(e.coupe_s, coupe, places=3)
+        self.assertAlmostEqual(e.percage_s, 10.5, places=6)  # un contour : pointage + perçage stationnaire
+        self.assertEqual((e.nb_percages, e.nb_coins), (1, 4))
+        self.assertAlmostEqual(e.total_s, coupe + 10.5, places=3)
+
+    def test_trou_ajoute_un_percage_et_de_la_coupe(self):
+        from .services.temps import estimer_temps_decoupe
+
+        avant = estimer_temps_decoupe(self.piece)
+        self.piece.contour_json["trous"] = [[[40, 20], [60, 20], [60, 30], [40, 30]]]
+        apres = estimer_temps_decoupe(self.piece)
+        self.assertEqual(apres.nb_percages, 2)
+        self.assertGreater(apres.total_s, avant.total_s + 10.5)
+
+    def test_qualite_plus_fine_plus_lente_et_coefficient(self):
+        from .services.temps import estimer_temps_decoupe
+
+        moyen = estimer_temps_decoupe(self.piece, qualite=3)
+        fin = estimer_temps_decoupe(self.piece, qualite=4)
+        self.assertGreater(fin.coupe_s, moyen.coupe_s)
+        self.parametre.coefficient_ajustement = 1.5
+        self.parametre.save()
+        self.piece.refresh_from_db()
+        self.assertAlmostEqual(estimer_temps_decoupe(self.piece).total_s, moyen.total_s * 1.5, places=3)
+
+    def test_marquage(self):
+        from .services.temps import estimer_temps_decoupe
+
+        self.piece.gravure_json = {"traits": [[[0, 0], [50, 0]], [[0, 5], [50, 5]]]}
+        self.piece.longueur_gravure_mm = 100
+        e = estimer_temps_decoupe(self.piece)
+        self.assertAlmostEqual(e.marquage_s, 100 / (5000 / 60) + 2 * 1, places=6)
+
+    def test_cas_impossibles(self):
+        from .services.temps import ErreurTemps, estimer_temps_decoupe
+
+        with self.assertRaises(ErreurTemps):
+            estimer_temps_decoupe(self.piece, qualite=5)  # pas de vitesses pour cette qualité
+        self.piece.matiere = Matiere.objects.create(nom="Cuivre", densite=8900)
+        with self.assertRaises(ErreurTemps):
+            estimer_temps_decoupe(self.piece)  # aucune matière paramétrée
+        sans_geometrie = PieceDecoupe.objects.create(nom="vide", fichier_source="decoupe/sources/v.dxf", matiere=self.matiere, epaisseur=10)
+        with self.assertRaises(ErreurTemps):
+            estimer_temps_decoupe(sans_geometrie)
+
+    def test_epaisseur_la_plus_proche_avec_avertissement(self):
+        from .services.temps import estimer_temps_decoupe
+
+        self.piece.epaisseur = 12
+        e = estimer_temps_decoupe(self.piece)
+        self.assertTrue(any("la plus proche" in a for a in e.avertissements))
+
+    def test_alimenter_la_gamme(self):
+        import datetime
+
+        from technique.models import Gamme
+
+        from .services.gamme import alimenter_gamme
+        from .services.temps import estimer_temps_decoupe
+
+        jour = datetime.date(2026, 10, 5)
+        etape, e = alimenter_gamme(self.piece, aujourdhui=jour)
+        self.assertEqual((etape.poste, etape.origine, etape.ordre), (self.poste, "decoupe", 1))
+        self.assertAlmostEqual(etape.temps_variable, round(e.total_min, 3))
+        # même jour : mise à jour sur place
+        self.parametre.coefficient_ajustement = 2
+        self.parametre.save()
+        self.piece.refresh_from_db()
+        etape2, _ = alimenter_gamme(self.piece, aujourdhui=jour)
+        self.assertEqual(etape2.pk, etape.pk)
+        self.assertEqual(Gamme.objects.filter(article=self.article).count(), 1)
+        # autre jour : l'ancienne étape est historisée, une nouvelle prend le relais au même rang
+        etape3, _ = alimenter_gamme(self.piece, aujourdhui=jour + datetime.timedelta(days=3))
+        etape.refresh_from_db()
+        self.assertEqual(etape.date_fin, jour + datetime.timedelta(days=2))
+        self.assertEqual((etape3.ordre, etape3.date_debut), (1, jour + datetime.timedelta(days=3)))
+
+    def test_gamme_manuelle_jamais_ecrasee(self):
+        import datetime
+
+        from technique.models import Gamme
+
+        from .services.gamme import alimenter_gamme
+
+        jour = datetime.date(2026, 10, 5)
+        manuelle = Gamme.objects.create(article=self.article, poste=self.poste, ordre=1, temps_variable=99, date_debut=datetime.date(2020, 1, 1))
+        etape, _ = alimenter_gamme(self.piece, aujourdhui=jour)
+        manuelle.refresh_from_db()
+        self.assertEqual(manuelle.temps_variable, 99)
+        self.assertEqual(etape.ordre, 2)
+
+    def test_gamme_sans_article_ou_poste(self):
+        from .services.gamme import alimenter_gamme
+        from .services.temps import ErreurTemps
+
+        self.piece.article = None
+        with self.assertRaises(ErreurTemps):
+            alimenter_gamme(self.piece)
+        self.piece.article = self.article
+        self.parametre.poste = None
+        self.parametre.save()
+        with self.assertRaises(ErreurTemps):
+            alimenter_gamme(self.piece)
+
+    def test_fiche_piece_et_action(self):
+        from technique.models import Gamme
+
+        page = self.client.get(f"/admin/decoupe/piecedecoupe/{self.piece.pk}/change/")
+        self.assertContains(page, "min par pièce")
+        self.assertContains(page, "Alimenter la gamme de l&#x27;article")
+        reponse = self.client.get(f"/admin/decoupe/piecedecoupe/{self.piece.pk}/alimenter-gamme/", follow=True)
+        self.assertContains(reponse, "par pièce.")
+        self.assertTrue(Gamme.objects.filter(article=self.article, origine="decoupe").exists())
+
+    def test_retoucher_une_etape_calculee_la_rend_manuelle(self):
+        from technique.models import Gamme
+
+        from .services.gamme import alimenter_gamme
+
+        etape, _ = alimenter_gamme(self.piece)
+        reponse = self.client.post(
+            f"/admin/technique/gamme/{etape.pk}/change/",
+            {"article": self.article.pk, "poste": self.poste.pk, "ordre": 1, "temps_fixe": "0", "temps_variable": "7", "date_debut": etape.date_debut.strftime("%d/%m/%Y")},
+        )
+        self.assertEqual(reponse.status_code, 302, reponse.context["adminform"].form.errors if reponse.context else "")
+        etape.refresh_from_db()
+        self.assertEqual((etape.temps_variable, etape.origine), (7, "manuelle"))
+
+    def test_admin_parametres_de_coupe(self):
+        self.assertContains(self.client.get("/admin/decoupe/parametrecoupe/"), "Steel")
+        page = self.client.get(f"/admin/decoupe/parametrecoupe/{self.parametre.pk}/change/")
+        self.assertContains(page, "154.9")
+        self.assertContains(page, "Réglages du calcul")

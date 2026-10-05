@@ -292,6 +292,7 @@ NAVIGATION = [
             _menu("Pièces à découper", "content_cut", "decoupe", "piecedecoupe"),
             _menu("Imbrications", "grid_view", "decoupe", "imbricationjob"),
             _menu("Profils d'import", "layers", "decoupe", "profilimportdecoupe"),
+            _menu("Paramètres de coupe", "speed", "decoupe", "parametrecoupe"),
         ],
     },
     {

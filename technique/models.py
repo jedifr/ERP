@@ -283,6 +283,10 @@ class Gamme(DateRangeHistoriqueMixin, models.Model):
     date_fin = models.DateField(
         "date de fin", null=True, blank=True, help_text="Historisation de la révision"
     )
+    origine = models.CharField(
+        "origine", max_length=12, default="manuelle", choices=[("manuelle", "Saisie à la main"), ("decoupe", "Calculée depuis la pièce à découper")],
+        help_text="Une étape « calculée » est remise à jour depuis la pièce à découper (temps de coupe) ; la modifier à la main la fait revenir en « saisie à la main ».",
+    )
 
     class Meta:
         verbose_name = "Étape de gamme"

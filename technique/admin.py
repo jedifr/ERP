@@ -28,6 +28,7 @@ class GammeInline(TabularInline):
     model = Gamme
     extra = 1
     autocomplete_fields = ["poste"]
+    readonly_fields = ["origine"]
 
 
 class ArticleFournisseurInline(TabularInline):
@@ -103,6 +104,15 @@ class ArticleAdmin(ColonnesPersonnalisablesMixin, ExportCsvMixin, ModelAdmin):
 
     class Media:
         js = ["technique/article_admin.js"]
+
+    def save_formset(self, request, form, formset, change):
+        # Une étape de gamme calculée depuis la pièce à découper, retouchée à la main, devient « saisie à la main » :
+        # un recalcul ultérieur ne l'écrase plus.
+        if formset.model is Gamme:
+            for f in formset.forms:
+                if f.instance.pk and f.has_changed() and f.instance.origine == "decoupe":
+                    f.instance.origine = "manuelle"
+        super().save_formset(request, form, formset, change)
 
     _CHAMPS_STOCK = ("gere_en_stock", "stock_mini", "quantite_reappro")
 
@@ -247,7 +257,13 @@ class NomenclatureAdmin(ModelAdmin):
 
 @admin.register(Gamme)
 class GammeAdmin(ModelAdmin):
-    list_display = ["article", "ordre", "poste", "date_debut", "date_fin"]
+    list_display = ["article", "ordre", "poste", "date_debut", "date_fin", "origine"]
+    readonly_fields = ["origine"]
+
+    def save_model(self, request, obj, form, change):
+        if change and obj.origine == "decoupe" and form.has_changed():
+            obj.origine = "manuelle"
+        super().save_model(request, obj, form, change)
     list_filter = ["poste"]
     search_fields = ["article__reference"]
     autocomplete_fields = ["article", "poste"]

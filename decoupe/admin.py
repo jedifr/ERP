@@ -1,21 +1,29 @@
 from django import forms
-from django.contrib import admin
+from django.contrib import admin, messages
+from django.core.exceptions import PermissionDenied
+from django.shortcuts import get_object_or_404, redirect
+from django.urls import reverse
 from django.urls import path
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 from comptes.pastilles import EN_COURS, PROBLEME, TERMINE, PastillesMixin
 from unfold.admin import ModelAdmin, TabularInline
+from unfold.decorators import action as unfold_action
 
 from .admin_views import analyser_fichier_view, previsualiser_imbrication_view
 from .models import (
     ImbricationJob,
     ImbricationLigne,
     ImbricationPlacement,
+    ParametreCoupe,
     PieceDecoupe,
     ProfilImportDecoupe,
     RegleProfilImportDecoupe,
+    VitesseCoupe,
 )
 from .services.apercu_svg import generer_svg_feuille, generer_svg_piece
+from .services.gamme import alimenter_gamme
+from .services.temps import ErreurTemps, estimer_temps_decoupe
 
 
 def _bloc_feuille_svg(numero, svg):
@@ -139,10 +147,47 @@ class PieceDecoupeAdmin(PastillesMixin, ModelAdmin):
         "calques_editables",
         "a_gravure_display",
         "longueur_gravure_mm_display",
+        "temps_decoupe_display",
         "contour_json",
         "date_import",
     ]
     actions = ["reimporter"]
+    actions_detail = ["action_alimenter_gamme"]
+
+    @admin.display(description="Temps de découpe estimé")
+    def temps_decoupe_display(self, obj):
+        if obj is None or not obj.pk or obj.statut != obj.Statut.OK:
+            return "—"
+        try:
+            e = estimer_temps_decoupe(obj)
+        except ErreurTemps as exc:
+            return str(exc)
+        texte = (
+            f"{e.total_min:.1f} min par pièce — coupe {e.coupe_s / 60:.1f} min ({e.longueur_coupe_mm:.0f} mm, {e.nb_coins} coins), "
+            f"perçage {e.percage_s / 60:.1f} min ({e.nb_percages} perçages), marquage {e.marquage_s / 60:.1f} min. "
+            f"Paramètres : {e.parametre}."
+        )
+        return format_html("{}{}", texte, mark_safe("".join(format_html("<br><em>{}</em>", a) for a in e.avertissements)))
+
+    @unfold_action(description="Alimenter la gamme de l'article (temps de découpe)", url_path="alimenter-gamme", icon="schedule")
+    def action_alimenter_gamme(self, request, object_id):
+        piece = get_object_or_404(PieceDecoupe, pk=object_id)
+        retour = reverse("admin:decoupe_piecedecoupe_change", args=[piece.pk])
+        if not (request.user.has_perm("technique.change_gamme") and request.user.has_perm("technique.add_gamme")):
+            raise PermissionDenied
+        try:
+            etape, estimation = alimenter_gamme(piece)
+        except ErreurTemps as exc:
+            self.message_user(request, str(exc), level=messages.ERROR)
+        else:
+            self.message_user(
+                request,
+                format_html(
+                    "Gamme de {} : étape {} ({}) = {} min par pièce.", piece.article, etape.ordre, etape.poste, f"{estimation.total_min:.2f}"
+                ),
+                level=messages.SUCCESS,
+            )
+        return redirect(retour)
 
     def formfield_for_dbfield(self, db_field, request, **kwargs):
         if db_field.name == "regles_calques_manuelles":
@@ -403,3 +448,32 @@ class ImbricationJobAdmin(ModelAdmin):
 class ImbricationPlacementAdmin(ModelAdmin):
     list_display = ["job", "piece", "numero_feuille", "x_mm", "y_mm", "rotation_deg", "miroir"]
     list_filter = ["numero_feuille", "miroir"]
+
+
+class VitesseCoupeInline(TabularInline):
+    model = VitesseCoupe
+    extra = 0
+    ordering = ["qualite"]
+
+
+@admin.register(ParametreCoupe)
+class ParametreCoupeAdmin(ModelAdmin):
+    """Paramètres de coupe repris du logiciel de la machine (jet d'eau) : une fiche par matière et épaisseur, avec une
+    ligne de vitesses par niveau de qualité. Servent à estimer le temps de découpe des pièces."""
+
+    list_display = ["matiere", "epaisseur_mm", "procede", "poste", "usinabilite", "intervalle_pieces_mm", "coefficient_ajustement"]
+    list_filter = ["procede", "matiere"]
+    search_fields = ["matiere__nom"]
+    autocomplete_fields = ["matiere", "poste"]
+    inlines = [VitesseCoupeInline]
+    fieldsets = [
+        (None, {"fields": ["procede", "matiere", "epaisseur_mm", "poste", "usinabilite"]}),
+        ("Perçage", {"fields": [
+            "mode_percage", "percage_stationnaire_hp_s", "percage_stationnaire_bp_s", "percage_circulaire_hp_tours",
+            "percage_circulaire_bp_tours", "diametre_percage_mm", "temporisation_pointage_s",
+        ]}),
+        ("Marquage, amorce et imbrication", {"fields": [
+            "vitesse_marquage_mm_min", "temporisation_marquage_s", "percement_lineaire_mm", "chevauchement_mm", "intervalle_pieces_mm",
+        ]}),
+        ("Réglages du calcul", {"fields": ["rayon_pleine_vitesse_mm", "seuil_angle_coin_deg", "coefficient_ajustement"]}),
+    ]
