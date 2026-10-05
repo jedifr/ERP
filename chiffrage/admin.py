@@ -1,3 +1,4 @@
+import dataclasses
 import datetime
 
 from django import forms
@@ -12,6 +13,7 @@ from django.utils import timezone
 from django.utils.html import escape, format_html, format_html_join
 from django.utils.safestring import mark_safe
 from unfold.decorators import action as unfold_action
+from unfold.enums import ActionVariant
 from comptes.exports import ExportCsvMixin
 from comptes.liens import lien_admin
 from comptes.montants import arrondir, pourcent, somme
@@ -60,6 +62,7 @@ from .documents import (
     generer_pdf_ordre_fabrication,
     generer_pdf_ordres_fabrication,
 )
+from . import etapes
 from .moteur import ChiffrageError, calculer_devis
 from .planning_sync import resynchroniser
 from .validation import verifier_validation_devis
@@ -159,6 +162,66 @@ class DevisLigneOperationInline(TabularInline):
         return False
 
 
+class EtapeSuivanteMixin:
+    """Bouton « Étape suivante » en haut de la fiche : propose et exécute la prochaine action du cycle
+    devis → commande → ordres de fabrication → livraison → facture (décision dans `etapes.py`).
+    Le bouton n'apparaît que s'il y a une étape à faire et son libellé dit laquelle."""
+
+    def etape_de(self, objet):
+        raise NotImplementedError
+
+    def executer_etape(self, request, objet, etape):
+        raise NotImplementedError
+
+    def has_etape_suivante_permission(self, request, object_id=None):
+        return self.has_view_permission(request)
+
+    def get_actions_detail(self, request, object_id):
+        actions = super().get_actions_detail(request, object_id)
+        objet = self.get_object(request, object_id)
+        etape = self.etape_de(objet) if objet is not None else None
+        resultat = []
+        for a in actions:
+            if a.action_name.endswith("action_etape_suivante"):
+                if etape is None:  # rien à faire : pas de bouton
+                    continue
+                a = dataclasses.replace(a, description=f"Étape suivante : {etape.libelle}")
+            resultat.append(a)
+        return resultat
+
+    @unfold_action(
+        description="Étape suivante", icon="arrow_forward", variant=ActionVariant.PRIMARY,
+        permissions=["etape_suivante"], url_path="etape-suivante",
+    )
+    def action_etape_suivante(self, request, object_id):
+        objet = get_object_or_404(self.model, pk=object_id)
+        if not self.has_view_permission(request, objet):
+            raise PermissionDenied
+        etape = self.etape_de(objet)
+        if etape is None:
+            self.message_user(request, f"{objet} : aucune étape suivante pour l'instant.", level=messages.INFO)
+            return HttpResponseRedirect(reverse(f"admin:{objet._meta.app_label}_{objet._meta.model_name}_change", args=[objet.pk]))
+        return self.executer_etape(request, objet, etape)
+
+    def _refus_droit(self, request, objet, message):
+        self.message_user(request, message, level=messages.ERROR)
+        return HttpResponseRedirect(reverse(f"admin:{objet._meta.app_label}_{objet._meta.model_name}_change", args=[objet.pk]))
+
+    def _suite_commande(self, request, commande, etape):
+        """Étapes qui partent d'une commande (aussi proposées depuis la livraison pour la facture)."""
+        if etape == etapes.CREER_ORDRES:
+            if not request.user.has_perm("chiffrage.add_ordrefabrication"):
+                return self._refus_droit(request, commande, "Vous n'avez pas la permission de créer des ordres de fabrication.")
+            return HttpResponseRedirect(reverse("admin:chiffrage_commande_action_creer_ordres", args=[commande.pk]))
+        if etape == etapes.CREER_LIVRAISON:
+            if not request.user.has_perm("chiffrage.add_livraison"):
+                return self._refus_droit(request, commande, "Vous n'avez pas la permission de créer une livraison.")
+            return HttpResponseRedirect(f"{reverse('admin:chiffrage_livraison_add')}?commande={commande.pk}")
+        if request.user.has_perm("facturation.add_facture"):
+            return HttpResponseRedirect(f"{reverse('admin:facturation_facture_preparer')}?commande={commande.pk}")
+        return self._refus_droit(request, commande, "Vous n'avez pas la permission de créer une facture.")
+
+
 class DevisAdminForm(forms.ModelForm):
     class Meta:
         model = Devis
@@ -225,7 +288,7 @@ class ExpireFilter(admin.SimpleListFilter):
 
 
 @admin.register(Devis)
-class DevisAdmin(ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
+class DevisAdmin(EtapeSuivanteMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
     codification_entite = RegleCodification.Entite.DEVIS
     form = DevisAdminForm
 
@@ -257,7 +320,31 @@ class DevisAdmin(ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin
     ]
     inlines = [DevisLigneInline]
     actions = ["action_recalculer", "action_lancer_en_production"]
-    actions_detail = ["action_pdf", "action_reviser"]
+    actions_detail = ["action_etape_suivante", "action_pdf", "action_reviser"]
+
+    def etape_de(self, objet):
+        return etapes.etape_devis(objet)
+
+    def executer_etape(self, request, devis, etape):
+        if etape == etapes.OUVRIR_COMMANDE:
+            return HttpResponseRedirect(
+                reverse("admin:chiffrage_commande_change", args=[Commande.objects.filter(devis=devis).first().pk])
+            )
+        if not request.user.has_perm("chiffrage.add_commande"):
+            return self._refus_droit(request, devis, "Vous n'avez pas la permission de créer une commande.")
+        try:
+            commande = lancer_en_production(devis)
+        except ChiffrageError as exc:
+            return self._refus_droit(request, devis, f"{devis} : {exc}")
+        suite = etapes.etape_commande(commande)
+        self.message_user(
+            request,
+            format_html(
+                "Commande {} créée.{}", lien_admin(commande), f" Étape suivante : {suite.libelle.lower()}." if suite else ""
+            ),
+            level=messages.SUCCESS,
+        )
+        return HttpResponseRedirect(reverse("admin:chiffrage_commande_change", args=[commande.pk]))
 
     def get_readonly_fields(self, request, obj=None):
         champs = list(super().get_readonly_fields(request, obj))
@@ -465,20 +552,24 @@ class DevisAdmin(ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin
 
     @admin.action(description="Créer la commande")
     def action_lancer_en_production(self, request, queryset):
+        creees = []
         for devis in queryset:
             try:
                 commande = lancer_en_production(devis)
             except ChiffrageError as exc:
                 self.message_user(request, f"{devis} : {exc}", level=messages.ERROR)
             else:
+                creees.append(commande)
                 self.message_user(
                     request,
                     format_html(
-                        "{} : commande {} créée. Cliquez sur la commande pour l'ouvrir et créer les ordres de fabrication.",
+                        "{} : commande {} créée. Cliquez sur la commande pour l'ouvrir.",
                         devis, lien_admin(commande),
                     ),
                     level=messages.SUCCESS,
                 )
+        if len(creees) == 1 and queryset.count() == 1:  # un seul devis : on ouvre directement la commande
+            return HttpResponseRedirect(reverse("admin:chiffrage_commande_change", args=[creees[0].pk]))
 
 
     @unfold_action(description="PDF du devis", url_path="pdf")
@@ -659,7 +750,7 @@ class CommandeLigneInline(TabularInline):
 
 
 @admin.register(Commande)
-class CommandeAdmin(ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
+class CommandeAdmin(EtapeSuivanteMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
     codification_entite = RegleCodification.Entite.COMMANDE
 
     list_display = ["numero", "client", "reference_client", "devis", "date_commande", "statut", "devise"]
@@ -738,7 +829,13 @@ class CommandeAdmin(ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMi
             obj.factures.order_by("date_facturation", "numero"), "admin:facturation_facture_change",
             lambda f: f"{f.numero} — {f.date_facturation:%d/%m/%Y}" + (" (avoir)" if f.est_avoir else ""),
         )
-    actions_detail = ["action_creer_ordres", "action_fiches_fabrication_pdf", "action_ar_pdf", "action_bon_preparation_pdf"]
+    actions_detail = ["action_etape_suivante", "action_creer_ordres", "action_fiches_fabrication_pdf", "action_ar_pdf", "action_bon_preparation_pdf"]
+
+    def etape_de(self, objet):
+        return etapes.etape_commande(objet)
+
+    def executer_etape(self, request, commande, etape):
+        return self._suite_commande(request, commande, etape)
 
     class Media:
         js = ["chiffrage/commande_admin_live.js"]
@@ -984,6 +1081,11 @@ class LivraisonLigneInline(TabularInline):
     extra = 1
     autocomplete_fields = ["commande_ligne", "lot"]
 
+    def get_extra(self, request, obj=None, **kwargs):
+        commande = LivraisonAdmin._commande_demandee(request) if not (obj and obj.pk) and request.method == "GET" else None
+        nombre = len(etapes.lignes_a_livrer(commande)) if commande is not None else 0
+        return nombre or self.extra
+
     def get_exclude(self, request, obj=None):
         return ["lot"] if not settings.STOCK_ACTIF else super().get_exclude(request, obj)
 
@@ -998,7 +1100,7 @@ class LivraisonLigneInline(TabularInline):
 
 
 @admin.register(Livraison)
-class LivraisonAdmin(ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
+class LivraisonAdmin(EtapeSuivanteMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
     codification_entite = RegleCodification.Entite.LIVRAISON
 
     list_display = ["numero", "commande", "date_livraison", "statut"]
@@ -1007,7 +1109,25 @@ class LivraisonAdmin(ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeM
     autocomplete_fields = ["commande"]
     inlines = [LivraisonLigneInline]
     actions = ["action_annuler"]
-    actions_detail = ["action_pdf"]
+    actions_detail = ["action_etape_suivante", "action_pdf"]
+
+    def etape_de(self, objet):
+        return etapes.etape_livraison(objet)
+
+    def executer_etape(self, request, livraison, etape):
+        return self._suite_commande(request, livraison.commande, etape)
+
+    def get_formset_kwargs(self, request, obj, inline, prefix):
+        """`?commande=…` (bouton « Créer la livraison ») : les lignes à livrer arrivent pré-remplies avec leur reliquat."""
+        kwargs = super().get_formset_kwargs(request, obj, inline, prefix)
+        commande = self._commande_demandee(request) if not (obj and obj.pk) and isinstance(inline, LivraisonLigneInline) else None
+        if commande is not None and request.method == "GET":
+            kwargs["initial"] = [{"commande_ligne": l.pk, "quantite_livree": q} for l, q in etapes.lignes_a_livrer(commande)]
+        return kwargs
+
+    @staticmethod
+    def _commande_demandee(request):
+        return Commande.objects.filter(pk=request.GET.get("commande", "")).exclude(statut=Commande.Statut.ANNULEE).first()
 
     # Fiche en deux colonnes : saisie à gauche, récapitulatif (client, contenu, reliquat, facturation, annulation)
     # à droite — voir comptes/static/comptes/fiche_deux_colonnes.css.

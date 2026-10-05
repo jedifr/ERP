@@ -340,13 +340,17 @@ class FactureAdmin(ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMix
             lignes = lignes_a_facturer(commande)
             if lignes:
                 candidats.append({"commande": commande, "lignes": lignes})
+        demandee = request.GET.get("commande", "")
+        seule = [c for c in candidats if c["commande"].pk == demandee]
         return TemplateResponse(
             request,
             "admin/facturation/preparer_facture.html",
             {
                 **self.admin_site.each_context(request),
                 "title": "Préparer une facture",
-                "candidats": candidats,
+                "candidats": seule or candidats,
+                "commande_filtree": bool(seule),
+                "liste_complete_url": reverse("admin:facturation_facture_preparer"),
                 "peut_anticiper": request.user.has_perm("facturation.facturer_avant_livraison"),
                 "retour": retour,
             },

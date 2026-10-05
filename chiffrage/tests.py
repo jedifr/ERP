@@ -5073,3 +5073,125 @@ class FicheOrdreFabricationDeuxColonnesTests(_FixtureOrdresCommande, TestCase):
         self.of.refresh_from_db()
         self.assertEqual(self.of.statut, "En cours")
         self.assertEqual(self.of.nombre_tentatives, 1)  # la synchronisation n'est pas modifiable à la main
+
+
+class EtapeSuivanteDevisTests(_FixtureModuleA, TestCase):
+    """Bouton « Étape suivante » du devis, et ouverture directe de la commande créée."""
+
+    def url(self):
+        return f"/admin/chiffrage/devis/{self.devis.pk}/etape-suivante/"
+
+    def test_devis_brouillon_pas_de_bouton(self):
+        page = self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/change/")
+        self.assertNotContains(page, "Étape suivante")
+        reponse = self.client.get(self.url(), follow=True)
+        self.assertContains(reponse, "aucune étape suivante")
+        self.assertFalse(Commande.objects.filter(devis=self.devis).exists())
+
+    def test_creer_la_commande_puis_ouvrir_la_commande(self):
+        self._valider()
+        page = self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/change/")
+        self.assertContains(page, "Étape suivante : Créer la commande")
+        reponse = self.client.get(self.url(), follow=True)
+        commande = Commande.objects.get(devis=self.devis)
+        self.assertEqual(reponse.redirect_chain[-1][0], f"/admin/chiffrage/commande/{commande.pk}/change/")
+        self.assertContains(reponse, "créée. Étape suivante : créer la livraison.")
+        # La commande existe : le bouton devient « Ouvrir la commande » et ne crée rien de plus.
+        page = self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/change/")
+        self.assertContains(page, "Étape suivante : Ouvrir la commande")
+        reponse = self.client.get(self.url())
+        self.assertRedirects(reponse, f"/admin/chiffrage/commande/{commande.pk}/change/", fetch_redirect_response=False)
+        self.assertEqual(Commande.objects.filter(devis=self.devis).count(), 1)
+
+    def test_devis_refuse_ou_remplace_pas_d_etape(self):
+        self._valider()
+        self.devis.issue = Devis.Issue.REFUSE
+        self.devis.save()
+        self.assertNotContains(self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/change/"), "Étape suivante")
+
+    def test_action_de_liste_ouvre_directement_la_commande(self):
+        self._valider()
+        reponse = self.client.post(
+            "/admin/chiffrage/devis/", {"action": "action_lancer_en_production", "_selected_action": [self.devis.pk]}, follow=True
+        )
+        commande = Commande.objects.get(devis=self.devis)
+        self.assertEqual(reponse.redirect_chain[-1][0], f"/admin/chiffrage/commande/{commande.pk}/change/")
+        self.assertContains(reponse, "créée")
+
+    def test_sans_droit_de_creer_une_commande(self):
+        from django.contrib.auth import get_user_model
+        from django.contrib.auth.models import Permission
+
+        self._valider()
+        simple = get_user_model().objects.create_user("lecteur-etape", "l@example.com", "pass-mot-de-passe-7", is_staff=True)
+        simple.user_permissions.add(Permission.objects.get(codename="view_devis"))
+        self.client.force_login(simple)
+        reponse = self.client.get(self.url(), follow=True)
+        self.assertContains(reponse, "pas la permission de créer une commande")
+        self.assertFalse(Commande.objects.filter(devis=self.devis).exists())
+
+
+class EtapeSuivanteCommandeTests(_FixtureOrdresCommande, TestCase):
+    """De la commande : ordres de fabrication, puis livraison pré-remplie, puis facture."""
+
+    def url(self):
+        return f"/admin/chiffrage/commande/{self.commande.pk}/etape-suivante/"
+
+    def test_parcours_complet(self):
+        fiche = f"/admin/chiffrage/commande/{self.commande.pk}/change/"
+        self.assertContains(self.client.get(fiche), "Étape suivante : Créer les ordres de fabrication")
+        self.assertRedirects(
+            self.client.get(self.url()), f"/admin/chiffrage/commande/{self.commande.pk}/ordres-fabrication/", fetch_redirect_response=False
+        )
+        creer_ordres_fabrication(self.commande, regrouper=True)
+
+        # Plus d'ordre à créer : on passe à la livraison, formulaire ouvert avec les reliquats.
+        self.assertContains(self.client.get(fiche), "Étape suivante : Créer la livraison")
+        reponse = self.client.get(self.url())
+        self.assertRedirects(reponse, f"/admin/chiffrage/livraison/add/?commande={self.commande.pk}", fetch_redirect_response=False)
+        page = self.client.get(reponse["Location"])
+        self.assertEqual(page.status_code, 200)
+        self.assertEqual(page.context["adminform"].form.initial.get("commande"), self.commande.pk)
+        lignes = page.context["inline_admin_formsets"][0].formset
+        self.assertEqual(
+            sorted((f.initial["commande_ligne"], f.initial["quantite_livree"]) for f in lignes.forms if f.initial),
+            sorted((l.pk, l.reliquat) for l in (self.l1, self.l2, self.l3, self.l4)),
+        )
+        self.assertEqual(len(lignes.forms), 4)  # une ligne par reliquat
+
+        # Tout livré : reste la facture.
+        livraison = Livraison.objects.create(numero="BL-ETAPE", commande=self.commande, date_livraison=datetime.date(2026, 10, 5))
+        for ligne in (self.l1, self.l2, self.l3, self.l4):
+            LivraisonLigne.objects.create(livraison=livraison, commande_ligne=ligne, quantite_livree=ligne.quantite_commandee)
+        self.assertContains(self.client.get(fiche), "Étape suivante : Préparer la facture")
+        self.assertRedirects(
+            self.client.get(self.url()), f"/admin/facturation/facture/preparer/?commande={self.commande.pk}", fetch_redirect_response=False
+        )
+        page = self.client.get(f"/admin/facturation/facture/preparer/?commande={self.commande.pk}")
+        self.assertContains(page, "CDE-OF")
+        self.assertContains(page, "Voir toutes les commandes à facturer")
+
+    def test_livraison_prepare_la_facture(self):
+        livraison = Livraison.objects.create(numero="BL-ETAPE2", commande=self.commande, date_livraison=datetime.date(2026, 10, 5))
+        LivraisonLigne.objects.create(livraison=livraison, commande_ligne=self.l4, quantite_livree=40)
+        creer_ordres_fabrication(self.commande, regrouper=True)
+        page = self.client.get(f"/admin/chiffrage/livraison/{livraison.pk}/change/")
+        self.assertContains(page, "Étape suivante : Préparer la facture")
+        self.assertRedirects(
+            self.client.get(f"/admin/chiffrage/livraison/{livraison.pk}/etape-suivante/"),
+            f"/admin/facturation/facture/preparer/?commande={self.commande.pk}", fetch_redirect_response=False,
+        )
+
+    def test_commande_annulee_pas_d_etape(self):
+        self.commande.annuler()
+        self.assertNotContains(self.client.get(f"/admin/chiffrage/commande/{self.commande.pk}/change/"), "Étape suivante")
+
+    def test_sans_droit_de_creer_des_ordres(self):
+        from django.contrib.auth import get_user_model
+        from django.contrib.auth.models import Permission
+
+        simple = get_user_model().objects.create_user("lecteur-etape2", "l2@example.com", "pass-mot-de-passe-8", is_staff=True)
+        simple.user_permissions.add(Permission.objects.get(codename="view_commande"))
+        self.client.force_login(simple)
+        reponse = self.client.get(self.url(), follow=True)
+        self.assertContains(reponse, "pas la permission de créer des ordres de fabrication")

@@ -29,6 +29,7 @@
   {% else %}
   <p class="mb-4">Rien à facturer : tout ce qui a été livré est déjà facturé.</p>
   {% endif %}
+  {% if commande_filtree %}<p class="mb-4"><a href="{{ liste_complete_url }}">Voir toutes les commandes à facturer</a></p>{% endif %}
   <a href="{{ retour }}">Retour aux factures</a>
 </div>
 {% endblock %}

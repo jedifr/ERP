@@ -2821,3 +2821,13 @@ La fiche d'un devis place la **saisie à gauche** (numéro, client, adresses, co
 ## Bandeaux de confirmation cliquables
 
 Quand une action crée ou modifie un document (commande créée depuis un devis, nouvel indice de devis, ordres de fabrication, ordre lancé depuis une ligne de commande, commande ou livraison annulée, mouvement de stock contre-passé, resynchronisation d'un OF), le **bandeau vert** contient un **lien vers le document** : un clic l'ouvre, sans le chercher dans la liste. Quand l'action ouvre déjà la fiche créée (facture préparée, avoir, duplication d'un article), il n'y a rien de plus à faire. Pour ajouter un lien dans un nouveau message : `comptes.liens.lien_admin(objet)` (à passer dans `format_html`).
+
+## Bouton « Étape suivante » (devis → commande → fabrication → livraison → facture)
+
+Sur la **fiche d'un devis, d'une commande et d'une livraison**, un bouton orange en haut propose **la prochaine action du cycle** et dit laquelle (« Étape suivante : Créer la commande »…). Il disparaît quand il n'y a plus rien à faire. Les étapes :
+
+- **Devis validé** (ni refusé ni remplacé) → *Créer la commande* ; une fois créée, le bouton devient *Ouvrir la commande*. Depuis la liste des devis, « Créer la commande » sur **un seul devis** ouvre directement la commande.
+- **Commande** → *Créer les ordres de fabrication* (écran d'aperçu, avec regroupement) tant qu'il reste des lignes fabriquées sans ordre, puis *Créer la livraison* (formulaire ouvert avec **les lignes à livrer pré-remplies** de leur reliquat, à ajuster avant d'enregistrer), puis *Préparer la facture* (écran filtré sur cette commande).
+- **Livraison** → *Préparer la facture* s'il reste du livré non facturé.
+
+Le bouton ne contourne aucun droit : sans la permission de créer l'objet suivant, un message l'indique. La décision de l'étape est dans `chiffrage/etapes.py`, l'exécution dans `EtapeSuivanteMixin` (`chiffrage/admin.py`). Les règles existantes (devis expiré, refusé, commande annulée…) restent appliquées.
