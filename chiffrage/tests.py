@@ -4994,3 +4994,33 @@ class FicheCommandeDeuxColonnesTests(_FixtureOrdresCommande, TestCase):
     def test_enregistrement_inchange(self):
         reponse = self.client.get(f"/admin/chiffrage/commande/{self.commande.pk}/change/")
         self.assertContains(reponse, 'name="reference_client"')
+
+
+class FicheLivraisonDeuxColonnesTests(_FixtureOrdresCommande, TestCase):
+    """Fiche livraison : saisie à gauche ; client, contenu, reliquat, facturation et annulation à droite."""
+
+    def setUp(self):
+        super().setUp()
+        self.livraison = Livraison.objects.create(numero="BL-DC", commande=self.commande, date_livraison=datetime.date(2026, 10, 5))
+        LivraisonLigne.objects.create(livraison=self.livraison, commande_ligne=self.l4, quantite_livree=40)
+        self.url = f"/admin/chiffrage/livraison/{self.livraison.pk}/change/"
+
+    def test_recapitulatif(self):
+        page = self.client.get(self.url)
+        for attendu in ("fiche-saisie", "fiche-recap", "Récapitulatif", "Client Fabrication", "1 rue des Forges", "69000 Lyon",
+                        "VIS-OF × 40", "VIS-OF : 60 restant(s)", "PIECE-F : 3 restant(s)", "VIS-OF : 40 à facturer",
+                        'name="version_verrou"'):
+            self.assertContains(page, attendu, msg_prefix="")
+        self.assertNotContains(page, "Annulée le")
+
+    def test_livraison_annulee_et_commande_soldee(self):
+        self.livraison.annuler(utilisateur=self.admin, motif="Erreur de saisie")
+        page = self.client.get(self.url)
+        self.assertContains(page, "Annulée le")
+        self.assertContains(page, "Erreur de saisie")
+        self.assertContains(page, "Tout ce qui est livré est facturé")  # plus rien de livré
+
+    def test_formulaire_d_ajout(self):
+        page = self.client.get("/admin/chiffrage/livraison/add/")
+        self.assertEqual(page.status_code, 200)
+        self.assertContains(page, "fiche-recap")

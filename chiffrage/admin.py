@@ -998,6 +998,75 @@ class LivraisonAdmin(ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeM
     actions = ["action_annuler"]
     actions_detail = ["action_pdf"]
 
+    # Fiche en deux colonnes : saisie à gauche, récapitulatif (client, contenu, reliquat, facturation, annulation)
+    # à droite — voir comptes/static/comptes/fiche_deux_colonnes.css.
+    CHAMPS_RECAPITULATIF = [
+        "client_recap", "contenu_recap", "reliquat_recap", "facturation_recap", "annulation_recap",
+    ]
+
+    def get_fieldsets(self, request, obj=None):
+        saisie = [c for c in self.get_fields(request, obj) if c not in self.CHAMPS_RECAPITULATIF]
+        return [
+            (None, {"fields": saisie, "classes": ["fiche-saisie"]}),
+            ("Récapitulatif", {"fields": self.CHAMPS_RECAPITULATIF, "classes": ["fiche-recap"]}),
+        ]
+
+    @staticmethod
+    def _enregistree(obj):
+        return obj is not None and obj.pk and obj.commande_id
+
+    @admin.display(description="Client et adresse de livraison")
+    def client_recap(self, obj):
+        if not self._enregistree(obj):
+            return "—"
+        commande = obj.commande
+        adresse = commande.adresse_livraison
+        return format_html(
+            "<b>{}</b><br>{}<br>{} {}", commande.client.raison_sociale, adresse.adresse, adresse.code_postal, adresse.ville
+        )
+
+    @admin.display(description="Contenu de la livraison")
+    def contenu_recap(self, obj):
+        if not self._enregistree(obj):
+            return "—"
+        lignes = list(obj.lignes.select_related("commande_ligne__article"))
+        if not lignes:
+            return "Aucune ligne"
+        detail = "<br>".join(
+            format_html("{} × {}", l.commande_ligne.article_id, f"{l.quantite_livree:g}") for l in lignes
+        )
+        return mark_safe(detail)
+
+    @admin.display(description="Reliquat de la commande")
+    def reliquat_recap(self, obj):
+        if not self._enregistree(obj):
+            return "—"
+        restantes = [l for l in obj.commande.lignes.all() if l.reliquat is not None and l.reliquat > 0]
+        if not restantes:
+            return "Commande entièrement livrée"
+        return mark_safe("<br>".join(
+            format_html("{} : {} restant(s)", l.article_id, f"{l.reliquat:g}") for l in restantes
+        ))
+
+    @admin.display(description="Livré non facturé")
+    def facturation_recap(self, obj):
+        if not self._enregistree(obj):
+            return "—"
+        a_facturer = [l for l in obj.commande.lignes.all() if (l.reste_a_facturer or 0) > 0]
+        if not a_facturer:
+            return "Tout ce qui est livré est facturé"
+        return mark_safe("<br>".join(
+            format_html("{} : {} à facturer", l.article_id, f"{l.reste_a_facturer:g}") for l in a_facturer
+        ))
+
+    @admin.display(description="Annulation")
+    def annulation_recap(self, obj):
+        if obj is None or not obj.pk or obj.statut != Livraison.Statut.ANNULEE:
+            return "—"
+        quand = f"{obj.date_annulation:%d/%m/%Y %H:%M}" if obj.date_annulation else "?"
+        qui = f" par {obj.utilisateur_annulation}" if obj.utilisateur_annulation_id else ""
+        return f"Annulée le {quand}{qui}" + (f" : {obj.motif_annulation}" if obj.motif_annulation else "")
+
     @unfold_action(description="Bon de livraison (PDF)", url_path="pdf")
     def action_pdf(self, request, object_id):
         livraison = Livraison.objects.get(pk=object_id)
@@ -1013,7 +1082,7 @@ class LivraisonAdmin(ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeM
         return reponse
 
     def get_readonly_fields(self, request, obj=None):
-        champs = ["statut", "date_annulation", "motif_annulation", "utilisateur_annulation"]
+        champs = ["statut", *self.CHAMPS_RECAPITULATIF]
         if obj is not None and obj.pk:
             champs += ["numero", "commande"]
         return champs
