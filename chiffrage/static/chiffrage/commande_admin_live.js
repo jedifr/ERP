@@ -77,6 +77,14 @@
         }
 
         $client.on("change", function () {
+            // Changer de client : les adresses (et le contact) du précédent ne valent plus, on repart de zéro
+            // avant de proposer ceux du nouveau client.
+            ["#id_adresse_facturation", "#id_adresse_livraison"].forEach(function (sel) {
+                const $champ = $(sel);
+                if ($champ.length && $champ.val()) {
+                    $champ.val(null).trigger("change");
+                }
+            });
             const code = $client.val();
             if (!code) {
                 return;

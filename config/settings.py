@@ -378,7 +378,10 @@ NAVIGATION = [
 
 UNFOLD = {
     "STYLES": [lambda request: static("comptes/admin_extra.css")],
-    "SCRIPTS": [lambda request: static("comptes/anti_double_clic.js")],
+    "SCRIPTS": [
+        lambda request: static("comptes/anti_double_clic.js"),
+        lambda request: static("comptes/filtre_client.js"),
+    ],
     "SITE_TITLE": "ERP maison",
     "SITE_HEADER": "ERP maison",
     "SITE_SUBHEADER": "Métallurgie & chaudronnerie",

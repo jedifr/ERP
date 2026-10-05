@@ -2809,3 +2809,7 @@ Le menu suit le chemin d'une commande :
 - Comptabilité, Données de base et Administration sont **repliés** par défaut (ils s'ouvrent d'eux-mêmes quand on est dans l'un de leurs écrans).
 - Chaque entrée n'apparaît que si l'utilisateur a le droit « voir » l'écran ; un groupe sans entrée visible disparaît. Le groupe Stock disparaît si `DJANGO_STOCK_ACTIF=false`.
 - Pour déplacer ou ajouter un écran : `config/settings.py`, liste `NAVIGATION` (une ligne `_menu("Titre", "icône", "app", "modele")`).
+
+## Adresses et contacts filtrés par client
+
+Sur les fiches **Devis** et **Commande**, les listes « adresse de facturation », « adresse de livraison » et « contact » ne proposent que ce qui appartient au **client choisi** (recherche incluse). Changer de client vide ces champs avant de proposer l'adresse principale et le contact du nouveau client, pour ne pas garder par erreur l'adresse de l'ancien. Tant qu'aucun client n'est choisi, la liste reste complète. (Technique : `comptes/static/comptes/filtre_client.js` ajoute le client aux requêtes d'autocomplétion ; `AdresseAdmin` et `ContactAdmin` filtrent côté serveur.)

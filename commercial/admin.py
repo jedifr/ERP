@@ -220,12 +220,26 @@ class TiersAdmin(ExportCsvMixin, CodificationInitialeMixin, ModelAdmin):
         return None
 
 
+def _du_client(request, queryset):
+    """Listes déroulantes d'autocomplétion (fiches Devis et Commande) : ne garder que ce qui appartient au
+    client choisi (paramètre `tiers`, ajouté par comptes/static/comptes/filtre_client.js). Sans client choisi,
+    ou hors autocomplétion (recherche de la liste d'administration), rien n'est filtré."""
+    code = request.GET.get("tiers")
+    if code and request.path.rstrip("/").endswith("/autocomplete"):
+        return queryset.filter(tiers_id=code)
+    return queryset
+
+
 @admin.register(Adresse)
 class AdresseAdmin(ModelAdmin):
     list_display = ["tiers", "types_affiches", "libelle", "ville", "pays", "est_principale"]
     list_filter = ["est_livraison", "est_facturation", "est_principale", "pays"]
     search_fields = ["tiers__code", "tiers__raison_sociale", "ville", "libelle"]
     autocomplete_fields = ["tiers", "pays"]
+
+    def get_search_results(self, request, queryset, search_term):
+        queryset, distinct = super().get_search_results(request, queryset, search_term)
+        return _du_client(request, queryset), distinct
 
     class Media:
         js = ["commercial/adresse_autocomplete.js"]
@@ -247,6 +261,10 @@ class ContactAdmin(ExportCsvMixin, ModelAdmin):
     search_fields = ["nom", "prenom", "tiers__code", "tiers__raison_sociale"]
     autocomplete_fields = ["tiers"]
     inlines = [ContactTelephoneInline]
+
+    def get_search_results(self, request, queryset, search_term):
+        queryset, distinct = super().get_search_results(request, queryset, search_term)
+        return _du_client(request, queryset), distinct
 
     @admin.display(description="Téléphones")
     def telephones_display(self, obj):
