@@ -4,7 +4,7 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 
-from technique.models import Article, Matiere
+from technique.models import Article, FamilleMatiere, Matiere
 from comptes.champs import ChampDecimal
 from comptes.montants import MONTANT, D, arrondir
 
@@ -449,7 +449,15 @@ class ParametreCoupe(models.Model):
         CIRCULAIRE_BP = "circulaire_bp", "Circulaire basse pression"
 
     procede = models.CharField("procédé", max_length=10, choices=Procede.choices, default=Procede.JET_EAU)
-    matiere = models.ForeignKey(Matiere, verbose_name="matière", on_delete=models.PROTECT, related_name="parametres_coupe")
+    famille = models.ForeignKey(
+        FamilleMatiere, verbose_name="famille de matière", on_delete=models.PROTECT, null=True, blank=True,
+        related_name="parametres_coupe",
+        help_text="Cas général : le paramètre vaut pour toutes les nuances de la famille (S235, S355… pour « Acier »).",
+    )
+    matiere = models.ForeignKey(
+        Matiere, verbose_name="nuance précise", on_delete=models.PROTECT, null=True, blank=True, related_name="parametres_coupe",
+        help_text="Exception : un paramètre propre à une seule nuance, qui prend le pas sur celui de sa famille. Laisser vide en général.",
+    )
     epaisseur_mm = models.FloatField("épaisseur (mm)")
     poste = models.ForeignKey(
         "technique.PosteTravail", verbose_name="poste de travail", on_delete=models.PROTECT, null=True, blank=True,
@@ -506,13 +514,32 @@ class ParametreCoupe(models.Model):
     class Meta:
         verbose_name = "Paramètre de coupe"
         verbose_name_plural = "Paramètres de coupe"
-        ordering = ["procede", "matiere", "epaisseur_mm"]
+        ordering = ["procede", "famille", "matiere", "epaisseur_mm"]
         constraints = [
-            models.UniqueConstraint(fields=["procede", "matiere", "epaisseur_mm"], name="unique_parametre_coupe")
+            models.CheckConstraint(
+                condition=models.Q(famille__isnull=False, matiere__isnull=True) | models.Q(famille__isnull=True, matiere__isnull=False),
+                name="parametre_coupe_famille_xor_matiere",
+            ),
+            models.UniqueConstraint(
+                fields=["procede", "famille", "epaisseur_mm"], condition=models.Q(famille__isnull=False), name="unique_parametre_coupe_famille"
+            ),
+            models.UniqueConstraint(
+                fields=["procede", "matiere", "epaisseur_mm"], condition=models.Q(matiere__isnull=False), name="unique_parametre_coupe_matiere"
+            ),
         ]
 
+    @property
+    def cible(self):
+        """Famille ou nuance à laquelle le paramètre s'applique."""
+        return self.matiere if self.matiere_id else self.famille
+
     def __str__(self):
-        return f"{self.matiere} {self.epaisseur_mm:g} mm ({self.get_procede_display()})"
+        return f"{self.cible} {self.epaisseur_mm:g} mm ({self.get_procede_display()})"
+
+    def clean(self):
+        super().clean()
+        if bool(self.famille_id) == bool(self.matiere_id):
+            raise ValidationError("Indiquez soit une famille de matière (cas général), soit une nuance précise, pas les deux.")
 
     @property
     def rayon_pleine_vitesse_mm(self):

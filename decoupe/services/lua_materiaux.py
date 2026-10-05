@@ -1,4 +1,4 @@
-"""Import du fichier `materials.lua` du logiciel de la machine (IGEMS) : une fiche de paramètres de coupe par matière et
+"""Import du fichier `materials.lua` du logiciel de la machine (IGEMS) : une fiche de paramètres de coupe par famille de matière et
 épaisseur (jet d'eau), avec l'usinabilité, le perçage, le marquage, le percement, le chevauchement, l'intervalle entre
 pièces, les paliers et les coefficients de chaque niveau de qualité.
 
@@ -11,7 +11,7 @@ import re
 from django.db import transaction
 
 from decoupe.models import ParametreCoupe, VitesseCoupe
-from technique.models import Matiere
+from technique.models import FamilleMatiere
 
 from .vitesses import QUALITES, vitesses_depuis_usinabilite
 
@@ -76,24 +76,34 @@ def resume(entrees):
 
 @transaction.atomic
 def importer_materiaux(entrees, correspondance, poste=None, remplacer_calcules=True):
-    """Crée (ou met à jour) un paramètre de coupe par entrée. `correspondance` : {nom du fichier: nom de la matière de l'ERP}
-    (une entrée sans correspondance est ignorée). Une matière absente de l'ERP est créée. Les paramètres « relevés sur la
-    machine » ne sont jamais touchés. Retourne un dictionnaire de compteurs."""
-    stats = {"crees": 0, "mis_a_jour": 0, "ignores": 0, "proteges": 0, "matieres_creees": 0}
-    matieres = {}
+    """Crée (ou met à jour) un paramètre de coupe par entrée, au niveau de la famille de matière.
+    `correspondance` : {nom du fichier: nom de la famille de l'ERP} (une entrée sans correspondance est ignorée ; une
+    famille absente est créée avec le nom du fichier en référence). Les paramètres « relevés sur la machine » ne sont
+    jamais touchés. Retourne un dictionnaire de compteurs."""
+    stats = {"crees": 0, "mis_a_jour": 0, "ignores": 0, "proteges": 0, "familles_creees": 0}
+    familles = {}
     for e in entrees:
-        nom_erp = (correspondance.get(e["nom"]) or "").strip()
-        if not nom_erp:
+        nom_famille = (correspondance.get(e["nom"]) or "").strip()
+        if not nom_famille:
             stats["ignores"] += 1
             continue
-        if nom_erp not in matieres:
-            matiere, creee = Matiere.objects.get_or_create(nom=nom_erp, defaults={"densite": e["densite"] or 1, "usinabilite": e["usinabilite"]})
-            if not creee and matiere.usinabilite is None:
-                matiere.usinabilite = e["usinabilite"]
-                matiere.save(update_fields=["usinabilite"])
-            stats["matieres_creees"] += creee
-            matieres[nom_erp] = matiere
-        matiere = matieres[nom_erp]
+        if nom_famille not in familles:
+            famille = FamilleMatiere.objects.filter(nom__iexact=nom_famille).first()
+            if famille is None:
+                famille = FamilleMatiere.objects.create(nom=nom_famille, nom_igems=e["nom"], usinabilite=e["usinabilite"])
+                stats["familles_creees"] += 1
+            else:
+                champs = []
+                if not famille.usinabilite:
+                    famille.usinabilite = e["usinabilite"]
+                    champs.append("usinabilite")
+                if not famille.nom_igems:
+                    famille.nom_igems = e["nom"]
+                    champs.append("nom_igems")
+                if champs:
+                    famille.save(update_fields=champs)
+            familles[nom_famille] = famille
+        famille = familles[nom_famille]
         valeurs = {
             "poste": poste, "usinabilite": e["usinabilite"], "percage_stationnaire_hp_s": e["percage_hp_s"],
             "percage_stationnaire_bp_s": e["percage_bp_s"], "percage_circulaire_hp_tours": e["circ_hp"],
@@ -103,10 +113,10 @@ def importer_materiaux(entrees, correspondance, poste=None, remplacer_calcules=T
             "intervalle_pieces_mm": e["intervalle"], "origine": "calcule",
         }
         parametre = ParametreCoupe.objects.filter(
-            procede=ParametreCoupe.Procede.JET_EAU, matiere=matiere, epaisseur_mm=e["epaisseur"]
+            procede=ParametreCoupe.Procede.JET_EAU, famille=famille, epaisseur_mm=e["epaisseur"]
         ).first()
         if parametre is None:
-            parametre = ParametreCoupe.objects.create(matiere=matiere, epaisseur_mm=e["epaisseur"], **valeurs)
+            parametre = ParametreCoupe.objects.create(famille=famille, epaisseur_mm=e["epaisseur"], **valeurs)
             stats["crees"] += 1
         elif parametre.origine == "machine":
             stats["proteges"] += 1

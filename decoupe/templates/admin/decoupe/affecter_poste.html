@@ -1,0 +1,21 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<div class="max-w-xl">
+  <p class="mb-4"><strong>{{ queryset.count }}</strong> paramètre(s) de coupe sélectionné(s). Le tarif horaire du poste valorise le temps calculé dans la gamme.</p>
+  <form method="post">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="{{ action }}">
+    <input type="hidden" name="apply" value="1">
+    {% for id in ids %}<input type="hidden" name="_selected_action" value="{{ id }}">{% endfor %}
+    <label class="block mb-4"><span class="font-semibold">Poste de travail</span><br>
+      <select name="poste" class="border border-base-300 rounded-default px-2 py-1">
+        {% for p in postes %}<option value="{{ p.pk }}">{{ p.nom }}</option>{% endfor %}
+      </select>
+    </label>
+    <div class="flex gap-3">
+      <button type="submit" class="bg-primary-600 text-white font-semibold px-4 py-2 rounded-default">Affecter</button>
+      <a href="../" class="border border-base-300 px-4 py-2 rounded-default">Annuler</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

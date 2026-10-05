@@ -547,25 +547,27 @@ class VitesseCoupeInline(TabularInline):
 
 @admin.register(ParametreCoupe)
 class ParametreCoupeAdmin(ModelAdmin):
-    """Paramètres de coupe repris du logiciel de la machine (jet d'eau) : une fiche par matière et épaisseur, avec une
-    ligne de vitesses par niveau de qualité. Servent à estimer le temps de découpe des pièces."""
+    """Paramètres de coupe repris du logiciel de la machine (jet d'eau) : une fiche par famille de matière (ou par nuance
+    précise, en exception) et épaisseur, avec une ligne de vitesses par niveau de qualité. Servent à estimer le temps
+    de découpe des pièces."""
 
-    list_display = ["matiere", "epaisseur_mm", "procede", "poste", "origine", "usinabilite", "intervalle_pieces_mm", "coefficient_ajustement"]
-    actions = ["action_calculer_vitesses"]
+    list_display = ["cible_display", "epaisseur_mm", "procede", "poste", "origine", "usinabilite", "intervalle_pieces_mm", "coefficient_ajustement"]
+    actions = ["action_calculer_vitesses", "action_affecter_poste"]
     actions_list = ["action_importer_lua"]
     actions_detail = ["action_dupliquer_epaisseurs"]
 
     @unfold_action(description="Importer materials.lua (IGEMS)", url_path="importer-lua", icon="upload_file")
     def action_importer_lua(self, request):
         """Import en masse du fichier materials.lua du logiciel de la machine : téléversement, contrôle de la
-        correspondance des matières, puis création des paramètres de coupe (toutes les matières et épaisseurs)."""
-        from technique.models import PosteTravail
+        correspondance des familles de matière, puis création des paramètres de coupe (toutes les matières et épaisseurs)."""
+        from technique.models import FamilleMatiere, PosteTravail
 
         if not request.user.has_perm("decoupe.add_parametrecoupe"):
             raise PermissionDenied
         liste = reverse("admin:decoupe_parametrecoupe_changelist")
         contexte = {**self.admin_site.each_context(request), "title": "Importer materials.lua", "retour": liste,
-                    "postes": PosteTravail.objects.order_by("nom")}
+                    "postes": PosteTravail.objects.order_by("nom"),
+                    "familles": FamilleMatiere.objects.order_by("ordre", "nom")}
         if request.method == "POST" and request.FILES.get("fichier"):
             try:
                 entrees = lire_materials_lua(request.FILES["fichier"].read().decode("utf-8", errors="replace"))
@@ -583,23 +585,46 @@ class ParametreCoupeAdmin(ModelAdmin):
             if not entrees:
                 self.message_user(request, "Le fichier n'est plus en mémoire : téléversez-le à nouveau.", level=messages.ERROR)
                 return redirect(request.path)
-            correspondance = {nom: request.POST.get(f"matiere__{nom}", "") for nom in {e["nom"] for e in entrees}}
+            correspondance = {nom: request.POST.get(f"famille__{nom}", "") for nom in {e["nom"] for e in entrees}}
             poste = PosteTravail.objects.filter(pk=request.POST.get("poste")).first()
             stats = importer_materiaux(entrees, correspondance, poste=poste, remplacer_calcules="remplacer" in request.POST)
             self.message_user(
                 request,
                 f"Import terminé : {stats['crees']} paramètre(s) créé(s), {stats['mis_a_jour']} mis à jour, {stats['proteges']} relevé(s) "
-                f"machine conservé(s), {stats['ignores']} ignoré(s) ; {stats['matieres_creees']} matière(s) créée(s). "
+                f"machine conservé(s), {stats['ignores']} ignoré(s) ; {stats['familles_creees']} famille(s) créée(s). "
                 "Vitesses calculées (estimation calée sur vos temps réels).",
                 level=messages.SUCCESS,
             )
             return redirect(liste)
         return TemplateResponse(request, "admin/decoupe/importer_lua.html", contexte)
-    list_filter = ["procede", "origine", "matiere"]
-    search_fields = ["matiere__nom"]
-    autocomplete_fields = ["matiere", "poste"]
+    list_filter = ["procede", "origine", "famille", "poste"]
+    search_fields = ["famille__nom", "matiere__nom"]
+    autocomplete_fields = ["famille", "matiere", "poste"]
     inlines = [VitesseCoupeInline]
     readonly_fields = ["origine"]
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related("famille", "matiere", "poste")
+
+    @admin.display(description="Famille / nuance", ordering="famille__nom")
+    def cible_display(self, obj):
+        return f"{obj.matiere} (nuance)" if obj.matiere_id else obj.famille
+
+    @admin.action(description="Affecter un poste de travail (machine de coupe)…")
+    def action_affecter_poste(self, request, queryset):
+        from technique.models import PosteTravail
+
+        if "poste" in request.POST and "apply" in request.POST:
+            poste = PosteTravail.objects.filter(pk=request.POST["poste"]).first()
+            n = queryset.update(poste=poste)
+            self.message_user(request, f"{n} paramètre(s) affecté(s) à « {poste} ».", level=messages.SUCCESS)
+            return None
+        return TemplateResponse(
+            request, "admin/decoupe/affecter_poste.html",
+            {**self.admin_site.each_context(request), "title": "Affecter un poste de travail", "queryset": queryset,
+             "postes": PosteTravail.objects.order_by("nom"), "action": "action_affecter_poste", "opts": self.model._meta,
+             "ids": request.POST.getlist("_selected_action")},
+        )
 
     @admin.action(description="Calculer les vitesses depuis l'usinabilité (estimation)")
     def action_calculer_vitesses(self, request, queryset):
@@ -629,7 +654,7 @@ class ParametreCoupeAdmin(ModelAdmin):
             except ErreurParametre as exc:
                 self.message_user(request, str(exc), level=messages.ERROR)
                 return redirect(retour)
-            texte = f"{len(crees)} paramètre(s) créé(s) pour {modele.matiere} (vitesses calculées, estimation à confirmer)."
+            texte = f"{len(crees)} paramètre(s) créé(s) pour {modele.cible} (vitesses calculées, estimation à confirmer)."
             if existants:
                 texte += " Déjà existants : " + ", ".join(f"{e:g}" for e in existants) + " mm."
             self.message_user(request, texte, level=messages.SUCCESS)
@@ -640,7 +665,7 @@ class ParametreCoupeAdmin(ModelAdmin):
              "suggestion": "2, 3, 4, 5, 6, 8, 12, 15, 20, 25, 30"},
         )
     fieldsets = [
-        (None, {"fields": ["procede", "matiere", "epaisseur_mm", "poste", "usinabilite", "origine"]}),
+        (None, {"fields": ["procede", "famille", "matiere", "epaisseur_mm", "poste", "usinabilite", "origine"]}),
         ("Perçage", {"fields": [
             "mode_percage", "percage_stationnaire_hp_s", "percage_stationnaire_bp_s", "percage_circulaire_hp_tours",
             "percage_circulaire_bp_tours", "diametre_percage_mm", "temporisation_pointage_s",

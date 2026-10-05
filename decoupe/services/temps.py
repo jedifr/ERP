@@ -45,14 +45,14 @@ class EstimationTemps:
 def parametre_pour(piece, procede="jet_eau"):
     """Paramètre de coupe de la matière et de l'épaisseur de la pièce (l'épaisseur la plus proche, avec avertissement,
     si l'épaisseur exacte n'existe pas)."""
-    from decoupe.models import ParametreCoupe
+    from .parametres import meilleur_parametre
 
     if not piece.matiere_id or not piece.epaisseur:
         raise ErreurTemps("Renseignez la matière et l'épaisseur de la pièce pour estimer son temps de découpe.")
-    candidats = list(ParametreCoupe.objects.filter(procede=procede, matiere_id=piece.matiere_id))
-    if not candidats:
-        raise ErreurTemps(f"Aucun paramètre de coupe pour la matière « {piece.matiere} » (menu Paramètres de coupe).")
-    meilleur = min(candidats, key=lambda p: abs(p.epaisseur_mm - piece.epaisseur))
+    meilleur = meilleur_parametre(piece.matiere, piece.epaisseur, procede)
+    if meilleur is None:
+        famille = f", ni pour sa famille « {piece.matiere.famille} »" if piece.matiere.famille_id else " (elle n'est rattachée à aucune famille de matière)"
+        raise ErreurTemps(f"Aucun paramètre de coupe pour la matière « {piece.matiere} »{famille} (menu Paramètres de coupe).")
     avertissement = None
     if abs(meilleur.epaisseur_mm - piece.epaisseur) > 1e-6:
         avertissement = (

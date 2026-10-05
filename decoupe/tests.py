@@ -10,12 +10,13 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from rest_framework.test import APIClient
 
-from technique.models import Article, Matiere
+from technique.models import Article, FamilleMatiere, Matiere
 
 from .models import (
     ImbricationJob,
     ImbricationLigne,
     ImbricationPlacement,
+    ParametreCoupe,
     PieceDecoupe,
     ProfilImportDecoupe,
     RegleProfilImportDecoupe,
@@ -1081,6 +1082,7 @@ class TempsDeDecoupeTests(TestCase):
 
         self.user = get_user_model().objects.create_superuser("temps-admin", "t@example.com", "pass-mot-de-passe-14")
         self.client.force_login(self.user)
+        ParametreCoupe.objects.all().delete()  # la base de coupe fournie (migration) fausserait les comptes de ces tests
         self.matiere = Matiere.objects.create(nom="Steel", densite=7800)
         self.poste = PosteTravail.objects.create(nom="Jet d'eau", mode_calcul=PosteTravail.ModeCalcul.HORAIRE)
         self.parametre = ParametreCoupe.objects.create(
@@ -1256,6 +1258,7 @@ class VitessesDepuisUsinabiliteTests(TestCase):
 
         self.user = get_user_model().objects.create_superuser("vitesses-admin", "v@example.com", "pass-mot-de-passe-15")
         self.client.force_login(self.user)
+        ParametreCoupe.objects.all().delete()  # la base de coupe fournie (migration) fausserait les comptes de ces tests
         self.poste = PosteTravail.objects.create(nom="Jet", mode_calcul=PosteTravail.ModeCalcul.HORAIRE)
         self.matiere = Matiere.objects.create(nom="Acier S235", densite=7.8, usinabilite=87.6)
 
@@ -1334,6 +1337,7 @@ class VitessesDepuisUsinabiliteTests(TestCase):
 
         modele = self.modele()
         self.matiere.usinabilite = None
+        self.matiere.famille = None
         self.matiere.save()
         with self.assertRaises(ErreurParametre):
             dupliquer_vers_epaisseurs(modele, [5])
@@ -1384,6 +1388,7 @@ class ImportMaterialsLuaEtCalibrageTests(TestCase):
 
         self.user = get_user_model().objects.create_superuser("lua-admin", "l@example.com", "pass-mot-de-passe-16")
         self.client.force_login(self.user)
+        ParametreCoupe.objects.all().delete()  # la base de coupe fournie (migration) fausserait les comptes de ces tests
         self.poste = PosteTravail.objects.create(nom="Jet d'eau lua", mode_calcul=PosteTravail.ModeCalcul.HORAIRE)
         self.texte = (self.DONNEES / "materials_extrait.lua").read_text()
 
@@ -1412,13 +1417,12 @@ class ImportMaterialsLuaEtCalibrageTests(TestCase):
         from .models import ParametreCoupe
 
         _entrees, stats = self.importer()
-        self.assertEqual((stats["crees"], stats["matieres_creees"]), (9, 4))  # aluminium ×3, acier ×3 : une seule matière chacun
-        acier = ParametreCoupe.objects.get(matiere__nom="Acier", epaisseur_mm=5)
+        self.assertEqual((stats["crees"], stats["familles_creees"]), (9, 0))  # les familles standard existent déjà
+        acier = ParametreCoupe.objects.get(famille__nom="Acier", matiere__isnull=True, epaisseur_mm=5)
         self.assertEqual((acier.origine, acier.poste, acier.usinabilite, acier.percage_stationnaire_hp_s), ("calcule", self.poste, 87.0, 5))
         self.assertEqual(acier.vitesses.count(), 5)
         vitesse = acier.vitesses.get(qualite=3)
         self.assertEqual((vitesse.paliers, vitesse.distance_acceleration_mm), (2, 1.5))
-        self.assertEqual(Matiere.objects.get(nom="Acier").usinabilite, 87.0)
         # un second import met à jour sans doublon
         _entrees, stats = self.importer()
         self.assertEqual((stats["crees"], stats["mis_a_jour"]), (0, 9))
@@ -1430,8 +1434,7 @@ class ImportMaterialsLuaEtCalibrageTests(TestCase):
         from .models import ParametreCoupe
         from .services.lua_materiaux import importer_materiaux, lire_materials_lua
 
-        matiere = Matiere.objects.create(nom="Acier", densite=7.8)
-        releve = ParametreCoupe.objects.create(matiere=matiere, epaisseur_mm=5, poste=self.poste, percage_stationnaire_hp_s=99)
+        releve = ParametreCoupe.objects.create(famille=FamilleMatiere.objects.get(nom="Acier"), epaisseur_mm=5, poste=self.poste, percage_stationnaire_hp_s=99)
         entrees = lire_materials_lua(self.texte)
         stats = importer_materiaux(entrees, {"Steel": "Acier", "Copper": ""}, poste=self.poste)
         releve.refresh_from_db()
@@ -1478,7 +1481,7 @@ class ImportMaterialsLuaEtCalibrageTests(TestCase):
         ecarts = []
         for piece, cas in ((arrondie, self.TEMPS_REELS), (plaque, self.TEMPS_REELS_PLAQUE), (plan, self.TEMPS_REELS_PLAN)):
             for nom, epaisseur, reel in cas:
-                piece.matiere = Matiere.objects.get(nom=NOMS_FRANCAIS[nom])
+                piece.matiere = Matiere.objects.get_or_create(nom=NOMS_FRANCAIS[nom], defaults={"densite": 1})[0]
                 piece.epaisseur = epaisseur
                 calcule = estimer_temps_decoupe(piece).total_min
                 ecarts.append(calcule / reel - 1)
@@ -1494,7 +1497,7 @@ class ImportMaterialsLuaEtCalibrageTests(TestCase):
 
         self.importer()
         plaque = self.piece_plaque()
-        plaque.matiere, plaque.epaisseur = Matiere.objects.get(nom=NOMS_FRANCAIS["Aluminium"]), 50
+        plaque.matiere, plaque.epaisseur = Matiere.objects.get_or_create(nom="Alu 6082", defaults={"densite": 2.7})[0], 50
         e = estimer_temps_decoupe(plaque)
         self.assertAlmostEqual(e.longueur_coupe_mm - 4 * 30, 1101.7, delta=15)  # 4 contours × (amorce + chevauchement de 15 mm)
         self.assertAlmostEqual(e.coupe_s, 25 * 60 + 43, delta=0.08 * 1543)
@@ -1509,10 +1512,10 @@ class ImportMaterialsLuaEtCalibrageTests(TestCase):
         url = "/admin/decoupe/parametrecoupe/importer-lua/"
         self.assertContains(self.client.get(url), "Lire le fichier")
         page = self.client.post(url, {"fichier": SimpleUploadedFile("materials.lua", self.texte.encode())})
-        for attendu in ("Steel", "Stainless Steel", "Matière de l'ERP", 'value="Acier"', 'value="Inox"'):
+        for attendu in ("Steel", "Stainless Steel", "Famille de l'ERP", 'value="Acier"', 'value="Inox"'):
             self.assertContains(page, attendu)
-        reponse = self.client.post(url, {"confirmer": "1", "poste": self.poste.pk, "remplacer": "on", "matiere__Steel": "Acier",
-                                         "matiere__Stainless Steel": "Inox", "matiere__Aluminium": "Aluminium", "matiere__Copper": ""}, follow=True)
+        reponse = self.client.post(url, {"confirmer": "1", "poste": self.poste.pk, "remplacer": "on", "famille__Steel": "Acier",
+                                         "famille__Stainless Steel": "Inox", "famille__Aluminium": "Aluminium", "famille__Copper": ""}, follow=True)
         self.assertContains(reponse, "Import terminé : 8 paramètre(s) créé(s)")
         self.assertEqual(ParametreCoupe.objects.count(), 8)
         # fichier invalide, ou confirmation sans fichier en mémoire
@@ -1693,3 +1696,115 @@ class ImbricationMatiereTests(TestCase):
         for attendu in ("Simuler l&#x27;imbrication et le coût matière", "Chute récupérable", "Chiffrer la matière par imbrication"):
             self.assertContains(page, attendu)
         self.assertContains(self.client.get("/admin/decoupe/formattole/"), "3000 × 1500")
+
+
+class FamillesMatiereTests(TestCase):
+    """Les nuances précises (S235, 5754…) se rattachent à une famille (Acier, Aluminium…) dont elles héritent les paramètres."""
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_superuser("famille-admin", "f@example.com", "pass-mot-de-passe-17")
+        self.client.force_login(self.user)
+
+    def test_familles_standard_et_base_de_coupe_fournies(self):
+        self.assertEqual(FamilleMatiere.objects.get(nom="Acier").usinabilite, 87.6)
+        self.assertEqual(FamilleMatiere.objects.get(nom="Inox").nom_igems, "Stainless Steel")
+        self.assertEqual(ParametreCoupe.objects.filter(matiere__isnull=True).count(), 153)
+        acier = ParametreCoupe.objects.get(famille__nom="Acier", epaisseur_mm=10)
+        self.assertEqual(acier.vitesses.count(), 5)
+        self.assertGreater(acier.percage_stationnaire_hp_s, 0)  # temps de perçage de materials.lua
+        self.assertIsNone(acier.poste)
+
+    def test_rattachement_automatique_des_nuances(self):
+        attendu = {
+            "S235": "Acier", "S355J2": "Acier", "Acier": "Acier", "C45": "Acier", "6082": "Aluminium", "2017": "Aluminium",
+            "5083": "Aluminium", "5754": "Aluminium", "Alu 6082": "Aluminium", "EN AW-5754": "Aluminium", "Inox 304L": "Inox",
+            "316L": "Inox", "1.4301": "Inox", "Acier inoxydable": "Inox", "Hardox 450": "Acier trempé", "Laiton CuZn39": "Laiton",
+        }
+        for nom, famille in attendu.items():
+            matiere = Matiere.objects.create(nom=nom, densite=7.8)
+            self.assertEqual(matiere.famille.nom, famille, nom)
+        self.assertIsNone(Matiere.objects.create(nom="Bois", densite=0.5).famille)
+        choisie = Matiere.objects.create(nom="S690", densite=7.8, famille=FamilleMatiere.objects.get(nom="Acier trempé"))
+        self.assertEqual(choisie.famille.nom, "Acier trempé")  # un choix explicite n'est pas écrasé
+
+    def test_la_nuance_herite_de_sa_famille(self):
+        from .services.temps import parametre_pour
+
+        piece = PieceDecoupe(nom="p", epaisseur=10, matiere=Matiere.objects.create(nom="S355", densite=7.85))
+        parametre, avertissement = parametre_pour(piece)
+        self.assertEqual((parametre.famille.nom, avertissement), ("Acier", None))
+        piece.epaisseur = 11
+        parametre, avertissement = parametre_pour(piece)
+        self.assertIn("la plus proche", avertissement)
+
+    def test_une_exception_de_nuance_prime_sur_la_famille(self):
+        from .services.matiere import espacement_pieces_mm
+        from .services.parametres import meilleur_parametre
+
+        matiere = Matiere.objects.create(nom="S960", densite=7.85)
+        exception = ParametreCoupe.objects.create(matiere=matiere, epaisseur_mm=10, intervalle_pieces_mm=9)
+        self.assertEqual(meilleur_parametre(matiere, 10), exception)
+        piece = PieceDecoupe(nom="p", epaisseur=10, matiere=matiere)
+        self.assertEqual(espacement_pieces_mm(piece), 9)
+        autre = Matiere.objects.create(nom="S275", densite=7.85)
+        self.assertEqual(meilleur_parametre(autre, 10).famille.nom, "Acier")  # l'exception ne concerne pas les autres nuances
+
+    def test_usinabilite_heritee(self):
+        from .services.parametres import usinabilite_de
+
+        matiere = Matiere.objects.create(nom="5754", densite=2.7)
+        self.assertEqual(matiere.usinabilite_effective, 213)
+        parametre = ParametreCoupe.objects.create(matiere=matiere, epaisseur_mm=3)
+        self.assertEqual(usinabilite_de(parametre), 213)
+        matiere.usinabilite = 200
+        self.assertEqual(usinabilite_de(parametre), 200)
+
+    def test_un_parametre_est_soit_famille_soit_nuance(self):
+        from django.core.exceptions import ValidationError
+        from django.db import IntegrityError, transaction
+
+        famille = FamilleMatiere.objects.get(nom="Acier")
+        matiere = Matiere.objects.create(nom="S235", densite=7.85)
+        with self.assertRaises(ValidationError):
+            ParametreCoupe(famille=famille, matiere=matiere, epaisseur_mm=7).full_clean()
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            ParametreCoupe.objects.create(famille=famille, matiere=matiere, epaisseur_mm=7)
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            ParametreCoupe.objects.create(epaisseur_mm=7)
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            ParametreCoupe.objects.create(famille=famille, epaisseur_mm=10)  # existe déjà (base fournie)
+
+    def test_import_vers_une_famille_nouvelle(self):
+        from .services.lua_materiaux import importer_materiaux, lire_materials_lua
+
+        texte = (Path(__file__).parent / "tests_data" / "materials_extrait.lua").read_text()
+        stats = importer_materiaux(lire_materials_lua(texte), {"Copper": "Cuivre-nickel"})
+        self.assertEqual(stats["familles_creees"], 1)
+        famille = FamilleMatiere.objects.get(nom="Cuivre-nickel")
+        self.assertEqual(famille.nom_igems, "Copper")
+        self.assertEqual(famille.parametres_coupe.count(), stats["crees"])
+
+    def test_admin_familles_et_rattachement(self):
+        sans = Matiere.objects.create(nom="Bois", densite=0.5)
+        FamilleMatiere.objects.create(nom="Bois massif", mots_cles="bois, chene")
+        page = self.client.get("/admin/technique/famillematiere/")
+        self.assertContains(page, "Acier")
+        self.assertContains(page, "Stainless Steel")
+        reponse = self.client.post(
+            "/admin/technique/matiere/", {"action": "action_rattacher_famille", "_selected_action": [sans.pk]}, follow=True
+        )
+        self.assertContains(reponse, "1 matière(s) rattachée(s)")
+        sans.refresh_from_db()
+        self.assertEqual(sans.famille.nom, "Bois massif")
+        self.assertContains(self.client.get("/admin/technique/matiere/"), "Bois massif")
+        self.assertContains(self.client.get("/admin/decoupe/parametrecoupe/?famille__id__exact=%d" % FamilleMatiere.objects.get(nom="Acier").pk), "Acier")
+
+    def test_admin_affecter_un_poste(self):
+        from technique.models import PosteTravail
+
+        poste = PosteTravail.objects.create(nom="Jet famille", mode_calcul=PosteTravail.ModeCalcul.HORAIRE)
+        ids = list(ParametreCoupe.objects.filter(famille__nom="Acier").values_list("pk", flat=True))
+        page = self.client.post("/admin/decoupe/parametrecoupe/", {"action": "action_affecter_poste", "_selected_action": ids})
+        self.assertContains(page, "Jet famille")
+        self.client.post("/admin/decoupe/parametrecoupe/", {"action": "action_affecter_poste", "_selected_action": ids, "apply": "1", "poste": poste.pk})
+        self.assertEqual(ParametreCoupe.objects.filter(poste=poste).count(), len(ids))

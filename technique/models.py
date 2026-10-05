@@ -5,15 +5,73 @@ from comptes.champs import ChampDecimal
 from comptes.montants import PRIX, TAUX
 
 
+class FamilleMatiere(models.Model):
+    """Matière « générique » (acier, inox, aluminium…) à laquelle se rattachent les nuances précises (S235, 5754…).
+
+    C'est à ce niveau que vivent les données communes : usinabilité standard, paramètres de coupe (vitesses, temps de
+    perçage… de la base du logiciel de la machine). Une nuance hérite de sa famille ; elle peut surcharger un paramètre
+    si besoin. `mots_cles` sert à rattacher automatiquement une nuance d'après son nom."""
+
+    nom = models.CharField("nom", max_length=100, unique=True)
+    nom_igems = models.CharField(
+        "nom dans le logiciel de la machine", max_length=100, blank=True,
+        help_text="Nom de la matière dans materials.lua (Steel, Stainless Steel, Aluminium…) : sert à l'import de la base de coupe.",
+    )
+    usinabilite = models.FloatField("usinabilité standard", null=True, blank=True, help_text="Indice d'usinabilité au jet d'eau")
+    mots_cles = models.TextField(
+        "mots-clés des nuances", blank=True,
+        help_text="Un par ligne ou séparés par des virgules (ex. s235, s355, acier, steel). Une nuance dont le nom commence par l'un d'eux "
+                  "est rattachée à cette famille. Les expressions à plusieurs mots (« en aw ») se cherchent dans le nom entier.",
+    )
+    ordre = models.PositiveSmallIntegerField(
+        "priorité", default=50, help_text="Les familles de priorité faible sont essayées d'abord (« inox » avant « acier »)."
+    )
+
+    class Meta:
+        verbose_name = "Famille de matière"
+        verbose_name_plural = "Familles de matière"
+        ordering = ["ordre", "nom"]
+
+    def __str__(self):
+        return self.nom
+
+    def liste_mots_cles(self):
+        brut = (self.mots_cles or "").replace("\n", ",").split(",")
+        return [m.strip().lower() for m in brut if m.strip()]
+
+    @classmethod
+    def pour_nom(cls, nom_matiere):
+        """Famille dont un mot-clé correspond au nom d'une nuance (la plus prioritaire), ou None."""
+        import re
+        import unicodedata
+
+        nom = "".join(c for c in unicodedata.normalize("NFD", (nom_matiere or "").lower()) if unicodedata.category(c) != "Mn")
+        jetons = re.findall(r"[a-z0-9]+(?:\.[0-9]+)*", nom)
+        for famille in cls.objects.all():
+            for mot in famille.liste_mots_cles():
+                mot = "".join(c for c in unicodedata.normalize("NFD", mot) if unicodedata.category(c) != "Mn")
+                if " " in mot or "-" in mot:
+                    if mot in nom:
+                        return famille
+                elif any(j.startswith(mot) for j in jetons):
+                    return famille
+        return None
+
+
 class Matiere(models.Model):
-    """Référentiel des matières (acier, aluminium, inox...)."""
+    """Référentiel des matières : les nuances précises (S235, 5754…) ou les matières courantes (acier, aluminium…)."""
 
     nom = models.CharField("nom", max_length=100, primary_key=True)
     densite = models.FloatField("densité", help_text="kg/dm³, utilisée pour le calcul au poids")
     usinabilite = models.FloatField(
         "usinabilité", null=True, blank=True,
         help_text="Indice d'usinabilité au jet d'eau (acier 87,6 ; inox 81,9 ; cuivre/laiton 110 ; aluminium 213…) : sert à calculer "
-                  "les vitesses de coupe quand elles n'ont pas été relevées sur la machine.",
+                  "les vitesses de coupe quand elles n'ont pas été relevées sur la machine. Vide : celle de la famille.",
+    )
+    famille = models.ForeignKey(
+        FamilleMatiere, verbose_name="famille de matière", on_delete=models.SET_NULL, null=True, blank=True, related_name="nuances",
+        help_text="Matière générique dont cette nuance hérite les paramètres de coupe (S235 → Acier, 5754 → Aluminium…). "
+                  "Rattachée automatiquement d'après le nom à la création si elle est laissée vide.",
     )
 
     class Meta:
@@ -23,6 +81,18 @@ class Matiere(models.Model):
 
     def __str__(self):
         return self.nom
+
+    def save(self, *args, **kwargs):
+        if self._state.adding and self.famille_id is None:
+            self.famille = FamilleMatiere.pour_nom(self.nom)  # S235 → Acier, 5754 → Aluminium…
+        super().save(*args, **kwargs)
+
+    @property
+    def usinabilite_effective(self):
+        """Usinabilité de la nuance, à défaut celle de sa famille."""
+        if self.usinabilite:
+            return self.usinabilite
+        return self.famille.usinabilite if self.famille_id else None
 
 
 class Article(models.Model):

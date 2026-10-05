@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.contrib import admin, messages
 from django.contrib.admin.views.decorators import staff_member_required
+from django.db.models import Count
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import path, reverse
 from django.utils.html import escape, format_html
@@ -13,7 +14,7 @@ from comptes.exports import ExportCsvMixin
 from achats.models import ArticleFournisseur
 from comptabilite.models import ArticleCompteAchat, ArticleCompteVente
 
-from .models import Article, Gamme, Matiere, Nomenclature, PosteTravail, TarifPoste
+from .models import Article, FamilleMatiere, Gamme, Matiere, Nomenclature, PosteTravail, TarifPoste
 from .services import DuplicationError, dupliquer_article
 
 
@@ -59,11 +60,64 @@ class ArticleCompteAchatInline(TabularInline):
     autocomplete_fields = ["poste_gestion", "compte_achat", "code_analytique"]
 
 
+@admin.register(FamilleMatiere)
+class FamilleMatiereAdmin(ModelAdmin):
+    """Matières génériques (Acier, Inox, Aluminium…) : les nuances précises (S235, 5754…) s'y rattachent et en héritent
+    l'usinabilité et les paramètres de coupe (temps de perçage, vitesses… de la base du logiciel de la machine)."""
+
+    list_display = ["nom", "nom_igems", "usinabilite", "nb_nuances", "nb_parametres", "ordre"]
+    search_fields = ["nom", "nom_igems", "mots_cles"]
+    ordering = ["ordre", "nom"]
+    actions = ["action_rattacher_nuances"]
+    fieldsets = [
+        (None, {"fields": ["nom", "nom_igems", "usinabilite", "ordre"]}),
+        ("Rattachement automatique des nuances", {"fields": ["mots_cles"]}),
+    ]
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).annotate(_nuances=Count("nuances", distinct=True), _parametres=Count("parametres_coupe", distinct=True))
+
+    @admin.display(description="Nuances", ordering="_nuances")
+    def nb_nuances(self, obj):
+        return obj._nuances
+
+    @admin.display(description="Paramètres de coupe", ordering="_parametres")
+    def nb_parametres(self, obj):
+        return obj._parametres
+
+    @admin.action(description="Rattacher les matières sans famille (d'après leur nom)")
+    def action_rattacher_nuances(self, request, queryset):
+        rattacher_matieres(self, request, Matiere.objects.filter(famille__isnull=True))
+
+
+def rattacher_matieres(modele_admin, request, matieres):
+    faites, inconnues = 0, []
+    for matiere in matieres:
+        famille = FamilleMatiere.pour_nom(matiere.nom)
+        if famille is None:
+            inconnues.append(matiere.nom)
+            continue
+        matiere.famille = famille
+        matiere.save(update_fields=["famille"])
+        faites += 1
+    modele_admin.message_user(request, f"{faites} matière(s) rattachée(s) à une famille.", level=messages.SUCCESS)
+    if inconnues:
+        modele_admin.message_user(
+            request, "Aucune famille ne correspond à : " + ", ".join(inconnues) + " (complétez les mots-clés d'une famille).", level=messages.WARNING
+        )
+
+
 @admin.register(Matiere)
 class MatiereAdmin(ModelAdmin):
-    list_display = ["nom", "densite", "usinabilite"]
-    search_fields = ["nom"]
-    actions = ["action_usinabilite_standard"]
+    list_display = ["nom", "famille", "densite", "usinabilite"]
+    list_filter = ["famille"]
+    search_fields = ["nom", "famille__nom"]
+    autocomplete_fields = ["famille"]
+    actions = ["action_usinabilite_standard", "action_rattacher_famille"]
+
+    @admin.action(description="Rattacher à une famille (d'après le nom : S235 → Acier, 5754 → Aluminium…)")
+    def action_rattacher_famille(self, request, queryset):
+        rattacher_matieres(self, request, queryset)
 
     @admin.action(description="Renseigner l'usinabilité standard (d'après le nom de la matière)")
     def action_usinabilite_standard(self, request, queryset):
@@ -72,6 +126,8 @@ class MatiereAdmin(ModelAdmin):
         faites, inconnues = 0, []
         for matiere in queryset.filter(usinabilite__isnull=True):
             valeur = usinabilite_standard_pour(matiere.nom)
+            if valeur is None and matiere.famille_id:
+                continue  # héritera de l'usinabilité de sa famille
             if valeur is None:
                 inconnues.append(matiere.nom)
                 continue

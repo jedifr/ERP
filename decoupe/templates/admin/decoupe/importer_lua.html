@@ -3,24 +3,26 @@
 <div class="max-w-4xl">
   {% if lignes %}
     <p class="mb-4">
-      Fichier lu. Vérifiez la <strong>matière de l'ERP</strong> qui correspond à chaque matière du logiciel (une matière absente
-      de l'ERP est créée ; laissez vide pour ne pas importer). Chaque ligne crée un paramètre de coupe par épaisseur.
+      Fichier lu. Vérifiez la <strong>famille de matière de l'ERP</strong> qui correspond à chaque matière du logiciel (une famille
+      absente est créée ; laissez vide pour ne pas importer). Chaque ligne crée un paramètre de coupe par épaisseur ; toutes les
+      nuances de la famille (S235, S355…) en héritent.
     </p>
     <form method="post">
       {% csrf_token %}
       <table class="w-full text-left mb-4">
-        <thead><tr><th class="py-2">Matière du logiciel</th><th>Épaisseurs</th><th>Usinabilité</th><th>Matière de l'ERP</th></tr></thead>
+        <thead><tr><th class="py-2">Matière du logiciel</th><th>Épaisseurs</th><th>Usinabilité</th><th>Famille de l'ERP</th></tr></thead>
         <tbody>
         {% for l in lignes %}
           <tr class="border-t border-base-200">
             <td class="py-2 font-semibold">{{ l.nom }}</td>
             <td>{{ l.nombre }} ({{ l.mini|floatformat:"-1" }} → {{ l.maxi|floatformat:"-1" }} mm)</td>
             <td>{{ l.usinabilite|floatformat:"-1" }}</td>
-            <td><input type="text" name="matiere__{{ l.nom }}" value="{{ l.francais }}" class="border border-base-300 rounded-default px-2 py-1"></td>
+            <td><input type="text" name="famille__{{ l.nom }}" value="{{ l.francais }}" list="familles" class="border border-base-300 rounded-default px-2 py-1"></td>
           </tr>
         {% endfor %}
         </tbody>
       </table>
+      <datalist id="familles">{% for f in familles %}<option value="{{ f.nom }}">{% endfor %}</datalist>
       <label class="block mb-3"><span class="font-semibold">Poste de travail (machine de coupe)</span><br>
         <select name="poste" class="border border-base-300 rounded-default px-2 py-1">
           <option value="">— aucun (à renseigner plus tard) —</option>

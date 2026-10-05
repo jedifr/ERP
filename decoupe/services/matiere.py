@@ -47,12 +47,12 @@ class CoutMatiere:
 
 def espacement_pieces_mm(piece):
     """Intervalle entre pièces du paramètre de coupe de la matière et de l'épaisseur de la pièce (4 mm à défaut)."""
-    from decoupe.models import ParametreCoupe
+    from .parametres import meilleur_parametre
 
     if piece.matiere_id and piece.epaisseur:
-        candidats = list(ParametreCoupe.objects.filter(matiere_id=piece.matiere_id))
-        if candidats:
-            return min(candidats, key=lambda p: abs(p.epaisseur_mm - piece.epaisseur)).intervalle_pieces_mm
+        parametre = meilleur_parametre(piece.matiere, piece.epaisseur)
+        if parametre:
+            return parametre.intervalle_pieces_mm
     return ESPACEMENT_PAR_DEFAUT_MM
 
 

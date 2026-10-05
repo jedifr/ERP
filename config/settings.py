@@ -347,6 +347,7 @@ NAVIGATION = [
             _menu("Contacts", "contacts", "commercial", "contact"),
             _menu("Articles", "category", "technique", "article"),
             _menu("Matières", "science", "technique", "matiere"),
+            _menu("Familles de matière", "category", "technique", "famillematiere"),
             _menu("Nomenclatures", "account_tree", "technique", "nomenclature"),
             _menu("Gammes", "route", "technique", "gamme"),
             _menu("Postes de travail", "precision_manufacturing", "technique", "postetravail"),
