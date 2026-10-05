@@ -336,6 +336,7 @@ NAVIGATION = [
             _menu("Comptes d'achat d'article", "trending_down", "comptabilite", "articlecompteachat"),
             _menu("Comptes comptables de tiers", "badge", "comptabilite", "tierscomptecomptable"),
             _menu("Paramètres comptables", "settings", "comptabilite", "parametrescomptables"),
+            _menu("Export comptable", "outbox", "comptabilite", "parametresexportcomptable"),
         ],
     },
     {

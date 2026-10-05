@@ -415,6 +415,10 @@ class FactureFournisseur(models.Model):
     montant_ht = ChampDecimal("montant HT", null=True, blank=True, **MONTANT)
     montant_ttc = ChampDecimal("montant TTC", null=True, blank=True, **MONTANT)
     statut_paiement = models.CharField("statut de paiement", max_length=50, blank=True)
+    date_paiement = models.DateField(
+        "date de règlement", null=True, blank=True,
+        help_text="Date à laquelle la facture a été réglée au fournisseur : elle alimente le journal de banque de l'export comptable.",
+    )
 
     class Meta:
         verbose_name = "Facture fournisseur"
