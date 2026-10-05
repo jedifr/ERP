@@ -155,3 +155,66 @@ class EnregistrerCodeUtiliseTests(TestCase):
         self.assertEqual(regle.annee_compteur, annee)
         self.assertEqual(regle.compteur_actuel, 1)
         self.assertEqual(generer_code(RegleCodification.Entite.FACTURE), f"FAC-{annee}-0002")
+
+
+class AnneeSurDeuxChiffresTests(TestCase):
+    """Codes du type DC26-0001 : préfixe + année sur 2 chiffres + numéro, remis à 1 chaque année."""
+
+    CAS = {
+        RegleCodification.Entite.DEVIS: "DC", RegleCodification.Entite.COMMANDE_FOURNISSEUR: "CF",
+        RegleCodification.Entite.LIVRAISON: "BL", RegleCodification.Entite.COMMANDE: "C0",
+    }
+
+    def _regle(self, entite, prefixe, format_annee="2"):
+        RegleCodification.objects.filter(pk=entite).update(
+            prefixe=prefixe, nombre_chiffres=4, reinitialisation=RegleCodification.Reinitialisation.ANNUELLE,
+            format_annee=format_annee, compteur_actuel=0, annee_compteur=None,
+        )
+
+    def test_les_quatre_formats_de_l_exemple(self):
+        for entite, prefixe in self.CAS.items():
+            self._regle(entite, prefixe)
+        with patch("codification.services.datetime") as horloge:
+            horloge.date.today.return_value = datetime.date(2026, 10, 5)
+            self.assertEqual(
+                {e: generer_code(e) for e in self.CAS},
+                {
+                    RegleCodification.Entite.DEVIS: "DC26-0001", RegleCodification.Entite.COMMANDE_FOURNISSEUR: "CF26-0001",
+                    RegleCodification.Entite.LIVRAISON: "BL26-0001", RegleCodification.Entite.COMMANDE: "C026-0001",
+                },
+            )
+
+    def test_quatre_chiffres_reste_le_comportement_par_defaut(self):
+        self._regle(RegleCodification.Entite.DEVIS, "DC", format_annee="4")
+        with patch("codification.services.datetime") as horloge:
+            horloge.date.today.return_value = datetime.date(2026, 10, 5)
+            self.assertEqual(generer_code(RegleCodification.Entite.DEVIS), "DC2026-0001")
+        self.assertEqual(RegleCodification._meta.get_field("format_annee").default, "4")
+
+    def test_le_compteur_suit_les_codes_a_deux_chiffres_et_repart_chaque_annee(self):
+        self._regle(RegleCodification.Entite.DEVIS, "DC")
+        enregistrer_code_utilise(RegleCodification.Entite.DEVIS, "DC26-0007")
+        regle = RegleCodification.objects.get(pk=RegleCodification.Entite.DEVIS)
+        self.assertEqual((regle.annee_compteur, regle.compteur_actuel), (2026, 7))
+        with patch("codification.services.datetime") as horloge:
+            horloge.date.today.return_value = datetime.date(2026, 12, 31)
+            self.assertEqual(generer_code(RegleCodification.Entite.DEVIS), "DC26-0008")
+            horloge.date.today.return_value = datetime.date(2027, 1, 2)
+            self.assertEqual(generer_code(RegleCodification.Entite.DEVIS), "DC27-0001")
+
+    def test_un_code_a_quatre_chiffres_ne_correspond_pas_a_une_regle_a_deux_chiffres(self):
+        self._regle(RegleCodification.Entite.DEVIS, "DC")
+        enregistrer_code_utilise(RegleCodification.Entite.DEVIS, "DC2026-0009")
+        self.assertEqual(RegleCodification.objects.get(pk=RegleCodification.Entite.DEVIS).compteur_actuel, 0)
+
+    def test_exemple_affiche_dans_l_admin(self):
+        from django.contrib.auth import get_user_model
+
+        self._regle(RegleCodification.Entite.DEVIS, "DC")
+        admin = get_user_model().objects.create_superuser("cod-admin", "c@example.com", "pass-mot-de-passe-1")
+        self.client.force_login(admin)
+        annee = f"{datetime.date.today().year % 100:02d}"
+        page = self.client.get("/admin/codification/reglecodification/")
+        self.assertContains(page, f"DC{annee}-0001")
+        fiche = self.client.get(f"/admin/codification/reglecodification/{RegleCodification.Entite.DEVIS}/change/")
+        self.assertContains(fiche, "2 chiffres (26)")

@@ -389,6 +389,9 @@ Fonctionnement (`codification/services.py`) :
 Pour reprendre une numérotation existante, ajuster `compteur_actuel`
 directement sur la règle (le prochain code utilisera `compteur + 1`).
 
+
+**Année sur 2 ou 4 chiffres** : avec la réinitialisation « Chaque année », le champ **« Année dans le code »** choisit `2026` (4 chiffres, comportement historique) ou `26` (2 chiffres). Exemples en 4 chiffres de numéro : préfixe `DC` + 2 chiffres → `DC26-0001` (devis), `CF` → `CF26-0001` (commande fournisseur), `BL` → `BL26-0001` (livraison), `C0` → `C026-0001` (commande client). Le compteur repart à 1 chaque 1er janvier. La liste des règles affiche le **prochain code** de chaque règle ; changer le format n'affecte pas les codes déjà attribués (le compteur de l'année en cours continue tant que le code saisi suit le nouveau format).
+
 ## Adresse de livraison, adresse de facturation et contact sur le devis
 
 En plus du client, un devis peut porter une **adresse de facturation**, une
