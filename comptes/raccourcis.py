@@ -22,6 +22,7 @@ ECRANS = [
     ("Devis sans réponse", "devis relancer sans réponse attente", "admin:chiffrage_devis_changelist", "?statut__exact=valide&issue__exact=en_attente", "chiffrage.view_devis", "hourglass_top"),
     ("Devis en brouillon", "devis brouillon à traiter", "admin:chiffrage_devis_changelist", "?statut__exact=brouillon", "chiffrage.view_devis", "edit_note"),
     ("Ordres de fabrication non transmis", "ordres fabrication of échec planning synchro", "admin:chiffrage_ordrefabrication_changelist", "?statut_synchro__exact=echec_persistant", "chiffrage.view_ordrefabrication", "sync_problem"),
+    ("Mes colonnes", "colonnes personnaliser affichage listes tableaux préférences", "mes_colonnes", "", None, "view_column"),
     ("Alertes de stock actives", "alertes stock réapprovisionnement seuil", "admin:stock_alertestock_changelist", "?statut__exact=active", "stock.view_alertestock", "warning"),
 ]
 
@@ -52,7 +53,7 @@ def raccourcis_ecrans(request):
         if utilisateur.has_perm(droit):
             resultats.append((titre, "Créer", _url(nom, parametres), "add_circle", f"{titre} {mots} nouveau créer"))
     for titre, mots, nom, parametres, droit, icone in ECRANS:
-        if not utilisateur.has_perm(droit):
+        if droit and not utilisateur.has_perm(droit):
             continue
         if nom.startswith("admin:stock_") and not settings.STOCK_ACTIF:
             continue

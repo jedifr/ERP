@@ -15,6 +15,7 @@ from codification.mixins import CodificationInitialeMixin
 from codification.models import RegleCodification
 from comptabilite.generation import GenerationEcritureError, generer_ecriture_facture
 
+from comptes.colonnes import ColonnesPersonnalisablesMixin
 from comptes.exports import ExportCsvMixin
 from comptes.pastilles import A_FAIRE, EN_COURS, NEUTRE, TERMINE, PastillesMixin
 from comptes.montants import arrondir, pourcent, somme
@@ -114,7 +115,7 @@ class RetardFilter(admin.SimpleListFilter):
 
 
 @admin.register(Facture)
-class FactureAdmin(PastillesMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
+class FactureAdmin(ColonnesPersonnalisablesMixin, PastillesMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
     codification_entite = RegleCodification.Entite.FACTURE
 
     pastilles = {

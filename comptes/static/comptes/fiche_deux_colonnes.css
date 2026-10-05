@@ -2,7 +2,7 @@
    qui reste visible en haut de page au lieu d'être relégué sous la saisie. */
 form > div:has(> fieldset.fiche-saisie) {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(320px, 28rem);
+    grid-template-columns: minmax(0, 1fr) clamp(28rem, 38%, 46rem);
     column-gap: 1.5rem;
     row-gap: 1.5rem;
     align-items: start;

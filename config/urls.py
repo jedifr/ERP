@@ -19,9 +19,11 @@ from django.conf import settings
 from django.contrib import admin
 from django.urls import include, path, re_path
 
+from comptes.colonnes import mes_colonnes
 from comptes.views import media_protege
 
 urlpatterns = [
+    path("admin/mes-colonnes/", admin.site.admin_view(mes_colonnes), name="mes_colonnes"),
     path("admin/", admin.site.urls),
     path("api/v1/", include("technique.urls")),
     path("api/v1/", include("decoupe.urls")),

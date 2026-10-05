@@ -75,3 +75,22 @@ class Societe(models.Model):
     def save(self, *args, **kwargs):
         self.pk = 1  # une seule fiche
         super().save(*args, **kwargs)
+
+
+class PreferenceColonnes(models.Model):
+    """Colonnes que l'utilisateur a choisi de masquer sur un écran (liste d'un document ou tableau de lignes d'une
+    fiche). Réglage personnel : il ne change rien pour les autres utilisateurs. Voir comptes/colonnes.py."""
+
+    utilisateur = models.ForeignKey(
+        "auth.User", verbose_name="utilisateur", on_delete=models.CASCADE, related_name="preferences_colonnes"
+    )
+    ecran = models.CharField("écran", max_length=150)
+    masquees = models.JSONField("colonnes masquées", default=list, blank=True)
+
+    class Meta:
+        verbose_name = "Préférence de colonnes"
+        verbose_name_plural = "Préférences de colonnes"
+        constraints = [models.UniqueConstraint(fields=["utilisateur", "ecran"], name="unique_preference_colonnes")]
+
+    def __str__(self):
+        return f"{self.utilisateur} — {self.ecran}"

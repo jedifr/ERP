@@ -110,3 +110,11 @@ fieldset.fiche-recap .aligned.border { border-top: 3px solid var(--color-primary
 .menu-nouveau-entree .material-symbols-outlined { font-size: 20px; color: var(--color-primary-600); }
 .menu-nouveau-entree:hover { background: color-mix(in oklch, var(--color-primary-500) 12%, transparent); }
 [x-cloak] { display: none !important; }
+
+/* ---------------------------------------------------------------- Page « Mes colonnes » */
+.colonnes-grille { display: grid; grid-template-columns: repeat(auto-fill, minmax(21rem, 1fr)); gap: 1rem; }
+.colonnes-bloc { background: white; border: 1px solid var(--color-base-200); border-radius: var(--erp-rayon); box-shadow: var(--erp-ombre); padding: .5rem 1rem 1rem; }
+.dark .colonnes-bloc { background: var(--color-base-900); border-color: var(--color-base-800); }
+.colonnes-bloc legend { font-weight: 600; padding: 0 .5rem; color: var(--color-primary-700); }
+.dark .colonnes-bloc legend { color: var(--color-primary-400); }
+.colonnes-case { display: flex; align-items: center; gap: .6rem; padding: .3rem 0; cursor: pointer; }

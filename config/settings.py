@@ -390,6 +390,12 @@ UNFOLD = {
     "SITE_HEADER": "ERP maison",
     "SITE_SUBHEADER": "Métallurgie & chaudronnerie",
     "SITE_SYMBOL": "factory",
+    "ACCOUNT": {
+        "navigation": [
+            {"title": "Mes colonnes", "link": reverse_lazy("mes_colonnes")},
+            {"title": "Changer le mot de passe", "link": reverse_lazy("admin:password_change")},
+        ],
+    },
     "SHOW_HISTORY": True,
     "SHOW_VIEW_ON_SITE": False,
     "DASHBOARD_CALLBACK": "comptes.dashboard.dashboard_callback",

@@ -2854,3 +2854,10 @@ Dans la barre d'enregistrement des fiches **devis, commande, livraison et ordre 
 - Les factures (émises dans Tiime) et les commandes fournisseur n'ont pas de PDF dans l'ERP : pas de bouton.
 - Le menu « + Nouveau » s'élargit à son contenu (jamais de retour à la ligne) et s'aligne sur le bord de l'écran s'il ne tient pas.
 - Code : `EnregistrerEtValiderMixin` (`chiffrage/admin.py`) ; un admin déclare `url_pdf`, `libelle_valider` et, s'il se valide, `valeurs_validation` / `pret_pour_pdf`.
+
+## Récapitulatif plus large et « Mes colonnes »
+
+- **Récapitulatif plus large** sur toutes les fiches en deux colonnes (devis, commande, facture, livraison, commande fournisseur, ordre de fabrication, article) : 38 % de la largeur, entre 28 et 46 rem, au lieu de 28 rem fixes — les listes d'ordres de fabrication, de livraisons ou de factures tiennent sur une ligne.
+- **Mes colonnes** (menu du compte en bas à gauche, ou Ctrl+K « colonnes ») : chaque utilisateur coche les colonnes qu'il veut voir. Réglage **personnel**, enregistré par utilisateur (`PreferenceColonnes`) ; « Rétablir les colonnes par défaut » efface ses choix. Écrans concernés : listes des devis, commandes, livraisons, factures, ordres de fabrication et articles ; tableau des lignes d'une commande (désignation, date de livraison possible, statut d'approvisionnement, livré, reliquat, entièrement livrée, facturé, livré non facturé).
+- Jamais masquables : le lien vers la fiche (première colonne d'une liste) et, dans le tableau des lignes, les colonnes indispensables à la saisie et aux calculs en direct (article, quantité, prix, TVA, montants, date de livraison prévue).
+- Pour rendre un écran personnalisable : ajouter `ColonnesPersonnalisablesMixin` (`comptes/colonnes.py`) devant `ModelAdmin` (liste) ou `TabularInline` (lignes, avec `colonnes_optionnelles = [...]`) ; `colonnes_masquees_par_defaut` fixe ce qui est masqué tant que l'utilisateur n'a rien choisi.

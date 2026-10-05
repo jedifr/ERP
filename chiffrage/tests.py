@@ -5379,3 +5379,67 @@ class EnregistrerEtOuvrirPdfTests(_FixtureOrdresCommande, TestCase):
         self.assertRedirects(reponse, f"/admin/chiffrage/ordrefabrication/{of.pk}/pdf/", fetch_redirect_response=False)
         of.refresh_from_db()
         self.assertEqual(of.statut, "En cours")
+
+
+class MesColonnesTests(_FixtureOrdresCommande, TestCase):
+    """« Mes colonnes » : chaque utilisateur choisit les colonnes des listes et des tableaux de lignes."""
+
+    def setUp(self):
+        super().setUp()
+        self.fiche = f"/admin/chiffrage/commande/{self.commande.pk}/change/"
+
+    def test_page_liste_les_ecrans_et_les_colonnes(self):
+        page = self.client.get("/admin/mes-colonnes/")
+        for attendu in ("Lignes de la fiche", "Statut d&#x27;approvisionnement", "Liste : Devis", "Liste : Commandes",
+                        "Liste : Factures", "Liste : Articles", "Rétablir les colonnes par défaut"):
+            self.assertContains(page, attendu)
+        self.assertContains(page, "/admin/mes-colonnes/")  # lien dans le menu du compte
+
+    def test_masquer_des_colonnes_de_la_fiche_et_de_la_liste(self):
+        self.assertContains(self.client.get(self.fiche), "Statut d&#x27;approvisionnement")
+        reponse = self.client.post("/admin/mes-colonnes/", {
+            "chiffrage.commande:commandeligne|designation": "on",
+            "chiffrage.commande:commandeligne|quantite_livree": "on",
+            "chiffrage.commande:commandeligne|reliquat": "on",
+            # absentes (donc masquées) : date_livraison_possible_display, statut_approvisionnement, entierement_livree…
+            "chiffrage.commande|numero": "on", "chiffrage.commande|client": "on",  # la liste garde ces colonnes seulement
+        })
+        self.assertRedirects(reponse, "/admin/mes-colonnes/", fetch_redirect_response=False)
+        fiche = self.client.get(self.fiche)
+        self.assertNotContains(fiche, "Statut d&#x27;approvisionnement")
+        self.assertNotContains(fiche, "Date de livraison possible")
+        self.assertContains(fiche, "Reliquat")
+        self.assertContains(fiche, "Prix de vente unitaire")  # colonnes indispensables toujours là
+        liste = self.client.get("/admin/chiffrage/commande/")
+        self.assertNotContains(liste, "Réf. commande client")
+        self.assertContains(liste, "Client")
+
+    def test_reglage_personnel(self):
+        from django.contrib.auth import get_user_model
+
+        self.client.post("/admin/mes-colonnes/", {"chiffrage.commande:commandeligne|reliquat": "on"})
+        autre = get_user_model().objects.create_superuser("autre-colonnes", "ac@example.com", "pass-mot-de-passe-13")
+        self.client.force_login(autre)
+        self.assertContains(self.client.get(self.fiche), "Statut d&#x27;approvisionnement")  # inchangé pour un autre utilisateur
+
+    def test_rien_n_est_masque_de_force_et_defaut_retabli(self):
+        from comptes.models import PreferenceColonnes
+
+        PreferenceColonnes.objects.create(
+            utilisateur=self.admin, ecran="chiffrage.commande:commandeligne", masquees=["article", "montant_ht", "reliquat"]
+        )
+        fiche = self.client.get(self.fiche)
+        self.assertContains(fiche, "Montant HT")  # non masquable : ignoré
+        self.assertContains(fiche, "Article")
+        self.assertNotContains(fiche, "Reliquat")
+        reponse = self.client.post("/admin/mes-colonnes/", {"defaut": "1"})
+        self.assertEqual(reponse.status_code, 302)
+        self.assertFalse(PreferenceColonnes.objects.filter(utilisateur=self.admin).exists())
+        self.assertContains(self.client.get(self.fiche), "Reliquat")
+
+    def test_enregistrer_la_fiche_sans_les_colonnes_masquees(self):
+        self.client.post("/admin/mes-colonnes/", {"chiffrage.commande:commandeligne|reliquat": "on"})
+        fiche = self.client.get(self.fiche)
+        self.assertEqual(fiche.status_code, 200)
+        formset = fiche.context["inline_admin_formsets"][0].formset
+        self.assertNotIn("designation", formset.empty_form.fields)

@@ -8,6 +8,7 @@ from django.utils.safestring import mark_safe
 from django.views.decorators.http import require_http_methods
 from unfold.admin import ModelAdmin, TabularInline
 
+from comptes.colonnes import ColonnesPersonnalisablesMixin
 from comptes.exports import ExportCsvMixin
 from achats.models import ArticleFournisseur
 from comptabilite.models import ArticleCompteAchat, ArticleCompteVente
@@ -78,7 +79,7 @@ def dupliquer_article_view(request, reference):
 
 
 @admin.register(Article)
-class ArticleAdmin(ExportCsvMixin, ModelAdmin):
+class ArticleAdmin(ColonnesPersonnalisablesMixin, ExportCsvMixin, ModelAdmin):
     list_display = [
         "reference",
         "libelle",

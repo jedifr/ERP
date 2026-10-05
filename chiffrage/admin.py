@@ -15,6 +15,7 @@ from django.utils.safestring import mark_safe
 from unfold.decorators import action as unfold_action
 from unfold.enums import ActionVariant
 from comptes.exports import ExportCsvMixin
+from comptes.colonnes import ColonnesPersonnalisablesMixin
 from comptes.liens import lien_admin
 from comptes.pastilles import A_FAIRE, EN_COURS, NEUTRE, PROBLEME, TERMINE, PastillesMixin
 from comptes.montants import arrondir, pourcent, somme
@@ -343,7 +344,7 @@ class ExpireFilter(admin.SimpleListFilter):
 
 
 @admin.register(Devis)
-class DevisAdmin(PastillesMixin, EnregistrerEtValiderMixin, EtapeSuivanteMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
+class DevisAdmin(ColonnesPersonnalisablesMixin, PastillesMixin, EnregistrerEtValiderMixin, EtapeSuivanteMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
     codification_entite = RegleCodification.Entite.DEVIS
     form = DevisAdminForm
 
@@ -778,7 +779,12 @@ class CommandeLigneModificationInline(TabularInline):
         return False
 
 
-class CommandeLigneInline(TabularInline):
+class CommandeLigneInline(ColonnesPersonnalisablesMixin, TabularInline):
+    # Colonnes que chaque utilisateur peut masquer (« Mes colonnes ») ; le reste sert aux calculs en direct de la fiche.
+    colonnes_optionnelles = [
+        "designation", "date_livraison_possible_display", "statut_approvisionnement", "quantite_livree",
+        "reliquat", "entierement_livree", "quantite_facturee", "reste_a_facturer",
+    ]
     model = CommandeLigne
     form = CommandeLigneForm
     extra = 0
@@ -819,7 +825,7 @@ class CommandeLigneInline(TabularInline):
 
 
 @admin.register(Commande)
-class CommandeAdmin(PastillesMixin, EnregistrerEtValiderMixin, EtapeSuivanteMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
+class CommandeAdmin(ColonnesPersonnalisablesMixin, PastillesMixin, EnregistrerEtValiderMixin, EtapeSuivanteMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
     codification_entite = RegleCodification.Entite.COMMANDE
 
     list_display = ["numero", "client", "reference_client", "devis", "date_commande", "statut", "devise"]
@@ -1173,7 +1179,7 @@ class LivraisonLigneInline(TabularInline):
 
 
 @admin.register(Livraison)
-class LivraisonAdmin(PastillesMixin, EnregistrerEtValiderMixin, EtapeSuivanteMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
+class LivraisonAdmin(ColonnesPersonnalisablesMixin, PastillesMixin, EnregistrerEtValiderMixin, EtapeSuivanteMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
     codification_entite = RegleCodification.Entite.LIVRAISON
 
     list_display = ["numero", "commande", "date_livraison", "statut"]
@@ -1399,7 +1405,7 @@ class ComposantOFInline(TabularInline):
 
 
 @admin.register(OrdreFabrication)
-class OrdreFabricationAdmin(PastillesMixin, EnregistrerEtValiderMixin, ExportCsvMixin, CodificationInitialeMixin, ModelAdmin):
+class OrdreFabricationAdmin(ColonnesPersonnalisablesMixin, PastillesMixin, EnregistrerEtValiderMixin, ExportCsvMixin, CodificationInitialeMixin, ModelAdmin):
     codification_entite = RegleCodification.Entite.ORDRE_FABRICATION
 
     pastilles = {"statut_synchro": {"synchronise": TERMINE, "en_attente": A_FAIRE, "echec_persistant": PROBLEME}}
