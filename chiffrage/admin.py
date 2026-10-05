@@ -9,7 +9,7 @@ from django.shortcuts import get_object_or_404
 from django.template.response import TemplateResponse
 from django.urls import path, reverse
 from django.utils import timezone
-from django.utils.html import format_html
+from django.utils.html import escape, format_html
 from django.utils.safestring import mark_safe
 from unfold.decorators import action as unfold_action
 from comptes.exports import ExportCsvMixin
@@ -1204,9 +1204,64 @@ class OrdreFabricationAdmin(ExportCsvMixin, CodificationInitialeMixin, ModelAdmi
     list_filter = ["statut_synchro"]
     readonly_fields = [
         "statut_synchro", "nombre_tentatives", "date_derniere_tentative", "derniere_erreur", "prochaine_tentative",
-        "lignes_commande_display",
+        "lignes_commande_display", "commande_recap", "avancement_recap", "synchro_recap",
     ]
     exclude = ["lignes_commande"]
+
+    # Fiche en deux colonnes : saisie à gauche, récapitulatif (commande, lignes couvertes, avancement, synchronisation
+    # avec le planning) à droite — voir comptes/static/comptes/fiche_deux_colonnes.css.
+    CHAMPS_RECAPITULATIF = ["commande_recap", "lignes_commande_display", "avancement_recap", "synchro_recap"]
+    CHAMPS_SYNCHRO = ["statut_synchro", "nombre_tentatives", "date_derniere_tentative", "derniere_erreur", "prochaine_tentative"]
+
+    def get_fieldsets(self, request, obj=None):
+        exclus = set(self.CHAMPS_RECAPITULATIF) | set(self.CHAMPS_SYNCHRO)
+        saisie = [c for c in self.get_fields(request, obj) if c not in exclus]
+        return [
+            (None, {"fields": saisie, "classes": ["fiche-saisie"]}),
+            ("Récapitulatif", {"fields": self.CHAMPS_RECAPITULATIF, "classes": ["fiche-recap"]}),
+        ]
+
+    @admin.display(description="Commande")
+    def commande_recap(self, obj):
+        if obj is None or not obj.pk or not obj.commande_id:
+            return "—"
+        commande = obj.commande
+        lien = format_html("<a href='{}'>{}</a>", reverse("admin:chiffrage_commande_change", args=[commande.pk]), commande.numero)
+        livraison = f"Livraison prévue le {obj.date_livraison_prevue:%d/%m/%Y}" if obj.date_livraison_prevue else "Pas de date de livraison"
+        return format_html("{} — {}<br>{}", lien, commande.client.raison_sociale, livraison)
+
+    @admin.display(description="Avancement")
+    def avancement_recap(self, obj):
+        if obj is None or not obj.pk:
+            return "—"
+        operations = list(obj.operations.select_related("poste"))
+        if not operations:
+            return "Aucune opération de gamme"
+        prevu = sum(o.temps_prevu or 0 for o in operations)
+        reel = sum(o.temps_reel or 0 for o in operations)
+        avec_temps = sum(1 for o in operations if o.temps_reel is not None)
+        bonnes = sum(o.quantite_bonne or 0 for o in operations)
+        rebuts = sum(o.quantite_rebut or 0 for o in operations)
+        lignes = [
+            f"{avec_temps} opération(s) sur {len(operations)} avec un temps réel",
+            f"Temps prévu {prevu:g} min — réel {reel:g} min",
+        ]
+        if any(o.quantite_bonne is not None or o.quantite_rebut is not None for o in operations):
+            lignes.append(f"Pièces bonnes : {bonnes:g} — rebuts : {rebuts:g}")
+        return mark_safe("<br>".join(escape(l) for l in lignes))
+
+    @admin.display(description="Synchronisation avec le planning")
+    def synchro_recap(self, obj):
+        if obj is None or not obj.pk:
+            return "—"
+        lignes = [f"{obj.get_statut_synchro_display()} — {obj.nombre_tentatives} tentative(s)"]
+        if obj.date_derniere_tentative:
+            lignes.append(f"Dernière tentative le {obj.date_derniere_tentative:%d/%m/%Y}")
+        if obj.prochaine_tentative:
+            lignes.append(f"Prochaine reprise le {obj.prochaine_tentative:%d/%m/%Y %H:%M}")
+        if obj.derniere_erreur:
+            lignes.append(f"Erreur : {obj.derniere_erreur[:200]}")
+        return mark_safe("<br>".join(escape(l) for l in lignes))
     search_fields = ["numero", "commande__numero", "article__reference"]
     autocomplete_fields = ["commande", "article"]
     inlines = [ComposantOFInline, OperationOFInline]

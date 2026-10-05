@@ -5024,3 +5024,46 @@ class FicheLivraisonDeuxColonnesTests(_FixtureOrdresCommande, TestCase):
         page = self.client.get("/admin/chiffrage/livraison/add/")
         self.assertEqual(page.status_code, 200)
         self.assertContains(page, "fiche-recap")
+
+
+class FicheOrdreFabricationDeuxColonnesTests(_FixtureOrdresCommande, TestCase):
+    """Fiche OF : saisie à gauche ; commande, lignes couvertes, avancement et synchro planning à droite."""
+
+    def setUp(self):
+        super().setUp()
+        self.of = next(o for o in creer_ordres_fabrication(self.commande, regrouper=True) if o.article == self.f)
+        self.url = f"/admin/chiffrage/ordrefabrication/{self.of.pk}/change/"
+
+    def test_recapitulatif(self):
+        operations = list(self.of.operations.order_by("ordre"))
+        operations[0].temps_reel = 25
+        operations[0].quantite_bonne = 4
+        operations[0].quantite_rebut = 1
+        operations[0].save()
+        page = self.client.get(self.url)
+        for attendu in ("fiche-saisie", "fiche-recap", "Récapitulatif", "CDE-OF", "Client Fabrication", "Livraison prévue le 10/12/2026",
+                        "Lignes de commande couvertes", "Flasque × 3", "Flasque × 2", "1 opération(s) sur 2 avec un temps réel",
+                        "Temps prévu 30 min — réel 25 min", "Pièces bonnes : 4 — rebuts : 1",
+                        "Synchronisation avec le planning", "En attente — 1 tentative(s)", "PLANNING_API_URL non configuré"):
+            self.assertContains(page, attendu)
+        self.assertContains(page, "/admin/chiffrage/commande/CDE-OF/change/")
+        self.assertContains(page, "Nomenclature")  # les inlines restent sous les deux colonnes
+        self.assertContains(page, "Gamme")
+
+    def test_of_sans_operation_et_formulaire_d_ajout(self):
+        self.of.operations.all().delete()
+        self.assertContains(self.client.get(self.url), "Aucune opération de gamme")
+        self.assertContains(self.client.get("/admin/chiffrage/ordrefabrication/add/"), "fiche-recap")
+
+    def test_enregistrement_inchange(self):
+        reponse = self.client.post(
+            self.url,
+            {"numero": self.of.pk, "commande": "CDE-OF", "article": "PIECE-F", "quantite": "5", "date_lancement": "2026-10-03",
+             "date_livraison_prevue": "2026-12-10", "statut": "En cours",
+             "operations-TOTAL_FORMS": "0", "operations-INITIAL_FORMS": "0",
+             "composants-TOTAL_FORMS": "0", "composants-INITIAL_FORMS": "0"},
+        )
+        self.assertEqual(reponse.status_code, 302, reponse.context["adminform"].form.errors if reponse.context else "")
+        self.of.refresh_from_db()
+        self.assertEqual(self.of.statut, "En cours")
+        self.assertEqual(self.of.nombre_tentatives, 1)  # la synchronisation n'est pas modifiable à la main
