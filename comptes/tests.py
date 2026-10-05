@@ -1071,4 +1071,4 @@ class StockActifMenuTests(TestCase):
     def test_menu_stock_masque_si_desactive(self):
         titres = self._titres_menu("false")
         self.assertNotIn("Stock", titres)
-        self.assertIn("Facturation", titres)
+        self.assertIn("Ventes", titres)

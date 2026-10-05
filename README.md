@@ -2800,3 +2800,12 @@ Les PDF de vente (**devis, AR de commande, bon de préparation, bon de livraison
 **Technique / déploiement** : rendu HTML → PDF par **WeasyPrint** (`requirements.txt`), qui exige Pango et des polices dans l'image Docker (`Dockerfile` mis à jour : `docker compose up -d --build`, c'est ce que fait `update-nas.sh`). GrapesJS 0.23 (licence BSD-3) est fourni dans `documents/static/documents/vendor/`. Pour mettre à jour cette bibliothèque : remplacer ces deux fichiers **en retirant la ligne `//# sourceMappingURL=…` en fin de `grapes.min.js`**, sinon `collectstatic` échoue.
 
 Envoyez-moi vos modèles papier ou Word : je reproduis leur mise en page comme modèle par défaut.
+
+## Menu latéral
+
+Le menu suit le chemin d'une commande :
+**Ventes** (Devis, Commandes clients, Livraisons (BL), Factures) → **Production** (Ordres de fabrication, Pièces à découper, Imbrications, Profils d'import) → **Achats** (Commandes fournisseur, Réceptions, Factures fournisseur, Envois et retours de sous-traitance, Fournisseurs d'article, Tarifs d'achat) → **Stock** (Lots, Mouvements, Alertes, Transferts, Inventaires, Emplacements) → **Comptabilité** → **Données de base** (Tiers, Adresses, Contacts, Articles, Matières, Nomenclatures, Gammes, Postes de travail, Tarifs de poste, Taux de TVA, Conditions de paiement, Délais proposés, Devises, Pays) → **Administration** (Société, Modèles de documents, Règles de codification, Utilisateurs, Groupes, Audit des droits, Journal des connexions).
+
+- Comptabilité, Données de base et Administration sont **repliés** par défaut (ils s'ouvrent d'eux-mêmes quand on est dans l'un de leurs écrans).
+- Chaque entrée n'apparaît que si l'utilisateur a le droit « voir » l'écran ; un groupe sans entrée visible disparaît. Le groupe Stock disparaît si `DJANGO_STOCK_ACTIF=false`.
+- Pour déplacer ou ajouter un écran : `config/settings.py`, liste `NAVIGATION` (une ligne `_menu("Titre", "icône", "app", "modele")`).

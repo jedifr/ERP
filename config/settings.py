@@ -255,6 +255,124 @@ LOGGING = {
 }
 
 
+# Menu latéral, organisé selon le chemin d'une commande : on vend, on produit, on achète, on stocke, on
+# comptabilise ; les données de base et l'administration sont regroupées à part (et repliées par défaut).
+# Chaque entrée n'est visible que pour qui a le droit « voir » le modèle correspondant.
+def _menu(titre, icone, app, modele, droit=None, url=None):
+    droit = droit or f"{app}.view_{modele}"
+    verifier = droit if callable(droit) else (lambda request, d=droit: request.user.has_perm(d))
+    return {
+        "title": titre,
+        "icon": icone,
+        "link": reverse_lazy(url or f"admin:{app}_{modele}_changelist"),
+        "permission": verifier,
+    }
+
+
+def _superutilisateur(request):
+    return request.user.is_superuser
+
+
+NAVIGATION = [
+    {
+        "title": "Ventes",
+        "separator": True,
+        "items": [
+            _menu("Devis", "description", "chiffrage", "devis"),
+            _menu("Commandes clients", "shopping_cart", "chiffrage", "commande"),
+            _menu("Livraisons (BL)", "local_shipping", "chiffrage", "livraison"),
+            _menu("Factures", "receipt_long", "facturation", "facture"),
+        ],
+    },
+    {
+        "title": "Production",
+        "separator": True,
+        "items": [
+            _menu("Ordres de fabrication", "build", "chiffrage", "ordrefabrication"),
+            _menu("Pièces à découper", "content_cut", "decoupe", "piecedecoupe"),
+            _menu("Imbrications", "grid_view", "decoupe", "imbricationjob"),
+            _menu("Profils d'import", "layers", "decoupe", "profilimportdecoupe"),
+        ],
+    },
+    {
+        "title": "Achats",
+        "separator": True,
+        "items": [
+            _menu("Commandes fournisseur", "local_shipping", "achats", "commandefournisseur"),
+            _menu("Réceptions", "move_to_inbox", "achats", "reception"),
+            _menu("Factures fournisseur", "request_quote", "achats", "facturefournisseur"),
+            _menu("Envois sous-traitance", "outbound", "soustraitance", "envoisoustraitance"),
+            _menu("Retours sous-traitance", "keyboard_return", "soustraitance", "retoursoustraitance"),
+            _menu("Fournisseurs d'article", "contact_page", "achats", "articlefournisseur"),
+            _menu("Tarifs d'achat", "sell", "achats", "tarifachatarticle"),
+        ],
+    },
+    {
+        "title": "Stock",
+        "separator": True,
+        "items": [
+            _menu("Lots", "inventory_2", "stock", "lot"),
+            _menu("Mouvements de stock", "sync_alt", "stock", "mouvementstock"),
+            _menu("Alertes de stock", "warning", "stock", "alertestock"),
+            _menu("Transferts", "swap_horiz", "stock", "transfert"),
+            _menu("Inventaires", "fact_check", "stock", "inventaire"),
+            _menu("Emplacements", "warehouse", "stock", "emplacement"),
+        ],
+    },
+    {
+        "title": "Comptabilité",
+        "separator": True,
+        "collapsible": True,
+        "items": [
+            _menu("Écritures comptables", "list_alt", "comptabilite", "ecriturecomptable"),
+            _menu("Journaux comptables", "book", "comptabilite", "journalcomptable"),
+            _menu("Plan comptable", "account_balance", "comptabilite", "comptecomptable"),
+            _menu("Postes de gestion", "workspaces", "comptabilite", "postegestion"),
+            _menu("Codes analytiques", "label", "comptabilite", "codeanalytique"),
+            _menu("Comptes de vente d'article", "trending_up", "comptabilite", "articlecomptevente"),
+            _menu("Comptes d'achat d'article", "trending_down", "comptabilite", "articlecompteachat"),
+            _menu("Comptes comptables de tiers", "badge", "comptabilite", "tierscomptecomptable"),
+            _menu("Paramètres comptables", "settings", "comptabilite", "parametrescomptables"),
+        ],
+    },
+    {
+        "title": "Données de base",
+        "separator": True,
+        "collapsible": True,
+        "items": [
+            _menu("Tiers (clients, fournisseurs)", "handshake", "commercial", "tiers"),
+            _menu("Adresses", "location_on", "commercial", "adresse"),
+            _menu("Contacts", "contacts", "commercial", "contact"),
+            _menu("Articles", "category", "technique", "article"),
+            _menu("Matières", "science", "technique", "matiere"),
+            _menu("Nomenclatures", "account_tree", "technique", "nomenclature"),
+            _menu("Gammes", "route", "technique", "gamme"),
+            _menu("Postes de travail", "precision_manufacturing", "technique", "postetravail"),
+            _menu("Tarifs de poste", "payments", "technique", "tarifposte"),
+            _menu("Taux de TVA", "percent", "commercial", "tauxtva"),
+            _menu("Conditions de paiement", "schedule", "commercial", "conditionpaiement"),
+            _menu("Délais proposés", "timer", "commercial", "delaipropose"),
+            _menu("Devises", "euro", "commercial", "devise"),
+            _menu("Pays", "public", "commercial", "pays"),
+        ],
+    },
+    {
+        "title": "Administration",
+        "separator": True,
+        "collapsible": True,
+        "items": [
+            _menu("Société (en-tête des documents)", "business", "comptes", "societe"),
+            _menu("Modèles de documents (PDF)", "edit_document", "documents", "modeledocument", _superutilisateur),
+            _menu("Règles de codification", "tag", "codification", "reglecodification"),
+            _menu("Utilisateurs", "person", "auth", "user", _superutilisateur),
+            _menu("Groupes", "groups", "auth", "group", _superutilisateur),
+            _menu("Audit des droits", "admin_panel_settings", "auth", "user", _superutilisateur, url="admin:auth_user_audit_droits"),
+            _menu("Journal des connexions", "login", "comptes", "evenementconnexion"),
+        ],
+    },
+]
+
+
 # Unfold — thème de l'admin Django
 # https://unfoldadmin.com/docs/configuration/settings/
 
@@ -290,254 +408,7 @@ UNFOLD = {
     "SIDEBAR": {
         "show_search": True,
         "show_all_applications": False,
-        "navigation": [
-            {
-                "title": "Socle technique",
-                "separator": True,
-                "items": [
-                    {
-                        "title": "Matières",
-                        "icon": "science",
-                        "link": reverse_lazy("admin:technique_matiere_changelist"),
-                    },
-                    {
-                        "title": "Articles",
-                        "icon": "category",
-                        "link": reverse_lazy("admin:technique_article_changelist"),
-                    },
-                    {
-                        "title": "Postes de travail",
-                        "icon": "precision_manufacturing",
-                        "link": reverse_lazy("admin:technique_postetravail_changelist"),
-                    },
-                    {
-                        "title": "Tarifs de poste",
-                        "icon": "payments",
-                        "link": reverse_lazy("admin:technique_tarifposte_changelist"),
-                    },
-                    {
-                        "title": "Nomenclatures",
-                        "icon": "account_tree",
-                        "link": reverse_lazy("admin:technique_nomenclature_changelist"),
-                    },
-                    {
-                        "title": "Gammes",
-                        "icon": "route",
-                        "link": reverse_lazy("admin:technique_gamme_changelist"),
-                    },
-                ],
-            },
-            {
-                "title": "Commercial",
-                "separator": True,
-                "items": [
-                    {
-                        "title": "Tiers",
-                        "icon": "handshake",
-                        "link": reverse_lazy("admin:commercial_tiers_changelist"),
-                    },
-                    {
-                        "title": "Adresses",
-                        "icon": "location_on",
-                        "link": reverse_lazy("admin:commercial_adresse_changelist"),
-                    },
-                    {
-                        "title": "Contacts",
-                        "icon": "contacts",
-                        "link": reverse_lazy("admin:commercial_contact_changelist"),
-                    },
-                    {
-                        "title": "Taux de TVA",
-                        "icon": "percent",
-                        "link": reverse_lazy("admin:commercial_tauxtva_changelist"),
-                    },
-                ],
-            },
-            {
-                "title": "Chiffrage et production",
-                "separator": True,
-                "items": [
-                    {
-                        "title": "Devis",
-                        "icon": "request_quote",
-                        "link": reverse_lazy("admin:chiffrage_devis_changelist"),
-                    },
-                    {
-                        "title": "Commandes",
-                        "icon": "shopping_cart",
-                        "link": reverse_lazy("admin:chiffrage_commande_changelist"),
-                    },
-                    {
-                        "title": "Ordres de fabrication",
-                        "icon": "build",
-                        "link": reverse_lazy("admin:chiffrage_ordrefabrication_changelist"),
-                    },
-                ],
-            },
-            {
-                "title": "Chiffrage découpe",
-                "separator": True,
-                "items": [
-                    {
-                        "title": "Pièces à découper",
-                        "icon": "content_cut",
-                        "link": reverse_lazy("admin:decoupe_piecedecoupe_changelist"),
-                    },
-                    {
-                        "title": "Imbrications",
-                        "icon": "grid_view",
-                        "link": reverse_lazy("admin:decoupe_imbricationjob_changelist"),
-                    },
-                    {
-                        "title": "Profils d'import",
-                        "icon": "layers",
-                        "link": reverse_lazy("admin:decoupe_profilimportdecoupe_changelist"),
-                    },
-                ],
-            },
-            {
-                "title": "Stock",
-                "separator": True,
-                "items": [
-                    {
-                        "title": "Emplacements",
-                        "icon": "warehouse",
-                        "link": reverse_lazy("admin:stock_emplacement_changelist"),
-                    },
-                    {
-                        "title": "Lots",
-                        "icon": "inventory_2",
-                        "link": reverse_lazy("admin:stock_lot_changelist"),
-                    },
-                    {
-                        "title": "Mouvements de stock",
-                        "icon": "sync_alt",
-                        "link": reverse_lazy("admin:stock_mouvementstock_changelist"),
-                    },
-                    {
-                        "title": "Alertes de stock",
-                        "icon": "warning",
-                        "link": reverse_lazy("admin:stock_alertestock_changelist"),
-                    },
-                ],
-            },
-            {
-                "title": "Achats et sous-traitance",
-                "separator": True,
-                "items": [
-                    {
-                        "title": "Commandes fournisseur",
-                        "icon": "local_shipping",
-                        "link": reverse_lazy("admin:achats_commandefournisseur_changelist"),
-                    },
-                    {
-                        "title": "Réceptions",
-                        "icon": "move_to_inbox",
-                        "link": reverse_lazy("admin:achats_reception_changelist"),
-                    },
-                    {
-                        "title": "Envois sous-traitance",
-                        "icon": "outbound",
-                        "link": reverse_lazy("admin:soustraitance_envoisoustraitance_changelist"),
-                    },
-                    {
-                        "title": "Retours sous-traitance",
-                        "icon": "keyboard_return",
-                        "link": reverse_lazy("admin:soustraitance_retoursoustraitance_changelist"),
-                    },
-                ],
-            },
-            {
-                "title": "Facturation",
-                "separator": True,
-                "items": [
-                    {
-                        "title": "Factures",
-                        "icon": "receipt_long",
-                        "link": reverse_lazy("admin:facturation_facture_changelist"),
-                    },
-                ],
-            },
-            {
-                "title": "Comptabilité",
-                "separator": True,
-                "items": [
-                    {
-                        "title": "Plan comptable",
-                        "icon": "account_balance",
-                        "link": reverse_lazy("admin:comptabilite_comptecomptable_changelist"),
-                    },
-                    {
-                        "title": "Journaux comptables",
-                        "icon": "book",
-                        "link": reverse_lazy("admin:comptabilite_journalcomptable_changelist"),
-                    },
-                    {
-                        "title": "Écritures comptables",
-                        "icon": "receipt",
-                        "link": reverse_lazy("admin:comptabilite_ecriturecomptable_changelist"),
-                    },
-                    {
-                        "title": "Postes de gestion",
-                        "icon": "category",
-                        "link": reverse_lazy("admin:comptabilite_postegestion_changelist"),
-                    },
-                    {
-                        "title": "Codes analytiques",
-                        "icon": "sell",
-                        "link": reverse_lazy("admin:comptabilite_codeanalytique_changelist"),
-                    },
-                    {
-                        "title": "Paramètres comptables",
-                        "icon": "settings",
-                        "link": reverse_lazy("admin:comptabilite_parametrescomptables_changelist"),
-                    },
-                ],
-            },
-            {
-                "title": "Paramétrage",
-                "separator": True,
-                "items": [
-                    {
-                        "title": "Règles de codification",
-                        "icon": "tag",
-                        "link": reverse_lazy("admin:codification_reglecodification_changelist"),
-                    },
-                    {
-                        "title": "Utilisateurs",
-                        "icon": "person",
-                        "link": reverse_lazy("admin:auth_user_changelist"),
-                    },
-                    {
-                        "title": "Groupes",
-                        "icon": "groups",
-                        "link": reverse_lazy("admin:auth_group_changelist"),
-                    },
-                    {
-                        "title": "Société (en-tête des documents)",
-                        "icon": "business",
-                        "link": reverse_lazy("admin:comptes_societe_changelist"),
-                    },
-                    {
-                        "title": "Modèles de documents (PDF)",
-                        "icon": "edit_document",
-                        "link": reverse_lazy("admin:documents_modeledocument_changelist"),
-                        "permission": lambda request: request.user.is_superuser,
-                    },
-                    {
-                        "title": "Audit des droits",
-                        "icon": "admin_panel_settings",
-                        "link": reverse_lazy("admin:auth_user_audit_droits"),
-                        "permission": lambda request: request.user.is_superuser,
-                    },
-                    {
-                        "title": "Journal des connexions",
-                        "icon": "login",
-                        "link": reverse_lazy("admin:comptes_evenementconnexion_changelist"),
-                    },
-                ],
-            },
-        ],
+        "navigation": NAVIGATION,
     },
 }
 
