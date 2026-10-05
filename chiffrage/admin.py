@@ -223,6 +223,60 @@ class EtapeSuivanteMixin:
         return self._refus_droit(request, commande, "Vous n'avez pas la permission de créer une facture.")
 
 
+class EnregistrerEtValiderMixin:
+    """Bouton « Enregistrer et valider » de la barre d'enregistrement : enregistre la fiche, la valide quand le
+    document a une validation (le devis), puis ouvre directement son PDF — un clic au lieu de quatre.
+
+    L'admin qui l'utilise déclare `url_pdf` (action PDF de la fiche), `libelle_valider` et, si le document se
+    valide, `valeurs_validation` (champs forcés avant l'enregistrement) et `pret_pour_pdf(obj)`. Si la validation
+    est refusée (devis sous le coût, sans ligne…), la fiche est enregistrée, les raisons s'affichent, et on reste
+    sur la fiche."""
+
+    MARQUEUR = "_enregistrer_valider"
+    url_pdf = None
+    libelle_valider = "Enregistrer et valider"
+    valeurs_validation = {}
+
+    def pret_pour_pdf(self, obj):
+        return True
+
+    def peut_enregistrer_valider(self, request):
+        return self.has_change_permission(request)
+
+    def has_enregistrer_valider_permission(self, request, object_id=None):
+        return self.peut_enregistrer_valider(request)
+
+    @unfold_action(
+        description="Enregistrer et valider", icon="task_alt", variant=ActionVariant.PRIMARY,
+        permissions=["enregistrer_valider"], attrs={"name": MARQUEUR},
+    )
+    def action_enregistrer_valider(self, request, obj):
+        return None  # le travail se fait dans response_change : une fois la fiche ET ses lignes enregistrées
+
+    def get_actions_submit_line(self, request, object_id):
+        return [
+            dataclasses.replace(a, description=self.libelle_valider) if a.action_name.endswith("action_enregistrer_valider") else a
+            for a in super().get_actions_submit_line(request, object_id)
+        ]
+
+    def changeform_view(self, request, object_id=None, form_url="", extra_context=None):
+        if request.method == "POST" and self.MARQUEUR in request.POST and self.valeurs_validation:
+            if self.peut_enregistrer_valider(request):
+                request.POST = request.POST.copy()
+                for champ, valeur in self.valeurs_validation.items():
+                    request.POST[champ] = valeur
+        return super().changeform_view(request, object_id, form_url, extra_context)
+
+    def response_change(self, request, obj):
+        if self.MARQUEUR not in request.POST:
+            return super().response_change(request, obj)
+        fiche = reverse(f"admin:{obj._meta.app_label}_{obj._meta.model_name}_change", args=[obj.pk])
+        if not self.pret_pour_pdf(obj):
+            self.message_user(request, f"{obj} enregistré, mais pas validé.", level=messages.WARNING)
+            return HttpResponseRedirect(fiche)
+        return HttpResponseRedirect(reverse(self.url_pdf, args=[obj.pk]))
+
+
 class DevisAdminForm(forms.ModelForm):
     class Meta:
         model = Devis
@@ -289,7 +343,7 @@ class ExpireFilter(admin.SimpleListFilter):
 
 
 @admin.register(Devis)
-class DevisAdmin(PastillesMixin, EtapeSuivanteMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
+class DevisAdmin(PastillesMixin, EnregistrerEtValiderMixin, EtapeSuivanteMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
     codification_entite = RegleCodification.Entite.DEVIS
     form = DevisAdminForm
 
@@ -326,6 +380,16 @@ class DevisAdmin(PastillesMixin, EtapeSuivanteMixin, ExportCsvMixin, VerrouOptim
     inlines = [DevisLigneInline]
     actions = ["action_recalculer", "action_lancer_en_production"]
     actions_detail = ["action_etape_suivante", "action_pdf", "action_reviser"]
+    actions_submit_line = ["action_enregistrer_valider"]
+    url_pdf = "admin:chiffrage_devis_action_pdf"
+    libelle_valider = "Enregistrer, valider et ouvrir le PDF"
+    valeurs_validation = {"statut": Devis.Statut.VALIDE}
+
+    def peut_enregistrer_valider(self, request):
+        return request.user.has_perm("chiffrage.valider_devis") and self.has_change_permission(request)
+
+    def pret_pour_pdf(self, obj):
+        return obj.statut == Devis.Statut.VALIDE
 
     def etape_de(self, objet):
         return etapes.etape_devis(objet)
@@ -755,7 +819,7 @@ class CommandeLigneInline(TabularInline):
 
 
 @admin.register(Commande)
-class CommandeAdmin(PastillesMixin, EtapeSuivanteMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
+class CommandeAdmin(PastillesMixin, EnregistrerEtValiderMixin, EtapeSuivanteMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
     codification_entite = RegleCodification.Entite.COMMANDE
 
     list_display = ["numero", "client", "reference_client", "devis", "date_commande", "statut", "devise"]
@@ -836,6 +900,9 @@ class CommandeAdmin(PastillesMixin, EtapeSuivanteMixin, ExportCsvMixin, VerrouOp
             lambda f: f"{f.numero} — {f.date_facturation:%d/%m/%Y}" + (" (avoir)" if f.est_avoir else ""),
         )
     actions_detail = ["action_etape_suivante", "action_creer_ordres", "action_fiches_fabrication_pdf", "action_ar_pdf", "action_bon_preparation_pdf"]
+    actions_submit_line = ["action_enregistrer_valider"]
+    url_pdf = "admin:chiffrage_commande_action_ar_pdf"
+    libelle_valider = "Enregistrer et ouvrir l'AR (PDF)"
 
     def etape_de(self, objet):
         return etapes.etape_commande(objet)
@@ -1106,7 +1173,7 @@ class LivraisonLigneInline(TabularInline):
 
 
 @admin.register(Livraison)
-class LivraisonAdmin(PastillesMixin, EtapeSuivanteMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
+class LivraisonAdmin(PastillesMixin, EnregistrerEtValiderMixin, EtapeSuivanteMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
     codification_entite = RegleCodification.Entite.LIVRAISON
 
     list_display = ["numero", "commande", "date_livraison", "statut"]
@@ -1117,6 +1184,9 @@ class LivraisonAdmin(PastillesMixin, EtapeSuivanteMixin, ExportCsvMixin, VerrouO
     inlines = [LivraisonLigneInline]
     actions = ["action_annuler"]
     actions_detail = ["action_etape_suivante", "action_pdf"]
+    actions_submit_line = ["action_enregistrer_valider"]
+    url_pdf = "admin:chiffrage_livraison_action_pdf"
+    libelle_valider = "Enregistrer et ouvrir le BL (PDF)"
 
     def etape_de(self, objet):
         return etapes.etape_livraison(objet)
@@ -1329,7 +1399,7 @@ class ComposantOFInline(TabularInline):
 
 
 @admin.register(OrdreFabrication)
-class OrdreFabricationAdmin(PastillesMixin, ExportCsvMixin, CodificationInitialeMixin, ModelAdmin):
+class OrdreFabricationAdmin(PastillesMixin, EnregistrerEtValiderMixin, ExportCsvMixin, CodificationInitialeMixin, ModelAdmin):
     codification_entite = RegleCodification.Entite.ORDRE_FABRICATION
 
     pastilles = {"statut_synchro": {"synchronise": TERMINE, "en_attente": A_FAIRE, "echec_persistant": PROBLEME}}
@@ -1410,6 +1480,9 @@ class OrdreFabricationAdmin(PastillesMixin, ExportCsvMixin, CodificationInitiale
     inlines = [ComposantOFInline, OperationOFInline]
     actions = ["action_resynchroniser", "action_imprimer_fiches"]
     actions_detail = ["action_pdf"]
+    actions_submit_line = ["action_enregistrer_valider"]
+    url_pdf = "admin:chiffrage_ordrefabrication_action_pdf"
+    libelle_valider = "Enregistrer et ouvrir la fiche (PDF)"
 
     @admin.action(description="Imprimer les fiches de fabrication (un seul PDF)")
     def action_imprimer_fiches(self, request, queryset):

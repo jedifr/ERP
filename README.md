@@ -2844,3 +2844,13 @@ Le bouton ne contourne aucun droit : sans la permission de créer l'objet suivan
 
 - **Recherche globale** : `Ctrl + K` (`⌘ K` sur Mac) ou clic sur la barre en haut du menu latéral. Une seule barre qui cherche, au fil de la frappe, dans les **devis, commandes, livraisons, ordres de fabrication, factures, articles, clients/fournisseurs et commandes fournisseur** (numéro, client, référence… : mêmes champs de recherche que les listes), et propose aussi des **écrans** (« factures en retard », « devis sans réponse », « ordres de fabrication non transmis », « nouveau devis »…) sans tenir compte des accents. 5 résultats par type ; Entrée ouvre le résultat, Ctrl+Entrée l'ouvre dans un nouvel onglet ; l'historique des dernières recherches est conservé. Les résultats **respectent les droits** : un type de document que l'utilisateur n'a pas le droit de voir n'apparaît jamais. Code : `comptes/recherche.py` (types de documents et détails affichés dans `DOCUMENTS`).
 - **Menu « + Nouveau »** en haut de chaque page : nouveau devis, nouvelle commande, nouvelle livraison, préparer une facture, nouvelle commande fournisseur, nouveau client/fournisseur, nouvel article — **seules les entrées autorisées** apparaissent (le menu disparaît s'il n'y en a aucune). Les entrées et les écrans de la recherche sont définis dans une seule liste : `comptes/raccourcis.py` (`CREATIONS`, `ECRANS`).
+
+## Bouton « Enregistrer et valider » (et ouvrir le PDF)
+
+Dans la barre d'enregistrement des fiches **devis, commande, livraison et ordre de fabrication**, un bouton enregistre la fiche **puis ouvre directement son PDF** :
+
+- **Devis** : *Enregistrer, valider et ouvrir le PDF* — le statut passe à « Validé » (avec les mêmes contrôles que d'habitude : au moins une ligne, chiffrage complet, vente sous le coût réservée à qui en a le droit) puis le PDF du devis s'ouvre. Si la validation est refusée, la fiche est enregistrée, les raisons s'affichent et on reste sur la fiche (le devis reste en brouillon). Le bouton n'apparaît que pour qui a la permission « valider un devis ».
+- **Commande** : enregistre et ouvre l'**AR de commande** ; **livraison** : le **bon de livraison** ; **ordre de fabrication** : la **fiche de fabrication**.
+- Les factures (émises dans Tiime) et les commandes fournisseur n'ont pas de PDF dans l'ERP : pas de bouton.
+- Le menu « + Nouveau » s'élargit à son contenu (jamais de retour à la ligne) et s'aligne sur le bord de l'écran s'il ne tient pas.
+- Code : `EnregistrerEtValiderMixin` (`chiffrage/admin.py`) ; un admin déclare `url_pdf`, `libelle_valider` et, s'il se valide, `valeurs_validation` / `pret_pour_pdf`.

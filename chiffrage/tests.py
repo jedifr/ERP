@@ -5289,3 +5289,93 @@ class RechercheGlobaleEtMenuNouveauTests(_FixtureOrdresCommande, TestCase):
         sans_droit = get_user_model().objects.create_user("sans-droit-menu", "sd@example.com", "pass-mot-de-passe-11", is_staff=True)
         self.client.force_login(sans_droit)
         self.assertNotContains(self.client.get("/admin/"), "menu-nouveau-bouton")
+
+
+class EnregistrerEtValiderTests(_FixtureModuleA, TestCase):
+    """Bouton « Enregistrer et valider » : enregistre, valide le devis, ouvre le PDF."""
+
+    def payload(self, devis, ligne=None):
+        donnees = {
+            "numero": devis.pk, "client": self.tiers.pk, "date_creation": "01/01/2026", "statut": "brouillon", "issue": "en_attente",
+            "taux_marge_globale": "", "adresse_facturation": "", "adresse_livraison": "", "contact": "", "delai": "",
+            "lignes-TOTAL_FORMS": "1" if ligne else "0", "lignes-INITIAL_FORMS": "1" if ligne else "0",
+            "lignes-MIN_NUM_FORMS": "0", "lignes-MAX_NUM_FORMS": "1000",
+            "_enregistrer_valider": "1",
+        }
+        if ligne:
+            donnees.update({
+                "lignes-0-id": str(ligne.pk), "lignes-0-devis": devis.pk, "lignes-0-ordre": "0", "lignes-0-article": self.article.pk,
+                "lignes-0-quantite": "3.0", "lignes-0-taux_marge_matiere_applique": "", "lignes-0-prix_vente_unitaire_force": "",
+                "lignes-0-taux_tva": "",
+            })
+        return donnees
+
+    def test_bouton_visible_pour_qui_peut_valider(self):
+        page = self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/change/")
+        self.assertContains(page, "Enregistrer, valider et ouvrir le PDF")
+        self.assertContains(page, 'name="_enregistrer_valider"')
+
+    def test_devis_enregistre_valide_puis_pdf(self):
+        reponse = self.client.post(f"/admin/chiffrage/devis/{self.devis.pk}/change/", self.payload(self.devis, self.ligne))
+        self.assertRedirects(reponse, f"/admin/chiffrage/devis/{self.devis.pk}/pdf/", fetch_redirect_response=False)
+        self.devis.refresh_from_db()
+        self.assertEqual(self.devis.statut, Devis.Statut.VALIDE)
+        pdf = self.client.get(reponse["Location"])
+        self.assertEqual(pdf["Content-Type"], "application/pdf")
+        self.assertTrue(pdf.content.startswith(b"%PDF"))
+
+    def test_validation_refusee_on_reste_sur_la_fiche(self):
+        vide = Devis.objects.create(numero="DEV-VIDE", client=self.tiers, date_creation=datetime.date(2026, 1, 1))
+        reponse = self.client.post(f"/admin/chiffrage/devis/{vide.pk}/change/", self.payload(vide), follow=True)
+        self.assertEqual(reponse.redirect_chain[-1][0], f"/admin/chiffrage/devis/{vide.pk}/change/")
+        self.assertContains(reponse, "aucune ligne")
+        self.assertContains(reponse, "enregistré, mais pas validé")
+        vide.refresh_from_db()
+        self.assertEqual(vide.statut, Devis.Statut.BROUILLON)
+
+    def test_deja_valide_ouvre_simplement_le_pdf(self):
+        self._valider()
+        donnees = {"statut": "valide", "issue": "en_attente", "lignes-TOTAL_FORMS": "0", "lignes-INITIAL_FORMS": "0",
+                   "_enregistrer_valider": "1"}
+        reponse = self.client.post(f"/admin/chiffrage/devis/{self.devis.pk}/change/", donnees)
+        self.assertRedirects(reponse, f"/admin/chiffrage/devis/{self.devis.pk}/pdf/", fetch_redirect_response=False)
+
+    def test_sans_droit_de_valider_pas_de_bouton_ni_validation(self):
+        from django.contrib.auth import get_user_model
+        from django.contrib.auth.models import Permission
+
+        editeur = get_user_model().objects.create_user("editeur-devis", "e@example.com", "pass-mot-de-passe-12", is_staff=True)
+        editeur.user_permissions.add(*Permission.objects.filter(codename__in=["view_devis", "change_devis", "view_devisligne"]))
+        self.client.force_login(editeur)
+        page = self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/change/")
+        self.assertNotContains(page, "Enregistrer, valider et ouvrir le PDF")
+        self.client.post(f"/admin/chiffrage/devis/{self.devis.pk}/change/", self.payload(self.devis, self.ligne))
+        self.devis.refresh_from_db()
+        self.assertEqual(self.devis.statut, Devis.Statut.BROUILLON)
+
+
+class EnregistrerEtOuvrirPdfTests(_FixtureOrdresCommande, TestCase):
+    """Même bouton sur la commande (AR), la livraison (BL) et l'ordre de fabrication (fiche)."""
+
+    def test_boutons_presents(self):
+        of = creer_ordres_fabrication(self.commande, regrouper=True)[0]
+        livraison = Livraison.objects.create(numero="BL-BTN", commande=self.commande, date_livraison=datetime.date(2026, 10, 5))
+        for url, libelle in (
+            (f"/admin/chiffrage/commande/{self.commande.pk}/change/", "Enregistrer et ouvrir l&#x27;AR (PDF)"),
+            (f"/admin/chiffrage/livraison/{livraison.pk}/change/", "Enregistrer et ouvrir le BL (PDF)"),
+            (f"/admin/chiffrage/ordrefabrication/{of.pk}/change/", "Enregistrer et ouvrir la fiche (PDF)"),
+        ):
+            self.assertContains(self.client.get(url), libelle)
+
+    def test_of_enregistre_puis_pdf(self):
+        of = next(o for o in creer_ordres_fabrication(self.commande, regrouper=True) if o.article == self.f)
+        reponse = self.client.post(
+            f"/admin/chiffrage/ordrefabrication/{of.pk}/change/",
+            {"numero": of.pk, "commande": "CDE-OF", "article": "PIECE-F", "quantite": "5", "date_lancement": "2026-10-03",
+             "date_livraison_prevue": "2026-12-10", "statut": "En cours",
+             "operations-TOTAL_FORMS": "0", "operations-INITIAL_FORMS": "0",
+             "composants-TOTAL_FORMS": "0", "composants-INITIAL_FORMS": "0", "_enregistrer_valider": "1"},
+        )
+        self.assertRedirects(reponse, f"/admin/chiffrage/ordrefabrication/{of.pk}/pdf/", fetch_redirect_response=False)
+        of.refresh_from_db()
+        self.assertEqual(of.statut, "En cours")
