@@ -475,6 +475,25 @@ class ParametresComptables(models.Model):
         help_text="Ex. 44566 — TVA déductible sur autres biens et services",
     )
 
+    compte_tva_autoliquidation_deductible = models.ForeignKey(
+        CompteComptable,
+        verbose_name="compte de TVA déductible sur autoliquidation",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="+",
+        help_text="Ex. 445663. Vide : ce compte est créé au premier achat en autoliquidation.",
+    )
+    compte_tva_autoliquidation_due = models.ForeignKey(
+        CompteComptable,
+        verbose_name="compte de TVA due sur autoliquidation",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="+",
+        help_text="Ex. 445200 (TVA due intracommunautaire). Vide : ce compte est créé au premier achat en autoliquidation.",
+    )
+
     class Meta:
         verbose_name = "Paramètres comptables"
         verbose_name_plural = "Paramètres comptables"

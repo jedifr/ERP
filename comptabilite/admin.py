@@ -158,11 +158,15 @@ class ParametresComptablesAdmin(ModelAdmin):
                     "compte_fournisseur_defaut",
                     "compte_achat_defaut",
                     "compte_tva_deductible_defaut",
+                    "compte_tva_autoliquidation_deductible",
+                    "compte_tva_autoliquidation_due",
                 ]
             },
         ),
     ]
     autocomplete_fields = [
+        "compte_tva_autoliquidation_deductible",
+        "compte_tva_autoliquidation_due",
         "journal_ventes",
         "compte_client_defaut",
         "compte_vente_defaut",

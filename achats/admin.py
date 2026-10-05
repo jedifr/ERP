@@ -235,8 +235,9 @@ class FactureFournisseurAdmin(ExportCsvMixin, CodificationInitialeMixin, ModelAd
         "montant_ht",
         "montant_ttc",
         "statut_paiement",
+        "date_paiement",
     ]
-    list_filter = ["statut_paiement"]
+    list_filter = ["statut_paiement", "autoliquidation"]
     search_fields = ["numero", "reference_fournisseur", "commande_fournisseur__numero"]
     autocomplete_fields = ["commande_fournisseur"]
     actions = ["action_generer_ecriture"]

@@ -415,6 +415,12 @@ class FactureFournisseur(models.Model):
     montant_ht = ChampDecimal("montant HT", null=True, blank=True, **MONTANT)
     montant_ttc = ChampDecimal("montant TTC", null=True, blank=True, **MONTANT)
     statut_paiement = models.CharField("statut de paiement", max_length=50, blank=True)
+    autoliquidation = models.BooleanField(
+        "autoliquidation de la TVA", null=True, blank=True,
+        help_text="Facture d'un fournisseur étranger sans TVA : l'ERP comptabilise la TVA à la fois déductible et due. Vide : automatique "
+                  "selon le régime fiscal du fournisseur (intracommunautaire ou hors UE : oui). Choisir « Non » pour une importation de "
+                  "marchandises dont la TVA est payée à la douane.",
+    )
     date_paiement = models.DateField(
         "date de règlement", null=True, blank=True,
         help_text="Date à laquelle la facture a été réglée au fournisseur : elle alimente le journal de banque de l'export comptable.",
@@ -427,3 +433,12 @@ class FactureFournisseur(models.Model):
 
     def __str__(self):
         return self.numero
+
+    @property
+    def est_en_autoliquidation(self):
+        """Choix explicite de la facture, à défaut selon le régime fiscal du fournisseur (UE ou hors UE : autoliquidation)."""
+        if self.autoliquidation is not None:
+            return self.autoliquidation
+        from commercial.models import Tiers
+
+        return self.commande_fournisseur.fournisseur.regime_fiscal in (Tiers.RegimeFiscal.INTRA_UE, Tiers.RegimeFiscal.HORS_UE)

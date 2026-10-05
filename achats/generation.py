@@ -8,7 +8,8 @@ choix de conception.
 
 from django.db import transaction
 
-from comptabilite.models import EcritureComptable, LigneEcriture, ParametresComptables
+from commercial.models import TauxTVA
+from comptabilite.models import CompteComptable, EcritureComptable, LigneEcriture, ParametresComptables
 from comptes.montants import ZERO, arrondir, pourcent
 
 
@@ -89,6 +90,24 @@ def _repartition_lignes(facture_fournisseur, parametres):
     }
 
 
+def _compte_autoliquidation(parametres, champ, code, libelle):
+    compte = getattr(parametres, champ)
+    if compte is not None:
+        return compte
+    compte, _ = CompteComptable.objects.get_or_create(
+        code=code, defaults={"libelle": libelle, "systeme": CompteComptable.Systeme.DEVELOPPE}
+    )
+    return compte
+
+
+def _taux_autoliquidation(taux):
+    """Taux français appliqué à une ligne en autoliquidation : celui de la ligne s'il est renseigné, sinon le taux par défaut."""
+    if taux:
+        return taux
+    defaut = TauxTVA.objects.filter(est_defaut=True).first() or TauxTVA.objects.order_by("-taux").first()
+    return defaut.taux if defaut is not None else 20
+
+
 def generer_ecriture_achat(facture_fournisseur):
     """Génère l'écriture comptable d'une facture fournisseur : Fournisseurs
     au crédit (montant TTC — compte spécifique du fournisseur si
@@ -99,7 +118,11 @@ def generer_ecriture_achat(facture_fournisseur):
     le compte d'achat/code analytique d'un article donné, éventuellement
     résolu selon le régime fiscal du fournisseur via un poste de gestion ;
     le code analytique n'est jamais posé sur la ligne Fournisseurs/TVA,
-    seulement sur la ligne d'achat). Idempotent — ne génère jamais deux
+    seulement sur la ligne d'achat). Facture d'un fournisseur étranger sans TVA
+    (autoliquidation, voir FactureFournisseur.est_en_autoliquidation) : le
+    fournisseur n'est crédité que du HT ; la TVA calculée au taux français est
+    débitée (TVA déductible sur autoliquidation) et créditée (TVA due
+    intracommunautaire) du même montant. Idempotent — ne génère jamais deux
     écritures pour la même facture fournisseur, la renvoie simplement si
     elle existe déjà. Renvoie (ecriture, creee)."""
     ecriture_existante = EcritureComptable.objects.filter(facture_fournisseur=facture_fournisseur).first()
@@ -121,7 +144,18 @@ def generer_ecriture_achat(facture_fournisseur):
             )
 
     groupes = _repartition_lignes(facture_fournisseur, parametres)
+    autoliquidation = facture_fournisseur.est_en_autoliquidation
+    if autoliquidation:
+        for g in groupes.values():
+            g["ttc"] = g["ht"]  # le fournisseur ne facture pas de TVA
     total_ttc = sum((g["ttc"] for g in groupes.values()), ZERO)
+    if autoliquidation:
+        compte_deductible = _compte_autoliquidation(
+            parametres, "compte_tva_autoliquidation_deductible", "445663", "TVA déductible sur autoliquidation"
+        )
+        compte_due = _compte_autoliquidation(
+            parametres, "compte_tva_autoliquidation_due", "445200", "TVA due intracommunautaire (autoliquidation)"
+        )
 
     fournisseur = facture_fournisseur.commande_fournisseur.fournisseur
     comptes_tiers = getattr(fournisseur, "comptes_comptables", None)
@@ -160,6 +194,12 @@ def generer_ecriture_achat(facture_fournisseur):
                 libelle=libelle,
                 debit=montants["ht"],
             )
+            if autoliquidation:
+                tva = arrondir(montants["ht"] * _taux_autoliquidation(taux) / 100)
+                if tva:
+                    LigneEcriture.objects.create(ecriture=ecriture, compte=compte_deductible, libelle=libelle, debit=tva)
+                    LigneEcriture.objects.create(ecriture=ecriture, compte=compte_due, libelle=libelle, credit=tva)
+                continue
             tva = arrondir(montants["ttc"] - montants["ht"])
             if tva:
                 LigneEcriture.objects.create(

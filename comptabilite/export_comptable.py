@@ -110,6 +110,16 @@ def ecritures_banque(debut, fin, parametres):
     defauts = ParametresComptables.charger()
     resultat = []
 
+    def montant_du(facture, ecriture_attr, sens):
+        """Montant du règlement : celui du mouvement du tiers dans l'écriture (HT seul en autoliquidation), à défaut le TTC."""
+        ecriture = getattr(facture, ecriture_attr, None)
+        if ecriture is not None:
+            lignes_tiers = [l for l in ecriture.lignes.all() if l.compte.code.startswith(PREFIXES_TIERS)]
+            total = sum((Decimal(getattr(l, sens)) for l in lignes_tiers), Decimal("0"))
+            if total:
+                return total
+        return Decimal(facture.montant_ttc or 0)
+
     def ajouter(date, numero, tiers, reference, montant, client):
         valeurs = {"code_facture": numero, "nom_tiers": tiers.raison_sociale, "reference_fournisseur": reference}
         libelle = _assembler(elements, valeurs)
@@ -128,11 +138,13 @@ def ecritures_banque(debut, fin, parametres):
     for f in Facture.objects.filter(
         type_document=Facture.TypeDocument.FACTURE, statut_paiement=Facture.StatutPaiement.PAYE, date_paiement__range=(debut, fin)
     ).select_related("commande__client"):
-        if f.montant_ttc:
-            ajouter(f.date_paiement, f.numero, f.commande.client, "", Decimal(f.montant_ttc), True)
+        montant = montant_du(f, "ecriture_comptable", "debit")
+        if montant:
+            ajouter(f.date_paiement, f.numero, f.commande.client, "", montant, True)
     for f in FactureFournisseur.objects.filter(date_paiement__range=(debut, fin)).select_related("commande_fournisseur__fournisseur"):
-        if f.montant_ttc:
-            ajouter(f.date_paiement, f.numero, f.commande_fournisseur.fournisseur, f.reference_fournisseur, Decimal(f.montant_ttc), False)
+        montant = montant_du(f, "ecriture_comptable", "credit")
+        if montant:
+            ajouter(f.date_paiement, f.numero, f.commande_fournisseur.fournisseur, f.reference_fournisseur, montant, False)
     return [e for _, _, e in sorted(resultat, key=lambda x: (x[0], x[1]))]
 
 

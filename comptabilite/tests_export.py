@@ -186,3 +186,79 @@ class ExportComptableTests(TestCase):
         with tempfile.TemporaryDirectory() as dossier:
             call_command("export_comptable", "2026-01", dossier, stdout=io.StringIO())
             self.assertEqual(sorted(p.name for p in Path(dossier).iterdir()), ["achat_01-2026.txt", "banque_01-2026.txt", "vente_01-2026.txt"])
+
+
+class AutoliquidationTests(TestCase):
+    """Facture d'un fournisseur étranger sans TVA : TVA déductible et due du même montant, fournisseur crédité du HT seul."""
+
+    def setUp(self):
+        importer_pcg()
+        self.article = Article.objects.create(reference="ART-AUTOLIQ", nature=Article.Nature.MATIERE_PREMIERE)
+        self.taux0 = TauxTVA.objects.create(nom="Sans TVA autoliq", taux=0)
+        self.taux20 = TauxTVA.objects.create(nom="Normal autoliq", taux=20, est_defaut=True)
+
+    def facture(self, regime="intra_ue", taux=None, numero="FF26-0100", **extra):
+        fournisseur = Tiers.objects.create(
+            code=f"FOU-{numero}", raison_sociale="Editeur Irlandais", type_tiers=Tiers.TypeTiers.FOURNISSEUR, regime_fiscal=regime
+        )
+        TiersCompteComptable.objects.create(tiers=fournisseur, code_fournisseur="EDIRL")
+        cf = CommandeFournisseur.objects.create(numero=f"CF-{numero}", fournisseur=fournisseur, date_commande=datetime.date(2026, 1, 2))
+        LigneCommandeFournisseur.objects.create(
+            commande_fournisseur=cf, article=self.article, quantite_commandee=10, prix_unitaire_achat=100, taux_tva=taux or self.taux0
+        )
+        return FactureFournisseur.objects.create(
+            numero=numero, commande_fournisseur=cf, date_facture=datetime.date(2026, 1, 13), reference_fournisseur="INV-77",
+            montant_ht=Decimal("1000"), montant_ttc=Decimal("1000"), **extra,
+        )
+
+    def mouvements(self, ecriture):
+        return [(l.compte.code, l.debit, l.credit) for l in ecriture.lignes.all()]
+
+    def test_intra_ue_sans_tva_au_taux_par_defaut(self):
+        ecriture, _ = generer_ecriture_achat(self.facture())
+        self.assertTrue(ecriture.est_equilibree)
+        self.assertEqual(
+            sorted(self.mouvements(ecriture)),
+            sorted([("401EDIRL", 0, 1000), ("601", 1000, 0), ("445663", 200, 0), ("445200", 0, 200)]),
+        )
+
+    def test_taux_de_la_ligne_conserve(self):
+        taux55 = TauxTVA.objects.create(nom="Réduit autoliq", taux=Decimal("5.5"))
+        ecriture, _ = generer_ecriture_achat(self.facture(taux=taux55, numero="FF26-0101"))
+        self.assertIn(("445663", Decimal("55.00"), 0), self.mouvements(ecriture))
+        self.assertIn(("445200", 0, Decimal("55.00")), self.mouvements(ecriture))
+        self.assertTrue(ecriture.est_equilibree)
+
+    def test_hors_ue_aussi_et_choix_explicite(self):
+        e1, _ = generer_ecriture_achat(self.facture(regime="hors_ue", numero="FF26-0102"))
+        self.assertTrue(any(c == "445200" for c, _, _ in self.mouvements(e1)))
+        e2, _ = generer_ecriture_achat(self.facture(regime="hors_ue", numero="FF26-0103", autoliquidation=False))
+        self.assertFalse(any(c == "445200" for c, _, _ in self.mouvements(e2)))  # importation : TVA payée à la douane
+        e3, _ = generer_ecriture_achat(self.facture(regime="france", numero="FF26-0104", autoliquidation=True))
+        self.assertTrue(any(c == "445200" for c, _, _ in self.mouvements(e3)))
+
+    def test_france_inchange(self):
+        e, _ = generer_ecriture_achat(self.facture(regime="france", taux=self.taux20, numero="FF26-0105"))
+        self.assertEqual(sorted(c for c, _, _ in self.mouvements(e)), ["401EDIRL", "44566", "601"])
+
+    def test_comptes_configures(self):
+        from .models import ParametresComptables
+
+        compte = CompteComptable.objects.create(code="4456AUT", libelle="Déductible autoliq perso")
+        parametres = ParametresComptables.charger()
+        parametres.compte_tva_autoliquidation_deductible = compte
+        parametres.save()
+        e, _ = generer_ecriture_achat(self.facture(numero="FF26-0106"))
+        self.assertIn("4456AUT", [c for c, _, _ in self.mouvements(e)])
+
+    def test_export_et_reglement_en_ht(self):
+        facture = self.facture(numero="FF26-0107", date_paiement=datetime.date(2026, 1, 28))
+        generer_ecriture_achat(facture)
+        debut, fin = export_comptable.bornes_du_mois(2026, 1)
+        resultat = export_comptable.exporter(debut, fin, EXPORT)
+        l = lignes(resultat["achats"])
+        self.assertEqual([x[8:16].strip() for x in l[4:8]], ["601000", "445663", "445200", "401EDIRL"])
+        self.assertEqual((l[5][46:59].strip(), l[6][59:72].strip(), l[7][59:72].strip()), ("200.00", "200.00", "1000.00"))
+        self.assertEqual(l[8][6:19].strip(), "1000.00")  # l'échéance porte le HT
+        b = lignes(resultat["banque"])
+        self.assertEqual((b[4][59:72].strip(), b[5][46:59].strip()), ("1000.00", "1000.00"))  # règlement du HT seul

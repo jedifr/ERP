@@ -2931,3 +2931,13 @@ L'export mensuel que vous faisiez avec l'ancien logiciel est reproduit : **Écri
 - **Réglages** (menu *Export comptable*) : codes de journaux du fichier (VT, AC, B2), compte de banque (512100), composition des libellés (code facture + nom du tiers pour les ventes et les achats, nom du tiers pour la banque, 30 caractères au plus) et référence de pièce des achats (code facture ou référence fournisseur ; la référence du fournisseur est toujours reprise dans sa propre colonne). Les valeurs initiales sont celles de vos paramètres actuels.
 - **Pièce** : les 8 derniers caractères du numéro de facture (comme `C25-3948` pour `FC25-3948`).
 - Les champs « dossier » et « exercice » restent vides comme dans vos fichiers. Deux dates identiques figurent dans chaque écriture : la date de l'export.
+
+## Autoliquidation de la TVA (achats à l'étranger)
+
+La génération de l'écriture d'une **facture fournisseur** gère l'autoliquidation : quand le fournisseur est étranger et ne facture pas de TVA, l'écriture porte la TVA à la fois **déductible** (débit 445663) et **due** (crédit 445200) du même montant, calculée au taux français ; le fournisseur n'est crédité que du **HT** (comme dans vos exports : achat 436,50 / TVA 87,30 en débit et crédit / fournisseur 436,50).
+
+- **Quand ?** Case « Autoliquidation de la TVA » de la facture fournisseur : vide = automatique selon le régime fiscal du fournisseur (**intracommunautaire ou hors UE : oui**, France : non) ; « Non » pour une importation de marchandises dont la TVA est payée à la douane ; « Oui » pour forcer.
+- **Taux** : celui de la ligne de commande s'il est renseigné (5,5 % par exemple), sinon le taux de TVA par défaut (20 %).
+- **Comptes** : 445663 et 445200, créés au premier usage ; modifiables dans *Paramètres comptables* (section Achats).
+- **Export comptable** : les trois mouvements sont rangés charges, TVA, tiers ; l'échéance et le règlement bancaire portent le **HT** seul, puisque le fournisseur n'a pas facturé de TVA. La liste des factures fournisseur affiche la date de règlement et se filtre sur l'autoliquidation.
+- Si une facture fournisseur a déjà son écriture, elle n'est pas régénérée : pour appliquer l'autoliquidation à une facture déjà comptabilisée, supprimez l'écriture puis régénérez-la.
