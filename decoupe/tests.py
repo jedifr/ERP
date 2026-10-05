@@ -1520,3 +1520,176 @@ class ImportMaterialsLuaEtCalibrageTests(TestCase):
         self.assertContains(invalide, "materials.lua")
         vide = self.client.post(url, {"confirmer": "1"}, follow=True)
         self.assertContains(vide, "plus en mémoire")
+
+
+class ImbricationMatiereTests(TestCase):
+    """Imbrication plus dense, coût matière au prorata de la surface consommée, simulation de formats, chiffrage."""
+
+    def setUp(self):
+        from decimal import Decimal
+
+        from .models import FormatTole
+
+        self.user = get_user_model().objects.create_superuser("imb-admin", "i@example.com", "pass-mot-de-passe-17")
+        self.client.force_login(self.user)
+        self.matiere = Matiere.objects.create(nom="Acier IMB", densite=7.8)
+        self.tole = Article.objects.create(
+            reference="TOLE-IMB", nature=Article.Nature.MATIERE_PREMIERE, unite_cout=Article.UniteCout.SURFACE, cout_unitaire=Decimal("20"),
+            epaisseur=3, matiere=self.matiere,
+        )
+        self.article = Article.objects.create(reference="PLAQUE-IMB", nature=Article.Nature.FABRIQUE)
+        self.format, _ = FormatTole.objects.get_or_create(largeur_mm=1250, longueur_mm=2500)
+        self.piece = PieceDecoupe.objects.create(
+            nom="Plaque 200x100", fichier_source="decoupe/sources/p.dxf", statut=PieceDecoupe.Statut.OK, matiere=self.matiere, epaisseur=3,
+            article=self.article, largeur_mm=200, hauteur_mm=100, surface_mm2=20000, pas_rotation_deg=90, tole=self.tole,
+            contour_json={"exterieur": [[0, 0], [200, 0], [200, 100], [0, 100]], "trous": []},
+        )
+
+    def test_formats_standard_crees_par_la_migration(self):
+        from .models import FormatTole
+
+        self.assertGreaterEqual(FormatTole.objects.count(), 6)
+        self.assertEqual(str(FormatTole.objects.get(largeur_mm=1500, longueur_mm=3000)), "3000 × 1500")
+
+    def test_imbrication_meilleure_jamais_pire_et_sans_chevauchement(self):
+        import random
+
+        from .services.imbrication import ItemANester, calculer_imbrication, imbriquer_meilleur
+
+        generateur = random.Random(7)
+        for _ in range(6):
+            items = [
+                ItemANester(piece_id=i, largeur_mm=generateur.randint(40, 600), hauteur_mm=generateur.randint(40, 400), surface_mm2=0,
+                            quantite=generateur.randint(1, 25), pas_rotation_deg=90)
+                for i in range(1, 5)
+            ]
+            for it in items:
+                it.surface_mm2 = it.largeur_mm * it.hauteur_mm
+            etageres = calculer_imbrication(items, 1500, 3000, 5, 4)
+            meilleur = imbriquer_meilleur(items, 1500, 3000, 5, 4)
+            self.assertLessEqual(meilleur.nb_feuilles, etageres.nb_feuilles)
+            self.assertEqual(sum(i.quantite for i in items), len(meilleur.placements))
+            for numero in range(1, meilleur.nb_feuilles + 1):
+                boites = [(p.x_mm, p.y_mm, p.x_mm + p.largeur_placee_mm, p.y_mm + p.hauteur_placee_mm) for p in meilleur.placements if p.numero_feuille == numero]
+                for i, a in enumerate(boites):
+                    self.assertTrue(a[0] >= 5 - 1e-6 and a[1] >= 5 - 1e-6 and a[2] <= 1495 + 1e-6 and a[3] <= 2995 + 1e-6, "hors de la zone utile")
+                    for b in boites[i + 1:]:
+                        self.assertFalse(a[0] < b[2] - 1e-6 and b[0] < a[2] - 1e-6 and a[1] < b[3] - 1e-6 and b[1] < a[3] - 1e-6, "chevauchement")
+
+    def test_cout_au_prorata_de_la_surface_consommee(self):
+        from decimal import Decimal
+
+        from .services.matiere import cout_matiere_imbrication
+
+        un = cout_matiere_imbrication(self.piece, 1, format_tole=self.format, taux_chute_recuperable=0)
+        # une pièce seule : bande entamée de la feuille (200 mm de large + marges de bord), pas la feuille entière
+        self.assertEqual(un.nb_feuilles, 1)
+        self.assertLess(un.surface_consommee_mm2, 0.2 * 1250 * 2500)
+        self.assertAlmostEqual(un.surface_facturee_mm2, un.surface_consommee_mm2, places=3)  # aucune chute récupérée : tout est facturé
+        self.assertEqual(un.cout_total, (Decimal(str(un.surface_facturee_mm2)) * Decimal("20") / 1_000_000).quantize(Decimal("0.01")))
+        # toutes les chutes récupérées : seule la surface des pièces est facturée
+        net = cout_matiere_imbrication(self.piece, 1, format_tole=self.format, taux_chute_recuperable=100)
+        self.assertAlmostEqual(net.surface_facturee_mm2, 20000, places=3)
+        self.assertLess(net.cout_total, un.cout_total)
+        # plus de pièces : le coût unitaire baisse (la bande entamée pèse moins), la surface facturée reste cohérente
+        cent = cout_matiere_imbrication(self.piece, 100, format_tole=self.format, taux_chute_recuperable=0)
+        self.assertLess(cent.cout_unitaire, un.cout_unitaire)
+        self.assertGreaterEqual(cent.surface_consommee_mm2, 100 * 20000)
+        self.assertLessEqual(cent.surface_consommee_mm2, cent.nb_feuilles * 1250 * 2500)
+        # une moitié de chutes récupérées : à mi-chemin
+        moitie = cout_matiere_imbrication(self.piece, 100, format_tole=self.format, taux_chute_recuperable=50)
+        self.assertAlmostEqual(moitie.surface_facturee_mm2, (cent.surface_facturee_mm2 + 100 * 20000) / 2, places=1)
+
+    def test_prix_au_poids_et_a_la_feuille(self):
+        from decimal import Decimal
+
+        from .services.matiere import cout_matiere_imbrication, prix_au_mm2
+
+        self.tole.unite_cout, self.tole.cout_unitaire = Article.UniteCout.POIDS, Decimal("2")  # 2 €/kg, 3 mm, 7,8 kg/dm³
+        self.assertAlmostEqual(float(prix_au_mm2(self.tole, 1250, 2500)), 2 * 3 * 7.8 / 1_000_000, places=12)
+        self.tole.unite_cout, self.tole.cout_unitaire = Article.UniteCout.PIECE, Decimal("300")  # 300 € la feuille
+        self.assertAlmostEqual(float(prix_au_mm2(self.tole, 1250, 2500)) * 1250 * 2500, 300, places=6)
+        self.tole.unite_cout = Article.UniteCout.LONGUEUR
+        with self.assertRaises(Exception):
+            cout_matiere_imbrication(self.piece, 1, tole=self.tole, format_tole=self.format)
+
+    def test_erreurs(self):
+        from .models import FormatTole
+        from .services.matiere import ErreurMatiere, cout_matiere_imbrication
+
+        with self.assertRaises(ErreurMatiere):
+            cout_matiere_imbrication(self.piece, 1)  # ni format ni tôle retenus (format)
+        with self.assertRaises(ErreurMatiere):
+            cout_matiere_imbrication(self.piece, 0, format_tole=self.format)
+        petit = FormatTole.objects.create(largeur_mm=150, longueur_mm=150)
+        with self.assertRaises(ErreurMatiere):
+            cout_matiere_imbrication(self.piece, 1, format_tole=petit)  # pièce plus grande que la tôle
+        self.tole.cout_unitaire = None
+        with self.assertRaises(ErreurMatiere):
+            cout_matiere_imbrication(self.piece, 1, tole=self.tole, format_tole=self.format)
+
+    def test_chiffrage_de_l_article_fabrique_par_imbrication(self):
+        from decimal import Decimal
+
+        from chiffrage.moteur import cout_matiere_article
+        from technique.models import Nomenclature
+
+        vis = Article.objects.create(reference="VIS-IMB", nature=Article.Nature.MATIERE_PREMIERE, unite_cout=Article.UniteCout.PIECE, cout_unitaire=Decimal("0.5"))
+        Nomenclature.objects.create(article_parent=self.article, article_composant=self.tole, quantite=1, longueur_mm=200, largeur_mm=100)
+        Nomenclature.objects.create(article_parent=self.article, article_composant=vis, quantite=4)
+        rectangle = cout_matiere_article(self.article, 100)  # nomenclature : (200×100 mm² × 20 €/m² + 4 × 0,5) × 100
+        self.assertEqual(rectangle, Decimal("240.0000"))
+        self.piece.format_tole, self.piece.imbrication_chiffrage = self.format, True
+        self.piece.save()
+        par_imbrication = cout_matiere_article(self.article, 100)
+        # la tôle est chiffrée par imbrication (chutes comprises), les vis restent à la nomenclature
+        self.assertGreater(par_imbrication, Decimal("200"))  # 100 × 4 × 0,5 de vis, plus la tôle
+        self.assertNotEqual(par_imbrication, rectangle)
+        self.assertGreater(cout_matiere_article(self.article, 1) / 1, cout_matiere_article(self.article, 100) / 100)  # économie d'échelle
+        self.piece.imbrication_chiffrage = False
+        self.piece.save()
+        self.assertEqual(cout_matiere_article(self.article, 100), rectangle)
+
+    def test_chiffrage_refuse_une_piece_trop_grande(self):
+        from chiffrage.moteur import ChiffrageError, cout_matiere_article
+        from technique.models import Nomenclature
+
+        from .models import FormatTole
+
+        Nomenclature.objects.create(article_parent=self.article, article_composant=self.tole, quantite=1, longueur_mm=200, largeur_mm=100)
+        self.piece.format_tole = FormatTole.objects.create(largeur_mm=150, longueur_mm=150)
+        self.piece.imbrication_chiffrage = True
+        self.piece.save()
+        with self.assertRaises(ChiffrageError):
+            cout_matiere_article(self.article, 5)
+
+    def test_admin_simulation_puis_retenir(self):
+        url = f"/admin/decoupe/piecedecoupe/{self.piece.pk}/simuler-imbrication/"
+        page = self.client.get(url)
+        self.assertContains(page, "Simuler")
+        self.assertContains(page, "3000 × 1500")
+        reponse = self.client.post(url, {"tole": self.tole.pk, "quantites": "1, 50", "taux": "20", "formats": [self.format.pk]})
+        for attendu in ("2500 × 1250", "/ pièce", "feuille", "Retenir", "<svg"):
+            self.assertContains(reponse, attendu)
+        reponse = self.client.post(url, {"retenir": self.format.pk, "tole": self.tole.pk, "quantites": "1, 50", "taux": "20", "formats": [self.format.pk]}, follow=True)
+        self.assertContains(reponse, "retenu")
+        self.piece.refresh_from_db()
+        self.assertEqual((self.piece.format_tole, self.piece.tole, float(self.piece.taux_chute_recuperable), self.piece.imbrication_chiffrage),
+                         (self.format, self.tole, 20.0, True))
+
+    def test_admin_simulation_saisies_invalides(self):
+        url = f"/admin/decoupe/piecedecoupe/{self.piece.pk}/simuler-imbrication/"
+        reponse = self.client.post(url, {"tole": self.tole.pk, "quantites": "abc", "taux": "20"}, follow=True)
+        self.assertContains(reponse, "quantités entières positives")
+        self.piece.tole = None
+        self.piece.save()
+        reponse = self.client.post(url, {"retenir": self.format.pk, "quantites": "1", "taux": "0"}, follow=True)
+        self.assertContains(reponse, "Choisissez la tôle")
+        self.piece.refresh_from_db()
+        self.assertFalse(self.piece.imbrication_chiffrage)
+
+    def test_fiche_piece_et_formats_dans_l_admin(self):
+        page = self.client.get(f"/admin/decoupe/piecedecoupe/{self.piece.pk}/change/")
+        for attendu in ("Simuler l&#x27;imbrication et le coût matière", "Chute récupérable", "Chiffrer la matière par imbrication"):
+            self.assertContains(page, attendu)
+        self.assertContains(self.client.get("/admin/decoupe/formattole/"), "3000 × 1500")

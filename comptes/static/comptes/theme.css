@@ -118,3 +118,6 @@ fieldset.fiche-recap .aligned.border { border-top: 3px solid var(--color-primary
 .colonnes-bloc legend { font-weight: 600; padding: 0 .5rem; color: var(--color-primary-700); }
 .dark .colonnes-bloc legend { color: var(--color-primary-400); }
 .colonnes-case { display: flex; align-items: center; gap: .6rem; padding: .3rem 0; cursor: pointer; }
+
+/* Simulation d'imbrication : le meilleur coût unitaire d'une colonne ressort. */
+.simulation-imbrication .cellule-meilleure { background: color-mix(in oklch, oklch(58% .15 155) 14%, transparent); border-radius: 8px; }

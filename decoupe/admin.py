@@ -13,6 +13,7 @@ from unfold.decorators import action as unfold_action
 
 from .admin_views import analyser_fichier_view, previsualiser_imbrication_view
 from .models import (
+    FormatTole,
     ImbricationJob,
     ImbricationLigne,
     ImbricationPlacement,
@@ -24,6 +25,7 @@ from .models import (
 )
 from .services.apercu_svg import generer_svg_feuille, generer_svg_piece
 from .services.gamme import alimenter_gamme
+from .services.matiere import ErreurMatiere, cout_matiere_imbrication
 from .services.lua_materiaux import NOMS_FRANCAIS, ErreurLua, importer_materiaux, lire_materials_lua, resume
 from .services.parametres import ErreurParametre, calculer_vitesses, dupliquer_vers_epaisseurs
 from .services.temps import ErreurTemps, estimer_temps_decoupe
@@ -155,7 +157,91 @@ class PieceDecoupeAdmin(PastillesMixin, ModelAdmin):
         "date_import",
     ]
     actions = ["reimporter"]
-    actions_detail = ["action_alimenter_gamme"]
+    actions_detail = ["action_simuler_imbrication", "action_alimenter_gamme"]
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == "tole":  # une tôle est un article matière première
+            from technique.models import Article
+
+            kwargs["queryset"] = Article.objects.filter(nature=Article.Nature.MATIERE_PREMIERE)
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
+    @unfold_action(description="Simuler l'imbrication et le coût matière", url_path="simuler-imbrication", icon="grid_view")
+    def action_simuler_imbrication(self, request, object_id):
+        """Compare des formats de tôle (feuilles, utilisation, surface consommée, coût matière) pour plusieurs quantités ;
+        « Retenir » fixe la tôle et le format de la pièce et active le chiffrage de la matière par imbrication."""
+        import re
+
+        from technique.models import Article
+
+        piece = get_object_or_404(PieceDecoupe, pk=object_id)
+        if not self.has_view_permission(request, piece):
+            raise PermissionDenied
+        retour = reverse("admin:decoupe_piecedecoupe_change", args=[piece.pk])
+        toles = Article.objects.filter(nature=Article.Nature.MATIERE_PREMIERE).order_by("reference")
+        formats = list(FormatTole.objects.filter(actif=True))
+        donnees = request.POST if request.method == "POST" else request.GET
+        contexte = {**self.admin_site.each_context(request), "title": f"Simuler l'imbrication : {piece}", "piece": piece, "retour": retour,
+                    "toles": toles, "formats": formats}
+        tole = toles.filter(pk=donnees.get("tole") or (piece.tole_id or "")).first()
+        if piece.statut != piece.Statut.OK:
+            self.message_user(request, "La géométrie de la pièce n'est pas encore importée.", level=messages.ERROR)
+            return redirect(retour)
+        try:
+            quantites = [int(float(q)) for q in (donnees.get("quantites") or "1, 10, 50, 100").replace(";", ",").split(",") if q.strip()]
+            taux = donnees.get("taux") if donnees.get("taux") not in (None, "") else piece.taux_chute_recuperable
+            taux = max(0, min(100, float(str(taux).replace(",", "."))))
+            if not quantites or min(quantites) <= 0 or len(quantites) > 6:
+                raise ValueError
+        except ValueError:
+            self.message_user(request, "Saisissez 1 à 6 quantités entières positives, séparées par des virgules, et un taux entre 0 et 100.", level=messages.ERROR)
+            return redirect(request.path)
+        choisis = [f for f in formats if str(f.pk) in (donnees.getlist("formats") if request.method == "POST" or "formats" in request.GET else [str(x.pk) for x in formats])]
+        contexte.update({"quantites": quantites, "taux": taux, "tole": tole, "choisis": [f.pk for f in choisis],
+                         "quantites_texte": ", ".join(str(q) for q in quantites)})
+
+        if request.method == "POST" and "retenir" in request.POST:
+            if not self.has_change_permission(request, piece):
+                raise PermissionDenied
+            retenu = FormatTole.objects.filter(pk=request.POST["retenir"]).first()
+            if tole is None or retenu is None:
+                self.message_user(request, "Choisissez la tôle avant de retenir un format.", level=messages.ERROR)
+            else:
+                piece.tole, piece.format_tole, piece.taux_chute_recuperable, piece.imbrication_chiffrage = tole, retenu, taux, True
+                piece.save(update_fields=["tole", "format_tole", "taux_chute_recuperable", "imbrication_chiffrage"])
+                suite = "" if piece.article_id else " Liez la pièce à son article fabriqué pour que le devis en profite."
+                self.message_user(request, f"{tole} en {retenu} retenu : la matière de {piece.article or 'la pièce'} est chiffrée par imbrication.{suite}", level=messages.SUCCESS)
+                return redirect(retour)
+
+        if tole is not None and (request.method == "POST" or "tole" in request.GET):
+            lignes, apercus = [], []
+            for f in choisis:
+                cellules = []
+                for q in quantites:
+                    try:
+                        c = cout_matiere_imbrication(piece, q, tole=tole, format_tole=f, taux_chute_recuperable=taux, avec_placements=(q == quantites[0]))
+                    except ErreurMatiere as exc:
+                        cellules.append({"erreur": str(exc)})
+                        continue
+                    cellules.append({"c": c})
+                    if q == quantites[0]:
+                        svg = generer_svg_feuille(
+                            f.largeur_mm, f.longueur_mm,
+                            [(piece, p.x_mm, p.y_mm, p.rotation_deg, False) for p in c.placements if p.numero_feuille == 1],
+                        )
+                        svg = re.sub(r'width="[^"]*mm" height="[^"]*mm"', 'style="width:100%;height:auto"', svg)
+                        apercus.append({"format": f, "svg": mark_safe(svg), "quantite": q})
+                lignes.append({"format": f, "cellules": cellules})
+            # meilleur coût unitaire de chaque colonne
+            for i, _q in enumerate(quantites):
+                valeurs = [(l["cellules"][i]["c"].cout_unitaire, id(l)) for l in lignes if "c" in l["cellules"][i]]
+                if valeurs:
+                    mini = min(v for v, _ in valeurs)
+                    for l in lignes:
+                        if "c" in l["cellules"][i] and l["cellules"][i]["c"].cout_unitaire == mini:
+                            l["cellules"][i]["meilleur"] = True
+            contexte.update({"lignes": lignes, "apercus": apercus, "peut_retenir": self.has_change_permission(request, piece)})
+        return TemplateResponse(request, "admin/decoupe/simuler_imbrication.html", contexte)
 
     @admin.display(description="Temps de découpe estimé")
     def temps_decoupe_display(self, obj):
@@ -567,3 +653,12 @@ class ParametreCoupeAdmin(ModelAdmin):
             "coefficient_ajustement",
         ]}),
     ]
+
+
+@admin.register(FormatTole)
+class FormatToleAdmin(ModelAdmin):
+    """Formats de tôle proposés à la simulation d'imbrication (3000 × 1500, 2500 × 1250…)."""
+
+    list_display = ["libelle", "longueur_mm", "largeur_mm", "actif"]
+    list_filter = ["actif"]
+    search_fields = ["libelle"]

@@ -293,6 +293,7 @@ NAVIGATION = [
             _menu("Imbrications", "grid_view", "decoupe", "imbricationjob"),
             _menu("Profils d'import", "layers", "decoupe", "profilimportdecoupe"),
             _menu("Paramètres de coupe", "speed", "decoupe", "parametrecoupe"),
+            _menu("Formats de tôle", "crop_landscape", "decoupe", "formattole"),
         ],
     },
     {

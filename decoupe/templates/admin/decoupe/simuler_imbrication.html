@@ -1,0 +1,68 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<div class="max-w-6xl">
+  <p class="mb-4">
+    Compare des <strong>formats de tôle</strong> pour la pièce « {{ piece }} » ({{ piece.largeur_mm|floatformat:"-1" }} × {{ piece.hauteur_mm|floatformat:"-1" }} mm) :
+    nombre de feuilles, taux d'utilisation et <strong>coût matière</strong> pour plusieurs quantités. La matière est facturée
+    au prorata de la <strong>surface consommée</strong> (feuilles entières, plus la bande entamée de la dernière) ; la part de
+    chute récupérable n'est pas imputée à la pièce.
+  </p>
+  <form method="post" class="mb-6">
+    {% csrf_token %}
+    <div class="grid gap-4 mb-4" style="grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));">
+      <label><span class="font-semibold">Tôle (article matière première)</span><br>
+        <select name="tole" class="border border-base-300 rounded-default px-2 py-1 w-full">
+          <option value="">— choisir —</option>
+          {% for t in toles %}<option value="{{ t.pk }}" {% if tole and tole.pk == t.pk %}selected{% endif %}>{{ t }}</option>{% endfor %}
+        </select>
+      </label>
+      <label><span class="font-semibold">Quantités (1 à 6, séparées par des virgules)</span><br>
+        <input type="text" name="quantites" value="{{ quantites_texte }}" class="border border-base-300 rounded-default px-2 py-1 w-full">
+      </label>
+      <label><span class="font-semibold">Chute récupérable (%)</span><br>
+        <input type="text" name="taux" value="{{ taux }}" class="border border-base-300 rounded-default px-2 py-1 w-full">
+      </label>
+    </div>
+    <div class="mb-4"><span class="font-semibold">Formats comparés</span><br>
+      {% for f in formats %}
+        <label class="inline-flex items-center gap-2 mr-4"><input type="checkbox" name="formats" value="{{ f.pk }}" {% if f.pk in choisis %}checked{% endif %}> {{ f }}</label>
+      {% empty %}<em>Aucun format actif : ajoutez-en dans « Formats de tôle ».</em>{% endfor %}
+    </div>
+    <button type="submit" class="bg-primary-600 text-white font-semibold px-4 py-2 rounded-default">Simuler</button>
+    <a href="{{ retour }}" class="border border-base-300 px-4 py-2 rounded-default ml-2">Retour à la pièce</a>
+  </form>
+
+  {% if lignes %}
+  <form method="post">
+    {% csrf_token %}
+    <input type="hidden" name="tole" value="{{ tole.pk }}"><input type="hidden" name="quantites" value="{{ quantites_texte }}"><input type="hidden" name="taux" value="{{ taux }}">
+    {% for f in choisis %}<input type="hidden" name="formats" value="{{ f }}">{% endfor %}
+    <table class="w-full text-left mb-2 simulation-imbrication">
+      <thead><tr><th class="py-2">Format</th>{% for q in quantites %}<th>{{ q }} pièce{{ q|pluralize }}</th>{% endfor %}{% if peut_retenir %}<th></th>{% endif %}</tr></thead>
+      <tbody>
+      {% for l in lignes %}
+        <tr class="border-t border-base-200">
+          <td class="py-2 font-semibold">{{ l.format }}</td>
+          {% for cellule in l.cellules %}
+            <td class="py-2 {% if cellule.meilleur %}cellule-meilleure{% endif %}">
+              {% if cellule.erreur %}<span class="text-red-600">{{ cellule.erreur }}</span>
+              {% else %}
+                <strong>{{ cellule.c.cout_unitaire }} €</strong> / pièce<br>
+                <small>{{ cellule.c.cout_total }} € · {{ cellule.c.nb_feuilles }} feuille{{ cellule.c.nb_feuilles|pluralize }} · {{ cellule.c.taux_utilisation_pct|floatformat:"0" }} % utilisé</small>
+              {% endif %}
+            </td>
+          {% endfor %}
+          {% if peut_retenir %}<td><button type="submit" name="retenir" value="{{ l.format.pk }}" class="border border-primary-600 text-primary-700 font-semibold px-3 py-1 rounded-default">Retenir</button></td>{% endif %}
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <p class="text-sm mb-6">En vert : le coût unitaire le plus bas pour la quantité. « Retenir » enregistre la tôle, le format et le taux sur la pièce et active le chiffrage de la matière par imbrication.</p>
+  </form>
+  <h2 class="font-semibold mb-2">Feuille 1 pour {{ apercus.0.quantite }} pièce{{ apercus.0.quantite|pluralize }}</h2>
+  <div class="grid gap-4" style="grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr));">
+    {% for a in apercus %}<div class="border border-base-200 rounded-default p-2"><div class="font-semibold mb-1">{{ a.format }}</div>{{ a.svg }}</div>{% endfor %}
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

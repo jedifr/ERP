@@ -104,10 +104,22 @@ def cout_matiere_article(article, quantite):
     ou achetée telle quelle (service acheté, consommable, composant) — est
     costée directement depuis son cout_unitaire."""
     if article.nature == Article.Nature.FABRIQUE:
-        cout_par_unite = sum(
-            (cout_composant(n) for n in article.composants.select_related("article_composant")), ZERO
-        )
-        return arrondir_prix(cout_par_unite * D(quantite))
+        from decoupe.services.matiere import ErreurMatiere, cout_matiere_imbrication, piece_de_chiffrage
+
+        piece = piece_de_chiffrage(article)
+        composants = article.composants.select_related("article_composant")
+        if piece is not None:
+            # La tôle de la pièce est chiffrée par imbrication (surface consommée avec les chutes, selon la quantité) :
+            # sa ligne de nomenclature (rectangle) n'est pas comptée une seconde fois.
+            composants = composants.exclude(article_composant=piece.tole)
+        cout_par_unite = sum((cout_composant(n) for n in composants), ZERO)
+        total = cout_par_unite * D(quantite)
+        if piece is not None:
+            try:
+                total += cout_matiere_imbrication(piece, max(1, round(quantite))).cout_total
+            except ErreurMatiere as exc:
+                raise ChiffrageError(f"Article « {article} » : matière par imbrication impossible — {exc}") from exc
+        return arrondir_prix(total)
 
     if article.cout_unitaire is None:
         raise ChiffrageError(f"L'article « {article} » n'a pas de coût unitaire renseigné.")

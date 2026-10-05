@@ -268,3 +268,135 @@ def calculer_imbrication(
         taux_utilisation_pct=taux,
         pieces_non_placees=pieces_non_placees,
     )
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Placement plus dense : MaxRects (rectangles libres maximaux), pour le chiffrage de la matière.
+#
+# Même principe que l'étagère (pièces représentées par le rectangle englobant de leur orientation), mais chaque pièce
+# est posée dans le meilleur espace libre de la feuille entière (« best short side fit ») et non seulement dans la
+# ligne courante : les creux laissés par les pièces plus petites sont comblés. `imbriquer_meilleur` essaie plusieurs
+# variantes (étagères et MaxRects, plusieurs tris) et retient la plus économe — jamais pire que l'étagère seule.
+# ---------------------------------------------------------------------------------------------------------------------
+
+
+class _MaxRects:
+    def __init__(self, largeur, hauteur, score="bssf"):
+        self.libres = [(0.0, 0.0, largeur, hauteur)]
+        self.score = score
+
+    def placer(self, options, espacement):
+        """Pose la pièce dans le meilleur rectangle libre parmi ses orientations ; renvoie (x, y, largeur, hauteur, rotation) ou None."""
+        meilleur = None
+        for largeur, hauteur, rotation in options:
+            lw, lh = largeur + espacement, hauteur + espacement
+            for (x, y, w, h) in self.libres:
+                if lw <= w + 1e-6 and lh <= h + 1e-6:
+                    if self.score == "bl":  # « bas-gauche » : on tasse les pièces vers un bord (la feuille se vide d'un seul côté)
+                        score = (y + lh, x)
+                    else:  # « best short side fit » : espace libre le mieux ajusté
+                        score = (min(w - lw, h - lh), max(w - lw, h - lh))
+                    if meilleur is None or score < meilleur[0]:
+                        meilleur = (score, x, y, lw, lh, largeur, hauteur, rotation)
+        if meilleur is None:
+            return None
+        _, x, y, lw, lh, largeur, hauteur, rotation = meilleur
+        self._decouper(x, y, lw, lh)
+        return x, y, largeur, hauteur, rotation
+
+    def _decouper(self, px, py, pw, ph):
+        nouveaux = []
+        for (x, y, w, h) in self.libres:
+            if px >= x + w - 1e-9 or px + pw <= x + 1e-9 or py >= y + h - 1e-9 or py + ph <= y + 1e-9:
+                nouveaux.append((x, y, w, h))  # pas de chevauchement : inchangé
+                continue
+            if px > x + 1e-9:
+                nouveaux.append((x, y, px - x, h))
+            if px + pw < x + w - 1e-9:
+                nouveaux.append((px + pw, y, x + w - (px + pw), h))
+            if py > y + 1e-9:
+                nouveaux.append((x, y, w, py - y))
+            if py + ph < y + h - 1e-9:
+                nouveaux.append((x, py + ph, w, y + h - (py + ph)))
+        # on retire les rectangles entièrement contenus dans un autre
+        nouveaux.sort(key=lambda r: -r[2] * r[3])
+        gardes = []
+        for r in nouveaux:
+            if not any(
+                g[0] <= r[0] + 1e-9 and g[1] <= r[1] + 1e-9 and g[0] + g[2] >= r[0] + r[2] - 1e-9 and g[1] + g[3] >= r[1] + r[3] - 1e-9
+                for g in gardes
+            ):
+                gardes.append(r)
+        self.libres = gardes
+
+
+def _unites(items, largeur_utile, hauteur_utile):
+    unites, non_placees, surface = [], [], 0.0
+    for item in items:
+        if not _orientations(item, largeur_utile, hauteur_utile):
+            non_placees.append(item.piece_id)
+            continue
+        unites.extend([item] * item.quantite)
+        surface += item.surface_mm2 * item.quantite
+    return unites, non_placees, surface
+
+
+def _resultat(placements, nb_feuilles, surface_pieces, largeur_feuille, longueur_feuille, non_placees):
+    surface_feuilles = nb_feuilles * largeur_feuille * longueur_feuille
+    return ResultatImbrication(
+        placements=placements, nb_feuilles=nb_feuilles, surface_pieces_mm2=surface_pieces, surface_feuilles_mm2=surface_feuilles,
+        taux_utilisation_pct=(surface_pieces / surface_feuilles * 100) if surface_feuilles else 0.0, pieces_non_placees=non_placees,
+    )
+
+
+def _imbriquer_maxrects(items, largeur_feuille_mm, longueur_feuille_mm, marge_bord_mm, espacement_pieces_mm, tri, score="bssf"):
+    largeur_utile = largeur_feuille_mm - 2 * marge_bord_mm
+    hauteur_utile = longueur_feuille_mm - 2 * marge_bord_mm
+    unites, non_placees, surface = _unites(items, largeur_utile, hauteur_utile)
+    cle = (lambda it: -it.largeur_mm * it.hauteur_mm) if tri == "aire" else (lambda it: -max(it.largeur_mm, it.hauteur_mm))
+    unites.sort(key=cle)
+    options_par_piece = {}
+    feuilles, placements = [], []
+    for item in unites:
+        options = options_par_piece.get(item.piece_id)
+        if options is None:
+            options = options_par_piece[item.piece_id] = _orientations(item, largeur_utile, hauteur_utile)
+        resultat = None
+        for numero, feuille in enumerate(feuilles, start=1):
+            resultat = feuille.placer(options, espacement_pieces_mm)
+            if resultat:
+                break
+        if not resultat:
+            feuille = _MaxRects(largeur_utile + espacement_pieces_mm, hauteur_utile + espacement_pieces_mm, score)
+            feuilles.append(feuille)
+            numero = len(feuilles)
+            resultat = feuille.placer(options, espacement_pieces_mm)
+        x, y, largeur, hauteur, rotation = resultat
+        placements.append(Placement(
+            piece_id=item.piece_id, numero_feuille=numero, x_mm=marge_bord_mm + x, y_mm=marge_bord_mm + y,
+            largeur_placee_mm=largeur, hauteur_placee_mm=hauteur, rotation_deg=rotation,
+        ))
+    return _resultat(placements, len(feuilles), surface, largeur_feuille_mm, longueur_feuille_mm, non_placees)
+
+
+def etendue_derniere_feuille_mm(resultat, marge_bord_mm=0.0):
+    """Hauteur utilisée (bord compris) de la dernière feuille : le reste de la feuille est une chute réutilisable."""
+    if not resultat.nb_feuilles:
+        return 0.0
+    derniere = [p for p in resultat.placements if p.numero_feuille == resultat.nb_feuilles]
+    if not derniere:
+        return 0.0
+    # bande occupée (les pièces sont tassées contre un bord de la feuille) + les deux marges de bord
+    return max(p.y_mm + p.hauteur_placee_mm for p in derniere) - min(p.y_mm for p in derniere) + 2 * marge_bord_mm
+
+
+def imbriquer_meilleur(items, largeur_feuille_mm, longueur_feuille_mm, marge_bord_mm=0.0, espacement_pieces_mm=0.0):
+    """Meilleur placement parmi plusieurs variantes : le moins de feuilles, puis la plus petite étendue utilisée sur la
+    dernière feuille (ce qui reste d'une feuille entamée se récupère). Toujours au moins aussi bon que l'étagère."""
+    candidats = [
+        _imbriquer_maxrects(items, largeur_feuille_mm, longueur_feuille_mm, marge_bord_mm, espacement_pieces_mm, tri, score)
+        for tri in ("aire", "dimension")
+        for score in ("bssf", "bl")
+    ]
+    candidats.insert(0, calculer_imbrication(items, largeur_feuille_mm, longueur_feuille_mm, marge_bord_mm, espacement_pieces_mm))
+    return min(candidats, key=lambda r: (r.nb_feuilles, etendue_derniere_feuille_mm(r, marge_bord_mm)))

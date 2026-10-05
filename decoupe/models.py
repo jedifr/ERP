@@ -16,6 +16,34 @@ QUALITES_COUPE = [
 ]
 
 
+class FormatTole(models.Model):
+    """Format de tôle standard (largeur × longueur) proposé à la simulation d'imbrication et au chiffrage de la matière."""
+
+    libelle = models.CharField("libellé", max_length=60, blank=True, help_text="Ex. « 3000 × 1500 » (laissé vide : déduit des dimensions)")
+    largeur_mm = models.FloatField("largeur (mm)")
+    longueur_mm = models.FloatField("longueur (mm)")
+    actif = models.BooleanField("proposé dans les simulations", default=True)
+
+    class Meta:
+        verbose_name = "Format de tôle"
+        verbose_name_plural = "Formats de tôle"
+        ordering = ["-longueur_mm", "-largeur_mm"]
+        constraints = [models.UniqueConstraint(fields=["largeur_mm", "longueur_mm"], name="unique_format_tole")]
+
+    def save(self, *args, **kwargs):
+        if not self.libelle:
+            self.libelle = f"{self.longueur_mm:g} × {self.largeur_mm:g}"
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.libelle
+
+    def clean(self):
+        super().clean()
+        if self.largeur_mm is not None and self.longueur_mm is not None and (self.largeur_mm <= 0 or self.longueur_mm <= 0):
+            raise ValidationError("Les dimensions du format doivent être positives.")
+
+
 class ProfilImportDecoupe(models.Model):
     """Ensemble de règles réutilisables pour classer les calques d'un DXF/DWG au moment de
     l'import (découpe / gravure / pliage / ignoré) — évite de reclasser les calques à la main
@@ -110,6 +138,24 @@ class PieceDecoupe(models.Model):
     qualite_coupe = models.DecimalField(
         "qualité de coupe", max_digits=2, decimal_places=1, default=Decimal("3.0"), choices=QUALITES_COUPE,
         help_text="Niveau de qualité du jet d'eau (1,5 extra brut → 5 extra fin) : plus c'est fin, plus la coupe est lente.",
+    )
+    # Matière : chiffrage par imbrication (voir services/matiere.py)
+    tole = models.ForeignKey(
+        Article, verbose_name="tôle", on_delete=models.SET_NULL, null=True, blank=True, related_name="pieces_decoupees_dans",
+        help_text="Article matière première (tôle) dans lequel la pièce est découpée : son prix sert au coût matière.",
+    )
+    format_tole = models.ForeignKey(
+        "FormatTole", verbose_name="format de tôle retenu", on_delete=models.SET_NULL, null=True, blank=True, related_name="pieces",
+        help_text="Format retenu après simulation d'imbrication.",
+    )
+    marge_bord_mm = models.FloatField("marge de bord (mm)", default=5, help_text="Bande non utilisable sur le pourtour de la tôle")
+    taux_chute_recuperable = models.DecimalField(
+        "chute récupérable (%)", max_digits=5, decimal_places=2, default=0,
+        help_text="Part des chutes réutilisée ailleurs : elle n'est pas facturée à la pièce (0 = toutes les chutes sont facturées).",
+    )
+    imbrication_chiffrage = models.BooleanField(
+        "chiffrer la matière par imbrication", default=False,
+        help_text="La matière d'un article fabriqué lié à cette pièce est calculée par imbrication (surface consommée avec les chutes, selon la quantité) au lieu du rectangle de la nomenclature.",
     )
     pas_rotation_deg = models.PositiveSmallIntegerField(
         choices=PasRotation.choices,
