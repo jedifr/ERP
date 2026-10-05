@@ -1,0 +1,34 @@
+{% load i18n static unfold %}
+
+<div class="flex flex-row gap-4 items-center ml-auto">
+    {% if menu_nouveau %}
+        {# Menu « + Nouveau » : créer un document depuis n'importe quelle page (entrées filtrées par les droits, voir comptes/raccourcis.py). #}
+        <div class="relative" x-data="{ ouvert: false }" x-on:click.outside="ouvert = false" x-on:keydown.escape.window="ouvert = false">
+            <button type="button" class="menu-nouveau-bouton" x-on:click="ouvert = !ouvert" aria-haspopup="true" x-bind:aria-expanded="ouvert">
+                <span class="material-symbols-outlined">add</span>
+                Nouveau
+                <span class="material-symbols-outlined">expand_more</span>
+            </button>
+            <div class="menu-nouveau" x-show="ouvert" x-cloak x-transition.opacity>
+                {% for groupe in menu_nouveau %}
+                    <div class="menu-nouveau-groupe">{{ groupe.titre }}</div>
+                    {% for entree in groupe.entrees %}
+                        <a href="{{ entree.url }}" class="menu-nouveau-entree">
+                            <span class="material-symbols-outlined">{{ entree.icone }}</span>{{ entree.titre }}
+                        </a>
+                    {% endfor %}
+                {% endfor %}
+            </div>
+        </div>
+    {% endif %}
+
+    {% if environment %}
+        {% include "unfold/helpers/label.html" with text=environment.0 type=environment.1 %}
+    {% endif %}
+
+    {% action_list %}
+
+    {% if nav_global_side %}
+        {{ nav_global_side }}
+    {% endif %}
+</div>

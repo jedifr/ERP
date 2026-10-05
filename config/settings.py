@@ -412,8 +412,15 @@ UNFOLD = {
             "950": "oklch(27.9% .077 45.635)",
         },
     },
+    # Recherche globale (Ctrl+K / ⌘K) : documents et écrans, voir comptes/recherche.py.
+    "COMMAND": {
+        "search_models": False,
+        "search_callback": "comptes.recherche.recherche_globale",
+        "show_history": True,
+    },
     "SIDEBAR": {
         "show_search": True,
+        "command_search": True,
         "show_all_applications": False,
         "navigation": NAVIGATION,
     },

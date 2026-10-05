@@ -16,7 +16,7 @@ from .layout import global_callback
 
 class ToggleLargeurPleinePageTests(TestCase):
     def test_global_callback_active_la_pleine_largeur(self):
-        self.assertEqual(global_callback(request=None), {"is_fullwidth": "1"})
+        self.assertEqual(global_callback(request=None), {"is_fullwidth": "1", "menu_nouveau": []})
 
     def test_page_admin_sans_conteneur_largeur_plafonnee(self):
         User = get_user_model()

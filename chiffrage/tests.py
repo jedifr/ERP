@@ -5226,3 +5226,66 @@ class ThemePastillesTests(_FixtureOrdresCommande, TestCase):
         page = self.client.get("/admin/")
         for attendu in ("tuile-ventes", "tuile-atelier", "tuile-tresorerie", "tuile-icone"):
             self.assertContains(page, attendu)
+
+
+class RechercheGlobaleEtMenuNouveauTests(_FixtureOrdresCommande, TestCase):
+    """Ctrl+K : documents et écrans, selon les droits ; menu « + Nouveau » filtré par les droits."""
+
+    def setUp(self):
+        from django.core.cache import cache
+
+        super().setUp()
+        cache.clear()  # Unfold met les résultats en cache par utilisateur et par terme
+
+    def chercher(self, terme):
+        return self.client.get("/admin/search/", {"s": terme, "extended": "1"})
+
+    def test_trouve_documents_par_numero_et_par_client(self):
+        for terme in ("CDE-OF", "Fabrication"):
+            page = self.chercher(terme)
+            self.assertContains(page, "CDE-OF")
+            self.assertContains(page, "/admin/chiffrage/commande/CDE-OF/change/")
+            self.assertContains(page, "Client Fabrication")
+        self.assertContains(self.chercher("PIECE-F"), "/admin/technique/article/PIECE-F/change/")
+
+    def test_trouve_les_ecrans_sans_tenir_compte_des_accents(self):
+        page = self.chercher("retard")
+        self.assertContains(page, "Factures en retard")
+        self.assertContains(page, "retard=en_retard")
+        self.assertContains(self.chercher("echec"), "Ordres de fabrication non transmis")
+        self.assertContains(self.chercher("nouveau devis"), "/admin/chiffrage/devis/add/")
+
+    def test_terme_trop_court_ou_inconnu(self):
+        self.assertNotContains(self.chercher("C"), "/admin/chiffrage/commande/CDE-OF/")
+        self.assertNotContains(self.chercher("zzzintrouvable"), "/change/")
+
+    def test_la_recherche_respecte_les_droits(self):
+        from django.contrib.auth import get_user_model
+        from django.contrib.auth.models import Permission
+
+        lecteur = get_user_model().objects.create_user("lecteur-recherche", "lr@example.com", "pass-mot-de-passe-9", is_staff=True)
+        lecteur.user_permissions.add(Permission.objects.get(codename="view_commande"))
+        self.client.force_login(lecteur)
+        page = self.chercher("CDE-OF")
+        self.assertContains(page, "/admin/chiffrage/commande/CDE-OF/change/")
+        self.assertNotContains(page, "Nouveau devis")
+        self.assertNotContains(self.chercher("PIECE-F"), "/admin/technique/article/PIECE-F/change/")  # pas le droit de voir les articles
+        self.assertNotContains(self.chercher("retard"), "Factures en retard")
+
+    def test_menu_nouveau_selon_les_droits(self):
+        from django.contrib.auth import get_user_model
+        from django.contrib.auth.models import Permission
+
+        page = self.client.get("/admin/")
+        for attendu in ("menu-nouveau", "Nouveau devis", "Nouvelle livraison", "Préparer une facture", "Nouvel article"):
+            self.assertContains(page, attendu)
+        lecteur = get_user_model().objects.create_user("lecteur-menu", "lm@example.com", "pass-mot-de-passe-10", is_staff=True)
+        lecteur.user_permissions.add(Permission.objects.get(codename="add_devis"), Permission.objects.get(codename="view_devis"))
+        self.client.force_login(lecteur)
+        page = self.client.get("/admin/")
+        self.assertContains(page, "Nouveau devis")
+        self.assertNotContains(page, "Nouvel article")
+        self.assertNotContains(page, "Nouvelle livraison")
+        sans_droit = get_user_model().objects.create_user("sans-droit-menu", "sd@example.com", "pass-mot-de-passe-11", is_staff=True)
+        self.client.force_login(sans_droit)
+        self.assertNotContains(self.client.get("/admin/"), "menu-nouveau-bouton")
