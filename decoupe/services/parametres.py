@@ -30,17 +30,43 @@ def parametres_applicables(matiere, procede=ParametreCoupe.Procede.JET_EAU):
     return list(ParametreCoupe.objects.filter(q, procede=procede).select_related("matiere", "famille"))
 
 
-def meilleur_parametre(matiere, epaisseur, procede=ParametreCoupe.Procede.JET_EAU):
-    """Paramètre de l'épaisseur la plus proche (à égalité, celui de la nuance avant celui de sa famille), ou None."""
+def _rang_gaz(parametre, matiere):
+    """Ordre de préférence des gaz : celui de la famille d'abord, puis oxygène, azote, air."""
+    ordre = [g for g in (matiere.famille.gaz_laser_prefere if matiere.famille_id else "", "O2", "N2", "Air") if g]
+    return ordre.index(parametre.gaz) if parametre.gaz in ordre else len(ordre)
+
+
+def meilleur_parametre(matiere, epaisseur, procede=ParametreCoupe.Procede.JET_EAU, gaz=""):
+    """Jet d'eau : paramètre de l'épaisseur la plus proche. Laser : épaisseur EXACTE uniquement (une épaisseur absente de
+    la base n'est pas réalisable), au gaz demandé ou à défaut au gaz usuel de la famille. À égalité, la nuance passe avant
+    sa famille. Retourne None si rien ne convient."""
     candidats = parametres_applicables(matiere, procede)
+    if gaz:
+        candidats = [p for p in candidats if p.gaz == gaz]
+    if procede == ParametreCoupe.Procede.LASER:
+        candidats = [p for p in candidats if abs(p.epaisseur_mm - epaisseur) < 1e-6]
+        return min(candidats, key=lambda p: (p.matiere_id is None, _rang_gaz(p, matiere)), default=None)
     if not candidats:
         return None
     return min(candidats, key=lambda p: (abs(p.epaisseur_mm - epaisseur), p.matiere_id is None))
 
 
+def epaisseurs_possibles(matiere, procede, gaz=""):
+    """Épaisseurs (mm) disponibles pour la matière, au gaz demandé le cas échéant."""
+    return sorted({p.epaisseur_mm for p in parametres_applicables(matiere, procede) if not gaz or p.gaz == gaz})
+
+
+def reglage(procede):
+    from decoupe.models import ReglageProcede
+
+    return ReglageProcede.pour(procede)
+
+
 def calculer_vitesses(parametre):
     """Remplace les vitesses de `parametre` par celles calculées depuis l'usinabilité. Refuse d'écraser des vitesses
     relevées sur la machine."""
+    if parametre.procede == ParametreCoupe.Procede.LASER:
+        raise ErreurParametre(f"« {parametre} » : au laser, les vitesses viennent du tableau du constructeur (pas de calcul d'usinabilité).")
     if parametre.origine == "machine" and parametre.vitesses.exists():
         raise ErreurParametre(f"« {parametre} » : vitesses relevées sur la machine, elles ne sont pas remplacées par un calcul.")
     usinabilite = usinabilite_de(parametre)
@@ -59,6 +85,8 @@ def calculer_vitesses(parametre):
 def dupliquer_vers_epaisseurs(modele, epaisseurs):
     """Crée un paramètre par épaisseur (sauf celles qui existent déjà) à partir de `modele` : mêmes réglages, perçage,
     percement et chevauchement proportionnels à l'épaisseur, vitesses calculées. Retourne (créés, déjà existants)."""
+    if modele.procede == ParametreCoupe.Procede.LASER:
+        raise ErreurParametre("Au laser, une épaisseur absente du tableau du constructeur n'est pas réalisable : pas de duplication.")
     if not usinabilite_de(modele):
         raise ErreurParametre("Renseignez d'abord l'usinabilité de la famille de matière (ou du paramètre modèle).")
     valeurs = {

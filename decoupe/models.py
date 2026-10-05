@@ -16,6 +16,17 @@ QUALITES_COUPE = [
 ]
 
 
+class ProcedeCoupe(models.TextChoices):
+    JET_EAU = "jet_eau", "Jet d'eau (eau + abrasif)"
+    LASER = "laser", "Laser fibre"
+
+
+class GazCoupe(models.TextChoices):
+    OXYGENE = "O2", "Oxygène (O₂)"
+    AZOTE = "N2", "Azote (N₂)"
+    AIR = "Air", "Air comprimé"
+
+
 class FormatTole(models.Model):
     """Format de tôle standard (largeur × longueur) proposé à la simulation d'imbrication et au chiffrage de la matière."""
 
@@ -134,6 +145,14 @@ class PieceDecoupe(models.Model):
         default=dict,
         blank=True,
         help_text="Classement calque → rôle choisi à la main pour cette pièce (prioritaire sur le profil d'import)",
+    )
+    procede = models.CharField(
+        "procédé de coupe", max_length=10, choices=ProcedeCoupe.choices, default=ProcedeCoupe.JET_EAU,
+        help_text="Machine utilisée pour estimer le temps de découpe, l'écart entre pièces et la gamme. Au laser, une épaisseur absente de la base n'est pas réalisable.",
+    )
+    gaz_coupe = models.CharField(
+        "gaz de coupe (laser)", max_length=4, choices=GazCoupe.choices, blank=True,
+        help_text="Laser uniquement. Vide : le gaz usuel de la famille de matière (oxygène pour l'acier, azote pour l'inox et l'alu…).",
     )
     qualite_coupe = models.DecimalField(
         "qualité de coupe", max_digits=2, decimal_places=1, default=Decimal("3.0"), choices=QUALITES_COUPE,
@@ -439,8 +458,7 @@ class ParametreCoupe(models.Model):
     logiciel de la machine) : vitesses par niveau de qualité (VitesseCoupe), perçage, marquage, intervalle entre
     pièces. Servent à estimer le temps de découpe d'une pièce (voir services/temps.py)."""
 
-    class Procede(models.TextChoices):
-        JET_EAU = "jet_eau", "Jet d'eau (eau + abrasif)"
+    Procede = ProcedeCoupe
 
     class ModePercage(models.TextChoices):
         STATIONNAIRE_HP = "stationnaire_hp", "Stationnaire haute pression"
@@ -448,7 +466,8 @@ class ParametreCoupe(models.Model):
         CIRCULAIRE_HP = "circulaire_hp", "Circulaire haute pression"
         CIRCULAIRE_BP = "circulaire_bp", "Circulaire basse pression"
 
-    procede = models.CharField("procédé", max_length=10, choices=Procede.choices, default=Procede.JET_EAU)
+    procede = models.CharField("procédé", max_length=10, choices=ProcedeCoupe.choices, default=ProcedeCoupe.JET_EAU)
+    gaz = models.CharField("gaz de coupe", max_length=4, choices=GazCoupe.choices, blank=True, help_text="Laser : un paramètre par gaz.")
     famille = models.ForeignKey(
         FamilleMatiere, verbose_name="famille de matière", on_delete=models.PROTECT, null=True, blank=True,
         related_name="parametres_coupe",
@@ -472,6 +491,16 @@ class ParametreCoupe(models.Model):
         choices=[("machine", "Relevées sur la machine"), ("calcule", "Calculées depuis l'usinabilité (estimation)")],
         help_text="Les vitesses « calculées » sont une estimation à confirmer ; celles relevées sur la machine ne sont jamais écrasées par un calcul.",
     )
+
+    # Laser : vitesses du constructeur (pas de niveaux de qualité) et consommations
+    vitesse_coupe_max_m_min = models.FloatField("vitesse maximale (m/min)", null=True, blank=True, help_text="Laser : vitesse maximale du constructeur (qualité et tolérance de focale réduites).")
+    vitesse_coupe_production_m_min = models.FloatField(
+        "vitesse de production (m/min)", null=True, blank=True,
+        help_text="Laser : vitesse retenue pour le calcul du temps (avant le coefficient de pondération des réglages de coupe).",
+    )
+    consommation_gaz_m3_h = models.FloatField("consommation de gaz (m³/h)", null=True, blank=True)
+    puissance_kw = models.FloatField("puissance absorbée (kW)", null=True, blank=True)
+    remarque = models.CharField("remarque", max_length=250, blank=True)
 
     # Perçage et marquage
     mode_percage = models.CharField("mode de perçage", max_length=16, choices=ModePercage.choices, default=ModePercage.STATIONNAIRE_HP)
@@ -514,17 +543,17 @@ class ParametreCoupe(models.Model):
     class Meta:
         verbose_name = "Paramètre de coupe"
         verbose_name_plural = "Paramètres de coupe"
-        ordering = ["procede", "famille", "matiere", "epaisseur_mm"]
+        ordering = ["procede", "famille", "matiere", "gaz", "epaisseur_mm"]
         constraints = [
             models.CheckConstraint(
                 condition=models.Q(famille__isnull=False, matiere__isnull=True) | models.Q(famille__isnull=True, matiere__isnull=False),
                 name="parametre_coupe_famille_xor_matiere",
             ),
             models.UniqueConstraint(
-                fields=["procede", "famille", "epaisseur_mm"], condition=models.Q(famille__isnull=False), name="unique_parametre_coupe_famille"
+                fields=["procede", "famille", "gaz", "epaisseur_mm"], condition=models.Q(famille__isnull=False), name="unique_parametre_coupe_famille"
             ),
             models.UniqueConstraint(
-                fields=["procede", "matiere", "epaisseur_mm"], condition=models.Q(matiere__isnull=False), name="unique_parametre_coupe_matiere"
+                fields=["procede", "matiere", "gaz", "epaisseur_mm"], condition=models.Q(matiere__isnull=False), name="unique_parametre_coupe_matiere"
             ),
         ]
 
@@ -534,12 +563,18 @@ class ParametreCoupe(models.Model):
         return self.matiere if self.matiere_id else self.famille
 
     def __str__(self):
-        return f"{self.cible} {self.epaisseur_mm:g} mm ({self.get_procede_display()})"
+        gaz = f" {self.gaz}" if self.gaz else ""
+        return f"{self.cible}{gaz} {self.epaisseur_mm:g} mm ({self.get_procede_display()})"
 
     def clean(self):
         super().clean()
         if bool(self.famille_id) == bool(self.matiere_id):
             raise ValidationError("Indiquez soit une famille de matière (cas général), soit une nuance précise, pas les deux.")
+        if self.procede == ProcedeCoupe.LASER:
+            if not self.gaz:
+                raise ValidationError({"gaz": "Au laser, indiquez le gaz de coupe."})
+            if not self.vitesse_coupe_production_m_min or self.vitesse_coupe_production_m_min <= 0:
+                raise ValidationError({"vitesse_coupe_production_m_min": "Au laser, renseignez la vitesse de production."})
 
     @property
     def rayon_pleine_vitesse_mm(self):
@@ -574,3 +609,31 @@ class VitesseCoupe(models.Model):
         if self.vitesse_haute_mm_min is not None and self.vitesse_basse_mm_min is not None:
             if self.vitesse_basse_mm_min <= 0 or self.vitesse_haute_mm_min < self.vitesse_basse_mm_min:
                 raise ValidationError("La vitesse basse doit être positive et inférieure ou égale à la vitesse élevée.")
+
+
+class ReglageProcede(models.Model):
+    """Réglages propres à un procédé de coupe : pondération des vitesses (laser) et écart minimal entre pièces à l'imbrication."""
+
+    procede = models.CharField("procédé", max_length=10, choices=ProcedeCoupe.choices, unique=True)
+    coefficient_vitesse = models.FloatField(
+        "coefficient de pondération des vitesses", default=1,
+        help_text="Laser : multiplie les vitesses de coupe du constructeur (0,85 = 15 % plus lent) pour tenir compte des vitesses surestimées constatées. Sans effet sur le jet d'eau, dont le calcul est déjà calé sur des temps réels.",
+    )
+    espacement_minimum_mm = models.FloatField(
+        "écart minimal entre pièces (mm)", default=4,
+        help_text="Plancher de l'écart entre deux pièces à l'imbrication, quelles que soient la matière et l'épaisseur (jet d'eau : 6 ; laser : 10). Au laser, la base donne un écart plus grand quand l'épaisseur augmente : le plus grand des deux est retenu.",
+    )
+
+    class Meta:
+        verbose_name = "Réglage de coupe"
+        verbose_name_plural = "Réglages de coupe"
+        ordering = ["procede"]
+
+    def __str__(self):
+        return self.get_procede_display()
+
+    @classmethod
+    def pour(cls, procede):
+        """Réglage du procédé (créé avec les valeurs usuelles s'il n'existe pas encore)."""
+        defauts = {"jet_eau": {"espacement_minimum_mm": 6}, "laser": {"coefficient_vitesse": 0.85, "espacement_minimum_mm": 10}}
+        return cls.objects.get_or_create(procede=procede, defaults=defauts.get(procede, {}))[0]

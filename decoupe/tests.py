@@ -18,6 +18,7 @@ from .models import (
     ImbricationPlacement,
     ParametreCoupe,
     PieceDecoupe,
+    ReglageProcede,
     ProfilImportDecoupe,
     RegleProfilImportDecoupe,
 )
@@ -1708,8 +1709,8 @@ class FamillesMatiereTests(TestCase):
     def test_familles_standard_et_base_de_coupe_fournies(self):
         self.assertEqual(FamilleMatiere.objects.get(nom="Acier").usinabilite, 87.6)
         self.assertEqual(FamilleMatiere.objects.get(nom="Inox").nom_igems, "Stainless Steel")
-        self.assertEqual(ParametreCoupe.objects.filter(matiere__isnull=True).count(), 153)
-        acier = ParametreCoupe.objects.get(famille__nom="Acier", epaisseur_mm=10)
+        self.assertEqual(ParametreCoupe.objects.filter(matiere__isnull=True, procede="jet_eau").count(), 153)
+        acier = ParametreCoupe.objects.get(famille__nom="Acier", procede="jet_eau", epaisseur_mm=10)
         self.assertEqual(acier.vitesses.count(), 5)
         self.assertGreater(acier.percage_stationnaire_hp_s, 0)  # temps de perçage de materials.lua
         self.assertIsNone(acier.poste)
@@ -1808,3 +1809,134 @@ class FamillesMatiereTests(TestCase):
         self.assertContains(page, "Jet famille")
         self.client.post("/admin/decoupe/parametrecoupe/", {"action": "action_affecter_poste", "_selected_action": ids, "apply": "1", "poste": poste.pk})
         self.assertEqual(ParametreCoupe.objects.filter(poste=poste).count(), len(ids))
+
+
+class LaserTests(TestCase):
+    """Découpe laser fibre : base du constructeur (vitesses de production, perçage), pondération, épaisseurs exactes seulement."""
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_superuser("laser-admin", "l2@example.com", "pass-mot-de-passe-18")
+        self.client.force_login(self.user)
+
+    def piece(self, nom_matiere="S235", epaisseur=10, **extra):
+        matiere = Matiere.objects.get_or_create(nom=nom_matiere, defaults={"densite": 7.85})[0]
+        return PieceDecoupe.objects.create(
+            nom="Carré", fichier_source="decoupe/sources/c.dxf", format_source="dxf", statut=PieceDecoupe.Statut.OK,
+            matiere=matiere, epaisseur=epaisseur, procede="laser",
+            contour_json={"exterieur": [[0, 0], [100, 0], [100, 100], [0, 100]], "trous": []}, **extra,
+        )
+
+    def test_base_du_constructeur_chargee(self):
+        from .models import ReglageProcede
+
+        self.assertEqual(ParametreCoupe.objects.filter(procede="laser").count(), 132)
+        p = ParametreCoupe.objects.get(procede="laser", famille__nom="Acier", gaz="O2", epaisseur_mm=10)
+        self.assertEqual((p.vitesse_coupe_production_m_min, p.vitesse_coupe_max_m_min, p.percage_stationnaire_hp_s), (2.1, 2.31, 0.9))
+        self.assertEqual(p.intervalle_pieces_mm, 10)
+        self.assertEqual(ParametreCoupe.objects.get(procede="laser", famille__nom="Acier", gaz="O2", epaisseur_mm=25).intervalle_pieces_mm, 25)
+        fine = ParametreCoupe.objects.get(procede="laser", famille__nom="Acier", gaz="O2", epaisseur_mm=0.5)
+        self.assertEqual(fine.origine, "calcule")
+        self.assertGreater(fine.vitesse_coupe_production_m_min, 9.7)
+        self.assertLessEqual(fine.vitesse_coupe_production_m_min, 9.7 * 1.15 + 1e-6)  # plafonnée
+        self.assertTrue(ParametreCoupe.objects.filter(procede="laser", famille__nom="Acier galvanisé").exists())
+        self.assertEqual(ReglageProcede.pour("laser").coefficient_vitesse, 0.85)
+        self.assertEqual(ReglageProcede.pour("jet_eau").espacement_minimum_mm, 6)
+
+    def test_temps_laser_avec_ponderation(self):
+        from .models import ReglageProcede
+        from .services.temps import estimer_temps_decoupe
+
+        piece = self.piece()  # carré de 100 mm = 400 mm de coupe, acier 10 mm, oxygène par défaut
+        e = estimer_temps_decoupe(piece)
+        self.assertEqual(e.parametre.gaz, "O2")
+        vitesse = 2.1 * 1000 / 60 * 0.85
+        self.assertAlmostEqual(e.coupe_s, 400 / vitesse, places=6)
+        self.assertAlmostEqual(e.percage_s, 0.9, places=6)
+        self.assertAlmostEqual(e.total_s, 400 / vitesse + 0.9 + 1.0, places=6)
+        self.assertTrue(any("pondération 0.85" in a for a in e.avertissements))
+        ReglageProcede.objects.filter(procede="laser").update(coefficient_vitesse=1)
+        self.assertAlmostEqual(estimer_temps_decoupe(piece).coupe_s, 400 / (2.1 * 1000 / 60), places=6)
+
+    def test_une_epaisseur_hors_base_n_est_pas_realisable(self):
+        from .services.temps import ErreurTemps, estimer_temps_decoupe
+
+        with self.assertRaisesMessage(ErreurTemps, "Non réalisable au laser"):
+            estimer_temps_decoupe(self.piece(epaisseur=7))
+        with self.assertRaisesMessage(ErreurTemps, "épaisseurs possibles"):
+            estimer_temps_decoupe(self.piece(epaisseur=40))
+        self.assertGreater(estimer_temps_decoupe(self.piece(epaisseur=0.5)).total_s, 0)  # 0,5 mm : extrapolée
+        # l'oxygène n'existe pas en acier au-delà de 12 mm côté azote : gaz imposé hors base
+        with self.assertRaisesMessage(ErreurTemps, "gaz N2"):
+            estimer_temps_decoupe(self.piece(epaisseur=10, gaz_coupe="N2"))
+        self.assertEqual(estimer_temps_decoupe(self.piece(epaisseur=4, gaz_coupe="N2")).parametre.gaz, "N2")
+
+    def test_gaz_usuel_par_famille(self):
+        from .services.temps import estimer_temps_decoupe
+
+        self.assertEqual(estimer_temps_decoupe(self.piece("Inox 304L", 5)).parametre.gaz, "N2")
+        self.assertEqual(estimer_temps_decoupe(self.piece("6082", 3)).parametre.gaz, "N2")
+        self.assertEqual(estimer_temps_decoupe(self.piece("S355", 4)).parametre.gaz, "O2")
+        with self.assertRaises(Exception):
+            estimer_temps_decoupe(self.piece("Hardox 450", 10))  # pas de laser pour cette famille
+
+    def test_espacement_entre_pieces(self):
+        from .services.matiere import espacement_pieces_mm
+
+        self.assertEqual(espacement_pieces_mm(self.piece(epaisseur=3)), 10)  # minimum laser
+        self.assertEqual(espacement_pieces_mm(self.piece(epaisseur=20)), 20)  # croît avec l'épaisseur
+        self.assertEqual(espacement_pieces_mm(self.piece(epaisseur=25)), 25)
+        self.assertEqual(espacement_pieces_mm(self.piece(epaisseur=7)), 10)  # hors base : plancher du procédé
+        jet = self.piece(epaisseur=40)
+        jet.procede = "jet_eau"
+        self.assertEqual(espacement_pieces_mm(jet), 6)  # jet d'eau : constant
+        jet.epaisseur = 3
+        self.assertEqual(espacement_pieces_mm(jet), 6)
+
+    def test_pas_de_calcul_ni_duplication_au_laser(self):
+        from .services.parametres import ErreurParametre, calculer_vitesses, dupliquer_vers_epaisseurs
+
+        p = ParametreCoupe.objects.get(procede="laser", famille__nom="Acier", gaz="O2", epaisseur_mm=10)
+        with self.assertRaises(ErreurParametre):
+            calculer_vitesses(p)
+        with self.assertRaises(ErreurParametre):
+            dupliquer_vers_epaisseurs(p, [11])
+
+    def test_un_parametre_laser_exige_gaz_et_vitesse(self):
+        from django.core.exceptions import ValidationError
+
+        famille = FamilleMatiere.objects.get(nom="Acier")
+        with self.assertRaises(ValidationError):
+            ParametreCoupe(procede="laser", famille=famille, epaisseur_mm=9, vitesse_coupe_production_m_min=2).full_clean()
+        with self.assertRaises(ValidationError):
+            ParametreCoupe(procede="laser", famille=famille, gaz="O2", epaisseur_mm=9).full_clean()
+
+    def test_alimenter_la_gamme_change_de_machine(self):
+        import datetime
+
+        from technique.models import Article, Gamme, PosteTravail
+        from .services.gamme import alimenter_gamme
+
+        laser = PosteTravail.objects.create(nom="Laser fibre", mode_calcul=PosteTravail.ModeCalcul.HORAIRE)
+        jet = PosteTravail.objects.create(nom="Jet d'eau 2", mode_calcul=PosteTravail.ModeCalcul.HORAIRE)
+        ParametreCoupe.objects.filter(procede="laser").update(poste=laser)
+        ParametreCoupe.objects.filter(procede="jet_eau").update(poste=jet)
+        article = Article.objects.create(reference="LASER-1", nature=Article.Nature.FABRIQUE)
+        piece = self.piece(article=article)
+        etape, _ = alimenter_gamme(piece)
+        self.assertEqual(etape.poste, laser)
+        piece.procede = "jet_eau"
+        etape2, _ = alimenter_gamme(piece)
+        self.assertEqual((etape2.pk, etape2.poste), (etape.pk, jet))
+        self.assertEqual(Gamme.objects.filter(article=article, origine="decoupe").count(), 1)
+
+    def test_admin_laser(self):
+        page = self.client.get("/admin/decoupe/parametrecoupe/?procede__exact=laser&q=Acier")
+        self.assertContains(page, "m/min")
+        self.assertContains(self.client.get("/admin/decoupe/reglageprocede/"), "Laser fibre")
+        reponse = self.client.post(
+            "/admin/decoupe/reglageprocede/%d/change/" % ReglageProcede.objects.get(procede="laser").pk,
+            {"procede": "laser", "coefficient_vitesse": "0.8", "espacement_minimum_mm": "12"}, follow=True,
+        )
+        self.assertEqual(ReglageProcede.objects.get(procede="laser").coefficient_vitesse, 0.8)
+        fiche = ParametreCoupe.objects.filter(procede="laser").first()
+        self.assertContains(self.client.get(f"/admin/decoupe/parametrecoupe/{fiche.pk}/change/"), "Laser (tableau du constructeur)")

@@ -2908,3 +2908,15 @@ Une **famille de matière** est une matière « générique » (Acier, Inox, Alu
 - Le poste de travail n'est pas renseigné par la base fournie : liste des paramètres → sélectionner → « Affecter un poste de travail ».
 - L'import de `materials.lua` associe désormais chaque matière du fichier à une **famille** (créée si absente), plus à une matière.
 - Les paramètres déjà saisis pour une matière portant le nom de sa famille (« Acier »…) ont été repris au niveau de la famille ; les autres restent des exceptions de nuance.
+
+## Découpe laser fibre (tableau du constructeur)
+
+Le classeur du constructeur (BySmart Fiber 6 kW) est intégré comme **second procédé de découpe**, à côté du jet d'eau.
+
+- **Base chargée au démarrage (migration)** : 132 fiches par famille de matière, gaz et épaisseur — Acier (O₂, N₂, air), Acier galvanisé et électrozingué (N₂), Inox (N₂, air), Aluminium (N₂, O₂, air), Laiton (N₂), Cuivre (O₂) — avec la **vitesse de production** (et la vitesse maximale), la consommation de gaz, la puissance absorbée et le **temps de perçage** (colonne 6 kW ; les colonnes 3 et 4 kW sont ignorées). L'inox avec film n'est pas repris. Les valeurs « limite » du constructeur (bavure possible, acier SSAB) sont signalées dans la remarque et dans l'estimation.
+- **Épaisseurs : seules celles de la base sont réalisables.** Une pièce laser dont l'épaisseur est absente (ou dont le gaz n'existe pas à cette épaisseur) est refusée, avec la liste des épaisseurs possibles. Le **0,5 mm**, absent du tableau, est extrapolé depuis 0,8 et 1 mm (vitesse plafonnée à +15 % de celle de 0,8 mm) et marqué « estimation ».
+- **Coefficient de pondération** (menu *Réglages de coupe*) : multiplie les vitesses du constructeur, jugées surestimées. Valeur initiale 0,85 (15 % plus lent) à ajuster sur vos temps réels ; le coefficient d'ajustement de chaque paramètre reste disponible pour un cas particulier.
+- **Temps laser d'une pièce** = longueur coupée ÷ (vitesse de production × pondération) + un perçage par contour + déplacements entre contours (1 s par contour). Le marquage n'est pas compté au laser.
+- **Sur la pièce à découper** : choisir le *procédé de coupe* (jet d'eau ou laser) et, au laser, le *gaz* (vide = gaz usuel de la famille : oxygène pour l'acier et le cuivre, azote pour l'inox, l'alu et le laiton ; modifiable sur chaque famille). Le temps, l'écart entre pièces et la gamme suivent le procédé ; changer de procédé met à jour l'étape de gamme existante (poste compris).
+- **Écart entre pièces à l'imbrication** : jet d'eau 6 mm constant ; laser 10 mm au minimum, et **plus grand quand l'épaisseur augmente** (écart = épaisseur à partir de 10 mm). Plancher réglable dans *Réglages de coupe* ; l'intervalle de chaque paramètre l'emporte s'il est plus grand.
+- Le **poste de travail** (et son tarif horaire) se renseigne comme pour le jet d'eau : Paramètres de coupe → sélectionner → « Affecter un poste de travail ».

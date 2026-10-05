@@ -18,6 +18,7 @@ from .models import (
     ImbricationLigne,
     ImbricationPlacement,
     ParametreCoupe,
+    ReglageProcede,
     PieceDecoupe,
     ProfilImportDecoupe,
     RegleProfilImportDecoupe,
@@ -108,6 +109,7 @@ class PieceDecoupeAdmin(PastillesMixin, ModelAdmin):
         "nom",
         "matiere",
         "epaisseur",
+        "procede",
         "format_source",
         "statut",
         "largeur_mm",
@@ -116,7 +118,7 @@ class PieceDecoupeAdmin(PastillesMixin, ModelAdmin):
         "nb_contours_interieurs",
         "date_import",
     ]
-    list_filter = ["statut", "format_source", "pas_rotation_deg", "symetrie_autorisee", "a_gravure", "profil_import"]
+    list_filter = ["statut", "procede", "format_source", "pas_rotation_deg", "symetrie_autorisee", "a_gravure", "profil_import"]
     search_fields = ["nom"]
     autocomplete_fields = ["article", "matiere", "profil_import"]
     # Champs bruts totalement exclus du formulaire (jamais éditables ni affichés tels quels) :
@@ -551,7 +553,7 @@ class ParametreCoupeAdmin(ModelAdmin):
     précise, en exception) et épaisseur, avec une ligne de vitesses par niveau de qualité. Servent à estimer le temps
     de découpe des pièces."""
 
-    list_display = ["cible_display", "epaisseur_mm", "procede", "poste", "origine", "usinabilite", "intervalle_pieces_mm", "coefficient_ajustement"]
+    list_display = ["cible_display", "epaisseur_mm", "procede", "gaz", "vitesse_production_display", "poste", "origine", "intervalle_pieces_mm", "coefficient_ajustement"]
     actions = ["action_calculer_vitesses", "action_affecter_poste"]
     actions_list = ["action_importer_lua"]
     actions_detail = ["action_dupliquer_epaisseurs"]
@@ -597,7 +599,7 @@ class ParametreCoupeAdmin(ModelAdmin):
             )
             return redirect(liste)
         return TemplateResponse(request, "admin/decoupe/importer_lua.html", contexte)
-    list_filter = ["procede", "origine", "famille", "poste"]
+    list_filter = ["procede", "gaz", "origine", "famille", "poste"]
     search_fields = ["famille__nom", "matiere__nom"]
     autocomplete_fields = ["famille", "matiere", "poste"]
     inlines = [VitesseCoupeInline]
@@ -605,6 +607,12 @@ class ParametreCoupeAdmin(ModelAdmin):
 
     def get_queryset(self, request):
         return super().get_queryset(request).select_related("famille", "matiere", "poste")
+
+    @admin.display(description="Vitesse de production")
+    def vitesse_production_display(self, obj):
+        if obj.procede == "laser" and obj.vitesse_coupe_production_m_min:
+            return f"{obj.vitesse_coupe_production_m_min:g} m/min"
+        return "—"
 
     @admin.display(description="Famille / nuance", ordering="famille__nom")
     def cible_display(self, obj):
@@ -665,7 +673,10 @@ class ParametreCoupeAdmin(ModelAdmin):
              "suggestion": "2, 3, 4, 5, 6, 8, 12, 15, 20, 25, 30"},
         )
     fieldsets = [
-        (None, {"fields": ["procede", "famille", "matiere", "epaisseur_mm", "poste", "usinabilite", "origine"]}),
+        (None, {"fields": ["procede", "gaz", "famille", "matiere", "epaisseur_mm", "poste", "usinabilite", "origine"]}),
+        ("Laser (tableau du constructeur)", {"fields": [
+            "vitesse_coupe_production_m_min", "vitesse_coupe_max_m_min", "consommation_gaz_m3_h", "puissance_kw", "remarque",
+        ]}),
         ("Perçage", {"fields": [
             "mode_percage", "percage_stationnaire_hp_s", "percage_stationnaire_bp_s", "percage_circulaire_hp_tours",
             "percage_circulaire_bp_tours", "diametre_percage_mm", "temporisation_pointage_s",
@@ -678,6 +689,19 @@ class ParametreCoupeAdmin(ModelAdmin):
             "coefficient_ajustement",
         ]}),
     ]
+
+
+@admin.register(ReglageProcede)
+class ReglageProcedeAdmin(ModelAdmin):
+    """Pondération des vitesses du laser et écart minimal entre pièces de chaque procédé."""
+
+    list_display = ["procede", "coefficient_vitesse", "espacement_minimum_mm"]
+
+    def has_add_permission(self, request):
+        return False  # un réglage par procédé, créé avec les valeurs usuelles
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(FormatTole)

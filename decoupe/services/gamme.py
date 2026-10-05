@@ -30,10 +30,11 @@ def alimenter_gamme(piece, aujourdhui=None):
         actives = Gamme.objects.filter(article=piece.article, date_debut__lte=aujourdhui).filter(
             Q(date_fin__isnull=True) | Q(date_fin__gte=aujourdhui)
         )
-        existante = actives.filter(origine="decoupe", poste=poste).order_by("ordre").first()
+        existante = actives.filter(origine="decoupe").order_by("ordre").first()  # quel que soit le poste : on peut changer de machine
         if existante and existante.date_debut == aujourdhui:
             existante.temps_variable = minutes
-            existante.save(update_fields=["temps_variable"])
+            existante.poste = poste
+            existante.save(update_fields=["temps_variable", "poste"])
             return existante, estimation
         if existante:
             existante.date_fin = aujourdhui - datetime.timedelta(days=1)

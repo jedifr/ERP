@@ -20,7 +20,6 @@ from technique.models import Article
 
 from .imbrication import ItemANester, etendue_derniere_feuille_mm, imbriquer_meilleur
 
-ESPACEMENT_PAR_DEFAUT_MM = 4.0
 _CACHE = {}
 _CACHE_MAX = 256
 
@@ -46,14 +45,17 @@ class CoutMatiere:
 
 
 def espacement_pieces_mm(piece):
-    """Intervalle entre pièces du paramètre de coupe de la matière et de l'épaisseur de la pièce (4 mm à défaut)."""
-    from .parametres import meilleur_parametre
+    """Écart entre pièces à l'imbrication : le plus grand de l'intervalle du paramètre de coupe (qui croît avec l'épaisseur
+    au laser) et de l'écart minimal du procédé (jet d'eau : 6 mm, donc constant tant qu'aucun paramètre ne demande plus ;
+    laser : 10 mm au moins)."""
+    from .parametres import meilleur_parametre, reglage
 
+    espacement = float(reglage(piece.procede).espacement_minimum_mm)
     if piece.matiere_id and piece.epaisseur:
-        parametre = meilleur_parametre(piece.matiere, piece.epaisseur)
+        parametre = meilleur_parametre(piece.matiere, piece.epaisseur, piece.procede, piece.gaz_coupe if piece.procede == "laser" else "")
         if parametre:
-            return parametre.intervalle_pieces_mm
-    return ESPACEMENT_PAR_DEFAUT_MM
+            espacement = max(espacement, float(parametre.intervalle_pieces_mm))
+    return espacement
 
 
 def prix_au_mm2(tole, largeur_mm, longueur_mm):

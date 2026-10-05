@@ -23,6 +23,11 @@ class FamilleMatiere(models.Model):
         help_text="Un par ligne ou séparés par des virgules (ex. s235, s355, acier, steel). Une nuance dont le nom commence par l'un d'eux "
                   "est rattachée à cette famille. Les expressions à plusieurs mots (« en aw ») se cherchent dans le nom entier.",
     )
+    gaz_laser_prefere = models.CharField(
+        "gaz de coupe laser usuel", max_length=4, blank=True,
+        choices=[("O2", "Oxygène"), ("N2", "Azote"), ("Air", "Air comprimé")],
+        help_text="Gaz retenu au laser quand la pièce n'en précise pas (oxygène pour l'acier, azote pour l'inox et l'alu…).",
+    )
     ordre = models.PositiveSmallIntegerField(
         "priorité", default=50, help_text="Les familles de priorité faible sont essayées d'abord (« inox » avant « acier »)."
     )

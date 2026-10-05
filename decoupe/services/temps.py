@@ -42,15 +42,26 @@ class EstimationTemps:
         return self.total_s / 60
 
 
-def parametre_pour(piece, procede="jet_eau"):
-    """Paramètre de coupe de la matière et de l'épaisseur de la pièce (l'épaisseur la plus proche, avec avertissement,
-    si l'épaisseur exacte n'existe pas)."""
-    from .parametres import meilleur_parametre
+def parametre_pour(piece, procede=None):
+    """Paramètre de coupe de la matière et de l'épaisseur de la pièce. Jet d'eau : l'épaisseur la plus proche, avec
+    avertissement. Laser : l'épaisseur exacte, sinon la pièce n'est pas réalisable (ErreurTemps)."""
+    from .parametres import epaisseurs_possibles, meilleur_parametre
 
+    procede = procede or piece.procede
     if not piece.matiere_id or not piece.epaisseur:
         raise ErreurTemps("Renseignez la matière et l'épaisseur de la pièce pour estimer son temps de découpe.")
-    meilleur = meilleur_parametre(piece.matiere, piece.epaisseur, procede)
+    gaz = piece.gaz_coupe if procede == "laser" else ""
+    meilleur = meilleur_parametre(piece.matiere, piece.epaisseur, procede, gaz)
     if meilleur is None:
+        if procede == "laser":
+            possibles = epaisseurs_possibles(piece.matiere, procede, gaz)
+            cible = f" avec le gaz {gaz}" if gaz else ""
+            if not possibles:
+                raise ErreurTemps(f"Découpe laser impossible : aucun paramètre pour « {piece.matiere} »{cible} (menu Paramètres de coupe).")
+            raise ErreurTemps(
+                f"Non réalisable au laser : {piece.epaisseur:g} mm n'est pas dans la base pour « {piece.matiere} »{cible} "
+                f"(épaisseurs possibles : {', '.join(f'{e:g}' for e in possibles)} mm)."
+            )
         famille = f", ni pour sa famille « {piece.matiere.famille} »" if piece.matiere.famille_id else " (elle n'est rattachée à aucune famille de matière)"
         raise ErreurTemps(f"Aucun paramètre de coupe pour la matière « {piece.matiere} »{famille} (menu Paramètres de coupe).")
     avertissement = None
@@ -148,6 +159,49 @@ def _temps_percage(parametre, vitesse):
     return parametre.temporisation_pointage_s + duree
 
 
+def _contours(piece):
+    contours = [piece.contour_json.get("exterieur") or []] + list(piece.contour_json.get("trous") or [])
+    for autre in piece.contour_json.get("autres") or []:  # plan de découpe : toutes les silhouettes se coupent
+        contours += [autre.get("exterieur") or []] + list(autre.get("trous") or [])
+    return [c for c in contours if len(c) >= 3]
+
+
+def _longueur_contour(points):
+    points = _fermer(points)
+    return sum(math.hypot(b[0] - a[0], b[1] - a[1]) for a, b in zip(points, points[1:]))
+
+
+def _estimer_laser(piece, parametre, avertissements):
+    """Laser : longueur coupée à la vitesse de production du constructeur × coefficient de pondération, plus un perçage par
+    contour et les déplacements entre contours. Pas de ralentissement en courbe ni dans les coins : la pondération
+    (réglages de coupe) et le coefficient d'ajustement du paramètre servent à caler sur les temps réels."""
+    from .parametres import reglage
+
+    coefficient_vitesse = reglage("laser").coefficient_vitesse or 1
+    vitesse_mm_s = (parametre.vitesse_coupe_production_m_min or 0) * 1000 / 60 * coefficient_vitesse
+    if vitesse_mm_s <= 0:
+        raise ErreurTemps(f"« {parametre} » : vitesse de production non renseignée.")
+    contours = _contours(piece)
+    longueur = sum(_longueur_contour(c) for c in contours)
+    coupe_s = longueur / vitesse_mm_s
+    percage_s = len(contours) * (parametre.temporisation_pointage_s + parametre.percage_stationnaire_hp_s) * parametre.facteur_percage
+    deplacements_s = len(contours) * parametre.deplacement_par_contour_s
+    avertissements.append(
+        f"Laser : vitesse de production du constructeur {parametre.vitesse_coupe_production_m_min:g} m/min × pondération {coefficient_vitesse:g} "
+        f"(menu Réglages de coupe), gaz {parametre.gaz}."
+    )
+    if parametre.remarque:
+        avertissements.append(f"{parametre} : {parametre.remarque}.")
+    if (piece.gravure_json or {}).get("traits"):
+        avertissements.append("Le marquage n'est pas compté au laser.")
+    coefficient = parametre.coefficient_ajustement or 1
+    return EstimationTemps(
+        coupe_s=coupe_s * coefficient, percage_s=percage_s * coefficient, marquage_s=0.0, deplacements_s=deplacements_s * coefficient,
+        total_s=(coupe_s + percage_s + deplacements_s) * coefficient, longueur_coupe_mm=longueur, nb_percages=len(contours), nb_coins=0,
+        parametre=parametre, avertissements=avertissements,
+    )
+
+
 def estimer_temps_decoupe(piece, qualite=None, parametre=None):
     """Temps de découpe d'UNE pièce (secondes, détail et avertissements). Lève ErreurTemps si impossible."""
     if piece.statut != piece.Statut.OK or not piece.contour_json:
@@ -157,6 +211,8 @@ def estimer_temps_decoupe(piece, qualite=None, parametre=None):
         parametre, avertissement = parametre_pour(piece)
         if avertissement:
             avertissements.append(avertissement)
+    if parametre.procede == "laser":
+        return _estimer_laser(piece, parametre, avertissements)
     if parametre.origine == "calcule":
         avertissements.append("Vitesses calculées depuis l'usinabilité (estimation) : à confirmer avec les valeurs de la machine.")
     qualite = float(qualite if qualite is not None else piece.qualite_coupe)
@@ -164,10 +220,7 @@ def estimer_temps_decoupe(piece, qualite=None, parametre=None):
     if vitesse is None:
         raise ErreurTemps(f"Pas de vitesses de coupe pour la qualité {qualite:g} dans « {parametre} ».")
 
-    contours = [piece.contour_json.get("exterieur") or []] + list(piece.contour_json.get("trous") or [])
-    for autre in piece.contour_json.get("autres") or []:  # plan de découpe : toutes les silhouettes se coupent
-        contours += [autre.get("exterieur") or []] + list(autre.get("trous") or [])
-    contours = [c for c in contours if len(c) >= 3]
+    contours = _contours(piece)
     coupe_s, longueur, nb_coins = 0.0, 0.0, 0
     for contour in contours:
         t, l, c = _temps_contour(contour, parametre, vitesse)
