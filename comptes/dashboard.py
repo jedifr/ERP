@@ -18,6 +18,17 @@ from stock.models import AlerteStock
 from .securite import diagnostics
 
 
+# Couleur de chaque tuile (voir comptes/static/comptes/theme.css) : ventes (ambre), atelier (bleu acier), trésorerie (vert).
+THEMES_TUILES = {
+    "CA facturé": "tresorerie",
+    "Factures en retard": "tresorerie",
+    "Alertes de stock": "atelier",
+    "Ordres de fabrication": "atelier",
+    "Synchro planning": "atelier",
+    "Pièces à découper": "atelier",
+}
+
+
 def dashboard_callback(request, context):
     aujourdhui = timezone.localdate()
     debut_mois = aujourdhui.replace(day=1)
@@ -151,6 +162,8 @@ def dashboard_callback(request, context):
             "link_query": "",
         },
     ]
+    for kpi in context["kpis"]:
+        kpi["theme"] = THEMES_TUILES.get(kpi["title"], "ventes")
     if not settings.STOCK_ACTIF:
         context["kpis"] = [k for k in context["kpis"] if k["title"] != "Alertes de stock"]
     context["dashboard_date"] = aujourdhui

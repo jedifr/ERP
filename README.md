@@ -2831,3 +2831,11 @@ Sur la **fiche d'un devis, d'une commande et d'une livraison**, un bouton orange
 - **Livraison** → *Préparer la facture* s'il reste du livré non facturé.
 
 Le bouton ne contourne aucun droit : sans la permission de créer l'objet suivant, un message l'indique. La décision de l'étape est dans `chiffrage/etapes.py`, l'exécution dans `EtapeSuivanteMixin` (`chiffrage/admin.py`). Les règles existantes (devis expiré, refusé, commande annulée…) restent appliquées.
+
+## Thème visuel (lot A : pastilles, listes aérées, tuiles)
+
+- **Pastilles de statut** dans les listes (devis : statut et réponse du client ; commandes ; livraisons ; factures : type et paiement ; ordres de fabrication : synchro planning ; inventaires ; alertes de stock ; pièces à découper). Le vocabulaire de couleurs est commun : bleu = en cours/brouillon, orange = à faire/en attente, vert = terminé/validé/payé, rouge = problème/annulé/refusé, ambre = information (avoir, remplacé). Il se déclare dans l'admin avec `pastilles = {"statut": {"valide": TERMINE, …}}` (`comptes/pastilles.py`, mixin `PastillesMixin`). Tri, filtres et export CSV sont inchangés.
+- **Listes plus aérées** : lignes plus hautes, en-têtes en petites capitales grises, montants et quantités alignés à droite avec des chiffres de largeur fixe, numéro du document en gras de la couleur du thème, survol de ligne teinté.
+- **Fiches** : cartes arrondies avec ombre légère, bandeau « Récapitulatif » avec icône et liseré ambre.
+- **Accueil** : tuiles avec pastille d'icône et liseré coloré par thème — ambre (ventes), bleu acier (atelier), vert (trésorerie), rouge (à traiter). La correspondance tuile → thème est dans `comptes/dashboard.py` (`THEMES_TUILES`).
+- Tout le style maison est dans `comptes/static/comptes/theme.css` (variables en tête de fichier : rayon, ombres, teintes) ; le mode sombre est repris du thème Unfold.

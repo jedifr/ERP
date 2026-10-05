@@ -16,6 +16,7 @@ from unfold.decorators import action as unfold_action
 from unfold.enums import ActionVariant
 from comptes.exports import ExportCsvMixin
 from comptes.liens import lien_admin
+from comptes.pastilles import A_FAIRE, EN_COURS, NEUTRE, PROBLEME, TERMINE, PastillesMixin
 from comptes.montants import arrondir, pourcent, somme
 from comptes.concurrence import VerrouOptimisteMixin
 from comptes.historique import HistoriqueLectureSeule
@@ -288,10 +289,14 @@ class ExpireFilter(admin.SimpleListFilter):
 
 
 @admin.register(Devis)
-class DevisAdmin(EtapeSuivanteMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
+class DevisAdmin(PastillesMixin, EtapeSuivanteMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
     codification_entite = RegleCodification.Entite.DEVIS
     form = DevisAdminForm
 
+    pastilles = {
+        "statut": {"brouillon": EN_COURS, "valide": TERMINE},
+        "issue": {"en_attente": A_FAIRE, "accepte": TERMINE, "refuse": PROBLEME, "remplace": NEUTRE},
+    }
     list_display = [
         "numero",
         "indice",
@@ -750,10 +755,11 @@ class CommandeLigneInline(TabularInline):
 
 
 @admin.register(Commande)
-class CommandeAdmin(EtapeSuivanteMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
+class CommandeAdmin(PastillesMixin, EtapeSuivanteMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
     codification_entite = RegleCodification.Entite.COMMANDE
 
     list_display = ["numero", "client", "reference_client", "devis", "date_commande", "statut", "devise"]
+    pastilles = {"statut": {"en_cours": EN_COURS, "soldee": TERMINE, "annulee": PROBLEME}}
     list_filter = ["statut"]
     search_fields = ["numero", "reference_client", "client__raison_sociale", "devis__numero"]
     autocomplete_fields = ["devis", "client", "adresse_facturation", "adresse_livraison", "devise"]
@@ -1100,10 +1106,11 @@ class LivraisonLigneInline(TabularInline):
 
 
 @admin.register(Livraison)
-class LivraisonAdmin(EtapeSuivanteMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
+class LivraisonAdmin(PastillesMixin, EtapeSuivanteMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
     codification_entite = RegleCodification.Entite.LIVRAISON
 
     list_display = ["numero", "commande", "date_livraison", "statut"]
+    pastilles = {"statut": {"validee": TERMINE, "annulee": PROBLEME}}
     list_filter = ["statut"]
     search_fields = ["numero", "commande__numero"]
     autocomplete_fields = ["commande"]
@@ -1322,9 +1329,10 @@ class ComposantOFInline(TabularInline):
 
 
 @admin.register(OrdreFabrication)
-class OrdreFabricationAdmin(ExportCsvMixin, CodificationInitialeMixin, ModelAdmin):
+class OrdreFabricationAdmin(PastillesMixin, ExportCsvMixin, CodificationInitialeMixin, ModelAdmin):
     codification_entite = RegleCodification.Entite.ORDRE_FABRICATION
 
+    pastilles = {"statut_synchro": {"synchronise": TERMINE, "en_attente": A_FAIRE, "echec_persistant": PROBLEME}}
     list_display = [
         "numero",
         "commande",

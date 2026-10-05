@@ -5195,3 +5195,34 @@ class EtapeSuivanteCommandeTests(_FixtureOrdresCommande, TestCase):
         self.client.force_login(simple)
         reponse = self.client.get(self.url(), follow=True)
         self.assertContains(reponse, "pas la permission de créer des ordres de fabrication")
+
+
+class ThemePastillesTests(_FixtureOrdresCommande, TestCase):
+    """Thème : statuts en pastilles colorées dans les listes, tuiles colorées à l'accueil, export CSV inchangé."""
+
+    def test_pastilles_dans_les_listes(self):
+        devis = Devis.objects.create(numero="DEV-PAST", client=self.tiers, date_creation=datetime.date(2026, 10, 1))
+        page = self.client.get("/admin/chiffrage/devis/")
+        self.assertContains(page, "Brouillon")
+        self.assertContains(page, "bg-blue-100")  # brouillon : bleu
+        self.assertContains(page, "bg-orange-100")  # réponse du client en attente : orange
+        self.assertContains(self.client.get("/admin/chiffrage/commande/"), "bg-blue-100")  # commande en cours
+        Devis.objects.filter(pk=devis.pk).update(statut="valide", issue="refuse")
+        page = self.client.get("/admin/chiffrage/devis/")
+        self.assertContains(page, "bg-green-100")
+        self.assertContains(page, "bg-red-100")
+
+    def test_tri_et_export_csv_inchanges(self):
+        Devis.objects.create(numero="DEV-PAST2", client=self.tiers, date_creation=datetime.date(2026, 10, 1))
+        self.assertEqual(self.client.get("/admin/chiffrage/devis/?o=5").status_code, 200)  # tri sur la colonne du statut
+        reponse = self.client.post(
+            "/admin/chiffrage/devis/", {"action": "exporter_csv", "_selected_action": ["DEV-PAST2"]}
+        )
+        texte = reponse.content.decode("utf-8-sig")
+        self.assertIn("Statut", texte.splitlines()[0])
+        self.assertIn("Brouillon", texte)
+
+    def test_tuiles_colorees_a_l_accueil(self):
+        page = self.client.get("/admin/")
+        for attendu in ("tuile-ventes", "tuile-atelier", "tuile-tresorerie", "tuile-icone"):
+            self.assertContains(page, attendu)

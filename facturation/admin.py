@@ -16,6 +16,7 @@ from codification.models import RegleCodification
 from comptabilite.generation import GenerationEcritureError, generer_ecriture_facture
 
 from comptes.exports import ExportCsvMixin
+from comptes.pastilles import A_FAIRE, EN_COURS, NEUTRE, TERMINE, PastillesMixin
 from comptes.montants import arrondir, pourcent, somme
 from comptes.concurrence import VerrouOptimisteMixin
 from comptes.historique import HistoriqueLectureSeule
@@ -113,9 +114,13 @@ class RetardFilter(admin.SimpleListFilter):
 
 
 @admin.register(Facture)
-class FactureAdmin(ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
+class FactureAdmin(PastillesMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
     codification_entite = RegleCodification.Entite.FACTURE
 
+    pastilles = {
+        "type_document": {"avoir": NEUTRE},
+        "statut_paiement": {"a_payer": A_FAIRE, "partiel": EN_COURS, "paye": TERMINE},
+    }
     list_display = [
         "numero",
         "commande",

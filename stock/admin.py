@@ -10,6 +10,7 @@ from codification.mixins import CodificationInitialeMixin
 from codification.models import RegleCodification
 
 from comptes.exports import ExportCsvMixin
+from comptes.pastilles import EN_COURS, PROBLEME, TERMINE, PastillesMixin
 from comptes.liens import lien_admin
 from django.utils.html import format_html
 from django.conf import settings
@@ -258,7 +259,8 @@ class InventaireLigneInline(TabularInline):
 
 
 @admin.register(Inventaire)
-class InventaireAdmin(StockOptionnelMixin, ModelAdmin):
+class InventaireAdmin(PastillesMixin, StockOptionnelMixin, ModelAdmin):
+    pastilles = {"statut": {"brouillon": EN_COURS, "valide": TERMINE}}
     list_display = ["__str__", "statut", "commentaire", "utilisateur_validation", "date_validation"]
     list_filter = ["statut"]
     readonly_fields = ["statut", "utilisateur_validation", "date_validation"]
@@ -296,7 +298,8 @@ class InventaireAdmin(StockOptionnelMixin, ModelAdmin):
 
 
 @admin.register(AlerteStock)
-class AlerteStockAdmin(StockOptionnelMixin, ExportCsvMixin, ModelAdmin):
+class AlerteStockAdmin(PastillesMixin, StockOptionnelMixin, ExportCsvMixin, ModelAdmin):
+    pastilles = {"statut": {"active": PROBLEME, "traitee": TERMINE}}
     list_display = ["article", "statut", "date_declenchement", "date_traitement"]
     list_filter = ["statut"]
     search_fields = ["article__reference"]

@@ -3,6 +3,7 @@ from django.contrib import admin
 from django.urls import path
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
+from comptes.pastilles import EN_COURS, PROBLEME, TERMINE, PastillesMixin
 from unfold.admin import ModelAdmin, TabularInline
 
 from .admin_views import analyser_fichier_view, previsualiser_imbrication_view
@@ -88,7 +89,8 @@ class ProfilImportDecoupeAdmin(ModelAdmin):
 
 
 @admin.register(PieceDecoupe)
-class PieceDecoupeAdmin(ModelAdmin):
+class PieceDecoupeAdmin(PastillesMixin, ModelAdmin):
+    pastilles = {"statut": {"en_attente": EN_COURS, "ok": TERMINE, "erreur": PROBLEME}}
     list_display = [
         "nom",
         "matiere",

@@ -380,6 +380,7 @@ UNFOLD = {
     "STYLES": [
         lambda request: static("comptes/admin_extra.css"),
         lambda request: static("comptes/fiche_deux_colonnes.css"),
+        lambda request: static("comptes/theme.css"),
     ],
     "SCRIPTS": [
         lambda request: static("comptes/anti_double_clic.js"),
