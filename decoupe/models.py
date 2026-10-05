@@ -409,7 +409,15 @@ class ParametreCoupe(models.Model):
         "technique.PosteTravail", verbose_name="poste de travail", on_delete=models.PROTECT, null=True, blank=True,
         related_name="parametres_coupe", help_text="Machine de coupe : son tarif horaire valorise le temps calculé dans la gamme.",
     )
-    usinabilite = models.FloatField("usinabilité", null=True, blank=True, help_text="Indice d'usinabilité du logiciel de la machine (information)")
+    usinabilite = models.FloatField(
+        "usinabilité", null=True, blank=True,
+        help_text="Indice d'usinabilité du logiciel de la machine ; vide : celui de la matière. Sert à calculer les vitesses.",
+    )
+    origine = models.CharField(
+        "origine des vitesses", max_length=8, default="machine",
+        choices=[("machine", "Relevées sur la machine"), ("calcule", "Calculées depuis l'usinabilité (estimation)")],
+        help_text="Les vitesses « calculées » sont une estimation à confirmer ; celles relevées sur la machine ne sont jamais écrasées par un calcul.",
+    )
 
     # Perçage et marquage
     mode_percage = models.CharField("mode de perçage", max_length=16, choices=ModePercage.choices, default=ModePercage.STATIONNAIRE_HP)

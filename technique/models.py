@@ -10,6 +10,11 @@ class Matiere(models.Model):
 
     nom = models.CharField("nom", max_length=100, primary_key=True)
     densite = models.FloatField("densité", help_text="kg/dm³, utilisée pour le calcul au poids")
+    usinabilite = models.FloatField(
+        "usinabilité", null=True, blank=True,
+        help_text="Indice d'usinabilité au jet d'eau (acier 87,6 ; inox 81,9 ; cuivre/laiton 110 ; aluminium 213…) : sert à calculer "
+                  "les vitesses de coupe quand elles n'ont pas été relevées sur la machine.",
+    )
 
     class Meta:
         verbose_name = "Matière"

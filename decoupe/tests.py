@@ -1238,3 +1238,129 @@ class TempsDeDecoupeTests(TestCase):
         page = self.client.get(f"/admin/decoupe/parametrecoupe/{self.parametre.pk}/change/")
         self.assertContains(page, "154.9")
         self.assertContains(page, "Réglages du calcul")
+
+
+class VitessesDepuisUsinabiliteTests(TestCase):
+    """Usinabilités standard, vitesses calculées et duplication d'un paramètre relevé vers d'autres épaisseurs."""
+
+    RELEVES = {  # (usinabilité, épaisseur) -> vitesses élevées relevées sur la machine, qualités 1,5 → 5
+        (87.0, 10): [343.7, 246.9, 154.9, 111.3, 86.1],
+        (213.0, 20): [450.1, 323.3, 202.8, 145.7, 112.7],
+        (110.0, 8): [581.8, 417.9, 262.2, 188.3, 145.7],
+    }
+
+    def setUp(self):
+        from technique.models import PosteTravail
+
+        self.user = get_user_model().objects.create_superuser("vitesses-admin", "v@example.com", "pass-mot-de-passe-15")
+        self.client.force_login(self.user)
+        self.poste = PosteTravail.objects.create(nom="Jet", mode_calcul=PosteTravail.ModeCalcul.HORAIRE)
+        self.matiere = Matiere.objects.create(nom="Acier S235", densite=7.8, usinabilite=87.6)
+
+    def test_le_modele_retrouve_les_releves(self):
+        from .services.vitesses import vitesses_depuis_usinabilite
+
+        for (usinabilite, epaisseur), attendu in self.RELEVES.items():
+            calcule = [v["vitesse_haute_mm_min"] for v in vitesses_depuis_usinabilite(usinabilite, epaisseur)]
+            for c, a in zip(calcule, attendu):
+                self.assertAlmostEqual(c / a, 1, delta=0.005, msg=f"{usinabilite} / {epaisseur} mm")
+
+    def test_plus_epais_ou_moins_usinable_plus_lent(self):
+        from .services.vitesses import vitesses_depuis_usinabilite
+
+        v10 = vitesses_depuis_usinabilite(87.6, 10)[2]["vitesse_haute_mm_min"]
+        self.assertLess(vitesses_depuis_usinabilite(87.6, 20)[2]["vitesse_haute_mm_min"], v10)
+        self.assertGreater(vitesses_depuis_usinabilite(213, 10)[2]["vitesse_haute_mm_min"], v10)
+        for v in vitesses_depuis_usinabilite(87.6, 15):
+            self.assertLess(v["vitesse_basse_mm_min"], v["vitesse_haute_mm_min"])
+        with self.assertRaises(ValueError):
+            vitesses_depuis_usinabilite(0, 10)
+
+    def test_usinabilites_standard_par_nom(self):
+        from .services.vitesses import usinabilite_standard_pour
+
+        attendus = {"Acier S235": 87.6, "Inox 304": 81.9, "Acier trempé": 80.4, "Acier inoxydable": 81.9, "Laiton": 110.0,
+                    "Cuivre": 110.0, "Titane": 115.0, "Alliage de zinc": 136.0, "Aluminium 5754": 213.0, "Granit": 322.0,
+                    "Marbre": 535.0, "Nylon": 538.0, "Plexiglas": 690.0, "Graphite": 879.0, "Polypropylène": 985.0}
+        for nom, valeur in attendus.items():
+            self.assertEqual(usinabilite_standard_pour(nom), valeur, nom)
+        self.assertIsNone(usinabilite_standard_pour("Bois"))
+
+    def test_action_matiere_usinabilite_standard(self):
+        for nom in ("Inox 316", "Bois"):
+            Matiere.objects.create(nom=nom, densite=7)
+        self.client.post("/admin/technique/matiere/", {"action": "action_usinabilite_standard", "_selected_action": ["Inox 316", "Bois", "Acier S235"]}, follow=True)
+        self.assertEqual(Matiere.objects.get(nom="Inox 316").usinabilite, 81.9)
+        self.assertIsNone(Matiere.objects.get(nom="Bois").usinabilite)
+        self.assertEqual(Matiere.objects.get(nom="Acier S235").usinabilite, 87.6)  # déjà renseignée : inchangée
+
+    def modele(self):
+        from .models import ParametreCoupe, VitesseCoupe
+
+        parametre = ParametreCoupe.objects.create(
+            matiere=self.matiere, epaisseur_mm=10, poste=self.poste, percage_stationnaire_hp_s=10, percage_stationnaire_bp_s=20,
+            percement_lineaire_mm=3, chevauchement_mm=3, percage_circulaire_hp_tours=5, intervalle_pieces_mm=4,
+        )
+        VitesseCoupe.objects.create(parametre=parametre, qualite=3, vitesse_haute_mm_min=154.9, vitesse_basse_mm_min=80.7)
+        return parametre
+
+    def test_un_releve_machine_n_est_jamais_ecrase(self):
+        from .services.parametres import ErreurParametre, calculer_vitesses
+
+        parametre = self.modele()
+        with self.assertRaises(ErreurParametre):
+            calculer_vitesses(parametre)
+        self.assertEqual(parametre.vitesses.get().vitesse_haute_mm_min, 154.9)
+
+    def test_dupliquer_vers_d_autres_epaisseurs(self):
+        from .models import ParametreCoupe
+        from .services.parametres import dupliquer_vers_epaisseurs
+
+        modele = self.modele()
+        crees, existants = dupliquer_vers_epaisseurs(modele, [5, 10, 20])
+        self.assertEqual([p.epaisseur_mm for p in crees], [5, 20])
+        self.assertEqual(existants, [10])
+        p20 = ParametreCoupe.objects.get(epaisseur_mm=20)
+        self.assertEqual((p20.origine, p20.poste, p20.matiere), ("calcule", self.poste, self.matiere))
+        self.assertEqual((p20.percage_stationnaire_hp_s, p20.percement_lineaire_mm, p20.percage_stationnaire_bp_s), (20, 6, 40))  # ∝ épaisseur
+        self.assertEqual(p20.intervalle_pieces_mm, 4)  # inchangé
+        self.assertEqual(p20.vitesses.count(), 5)
+        self.assertEqual(ParametreCoupe.objects.get(epaisseur_mm=10).origine, "machine")
+
+    def test_dupliquer_sans_usinabilite_refuse(self):
+        from .services.parametres import ErreurParametre, dupliquer_vers_epaisseurs
+
+        modele = self.modele()
+        self.matiere.usinabilite = None
+        self.matiere.save()
+        with self.assertRaises(ErreurParametre):
+            dupliquer_vers_epaisseurs(modele, [5])
+
+    def test_admin_dupliquer_et_calculer(self):
+        from .models import ParametreCoupe
+
+        modele = self.modele()
+        page = self.client.get(f"/admin/decoupe/parametrecoupe/{modele.pk}/dupliquer-epaisseurs/")
+        self.assertContains(page, "proportionnels à l")
+        reponse = self.client.post(f"/admin/decoupe/parametrecoupe/{modele.pk}/dupliquer-epaisseurs/", {"epaisseurs": "6, 8,12"}, follow=True)
+        self.assertContains(reponse, "3 paramètre(s) créé(s)")
+        calcule = ParametreCoupe.objects.get(epaisseur_mm=12)
+        reponse = self.client.post(f"/admin/decoupe/parametrecoupe/{modele.pk}/dupliquer-epaisseurs/", {"epaisseurs": "abc"}, follow=True)
+        self.assertContains(reponse, "séparées par des virgules")
+        # l'action de liste refuse le relevé machine et recalcule l'estimation
+        reponse = self.client.post("/admin/decoupe/parametrecoupe/", {"action": "action_calculer_vitesses", "_selected_action": [modele.pk, calcule.pk]}, follow=True)
+        self.assertContains(reponse, "relevées sur la machine")
+        self.assertContains(reponse, "vitesses calculées")
+
+    def test_l_estimation_previent_quand_les_vitesses_sont_calculees(self):
+        from .services.parametres import dupliquer_vers_epaisseurs
+        from .services.temps import estimer_temps_decoupe
+
+        crees, _ = dupliquer_vers_epaisseurs(self.modele(), [12])
+        piece = PieceDecoupe.objects.create(
+            nom="P", fichier_source="decoupe/sources/p.dxf", statut=PieceDecoupe.Statut.OK, matiere=self.matiere, epaisseur=12,
+            contour_json={"exterieur": [[0, 0], [100, 0], [100, 50], [0, 50]], "trous": []},
+        )
+        e = estimer_temps_decoupe(piece)
+        self.assertTrue(any("calculées depuis l'usinabilité" in a for a in e.avertissements))
+        self.assertGreater(e.total_s, 0)

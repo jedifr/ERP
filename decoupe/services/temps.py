@@ -149,6 +149,8 @@ def estimer_temps_decoupe(piece, qualite=None, parametre=None):
         parametre, avertissement = parametre_pour(piece)
         if avertissement:
             avertissements.append(avertissement)
+    if parametre.origine == "calcule":
+        avertissements.append("Vitesses calculées depuis l'usinabilité (estimation) : à confirmer avec les valeurs de la machine.")
     qualite = float(qualite if qualite is not None else piece.qualite_coupe)
     vitesse = next((v for v in parametre.vitesses.all() if abs(float(v.qualite) - qualite) < 1e-9), None)
     if vitesse is None:

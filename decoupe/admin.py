@@ -2,6 +2,7 @@ from django import forms
 from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied
 from django.shortcuts import get_object_or_404, redirect
+from django.template.response import TemplateResponse
 from django.urls import reverse
 from django.urls import path
 from django.utils.html import format_html
@@ -23,6 +24,7 @@ from .models import (
 )
 from .services.apercu_svg import generer_svg_feuille, generer_svg_piece
 from .services.gamme import alimenter_gamme
+from .services.parametres import ErreurParametre, calculer_vitesses, dupliquer_vers_epaisseurs
 from .services.temps import ErreurTemps, estimer_temps_decoupe
 
 
@@ -461,13 +463,55 @@ class ParametreCoupeAdmin(ModelAdmin):
     """Paramètres de coupe repris du logiciel de la machine (jet d'eau) : une fiche par matière et épaisseur, avec une
     ligne de vitesses par niveau de qualité. Servent à estimer le temps de découpe des pièces."""
 
-    list_display = ["matiere", "epaisseur_mm", "procede", "poste", "usinabilite", "intervalle_pieces_mm", "coefficient_ajustement"]
-    list_filter = ["procede", "matiere"]
+    list_display = ["matiere", "epaisseur_mm", "procede", "poste", "origine", "usinabilite", "intervalle_pieces_mm", "coefficient_ajustement"]
+    actions = ["action_calculer_vitesses"]
+    actions_detail = ["action_dupliquer_epaisseurs"]
+    list_filter = ["procede", "origine", "matiere"]
     search_fields = ["matiere__nom"]
     autocomplete_fields = ["matiere", "poste"]
     inlines = [VitesseCoupeInline]
+    readonly_fields = ["origine"]
+
+    @admin.action(description="Calculer les vitesses depuis l'usinabilité (estimation)")
+    def action_calculer_vitesses(self, request, queryset):
+        for parametre in queryset:
+            try:
+                calculer_vitesses(parametre)
+            except ErreurParametre as exc:
+                self.message_user(request, str(exc), level=messages.ERROR)
+            else:
+                self.message_user(request, f"{parametre} : vitesses calculées (estimation).", level=messages.SUCCESS)
+
+    @unfold_action(description="Dupliquer vers d'autres épaisseurs", url_path="dupliquer-epaisseurs", icon="content_copy")
+    def action_dupliquer_epaisseurs(self, request, object_id):
+        modele = get_object_or_404(ParametreCoupe, pk=object_id)
+        if not request.user.has_perm("decoupe.add_parametrecoupe"):
+            raise PermissionDenied
+        retour = reverse("admin:decoupe_parametrecoupe_change", args=[modele.pk])
+        if request.method == "POST":
+            try:
+                epaisseurs = [float(x.replace(",", ".")) for x in request.POST.get("epaisseurs", "").replace(";", ",").split(",") if x.strip()]
+                if not epaisseurs:
+                    raise ValueError
+                crees, existants = dupliquer_vers_epaisseurs(modele, epaisseurs)
+            except ValueError:
+                self.message_user(request, "Saisissez des épaisseurs en millimètres, séparées par des virgules (ex. 3, 4, 5, 6).", level=messages.ERROR)
+                return redirect(reverse("admin:decoupe_parametrecoupe_action_dupliquer_epaisseurs", args=[modele.pk]))
+            except ErreurParametre as exc:
+                self.message_user(request, str(exc), level=messages.ERROR)
+                return redirect(retour)
+            texte = f"{len(crees)} paramètre(s) créé(s) pour {modele.matiere} (vitesses calculées, estimation à confirmer)."
+            if existants:
+                texte += " Déjà existants : " + ", ".join(f"{e:g}" for e in existants) + " mm."
+            self.message_user(request, texte, level=messages.SUCCESS)
+            return redirect(reverse("admin:decoupe_parametrecoupe_changelist"))
+        return TemplateResponse(
+            request, "admin/decoupe/dupliquer_parametre.html",
+            {**self.admin_site.each_context(request), "title": f"Dupliquer {modele}", "modele": modele, "retour": retour,
+             "suggestion": "2, 3, 4, 5, 6, 8, 12, 15, 20, 25, 30"},
+        )
     fieldsets = [
-        (None, {"fields": ["procede", "matiere", "epaisseur_mm", "poste", "usinabilite"]}),
+        (None, {"fields": ["procede", "matiere", "epaisseur_mm", "poste", "usinabilite", "origine"]}),
         ("Perçage", {"fields": [
             "mode_percage", "percage_stationnaire_hp_s", "percage_stationnaire_bp_s", "percage_circulaire_hp_tours",
             "percage_circulaire_bp_tours", "diametre_percage_mm", "temporisation_pointage_s",

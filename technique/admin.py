@@ -61,8 +61,26 @@ class ArticleCompteAchatInline(TabularInline):
 
 @admin.register(Matiere)
 class MatiereAdmin(ModelAdmin):
-    list_display = ["nom", "densite"]
+    list_display = ["nom", "densite", "usinabilite"]
     search_fields = ["nom"]
+    actions = ["action_usinabilite_standard"]
+
+    @admin.action(description="Renseigner l'usinabilité standard (d'après le nom de la matière)")
+    def action_usinabilite_standard(self, request, queryset):
+        from decoupe.services.vitesses import usinabilite_standard_pour
+
+        faites, inconnues = 0, []
+        for matiere in queryset.filter(usinabilite__isnull=True):
+            valeur = usinabilite_standard_pour(matiere.nom)
+            if valeur is None:
+                inconnues.append(matiere.nom)
+                continue
+            matiere.usinabilite = valeur
+            matiere.save(update_fields=["usinabilite"])
+            faites += 1
+        self.message_user(request, f"Usinabilité renseignée pour {faites} matière(s) (celles déjà renseignées sont inchangées).", level=messages.SUCCESS)
+        if inconnues:
+            self.message_user(request, "Matière non reconnue, à saisir à la main : " + ", ".join(inconnues), level=messages.WARNING)
 
 
 @staff_member_required

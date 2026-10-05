@@ -1,0 +1,20 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<div class="max-w-3xl">
+  <p class="mb-4">
+    Crée des paramètres de coupe pour <strong>{{ modele.matiere }}</strong> à d'autres épaisseurs, à partir de
+    <strong>{{ modele }}</strong> (relevé sur la machine) : mêmes réglages, perçage, percement et chevauchement
+    <strong>proportionnels à l'épaisseur</strong>, et vitesses <strong>calculées depuis l'usinabilité</strong>
+    (estimation, marquée comme telle). Les épaisseurs déjà paramétrées sont laissées intactes.
+  </p>
+  <form method="post">
+    {% csrf_token %}
+    <label class="block font-semibold mb-2" for="epaisseurs">Épaisseurs (mm), séparées par des virgules</label>
+    <input type="text" id="epaisseurs" name="epaisseurs" value="{{ suggestion }}" class="border border-base-300 rounded-default px-3 py-2 w-full mb-4">
+    <div class="flex gap-3">
+      <button type="submit" class="bg-primary-600 text-white font-semibold px-4 py-2 rounded-default">Créer les paramètres</button>
+      <a href="{{ retour }}" class="border border-base-300 px-4 py-2 rounded-default">Annuler</a>
+    </div>
+  </form>
+</div>
+{% endblock %}
