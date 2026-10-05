@@ -2,7 +2,9 @@ from django.conf import settings
 from django.contrib import admin, messages
 from django.contrib.admin.views.decorators import staff_member_required
 from django.shortcuts import get_object_or_404, redirect
-from django.urls import path
+from django.urls import path, reverse
+from django.utils.html import escape, format_html
+from django.utils.safestring import mark_safe
 from django.views.decorators.http import require_http_methods
 from unfold.admin import ModelAdmin, TabularInline
 
@@ -102,6 +104,101 @@ class ArticleAdmin(ExportCsvMixin, ModelAdmin):
         js = ["technique/article_admin.js"]
 
     _CHAMPS_STOCK = ("gere_en_stock", "stock_mini", "quantite_reappro")
+
+    # Fiche en deux colonnes : saisie à gauche, récapitulatif (calculé, en lecture seule) à droite.
+    CHAMPS_RECAPITULATIF = [
+        "composition_recap", "achat_recap", "stock_recap", "utilise_dans_recap", "activite_recap",
+    ]
+    readonly_fields = CHAMPS_RECAPITULATIF
+
+    def get_fieldsets(self, request, obj=None):
+        recap = [c for c in self.CHAMPS_RECAPITULATIF if settings.STOCK_ACTIF or c != "stock_recap"]
+        saisie = [c for c in self.get_fields(request, obj) if c not in self.CHAMPS_RECAPITULATIF]
+        return [
+            (None, {"fields": saisie, "classes": ["fiche-saisie"]}),
+            ("Récapitulatif", {"fields": recap, "classes": ["fiche-recap"]}),
+        ]
+
+    @staticmethod
+    def _vide(obj):
+        return obj is None or not obj.pk
+
+    @admin.display(description="Composition")
+    def composition_recap(self, obj):
+        if self._vide(obj):
+            return "—"
+        if obj.nature != Article.Nature.FABRIQUE:
+            return "Article acheté : pas de nomenclature ni de gamme"
+        nb_composants = obj.composants.count()
+        nb_etapes = obj.gamme_etapes.count()
+        lignes = [f"{nb_composants} composant(s) en nomenclature", f"{nb_etapes} étape(s) de gamme"]
+        if not nb_composants or not nb_etapes:
+            lignes.append("À compléter avant de pouvoir chiffrer cet article")
+        return mark_safe("<br>".join(escape(l) for l in lignes))
+
+    @admin.display(description="Prix d'achat actuel")
+    def achat_recap(self, obj):
+        if self._vide(obj):
+            return "—"
+        if obj.nature == Article.Nature.FABRIQUE:
+            return "Article fabriqué : coût recalculé à chaque devis"
+        lignes = []
+        for af in obj.fournisseurs.select_related("fournisseur"):
+            tarif = af.tarif_actuel
+            prix = f"{tarif.prix_unitaire:,.4f} €".replace(",", " ").replace(".", ",") if tarif else "pas de tarif en vigueur"
+            lignes.append(f"{af.fournisseur.raison_sociale} : {prix}")
+        if obj.cout_unitaire is not None:
+            lignes.insert(0, "Coût retenu : " + f"{obj.cout_unitaire:,.4f} €".replace(",", " ").replace(".", ","))
+        return mark_safe("<br>".join(escape(l) for l in lignes)) if lignes else "Aucun fournisseur renseigné"
+
+    @admin.display(description="Stock")
+    def stock_recap(self, obj):
+        if self._vide(obj):
+            return "—"
+        from stock.models import AlerteStock, stock_actif_pour, stock_total
+
+        if not stock_actif_pour(obj):
+            return "Article non géré en stock"
+        total = stock_total(obj)
+        lignes = [f"En stock : {total:g}"]
+        if obj.stock_mini is not None:
+            lignes.append(f"Seuil d'alerte : {obj.stock_mini:g}")
+        if AlerteStock.objects.filter(article=obj, statut=AlerteStock.Statut.ACTIVE).exists():
+            lignes.append("⚠ Alerte de réapprovisionnement active")
+        return mark_safe("<br>".join(escape(l) for l in lignes))
+
+    @admin.display(description="Utilisé dans")
+    def utilise_dans_recap(self, obj):
+        if self._vide(obj):
+            return "—"
+        parents = list(obj.utilise_dans.select_related("article_parent").order_by("article_parent_id")[:10])
+        if not parents:
+            return "Aucune nomenclature"
+        liens = [
+            format_html(
+                '<a href="{}">{}</a> (× {})',
+                reverse("admin:technique_article_change", args=[n.article_parent_id]),
+                n.article_parent,
+                f"{n.quantite:g}",
+            )
+            for n in parents
+        ]
+        plus = obj.utilise_dans.count() - len(parents)
+        if plus > 0:
+            liens.append(escape(f"… et {plus} autre(s)"))
+        return mark_safe("<br>".join(liens))
+
+    @admin.display(description="Activité")
+    def activite_recap(self, obj):
+        if self._vide(obj):
+            return "—"
+        lignes = [
+            f"{obj.devis_lignes.count()} ligne(s) de devis",
+            f"{obj.lignes_commande.count()} ligne(s) de commande",
+        ]
+        if obj.nature == Article.Nature.FABRIQUE:
+            lignes.append(f"{obj.ordres_fabrication.count()} ordre(s) de fabrication")
+        return mark_safe("<br>".join(escape(l) for l in lignes))
 
     def get_exclude(self, request, obj=None):
         exclus = list(super().get_exclude(request, obj) or [])

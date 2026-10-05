@@ -10,6 +10,8 @@ from codification.mixins import CodificationInitialeMixin
 from codification.models import RegleCodification
 
 from comptes.exports import ExportCsvMixin
+from comptes.liens import lien_admin
+from django.utils.html import format_html
 from django.conf import settings
 from comptes.concurrence import VerrouOptimisteMixin
 from comptes.historique import HistoriqueLectureSeule
@@ -190,7 +192,9 @@ class MouvementStockAdmin(StockOptionnelMixin, ExportCsvMixin, ModelAdmin):
             except (MouvementImmuableError, StockInsuffisantError) as exc:
                 self.message_user(request, str(exc), level=messages.ERROR)
             else:
-                self.message_user(request, f"Mouvement annulé : {inverse}.", level=messages.SUCCESS)
+                self.message_user(
+                    request, format_html("Mouvement annulé : {}.", lien_admin(inverse)), level=messages.SUCCESS
+                )
             return HttpResponseRedirect(retour)
         avertissement = ""
         if mouvement.reference_origine.startswith(PREFIXES_DOCUMENTS):

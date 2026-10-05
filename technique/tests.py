@@ -2,7 +2,7 @@ from decimal import Decimal
 import datetime
 
 from django.core.exceptions import ValidationError
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from .models import Article, Gamme, Matiere, Nomenclature, PosteTravail, TarifPoste
 from .services import DuplicationError, dupliquer_article
@@ -286,3 +286,69 @@ class DupliquerArticleViewTests(TestCase):
         Article.objects.create(reference="TOLE-DUP-VIEW3", nature=Article.Nature.MATIERE_PREMIERE)
         response = self.client.post("/admin/technique/article/TOLE-DUP-VIEW3/dupliquer/")
         self.assertNotEqual(response.status_code, 200)
+
+
+class FicheArticleDeuxColonnesTests(TestCase):
+    """Fiche article : saisie à gauche ; composition, prix d'achat, stock, utilisation et activité à droite."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        self.client.force_login(get_user_model().objects.create_superuser("fiche-art", "f@example.com", "pass1234"))
+        self.tole = Article.objects.create(
+            reference="TOLE-RECAP", libelle="Tôle recap", nature=Article.Nature.MATIERE_PREMIERE,
+            unite_cout=Article.UniteCout.PIECE, cout_unitaire=Decimal("12.5"), stock_mini=10, gere_en_stock=True,
+        )
+        self.piece = Article.objects.create(reference="PIECE-RECAP", libelle="Pièce recap", nature=Article.Nature.FABRIQUE)
+        Nomenclature.objects.create(article_parent=self.piece, article_composant=self.tole, quantite=2)
+
+    def url(self, article):
+        return f"/admin/technique/article/{article.pk}/change/"
+
+    def test_article_achete(self):
+        from achats.models import ArticleFournisseur, TarifAchatArticle
+        from commercial.models import Tiers
+        from stock.models import AlerteStock, Emplacement, Lot
+
+        fournisseur = Tiers.objects.create(code="FOUR-RECAP", raison_sociale="Aciers Martin", type_tiers=Tiers.TypeTiers.FOURNISSEUR)
+        lien = ArticleFournisseur.objects.create(article=self.tole, fournisseur=fournisseur)
+        TarifAchatArticle.objects.create(article_fournisseur=lien, prix_unitaire=Decimal("11.2"), date_debut=datetime.date(2020, 1, 1))
+        Lot.objects.create(article=self.tole, emplacement=Emplacement.objects.create(code="R1"), quantite=4)
+        AlerteStock.objects.create(article=self.tole)
+        page = self.client.get(self.url(self.tole))
+        for attendu in ("fiche-saisie", "fiche-recap", "Article acheté", "Coût retenu : 12,5000 €", "Aciers Martin : 11,2000 €",
+                        "En stock : 4", "Seuil d&#x27;alerte : 10", "Alerte de réapprovisionnement active",
+                        "PIECE-RECAP", "× 2", "0 ligne(s) de devis", "0 ligne(s) de commande"):
+            self.assertContains(page, attendu)
+        self.assertContains(page, "/admin/technique/article/PIECE-RECAP/change/")
+
+    def test_article_fabrique(self):
+        page = self.client.get(self.url(self.piece))
+        for attendu in ("1 composant(s) en nomenclature", "0 étape(s) de gamme", "À compléter avant de pouvoir chiffrer",
+                        "coût recalculé à chaque devis", "Article non géré en stock", "Aucune nomenclature",
+                        "0 ordre(s) de fabrication"):
+            self.assertContains(page, attendu)
+
+    @override_settings(STOCK_ACTIF=False)
+    def test_sans_gestion_de_stock_pas_de_bloc_stock(self):
+        page = self.client.get(self.url(self.tole))
+        self.assertNotContains(page, "En stock :")
+        self.assertNotContains(page, "Seuil d")
+        self.assertContains(page, "fiche-recap")
+
+    def test_formulaire_d_ajout_et_enregistrement(self):
+        self.assertContains(self.client.get("/admin/technique/article/add/"), "fiche-recap")
+        page = self.client.get(self.url(self.tole))
+        donnees = {
+            "reference": "TOLE-RECAP", "libelle": "Tôle modifiée", "nature": "matiere_premiere", "unite_cout": "piece",
+            "cout_unitaire": "12.5", "gere_en_stock": "on", "stock_mini": "10",
+            "composants-TOTAL_FORMS": "0", "composants-INITIAL_FORMS": "0",
+            "gamme_etapes-TOTAL_FORMS": "0", "gamme_etapes-INITIAL_FORMS": "0",
+            "fournisseurs-TOTAL_FORMS": "0", "fournisseurs-INITIAL_FORMS": "0",
+            "compte_vente_override-TOTAL_FORMS": "0", "compte_vente_override-INITIAL_FORMS": "0",
+            "compte_achat_override-TOTAL_FORMS": "0", "compte_achat_override-INITIAL_FORMS": "0",
+        }
+        reponse = self.client.post(self.url(self.tole), donnees)
+        self.assertEqual(reponse.status_code, 302)
+        self.tole.refresh_from_db()
+        self.assertEqual(self.tole.libelle, "Tôle modifiée")

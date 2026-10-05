@@ -9,10 +9,11 @@ from django.shortcuts import get_object_or_404
 from django.template.response import TemplateResponse
 from django.urls import path, reverse
 from django.utils import timezone
-from django.utils.html import escape, format_html
+from django.utils.html import escape, format_html, format_html_join
 from django.utils.safestring import mark_safe
 from unfold.decorators import action as unfold_action
 from comptes.exports import ExportCsvMixin
+from comptes.liens import lien_admin
 from comptes.montants import arrondir, pourcent, somme
 from comptes.concurrence import VerrouOptimisteMixin
 from comptes.historique import HistoriqueLectureSeule
@@ -472,7 +473,10 @@ class DevisAdmin(ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin
             else:
                 self.message_user(
                     request,
-                    f"{devis} : commande {commande} créée. Ouvrez-la pour créer les ordres de fabrication.",
+                    format_html(
+                        "{} : commande {} créée. Cliquez sur la commande pour l'ouvrir et créer les ordres de fabrication.",
+                        devis, lien_admin(commande),
+                    ),
                     level=messages.SUCCESS,
                 )
 
@@ -503,8 +507,11 @@ class DevisAdmin(ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin
                 return HttpResponseRedirect(retour)
             self.message_user(
                 request,
-                f"Indice {revision.indice} créé en brouillon ({revision}) ; {devis} (indice {devis.indice}) est "
-                "marqué « remplacé ». Modifiez-le, chiffrez-le puis validez-le.",
+                format_html(
+                    "Indice {} créé en brouillon ({}) ; {} (indice {}) est marqué « remplacé ». "
+                    "Modifiez-le, chiffrez-le puis validez-le.",
+                    revision.indice, lien_admin(revision), lien_admin(devis), devis.indice,
+                ),
                 level=messages.SUCCESS,
             )
             return HttpResponseRedirect(reverse("admin:chiffrage_devis_change", args=[revision.pk]))
@@ -814,7 +821,7 @@ class CommandeAdmin(ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMi
                     "{} ordre(s) de fabrication créé(s) : {}. <a href='{}?ofs={}' target='_blank' class='underline font-semibold'>"
                     "Imprimer les {} fiche(s) de fabrication (PDF)</a>",
                     len(ordres),
-                    ", ".join(o.numero for o in ordres),
+                    format_html_join(", ", "{}", ((lien_admin(o),) for o in ordres)),
                     reverse("admin:chiffrage_commande_action_fiches_fabrication_pdf", args=[commande.pk]),
                     ",".join(o.numero for o in ordres),
                     len(ordres),
@@ -871,7 +878,9 @@ class CommandeAdmin(ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMi
                 continue
             nb_of = commande.ordres_fabrication.count()
             suite = f" {nb_of} ordre(s) de fabrication restent à arrêter dans le planning." if nb_of else ""
-            self.message_user(request, f"{commande} : commande annulée.{suite}", level=messages.SUCCESS)
+            self.message_user(
+                request, format_html("{} : commande annulée.{}", lien_admin(commande), suite), level=messages.SUCCESS
+            )
 
     def save_formset(self, request, form, formset, change):
         if formset.model is not CommandeLigne:
@@ -936,7 +945,9 @@ class CommandeLigneAdmin(ExportCsvMixin, ModelAdmin):
             except ChiffrageError as exc:
                 self.message_user(request, f"{ligne} : {exc}", level=messages.ERROR)
             else:
-                self.message_user(request, f"{ligne} : ordre de fabrication {of} créé.", level=messages.SUCCESS)
+                self.message_user(
+                    request, format_html("{} : ordre de fabrication {} créé.", ligne, lien_admin(of)), level=messages.SUCCESS
+                )
 
     def save_model(self, request, obj, form, change):
         ancienne_quantite = None
@@ -1128,7 +1139,11 @@ class LivraisonAdmin(ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeM
             except LivraisonError as exc:
                 self.message_user(request, str(exc), level=messages.ERROR)
             else:
-                self.message_user(request, f"Livraison {livraison} annulée : quantités livrées et stock rétablis.", level=messages.SUCCESS)
+                self.message_user(
+                    request,
+                    format_html("Livraison {} annulée : quantités livrées et stock rétablis.", lien_admin(livraison)),
+                    level=messages.SUCCESS,
+                )
             return HttpResponseRedirect(retour)
         return TemplateResponse(
             request,
@@ -1306,7 +1321,7 @@ class OrdreFabricationAdmin(ExportCsvMixin, CodificationInitialeMixin, ModelAdmi
             reussite = resynchroniser(of)
             niveau = messages.SUCCESS if reussite else messages.WARNING
             statut = "synchronisé" if reussite else f"toujours en échec ({of.statut_synchro})"
-            self.message_user(request, f"{of} : {statut}.", level=niveau)
+            self.message_user(request, format_html("{} : {}.", lien_admin(of), statut), level=niveau)
 
 
 @admin.register(OperationOF)

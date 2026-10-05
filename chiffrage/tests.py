@@ -3273,7 +3273,8 @@ class CommandeLigneAuditAdminTests(TestCase):
             follow=True,
         )
         self.assertEqual(response.status_code, 200)
-        self.assertTrue(OrdreFabrication.objects.filter(commande=self.commande, article=self.article_fabrique).exists())
+        of = OrdreFabrication.objects.get(commande=self.commande, article=self.article_fabrique)
+        self.assertContains(response, f'href="/admin/chiffrage/ordrefabrication/{of.pk}/change/"')  # le bandeau ouvre l'OF
 
     def test_action_lancer_en_production_erreur_affichee(self):
         ligne = CommandeLigne.objects.create(
@@ -3516,6 +3517,8 @@ class LancementEnProductionRobusteTests(_FixtureModuleA, TestCase):
         premier = self.client.post("/admin/chiffrage/devis/", donnees, follow=True)
         second = self.client.post("/admin/chiffrage/devis/", donnees, follow=True)
         self.assertEqual(premier.status_code, 200)
+        commande = Commande.objects.get(devis=self.devis)
+        self.assertContains(premier, f'href="/admin/chiffrage/commande/{commande.pk}/change/"')  # le bandeau ouvre la commande
         self.assertEqual(second.status_code, 200)
         self.assertContains(second, "déjà été lancé")
         self.assertEqual(Commande.objects.filter(devis=self.devis).count(), 1)
@@ -4304,6 +4307,7 @@ class CycleDeVieDevisTests(_FixtureModuleA, TestCase):
         self.assertFalse(Devis.objects.filter(pk="DEV-REC-A-B").exists())
         r = self.client.post(url, {"motif": "Remise de 5 %"}, follow=True)
         self.assertContains(r, "Indice B créé")
+        self.assertContains(r, f'href="/admin/chiffrage/devis/{self.devis.pk}/change/"')  # lien vers l'indice remplacé
         self.assertTrue(Devis.objects.filter(pk="DEV-REC-A-B", motif_revision="Remise de 5 %").exists())
 
     def test_action_admin_reviser_sans_motif_refusee(self):
@@ -4681,6 +4685,8 @@ class OrdresDepuisCommandeTests(_FixtureOrdresCommande, TestCase):
         self.assertEqual(OrdreFabrication.objects.count(), 0)
         reponse = self.client.post(url, {"regrouper": "1"}, follow=True)
         self.assertContains(reponse, "2 ordre(s) de fabrication créé(s)")
+        for of in self.commande.ordres_fabrication.all():
+            self.assertContains(reponse, f'href="/admin/chiffrage/ordrefabrication/{of.pk}/change/"')
         self.assertEqual(self.commande.ordres_fabrication.count(), 2)
         # Plus rien à créer : la page l'explique au lieu de proposer un bouton.
         self.assertContains(self.client.get(url), "rien à créer")
