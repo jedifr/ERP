@@ -1,0 +1,53 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<div class="max-w-4xl">
+  {% if lignes %}
+    <p class="mb-4">
+      Fichier lu. Vérifiez la <strong>matière de l'ERP</strong> qui correspond à chaque matière du logiciel (une matière absente
+      de l'ERP est créée ; laissez vide pour ne pas importer). Chaque ligne crée un paramètre de coupe par épaisseur.
+    </p>
+    <form method="post">
+      {% csrf_token %}
+      <table class="w-full text-left mb-4">
+        <thead><tr><th class="py-2">Matière du logiciel</th><th>Épaisseurs</th><th>Usinabilité</th><th>Matière de l'ERP</th></tr></thead>
+        <tbody>
+        {% for l in lignes %}
+          <tr class="border-t border-base-200">
+            <td class="py-2 font-semibold">{{ l.nom }}</td>
+            <td>{{ l.nombre }} ({{ l.mini|floatformat:"-1" }} → {{ l.maxi|floatformat:"-1" }} mm)</td>
+            <td>{{ l.usinabilite|floatformat:"-1" }}</td>
+            <td><input type="text" name="matiere__{{ l.nom }}" value="{{ l.francais }}" class="border border-base-300 rounded-default px-2 py-1"></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      <label class="block mb-3"><span class="font-semibold">Poste de travail (machine de coupe)</span><br>
+        <select name="poste" class="border border-base-300 rounded-default px-2 py-1">
+          <option value="">— aucun (à renseigner plus tard) —</option>
+          {% for p in postes %}<option value="{{ p.pk }}">{{ p.nom }}</option>{% endfor %}
+        </select>
+      </label>
+      <label class="flex items-center gap-2 mb-4"><input type="checkbox" name="remplacer" checked> Remplacer les paramètres déjà <em>calculés</em> (les paramètres relevés sur la machine ne sont jamais touchés)</label>
+      <div class="flex gap-3">
+        <button type="submit" name="confirmer" value="1" class="bg-primary-600 text-white font-semibold px-4 py-2 rounded-default">Importer</button>
+        <a href="{{ retour }}" class="border border-base-300 px-4 py-2 rounded-default">Annuler</a>
+      </div>
+    </form>
+  {% else %}
+    <p class="mb-4">
+      Importe d'un coup toutes les matières et épaisseurs du <strong>materials.lua</strong> du logiciel de la machine
+      (dossier <code>IGEMS_R9\shared\Material</code>) : usinabilité, perçage, marquage, percement, chevauchement,
+      intervalle entre pièces, paliers et coefficients. Les vitesses du jet d'eau ne sont pas dans ce fichier : elles
+      sont calculées par notre modèle, calé sur des temps de découpe réels.
+    </p>
+    <form method="post" enctype="multipart/form-data">
+      {% csrf_token %}
+      <input type="file" name="fichier" accept=".lua,.txt" class="mb-4 block">
+      <div class="flex gap-3">
+        <button type="submit" class="bg-primary-600 text-white font-semibold px-4 py-2 rounded-default">Lire le fichier</button>
+        <a href="{{ retour }}" class="border border-base-300 px-4 py-2 rounded-default">Annuler</a>
+      </div>
+    </form>
+  {% endif %}
+</div>
+{% endblock %}

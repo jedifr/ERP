@@ -2,10 +2,10 @@
 épaisseurs que l'on n'a pas relevées dans le logiciel de la machine.
 
 **Vitesse élevée** : V = K × g(qualité) × U^a / e^b, U = usinabilité, e = épaisseur (mm). Les trois tables relevées
-(acier 10 mm U = 87, cuivre 8 mm U = 110, aluminium 20 mm U = 213 ; 15 valeurs) suivent toutes la même courbe
-g(qualité) et se retrouvent à 0,1 % près avec K = 24,4, a = 1,173, b = 1,126 (l'exposant de l'épaisseur est proche
-de celui de la littérature sur le jet d'eau abrasif). Les exposants ne reposent que sur ces trois points : à
-confirmer au fur et à mesure que d'autres tables sont relevées.
+(acier 10 mm U = 87, cuivre 8 mm U = 110, aluminium 20 mm U = 220 ; 15 valeurs) suivent toutes la même courbe
+g(qualité). Les trois constantes (K, a, b) et le rayon de pleine vitesse sont **calés sur cinq temps de découpe
+réels** (même pièce de 4,5 m de contour découpée en aluminium 10 et 30 mm, inox 20 mm, cuivre 15 mm et acier 5 mm,
+qualité 3) : le modèle les retrouve à 1-3 % près, sauf l'aluminium 30 mm (− 6 %).
 
 **Vitesse basse** : rapport vitesse basse / vitesse élevée relevé pour 8, 10 et 20 mm, interpolé sur le logarithme
 de l'épaisseur (et prolongé tel quel au-delà) — approximatif : les vitesses basses du logiciel dépendent d'autres
@@ -16,9 +16,10 @@ Les paramètres produits par ces formules sont marqués « calculé » : ils ne 
 
 import math
 
-K_VITESSE = 24.399
-EXPOSANT_USINABILITE = 1.1728
-EXPOSANT_EPAISSEUR = 1.1259
+K_VITESSE = 29.727
+EXPOSANT_USINABILITE = 1.1571
+EXPOSANT_EPAISSEUR = 1.1812
+RAYON_PLEINE_VITESSE_MM = 18.3
 QUALITES = (1.5, 2.0, 3.0, 4.0, 5.0)
 FACTEUR_QUALITE = {1.5: 1.0, 2.0: 0.7184, 3.0: 0.4507, 4.0: 0.3238, 5.0: 0.2505}
 # Vitesse basse / vitesse élevée, par épaisseur relevée (mm), pour chaque qualité (1,5 → 5).

@@ -24,6 +24,7 @@ from .models import (
 )
 from .services.apercu_svg import generer_svg_feuille, generer_svg_piece
 from .services.gamme import alimenter_gamme
+from .services.lua_materiaux import NOMS_FRANCAIS, ErreurLua, importer_materiaux, lire_materials_lua, resume
 from .services.parametres import ErreurParametre, calculer_vitesses, dupliquer_vers_epaisseurs
 from .services.temps import ErreurTemps, estimer_temps_decoupe
 
@@ -465,7 +466,49 @@ class ParametreCoupeAdmin(ModelAdmin):
 
     list_display = ["matiere", "epaisseur_mm", "procede", "poste", "origine", "usinabilite", "intervalle_pieces_mm", "coefficient_ajustement"]
     actions = ["action_calculer_vitesses"]
+    actions_list = ["action_importer_lua"]
     actions_detail = ["action_dupliquer_epaisseurs"]
+
+    @unfold_action(description="Importer materials.lua (IGEMS)", url_path="importer-lua", icon="upload_file")
+    def action_importer_lua(self, request):
+        """Import en masse du fichier materials.lua du logiciel de la machine : téléversement, contrôle de la
+        correspondance des matières, puis création des paramètres de coupe (toutes les matières et épaisseurs)."""
+        from technique.models import PosteTravail
+
+        if not request.user.has_perm("decoupe.add_parametrecoupe"):
+            raise PermissionDenied
+        liste = reverse("admin:decoupe_parametrecoupe_changelist")
+        contexte = {**self.admin_site.each_context(request), "title": "Importer materials.lua", "retour": liste,
+                    "postes": PosteTravail.objects.order_by("nom")}
+        if request.method == "POST" and request.FILES.get("fichier"):
+            try:
+                entrees = lire_materials_lua(request.FILES["fichier"].read().decode("utf-8", errors="replace"))
+            except ErreurLua as exc:
+                self.message_user(request, str(exc), level=messages.ERROR)
+                return redirect(request.path)
+            request.session["import_lua"] = entrees
+            contexte["lignes"] = [
+                {"nom": nom, "nombre": n, "usinabilite": u, "mini": mini, "maxi": maxi, "francais": NOMS_FRANCAIS.get(nom, nom)}
+                for nom, n, u, mini, maxi in resume(entrees)
+            ]
+            return TemplateResponse(request, "admin/decoupe/importer_lua.html", contexte)
+        if request.method == "POST" and "confirmer" in request.POST:
+            entrees = request.session.pop("import_lua", None)
+            if not entrees:
+                self.message_user(request, "Le fichier n'est plus en mémoire : téléversez-le à nouveau.", level=messages.ERROR)
+                return redirect(request.path)
+            correspondance = {nom: request.POST.get(f"matiere__{nom}", "") for nom in {e["nom"] for e in entrees}}
+            poste = PosteTravail.objects.filter(pk=request.POST.get("poste")).first()
+            stats = importer_materiaux(entrees, correspondance, poste=poste, remplacer_calcules="remplacer" in request.POST)
+            self.message_user(
+                request,
+                f"Import terminé : {stats['crees']} paramètre(s) créé(s), {stats['mis_a_jour']} mis à jour, {stats['proteges']} relevé(s) "
+                f"machine conservé(s), {stats['ignores']} ignoré(s) ; {stats['matieres_creees']} matière(s) créée(s). "
+                "Vitesses calculées (estimation calée sur vos temps réels).",
+                level=messages.SUCCESS,
+            )
+            return redirect(liste)
+        return TemplateResponse(request, "admin/decoupe/importer_lua.html", contexte)
     list_filter = ["procede", "origine", "matiere"]
     search_fields = ["matiere__nom"]
     autocomplete_fields = ["matiere", "poste"]

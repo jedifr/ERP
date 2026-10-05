@@ -435,7 +435,7 @@ class ParametreCoupe(models.Model):
 
     # Réglages de calcul
     rayon_pleine_vitesse_mm = models.FloatField(
-        "rayon de pleine vitesse (mm)", default=25,
+        "rayon de pleine vitesse (mm)", default=18.3,
         help_text="Un arc de rayon supérieur est coupé à la vitesse élevée ; en dessous la vitesse décroît jusqu'à la vitesse basse.",
     )
     seuil_angle_coin_deg = models.FloatField("angle d'un coin (°)", default=30, help_text="Au-delà de ce changement de direction, c'est un coin (ralentissement)")
