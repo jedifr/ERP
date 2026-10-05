@@ -2941,3 +2941,7 @@ La génération de l'écriture d'une **facture fournisseur** gère l'autoliquida
 - **Comptes** : 445663 et 445200, créés au premier usage ; modifiables dans *Paramètres comptables* (section Achats).
 - **Export comptable** : les trois mouvements sont rangés charges, TVA, tiers ; l'échéance et le règlement bancaire portent le **HT** seul, puisque le fournisseur n'a pas facturé de TVA. La liste des factures fournisseur affiche la date de règlement et se filtre sur l'autoliquidation.
 - Si une facture fournisseur a déjà son écriture, elle n'est pas régénérée : pour appliquer l'autoliquidation à une facture déjà comptabilisée, supprimez l'écriture puis régénérez-la.
+
+## Séparateurs du menu « + Nouveau »
+
+Les titres de groupe du menu (Ventes, Achats, Données) sont maintenant des bandeaux explicites : fond teinté, liseré orange à gauche, texte plus grand et en gras, avec un espacement net entre les groupes.
