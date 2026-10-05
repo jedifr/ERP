@@ -563,6 +563,7 @@ class ParametreCoupeAdmin(ModelAdmin):
             "vitesse_marquage_mm_min", "temporisation_marquage_s", "percement_lineaire_mm", "chevauchement_mm", "intervalle_pieces_mm",
         ]}),
         ("Réglages du calcul", {"fields": [
-            "rayon_pleine_vitesse_coef", "seuil_angle_coin_deg", "facteur_percage", "deplacement_par_contour_s", "coefficient_ajustement",
+            "rayon_pleine_vitesse_coef", "facteur_vitesse_courbe", "seuil_angle_coin_deg", "facteur_percage", "deplacement_par_contour_s",
+            "coefficient_ajustement",
         ]}),
     ]

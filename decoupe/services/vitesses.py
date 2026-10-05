@@ -3,11 +3,11 @@
 
 **Vitesse élevée** : V = K × g(qualité) × U^a / e^b, U = usinabilité, e = épaisseur (mm). Les trois tables relevées
 (acier 10 mm U = 87, cuivre 8 mm U = 110, aluminium 20 mm U = 220 ; 15 valeurs) suivent toutes la même courbe
-g(qualité). Les constantes (K, a, b), le rayon de pleine vitesse (proportionnel à l'épaisseur) et le facteur de
-perçage sont **calés sur huit temps de découpe réels** (qualité 3) : une pièce arrondie de 4,5 m de contour en
-aluminium 10 et 30 mm, inox 20 mm, cuivre 15 mm et acier 5 mm, et une plaque de 1,1 m de coupe, surtout en lignes
-droites, en acier 25 et 35 mm et en aluminium 50 mm (dont la décomposition donnée par le logiciel). Le modèle les
-retrouve à moins de 5 % près.
+g(qualité). Les constantes (K, a, b), le rayon de pleine vitesse (proportionnel à l'épaisseur), le facteur de vitesse
+en courbe et le facteur de perçage sont **calés sur neuf temps de découpe réels** (qualité 3) : une pièce arrondie de
+4,5 m de contour en aluminium 10 et 30 mm, inox 20 mm, cuivre 15 mm et acier 5 mm ; une plaque de 1,1 m de coupe,
+surtout en lignes droites, en acier 25 et 35 mm et en aluminium 50 mm ; un plan de 20 m de coupe (54 cercles) en inox
+25 mm. Le modèle les retrouve à 1,2 % près au maximum.
 
 **Vitesse basse** : rapport vitesse basse / vitesse élevée relevé pour 8, 10 et 20 mm, interpolé sur le logarithme
 de l'épaisseur (et prolongé tel quel au-delà) — approximatif : les vitesses basses du logiciel dépendent d'autres
@@ -18,9 +18,9 @@ Les paramètres produits par ces formules sont marqués « calculé » : ils ne 
 
 import math
 
-K_VITESSE = 33.419
-EXPOSANT_USINABILITE = 1.0538
-EXPOSANT_EPAISSEUR = 1.0189
+K_VITESSE = 33.569
+EXPOSANT_USINABILITE = 1.0912
+EXPOSANT_EPAISSEUR = 1.0988
 QUALITES = (1.5, 2.0, 3.0, 4.0, 5.0)
 FACTEUR_QUALITE = {1.5: 1.0, 2.0: 0.7184, 3.0: 0.4507, 4.0: 0.3238, 5.0: 0.2505}
 # Vitesse basse / vitesse élevée, par épaisseur relevée (mm), pour chaque qualité (1,5 → 5).

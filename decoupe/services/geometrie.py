@@ -65,6 +65,9 @@ class GeometrieResultat:
     gravure: list = field(default_factory=list)
     pliage: list = field(default_factory=list)
     longueur_gravure_mm: float = 0.0
+    # Les autres silhouettes disjointes du fichier (plan de découpe de plusieurs pièces) : [{"exterieur", "trous"}],
+    # dans le même repère que la pièce principale. Elles comptent dans le temps de découpe.
+    autres: list = field(default_factory=list)
     calques: list = field(default_factory=list)
     calques_roles: dict = field(default_factory=dict)
 
@@ -173,6 +176,13 @@ def _assembler_silhouette(anneaux):
     return resultat
 
 
+def _autres_silhouettes(geometrie, principal):
+    """Silhouettes disjointes de la principale (coordonnées brutes, à recaler comme la principale)."""
+    if geometrie.geom_type == "Polygon":
+        return []
+    return [g for g in geometrie.geoms if g.area > 1e-6 and g is not principal and not g.equals(principal)]
+
+
 def _extraire_polygone_principal(geometrie, avertissements):
     if geometrie.is_empty:
         raise ErreurImportGeometrie("Aucun contour fermé n'a été trouvé dans le fichier.")
@@ -188,8 +198,8 @@ def _extraire_polygone_principal(geometrie, avertissements):
     ignores = len(polygones) - 1
     if ignores:
         avertissements.append(
-            f"Le fichier contient {ignores} contour(s) fermé(s) supplémentaire(s), disjoints de la "
-            "silhouette principale ; seule la silhouette de plus grande surface a été retenue comme pièce."
+            f"Le fichier contient {ignores} silhouette(s) supplémentaire(s), disjointes de la silhouette principale ; "
+            "la silhouette de plus grande surface sert de pièce (aperçu, imbrication) et toutes comptent dans le temps de découpe."
         )
     return principal
 
@@ -281,6 +291,7 @@ def extraire_geometrie(chemin, format_source, regles_calques=None):
 
     silhouette = _assembler_silhouette(anneaux)
     piece = _extraire_polygone_principal(silhouette, avertissements)
+    autres_brutes = _autres_silhouettes(silhouette, piece)
 
     minx, miny, maxx, maxy = piece.bounds
     piece = translate(piece, xoff=-minx, yoff=-miny)
@@ -288,6 +299,13 @@ def extraire_geometrie(chemin, format_source, regles_calques=None):
     exterior = [(round(x, 3), round(y, 3)) for x, y in piece.exterior.coords]
     holes = [[(round(x, 3), round(y, 3)) for x, y in interieur.coords] for interieur in piece.interiors]
     perimetre = piece.exterior.length + sum(interieur.length for interieur in piece.interiors)
+    autres = []
+    for g in autres_brutes:
+        g = translate(g, xoff=-minx, yoff=-miny)
+        autres.append({
+            "exterieur": [(round(x, 3), round(y, 3)) for x, y in g.exterior.coords],
+            "trous": [[(round(x, 3), round(y, 3)) for x, y in i.coords] for i in g.interiors],
+        })
 
     return GeometrieResultat(
         exterior=exterior,
@@ -302,4 +320,5 @@ def extraire_geometrie(chemin, format_source, regles_calques=None):
         longueur_gravure_mm=sum(ligne.length for ligne in traits_gravure),
         calques=calques_tries,
         calques_roles=calques_roles,
+        autres=autres,
     )

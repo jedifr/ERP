@@ -80,9 +80,16 @@ def _angle(a, b, c):
     return math.acos(cos)
 
 
+def _vitesses_extremes(vitesse, parametre):
+    """(vitesse élevée, vitesse basse effective) en mm/min : la basse est relevée du facteur de vitesse en courbe."""
+    haute = vitesse.vitesse_haute_mm_min * vitesse.coefficient_haut
+    basse = vitesse.vitesse_basse_mm_min * vitesse.coefficient_bas * parametre.facteur_vitesse_courbe
+    return haute, min(basse, haute)
+
+
 def _vitesse_arc(rayon, vitesse, parametre):
     """Vitesse (mm/min) sur un arc de rayon donné, avec `paliers` crans entre la basse et l'élevée."""
-    haute, basse = vitesse.vitesse_haute_mm_min * vitesse.coefficient_haut, vitesse.vitesse_basse_mm_min * vitesse.coefficient_bas
+    haute, basse = _vitesses_extremes(vitesse, parametre)
     if rayon == math.inf or rayon >= parametre.rayon_pleine_vitesse_mm:
         return haute
     fraction = max(0.0, rayon / parametre.rayon_pleine_vitesse_mm)
@@ -101,8 +108,7 @@ def _temps_contour(points, parametre, vitesse):
     seuil = math.radians(parametre.seuil_angle_coin_deg)
     angles = [_angle(anneau[i - 1], anneau[i], anneau[(i + 1) % n]) for i in range(n)]
     coins = [a >= seuil for a in angles]
-    haute = vitesse.vitesse_haute_mm_min * vitesse.coefficient_haut
-    basse = vitesse.vitesse_basse_mm_min * vitesse.coefficient_bas
+    haute, basse = _vitesses_extremes(vitesse, parametre)
     temps, longueur = 0.0, 0.0
     for i in range(n):
         j = (i + 1) % n
@@ -137,7 +143,7 @@ def _temps_percage(parametre, vitesse):
             parametre.percage_circulaire_hp_tours if mode == parametre.ModePercage.CIRCULAIRE_HP
             else parametre.percage_circulaire_bp_tours
         )
-        basse = vitesse.vitesse_basse_mm_min * vitesse.coefficient_bas
+        basse = _vitesses_extremes(vitesse, parametre)[1]
         duree = tours * math.pi * parametre.diametre_percage_mm / (basse / 60)
     return parametre.temporisation_pointage_s + duree
 
@@ -159,6 +165,8 @@ def estimer_temps_decoupe(piece, qualite=None, parametre=None):
         raise ErreurTemps(f"Pas de vitesses de coupe pour la qualité {qualite:g} dans « {parametre} ».")
 
     contours = [piece.contour_json.get("exterieur") or []] + list(piece.contour_json.get("trous") or [])
+    for autre in piece.contour_json.get("autres") or []:  # plan de découpe : toutes les silhouettes se coupent
+        contours += [autre.get("exterieur") or []] + list(autre.get("trous") or [])
     contours = [c for c in contours if len(c) >= 3]
     coupe_s, longueur, nb_coins = 0.0, 0.0, 0
     for contour in contours:

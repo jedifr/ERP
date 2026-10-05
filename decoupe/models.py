@@ -206,7 +206,7 @@ class PieceDecoupe(models.Model):
         self.largeur_mm = resultat.largeur_mm
         self.hauteur_mm = resultat.hauteur_mm
         self.nb_contours_interieurs = len(resultat.holes)
-        self.contour_json = {"exterieur": resultat.exterior, "trous": resultat.holes}
+        self.contour_json = {"exterieur": resultat.exterior, "trous": resultat.holes, "autres": resultat.autres}
         self.calques_detectes = resultat.calques
         self.a_gravure = bool(resultat.gravure)
         self.gravure_json = {"traits": resultat.gravure}
@@ -435,9 +435,14 @@ class ParametreCoupe(models.Model):
 
     # Réglages de calcul
     rayon_pleine_vitesse_coef = models.FloatField(
-        "rayon de pleine vitesse (× épaisseur)", default=1.98,
+        "rayon de pleine vitesse (× épaisseur)", default=2.227,
         help_text="Un arc dont le rayon dépasse ce multiple de l'épaisseur est coupé à la vitesse élevée ; en dessous la vitesse "
                   "décroît jusqu'à la vitesse basse (le jet se déporte d'autant plus dans les courbes que la tôle est épaisse).",
+    )
+    facteur_vitesse_courbe = models.FloatField(
+        "facteur de vitesse en courbe", default=1.243,
+        help_text="Multiplie la vitesse basse dans les courbes et les coins (le logiciel de la machine ne descend pas aussi bas que la "
+                  "vitesse basse affichée) : calé sur les temps réels.",
     )
     facteur_percage = models.FloatField(
         "facteur de perçage", default=0.5,
