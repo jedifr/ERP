@@ -3,6 +3,8 @@ from django.contrib.admin.views.decorators import staff_member_required
 from django.http import HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.template.response import TemplateResponse
+from django.utils.html import format_html
+from django.utils.safestring import mark_safe
 from django.urls import path, reverse
 from django.views.decorators.http import require_http_methods
 from unfold.admin import ModelAdmin, TabularInline
@@ -134,8 +136,67 @@ class FactureAdmin(ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMix
     actions = ["action_generer_ecriture", "action_relancer"]
     actions_list = ["action_preparer_facture"]
     actions_detail = ["action_creer_avoir"]
-    readonly_fields = ["montants_calcules_display"]
+    readonly_fields = [
+        "montants_calcules_display", "echeance_recap", "ecart_recap", "relances_recap", "avoirs_recap", "ecriture_recap",
+    ]
     inlines = [FactureLigneInline, RelanceFactureInline]
+
+    # Fiche en deux colonnes : saisie à gauche, récapitulatif (échéance, écart, relances, avoirs, écriture) à droite
+    # — voir comptes/static/comptes/fiche_deux_colonnes.css.
+    CHAMPS_RECAPITULATIF = [
+        "echeance_recap", "montants_calcules_display", "ecart_recap", "relances_recap", "avoirs_recap", "ecriture_recap",
+    ]
+
+    def get_fieldsets(self, request, obj=None):
+        saisie = [c for c in self.get_fields(request, obj) if c not in self.CHAMPS_RECAPITULATIF]
+        return [
+            (None, {"fields": saisie, "classes": ["fiche-saisie"]}),
+            ("Récapitulatif", {"fields": self.CHAMPS_RECAPITULATIF, "classes": ["fiche-recap"]}),
+        ]
+
+    @admin.display(description="Échéance")
+    def echeance_recap(self, obj):
+        if obj is None or not obj.pk or not obj.commande_id:
+            return "—"
+        return self.date_echeance_display(obj)
+
+    @admin.display(description="Écart avec les lignes")
+    def ecart_recap(self, obj):
+        if obj is None or not obj.pk:
+            return "—"
+        return self.ecart_display(obj)
+
+    @admin.display(description="Relances de paiement")
+    def relances_recap(self, obj):
+        if obj is None or not obj.pk:
+            return "—"
+        return self.relances_display(obj)
+
+    @admin.display(description="Facture d'origine / avoirs")
+    def avoirs_recap(self, obj):
+        if obj is None or not obj.pk:
+            return "—"
+        liens = []
+        if obj.facture_origine_id:
+            liens.append(format_html(
+                "Avoir sur <a href='{}'>{}</a>", reverse("admin:facturation_facture_change", args=[obj.facture_origine_id]),
+                obj.facture_origine_id,
+            ))
+        for avoir in obj.avoirs.order_by("date_facturation", "numero"):
+            liens.append(format_html(
+                "Avoir <a href='{}'>{}</a> ({} €)", reverse("admin:facturation_facture_change", args=[avoir.pk]),
+                avoir.numero, pourcent(avoir.montant_ht) if avoir.montant_ht is not None else "—",
+            ))
+        return mark_safe("<br>".join(liens)) if liens else "—"
+
+    @admin.display(description="Écriture comptable")
+    def ecriture_recap(self, obj):
+        if obj is None or not obj.pk:
+            return "—"
+        ecriture = getattr(obj, "ecriture_comptable", None) if hasattr(obj, "ecriture_comptable") else None
+        if ecriture is None:
+            return "Pas encore générée"
+        return format_html("<a href='{}'>{}</a>", reverse("admin:comptabilite_ecriturecomptable_change", args=[ecriture.pk]), ecriture)
 
     class Media:
         js = ["facturation/facture_admin.js"]

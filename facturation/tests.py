@@ -1073,3 +1073,34 @@ class MontantsDecimalTests(_FixtureLignes, TestCase):
         taux = TauxTVA(nom="Test", taux=5.5)
         taux.full_clean()
         self.assertEqual(taux.taux, Decimal("5.5"))
+
+
+class FicheFactureDeuxColonnesTests(_FixtureLignes, TestCase):
+    """Fiche facture : saisie à gauche ; échéance, écart, relances, avoirs et écriture à droite."""
+
+    def test_recapitulatif_avec_avoir_et_ecriture(self):
+        from comptabilite.generation import generer_ecriture_facture
+        from comptabilite.pcg import importer_pcg
+
+        facture = self._facturer(6, "FAC-REC", montant_ht=55, montant_ttc=66)
+        page = self.client.get(f"/admin/facturation/facture/{facture.pk}/change/")
+        for attendu in ("fiche-saisie", "fiche-recap", "Récapitulatif", "Échéance", "Écart avec les lignes", "Relances de paiement",
+                        "Écriture comptable", "Pas encore générée", "Montants calculés", 'name="version_verrou"', "-5.00 €"):
+            self.assertContains(page, attendu)
+        importer_pcg()
+        generer_ecriture_facture(facture)
+        page = self.client.get(f"/admin/facturation/facture/{facture.pk}/change/")
+        self.assertNotContains(page, "Pas encore générée")
+        self.assertContains(page, "/admin/comptabilite/ecriturecomptable/")
+        avoir = Facture.objects.create(
+            numero="AV-REC", commande=self.commande, type_document=Facture.TypeDocument.AVOIR, facture_origine=facture,
+            motif="Erreur", montant_ht=Decimal("-10"), montant_ttc=Decimal("-12"), date_facturation=datetime.date(2026, 2, 5),
+        )
+        page = self.client.get(f"/admin/facturation/facture/{facture.pk}/change/")
+        self.assertContains(page, f"/admin/facturation/facture/{avoir.pk}/change/")
+        self.assertContains(self.client.get(f"/admin/facturation/facture/{avoir.pk}/change/"), "Avoir sur")
+
+    def test_formulaire_d_ajout(self):
+        page = self.client.get("/admin/facturation/facture/add/")
+        self.assertEqual(page.status_code, 200)
+        self.assertContains(page, "fiche-recap")
