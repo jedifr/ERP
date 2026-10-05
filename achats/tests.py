@@ -1,4 +1,5 @@
 import datetime
+from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
@@ -853,3 +854,50 @@ class StockOptionnelTests(TestCase):
         titres = [k["title"] for k in dashboard_callback(request=None, context={})["kpis"]]
         self.assertNotIn("Alertes de stock", titres)
         self.assertNotIn("Alertes de stock actives", construire())
+
+
+class FicheCommandeFournisseurDeuxColonnesTests(TestCase):
+    """Fiche commande fournisseur : saisie à gauche ; fournisseur, totaux, reste à recevoir, réceptions et factures à droite."""
+
+    def setUp(self):
+        ReceptionTests.setUp(self)
+        from django.contrib.auth import get_user_model
+
+        self.admin = get_user_model().objects.create_superuser("cf-admin", "c@example.com", "pass-mot-de-passe-2")
+        self.client.force_login(self.admin)
+        self.article.gere_en_stock = False  # réception sans lot : seule la quantité reçue compte
+        self.article.save()
+        self.url = f"/admin/achats/commandefournisseur/{self.commande.pk}/change/"
+
+    def test_recapitulatif_complet(self):
+        from achats.models import FactureFournisseur
+
+        ReceptionLigne.objects.create(reception=self.reception, ligne_commande_fournisseur=self.ligne, quantite_recue=40)
+        FactureFournisseur.objects.create(
+            numero="FF-REC", commande_fournisseur=self.commande, date_facture=datetime.date(2026, 2, 1),
+            montant_ht=Decimal("80"), montant_ttc=Decimal("96"),
+        )
+        Adresse.objects.create(tiers=self.fournisseur, est_facturation=True, adresse="3 zone industrielle", code_postal="38000", ville="Grenoble", est_principale=True)
+        page = self.client.get(self.url)
+        for attendu in ("fiche-saisie", "fiche-recap", "Récapitulatif", "Fournisseur Test", "3 zone industrielle", "38000 Grenoble",
+                        "200,00 €", "TOLE-ACH-01 : 60 sur 100", "REC-001", "FF-REC", "Facturé : 80,00 € HT sur 200,00 € commandés"):
+            self.assertContains(page, attendu)
+        self.assertContains(page, "/admin/achats/reception/REC-001/change/")
+        self.assertContains(page, "/admin/achats/facturefournisseur/FF-REC/change/")
+
+    def test_tout_recu_et_commande_sans_ligne(self):
+        ReceptionLigne.objects.create(reception=self.reception, ligne_commande_fournisseur=self.ligne, quantite_recue=100)
+        self.assertContains(self.client.get(self.url), "Tout est reçu")
+        vide = CommandeFournisseur.objects.create(numero="CF-VIDE", fournisseur=self.fournisseur, date_commande=datetime.date(2026, 1, 1))
+        self.assertContains(self.client.get(f"/admin/achats/commandefournisseur/{vide.pk}/change/"), "Aucune ligne")
+
+    def test_formulaire_d_ajout_et_enregistrement(self):
+        self.assertContains(self.client.get("/admin/achats/commandefournisseur/add/"), "fiche-recap")
+        reponse = self.client.post(
+            self.url,
+            {"numero": "CF-001", "fournisseur": self.fournisseur.pk, "date_commande": "2026-01-01", "statut": "Envoyée",
+             "date_livraison_prevue": "", "lignes-TOTAL_FORMS": "0", "lignes-INITIAL_FORMS": "0"},
+        )
+        self.assertEqual(reponse.status_code, 302, reponse.context["adminform"].form.errors if reponse.context else "")
+        self.commande.refresh_from_db()
+        self.assertEqual(self.commande.statut, "Envoyée")

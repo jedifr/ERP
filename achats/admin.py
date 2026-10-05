@@ -1,11 +1,15 @@
 from django.conf import settings
 from django.contrib import admin, messages
+from django.urls import reverse
+from django.utils.html import escape, format_html
+from django.utils.safestring import mark_safe
 from unfold.admin import ModelAdmin, TabularInline
 
 from codification.mixins import CodificationInitialeMixin
 from codification.models import RegleCodification
 
 from comptes.exports import ExportCsvMixin
+from comptes.montants import arrondir, somme
 from .generation import GenerationEcritureAchatError, generer_ecriture_achat
 from .models import (
     AchatsError,
@@ -72,6 +76,93 @@ class CommandeFournisseurAdmin(ExportCsvMixin, CodificationInitialeMixin, ModelA
     search_fields = ["numero", "fournisseur__raison_sociale"]
     autocomplete_fields = ["fournisseur"]
     inlines = [LigneCommandeFournisseurInline]
+    readonly_fields = [
+        "fournisseur_recap", "montant_total_ht_display", "montant_total_ttc_display",
+        "reste_a_recevoir_recap", "receptions_recap", "factures_recap",
+    ]
+
+    # Fiche en deux colonnes : saisie à gauche, récapitulatif (fournisseur, totaux, reste à recevoir, réceptions,
+    # factures) à droite — voir comptes/static/comptes/fiche_deux_colonnes.css.
+    CHAMPS_RECAPITULATIF = [
+        "fournisseur_recap", "montant_total_ht_display", "montant_total_ttc_display",
+        "reste_a_recevoir_recap", "receptions_recap", "factures_recap",
+    ]
+
+    def get_fieldsets(self, request, obj=None):
+        saisie = [c for c in self.get_fields(request, obj) if c not in self.CHAMPS_RECAPITULATIF]
+        return [
+            (None, {"fields": saisie, "classes": ["fiche-saisie"]}),
+            ("Récapitulatif", {"fields": self.CHAMPS_RECAPITULATIF, "classes": ["fiche-recap"]}),
+        ]
+
+    @staticmethod
+    def _euros(valeur):
+        return f"{arrondir(valeur):,.2f} €".replace(",", " ").replace(".", ",")
+
+    @staticmethod
+    def _liens(objets, nom_url, texte):
+        liens = [format_html("<a href='{}'>{}</a>", reverse(nom_url, args=[o.pk]), texte(o)) for o in objets]
+        return mark_safe("<br>".join(liens)) if liens else "—"
+
+    @admin.display(description="Fournisseur")
+    def fournisseur_recap(self, obj):
+        if obj is None or not obj.pk or not obj.fournisseur_id:
+            return "—"
+        adresse = obj.fournisseur.adresses.order_by("-est_principale", "id").first()
+        lignes = [format_html("<b>{}</b>", obj.fournisseur.raison_sociale)]
+        if adresse:
+            lignes += [adresse.adresse, f"{adresse.code_postal} {adresse.ville}".strip()]
+        return mark_safe("<br>".join(str(l) if hasattr(l, "__html__") else escape(l) for l in lignes if l))
+
+    @admin.display(description="Total HT")
+    def montant_total_ht_display(self, obj):
+        if obj is None or not obj.pk:
+            return "—"
+        return self._euros(somme(l.montant_ht for l in obj.lignes.all()))
+
+    @admin.display(description="Total TTC")
+    def montant_total_ttc_display(self, obj):
+        if obj is None or not obj.pk:
+            return "—"
+        return self._euros(somme(l.montant_ttc for l in obj.lignes.all()))
+
+    @admin.display(description="Reste à recevoir")
+    def reste_a_recevoir_recap(self, obj):
+        if obj is None or not obj.pk:
+            return "—"
+        lignes = list(obj.lignes.select_related("article", "poste_gestion"))
+        if not lignes:
+            return "Aucune ligne"
+        restantes = [(l, l.quantite_commandee - (l.quantite_recue or 0)) for l in lignes]
+        restantes = [(l, reste) for l, reste in restantes if reste > 0]
+        if not restantes:
+            return "Tout est reçu"
+        return mark_safe("<br>".join(
+            format_html("{} : {} sur {}", str(l.article or l.poste_gestion or l.designation or "?"), f"{reste:g}", f"{l.quantite_commandee:g}")
+            for l, reste in restantes
+        ))
+
+    @admin.display(description="Réceptions")
+    def receptions_recap(self, obj):
+        if obj is None or not obj.pk:
+            return "—"
+        return self._liens(obj.receptions.order_by("date_reception", "numero"), "admin:achats_reception_change",
+                           lambda r: f"{r.numero} — {r.date_reception:%d/%m/%Y}")
+
+    @admin.display(description="Factures fournisseur")
+    def factures_recap(self, obj):
+        if obj is None or not obj.pk:
+            return "—"
+        factures = list(obj.factures.order_by("date_facture", "numero"))
+        if not factures:
+            return "—"
+        total = somme(f.montant_ht for f in factures)
+        liens = self._liens(
+            factures, "admin:achats_facturefournisseur_change",
+            lambda f: f"{f.numero} — {f.date_facture:%d/%m/%Y}" + (f" — {self._euros(f.montant_ht)} HT" if f.montant_ht is not None else ""),
+        )
+        commande_ht = somme(l.montant_ht for l in obj.lignes.all())
+        return mark_safe(f"{liens}<br>" + escape(f"Facturé : {self._euros(total)} HT sur {self._euros(commande_ht)} commandés"))
 
 
 @admin.register(LigneCommandeFournisseur)
