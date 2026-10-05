@@ -4929,3 +4929,37 @@ class AdressesSurTousLesDocumentsDeVenteTests(_FixtureOrdresCommande, TestCase):
         self.assertIn("1 rue des Forges", texte)
         self.assertIn("9 quai du Port", texte)
         self.assertIn("13000 Marseille", texte)
+
+
+class FicheDevisDeuxColonnesTests(TestCase):
+    """Saisie à gauche, récapitulatif (montants, indices) à droite ; le verrou de version reste présent."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        self.admin = get_user_model().objects.create_superuser("dc-admin", "d@example.com", "pass-mot-de-passe-1")
+        self.client.force_login(self.admin)
+        self.tiers = Tiers.objects.create(code="CLI-DC", raison_sociale="Client DC", type_tiers=Tiers.TypeTiers.CLIENT)
+        self.devis = Devis.objects.create(numero="DEV-DC", client=self.tiers, date_creation=datetime.date(2026, 10, 1))
+
+    def test_fieldsets_saisie_et_recapitulatif(self):
+        page = self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/change/")
+        self.assertContains(page, "devis-saisie")
+        self.assertContains(page, "devis-recap")
+        self.assertContains(page, "Récapitulatif")
+        for libelle in ("Montant total HT", "Montant total TTC", "Indices de ce devis"):
+            self.assertContains(page, libelle)
+        self.assertContains(page, 'name="version_verrou"')  # protection contre les écrasements conservée
+
+    def test_formulaire_d_ajout_et_enregistrement_inchanges(self):
+        self.assertContains(self.client.get("/admin/chiffrage/devis/add/"), "devis-recap")
+        reponse = self.client.post(
+            f"/admin/chiffrage/devis/{self.devis.pk}/change/",
+            {"numero": "DEV-DC", "client": self.tiers.pk, "date_creation": "2026-10-01", "statut": "brouillon",
+             "issue": "en_attente", "delai": "3 semaines", "lignes-TOTAL_FORMS": "0", "lignes-INITIAL_FORMS": "0",
+             "version_verrou": ""},
+        )
+        erreurs = reponse.context["adminform"].form.errors if reponse.context else None
+        self.assertEqual(reponse.status_code, 302, erreurs)
+        self.devis.refresh_from_db()
+        self.assertEqual(self.devis.delai, "3 semaines")

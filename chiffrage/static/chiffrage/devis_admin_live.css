@@ -11,3 +11,20 @@
     vertical-align: bottom;
     line-height: 1.2;
 }
+
+/* Fiche devis en deux colonnes : la saisie à gauche, le récapitulatif (montants, indices, changements) à droite,
+   qui reste visible en haut de page au lieu d'être relégué sous la saisie. */
+form > div:has(> fieldset.devis-saisie) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 28rem);
+    column-gap: 1.5rem;
+    row-gap: 1.5rem;
+    align-items: start;
+}
+form > div:has(> fieldset.devis-saisie) > fieldset.devis-saisie { grid-column: 1; grid-row: 1; }
+form > div:has(> fieldset.devis-saisie) > fieldset.devis-recap { grid-column: 2; grid-row: 1; }
+form > div:has(> fieldset.devis-saisie) > :not(fieldset.devis-saisie):not(fieldset.devis-recap) { grid-column: 1 / -1; }
+@media (max-width: 1100px) {
+    form > div:has(> fieldset.devis-saisie) { grid-template-columns: minmax(0, 1fr); }
+    form > div:has(> fieldset.devis-saisie) > fieldset.devis-recap { grid-column: 1; grid-row: auto; }
+}

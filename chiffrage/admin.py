@@ -297,6 +297,19 @@ class DevisAdmin(ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin
         js = ["chiffrage/devis_admin_live.js", "chiffrage/devisligne_reorder.js"]
         css = {"all": ["chiffrage/devis_admin_live.css"]}
 
+    # Fiche en deux colonnes : saisie à gauche, récapitulatif (montants, indices) à droite — voir devis_admin_live.css.
+    CHAMPS_RECAPITULATIF = [
+        "montant_matiere_ht_display", "montant_operations_ht_display", "montant_total_ht_display",
+        "montant_total_ttc_display", "indices_display", "comparaison_display",
+    ]
+
+    def get_fieldsets(self, request, obj=None):
+        saisie = [c for c in self.get_fields(request, obj) if c not in self.CHAMPS_RECAPITULATIF]
+        return [
+            (None, {"fields": saisie, "classes": ["devis-saisie"]}),
+            ("Récapitulatif", {"fields": self.CHAMPS_RECAPITULATIF, "classes": ["devis-recap"]}),
+        ]
+
     def get_queryset(self, request):
         return super().get_queryset(request).prefetch_related("lignes__operations", "lignes__taux_tva")
 

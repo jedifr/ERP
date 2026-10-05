@@ -2813,3 +2813,7 @@ Le menu suit le chemin d'une commande :
 ## Adresses et contacts filtrés par client
 
 Sur les fiches **Devis** et **Commande**, les listes « adresse de facturation », « adresse de livraison » et « contact » ne proposent que ce qui appartient au **client choisi** (recherche incluse). Changer de client vide ces champs avant de proposer l'adresse principale et le contact du nouveau client, pour ne pas garder par erreur l'adresse de l'ancien. Tant qu'aucun client n'est choisi, la liste reste complète. (Technique : `comptes/static/comptes/filtre_client.js` ajoute le client aux requêtes d'autocomplétion ; `AdresseAdmin` et `ContactAdmin` filtrent côté serveur.)
+
+## Fiche devis en deux colonnes
+
+La fiche d'un devis place la **saisie à gauche** (numéro, client, adresses, contact, dates, statut, réponse du client, marge, délai) et un **récapitulatif à droite** (montants matière, opérations, total HT et TTC, indices et changements entre indices), visible dès l'ouverture sans descendre dans la page. Sous 1100 px de large, le récapitulatif repasse sous la saisie. Le tableau des lignes reste sur toute la largeur. Pour appliquer la même disposition à une autre fiche : fieldsets avec les classes `devis-saisie` / `devis-recap` (voir `DevisAdmin.get_fieldsets`) et les règles de `chiffrage/static/chiffrage/devis_admin_live.css`.
