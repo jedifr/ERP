@@ -4944,15 +4944,15 @@ class FicheDevisDeuxColonnesTests(TestCase):
 
     def test_fieldsets_saisie_et_recapitulatif(self):
         page = self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/change/")
-        self.assertContains(page, "devis-saisie")
-        self.assertContains(page, "devis-recap")
+        self.assertContains(page, "fiche-saisie")
+        self.assertContains(page, "fiche-recap")
         self.assertContains(page, "Récapitulatif")
         for libelle in ("Montant total HT", "Montant total TTC", "Indices de ce devis"):
             self.assertContains(page, libelle)
         self.assertContains(page, 'name="version_verrou"')  # protection contre les écrasements conservée
 
     def test_formulaire_d_ajout_et_enregistrement_inchanges(self):
-        self.assertContains(self.client.get("/admin/chiffrage/devis/add/"), "devis-recap")
+        self.assertContains(self.client.get("/admin/chiffrage/devis/add/"), "fiche-recap")
         reponse = self.client.post(
             f"/admin/chiffrage/devis/{self.devis.pk}/change/",
             {"numero": "DEV-DC", "client": self.tiers.pk, "date_creation": "2026-10-01", "statut": "brouillon",
@@ -4963,3 +4963,34 @@ class FicheDevisDeuxColonnesTests(TestCase):
         self.assertEqual(reponse.status_code, 302, erreurs)
         self.devis.refresh_from_db()
         self.assertEqual(self.devis.delai, "3 semaines")
+
+
+class FicheCommandeDeuxColonnesTests(_FixtureOrdresCommande, TestCase):
+    """Fiche commande : saisie à gauche ; totaux, OF, livraisons et factures à droite."""
+
+    def test_recapitulatif_totaux_et_documents_lies(self):
+        from facturation.models import Facture
+
+        ordres = creer_ordres_fabrication(self.commande)
+        livraison = Livraison.objects.create(numero="BL-REC", commande=self.commande, date_livraison=datetime.date(2026, 10, 5))
+        facture = Facture.objects.create(numero="FAC-REC", commande=self.commande, date_facturation=datetime.date(2026, 10, 6))
+        page = self.client.get(f"/admin/chiffrage/commande/{self.commande.pk}/change/")
+        for attendu in ("fiche-saisie", "fiche-recap", "Récapitulatif", "800,00 €", "960,00 €", "Ordres de fabrication",
+                        "Livraisons", "Factures", "BL-REC", "FAC-REC", ordres[0].numero, 'name="version_verrou"'):
+            self.assertContains(page, attendu)
+        self.assertContains(page, f"/admin/chiffrage/livraison/{livraison.pk}/change/")
+        self.assertContains(page, f"/admin/facturation/facture/{facture.pk}/change/")
+
+    def test_commande_vide_et_formulaire_d_ajout(self):
+        self.assertContains(self.client.get("/admin/chiffrage/commande/add/"), "fiche-recap")
+        vide = Commande.objects.create(
+            numero="CDE-VIDE", client=self.tiers, reference_client="X", date_commande=datetime.date(2026, 10, 1),
+            adresse_facturation=self.commande.adresse_facturation, adresse_livraison=self.commande.adresse_livraison,
+        )
+        page = self.client.get(f"/admin/chiffrage/commande/{vide.pk}/change/")
+        self.assertEqual(page.status_code, 200)
+        self.assertContains(page, "Total HT")
+
+    def test_enregistrement_inchange(self):
+        reponse = self.client.get(f"/admin/chiffrage/commande/{self.commande.pk}/change/")
+        self.assertContains(reponse, 'name="reference_client"')

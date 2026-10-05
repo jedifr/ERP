@@ -377,7 +377,10 @@ NAVIGATION = [
 # https://unfoldadmin.com/docs/configuration/settings/
 
 UNFOLD = {
-    "STYLES": [lambda request: static("comptes/admin_extra.css")],
+    "STYLES": [
+        lambda request: static("comptes/admin_extra.css"),
+        lambda request: static("comptes/fiche_deux_colonnes.css"),
+    ],
     "SCRIPTS": [
         lambda request: static("comptes/anti_double_clic.js"),
         lambda request: static("comptes/filtre_client.js"),

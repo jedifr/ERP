@@ -13,7 +13,7 @@ from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 from unfold.decorators import action as unfold_action
 from comptes.exports import ExportCsvMixin
-from comptes.montants import pourcent
+from comptes.montants import arrondir, pourcent, somme
 from comptes.concurrence import VerrouOptimisteMixin
 from comptes.historique import HistoriqueLectureSeule
 from unfold.admin import ModelAdmin, TabularInline
@@ -297,7 +297,7 @@ class DevisAdmin(ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin
         js = ["chiffrage/devis_admin_live.js", "chiffrage/devisligne_reorder.js"]
         css = {"all": ["chiffrage/devis_admin_live.css"]}
 
-    # Fiche en deux colonnes : saisie à gauche, récapitulatif (montants, indices) à droite — voir devis_admin_live.css.
+    # Fiche en deux colonnes : saisie à gauche, récapitulatif (montants, indices) à droite — voir fiche_deux_colonnes.css.
     CHAMPS_RECAPITULATIF = [
         "montant_matiere_ht_display", "montant_operations_ht_display", "montant_total_ht_display",
         "montant_total_ttc_display", "indices_display", "comparaison_display",
@@ -306,8 +306,8 @@ class DevisAdmin(ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin
     def get_fieldsets(self, request, obj=None):
         saisie = [c for c in self.get_fields(request, obj) if c not in self.CHAMPS_RECAPITULATIF]
         return [
-            (None, {"fields": saisie, "classes": ["devis-saisie"]}),
-            ("Récapitulatif", {"fields": self.CHAMPS_RECAPITULATIF, "classes": ["devis-recap"]}),
+            (None, {"fields": saisie, "classes": ["fiche-saisie"]}),
+            ("Récapitulatif", {"fields": self.CHAMPS_RECAPITULATIF, "classes": ["fiche-recap"]}),
         ]
 
     def get_queryset(self, request):
@@ -345,8 +345,8 @@ class DevisAdmin(ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin
             etat = "remplacé" if v.issue == Devis.Issue.REMPLACE else v.get_issue_display()
             lignes.append(
                 format_html(
-                    "<tr><td class='pr-4'><b>{}</b>{}</td><td class='pr-4'><a href='{}'>{}</a></td><td class='pr-4'>{}</td>"
-                    "<td class='pr-4'>{}</td><td class='pr-4'>{}</td><td>{}</td></tr>",
+                    "<tr><td><b>{}</b>{}</td><td style='white-space:nowrap'><a href='{}'>{}</a></td>"
+                    "<td>{} · {} · {}</td><td>{}</td></tr>",
                     v.indice,
                     " (cet indice)" if v.pk == obj.pk else "",
                     reverse("admin:chiffrage_devis_change", args=[v.pk]),
@@ -358,8 +358,8 @@ class DevisAdmin(ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin
                 )
             )
         return format_html(
-            "<table class='text-sm'><tr class='text-left'><th class='pr-4'>Indice</th><th class='pr-4'>Devis</th>"
-            "<th class='pr-4'>Date</th><th class='pr-4'>Statut</th><th class='pr-4'>Réponse</th><th>Modification</th></tr>{}</table>",
+            "<table class='text-sm'><tr class='text-left'><th>Indice</th><th>Devis</th><th>Date · statut · réponse</th>"
+            "<th>Modification</th></tr>{}</table>",
             mark_safe("".join(lignes)),
         )
 
@@ -661,9 +661,76 @@ class CommandeAdmin(ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMi
     autocomplete_fields = ["devis", "client", "adresse_facturation", "adresse_livraison", "devise"]
     # Le statut ne se saisit pas : « soldée » est déduit des livraisons, « annulée »
     # passe par l'action dédiée (qui refuse une commande déjà livrée).
-    readonly_fields = ["statut"]
+    readonly_fields = [
+        "statut", "montant_total_ht_display", "montant_total_ttc_display",
+        "ordres_fabrication_display", "livraisons_display", "factures_display",
+    ]
     inlines = [CommandeLigneInline]
     actions = ["action_synchroniser_lignes", "action_annuler"]
+
+    # Fiche en deux colonnes : saisie à gauche, récapitulatif (totaux, ordres de fabrication, livraisons, factures)
+    # à droite — voir comptes/static/comptes/fiche_deux_colonnes.css.
+    CHAMPS_RECAPITULATIF = [
+        "montant_total_ht_display", "montant_total_ttc_display",
+        "ordres_fabrication_display", "livraisons_display", "factures_display",
+    ]
+
+    def get_fieldsets(self, request, obj=None):
+        saisie = [c for c in self.get_fields(request, obj) if c not in self.CHAMPS_RECAPITULATIF]
+        return [
+            (None, {"fields": saisie, "classes": ["fiche-saisie"]}),
+            ("Récapitulatif", {"fields": self.CHAMPS_RECAPITULATIF, "classes": ["fiche-recap"]}),
+        ]
+
+    @staticmethod
+    def _montant_commande(obj, champ):
+        if obj is None or not obj.pk:
+            return "—"
+        valeurs = [getattr(l, champ) for l in obj.lignes.all() if getattr(l, champ) is not None]
+        if not valeurs:
+            return "—"
+        return f"{arrondir(somme(valeurs)):,.2f} €".replace(",", " ").replace(".", ",")
+
+    @admin.display(description="Total HT")
+    def montant_total_ht_display(self, obj):
+        return self._montant_commande(obj, "montant_ht")
+
+    @admin.display(description="Total TTC")
+    def montant_total_ttc_display(self, obj):
+        return self._montant_commande(obj, "montant_ttc")
+
+    @staticmethod
+    def _liens(objets, nom_url, texte):
+        liens = [format_html("<a href='{}'>{}</a>", reverse(nom_url, args=[o.pk]), texte(o)) for o in objets]
+        return mark_safe("<br>".join(liens)) if liens else "—"
+
+    @admin.display(description="Ordres de fabrication")
+    def ordres_fabrication_display(self, obj):
+        if obj is None or not obj.pk:
+            return "—"
+        return self._liens(
+            obj.ordres_fabrication.order_by("numero"), "admin:chiffrage_ordrefabrication_change",
+            lambda o: f"{o.numero} — {o.article_id} × {o.quantite:g}"
+            + (f" (livraison {o.date_livraison_prevue:%d/%m/%Y})" if o.date_livraison_prevue else ""),
+        )
+
+    @admin.display(description="Livraisons")
+    def livraisons_display(self, obj):
+        if obj is None or not obj.pk:
+            return "—"
+        return self._liens(
+            obj.livraisons.order_by("date_livraison", "numero"), "admin:chiffrage_livraison_change",
+            lambda l: f"{l.numero} — {l.date_livraison:%d/%m/%Y}" + (" (annulée)" if l.statut == l.Statut.ANNULEE else ""),
+        )
+
+    @admin.display(description="Factures")
+    def factures_display(self, obj):
+        if obj is None or not obj.pk:
+            return "—"
+        return self._liens(
+            obj.factures.order_by("date_facturation", "numero"), "admin:facturation_facture_change",
+            lambda f: f"{f.numero} — {f.date_facturation:%d/%m/%Y}" + (" (avoir)" if f.est_avoir else ""),
+        )
     actions_detail = ["action_creer_ordres", "action_fiches_fabrication_pdf", "action_ar_pdf", "action_bon_preparation_pdf"]
 
     class Media:

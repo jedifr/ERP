@@ -1,0 +1,22 @@
+/* Fiches (devis, commande) en deux colonnes : la saisie à gauche, le récapitulatif (montants, indices, changements) à droite,
+   qui reste visible en haut de page au lieu d'être relégué sous la saisie. */
+form > div:has(> fieldset.fiche-saisie) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 28rem);
+    column-gap: 1.5rem;
+    row-gap: 1.5rem;
+    align-items: start;
+}
+form > div:has(> fieldset.fiche-saisie) > fieldset.fiche-saisie { grid-column: 1; grid-row: 1; }
+form > div:has(> fieldset.fiche-saisie) > fieldset.fiche-recap { grid-column: 2; grid-row: 1; }
+form > div:has(> fieldset.fiche-saisie) > :not(fieldset.fiche-saisie):not(fieldset.fiche-recap) { grid-column: 1 / -1; }
+@media (max-width: 1100px) {
+    form > div:has(> fieldset.fiche-saisie) { grid-template-columns: minmax(0, 1fr); }
+    form > div:has(> fieldset.fiche-saisie) > fieldset.fiche-recap { grid-column: 1; grid-row: auto; }
+}
+
+/* Dans le récapitulatif, un tableau (indices, changements) prend toute la largeur sous son libellé. */
+fieldset.fiche-recap .field-line:has(table) { flex-direction: column !important; align-items: stretch !important; gap: .5rem; }
+fieldset.fiche-recap .field-line:has(table) .readonly { max-width: 100%; overflow-x: auto; }
+fieldset.fiche-recap table { width: 100%; font-size: 12px; }
+fieldset.fiche-recap table th, fieldset.fiche-recap table td { padding: 2px 8px 2px 0; vertical-align: top; }
