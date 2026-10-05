@@ -8,7 +8,8 @@ Modèle (volontairement simple et réglable ; à caler sur les temps réels du l
 - **coins** : à chaque changement de direction brusque (au-delà de `seuil_angle_coin_deg`) la machine ralentit sur
   la distance d'accélération + décélération (A + R) : on compte ce tronçon à la vitesse basse ;
 - **amorce et fermeture** : par contour, le percement linéaire et le chevauchement s'ajoutent, à vitesse basse ;
-- **perçage** : par contour, temporisation de pointage + temps de perçage selon le mode choisi ;
+- **perçage** : par contour, temporisation de pointage + temps de perçage selon le mode choisi, multiplié par un
+  facteur de perçage (calé sur la durée donnée par le logiciel de la machine) ; **déplacements** entre contours ;
 - **marquage** : longueur des tracés de gravure à la vitesse de marquage + temporisation par tracé ;
 - le tout multiplié par `coefficient_ajustement` (le réglage qui permet de caler le calcul sur la machine).
 
@@ -32,6 +33,7 @@ class EstimationTemps:
     longueur_coupe_mm: float
     nb_percages: int
     nb_coins: int
+    deplacements_s: float = 0.0
     parametre: object = None
     avertissements: list = field(default_factory=list)
 
@@ -162,7 +164,8 @@ def estimer_temps_decoupe(piece, qualite=None, parametre=None):
     for contour in contours:
         t, l, c = _temps_contour(contour, parametre, vitesse)
         coupe_s, longueur, nb_coins = coupe_s + t, longueur + l, nb_coins + c
-    percage_s = len(contours) * _temps_percage(parametre, vitesse)
+    percage_s = len(contours) * _temps_percage(parametre, vitesse) * parametre.facteur_percage
+    deplacements_s = len(contours) * parametre.deplacement_par_contour_s
 
     traits = (piece.gravure_json or {}).get("traits") or []
     marquage_s = 0.0
@@ -173,6 +176,6 @@ def estimer_temps_decoupe(piece, qualite=None, parametre=None):
     coefficient = parametre.coefficient_ajustement or 1
     return EstimationTemps(
         coupe_s=coupe_s * coefficient, percage_s=percage_s * coefficient, marquage_s=marquage_s * coefficient,
-        total_s=(coupe_s + percage_s + marquage_s) * coefficient, longueur_coupe_mm=longueur,
+        deplacements_s=deplacements_s * coefficient, total_s=(coupe_s + percage_s + marquage_s + deplacements_s) * coefficient, longueur_coupe_mm=longueur,
         nb_percages=len(contours), nb_coins=nb_coins, parametre=parametre, avertissements=avertissements,
     )

@@ -13,7 +13,7 @@ from django.db import transaction
 from decoupe.models import ParametreCoupe, VitesseCoupe
 from technique.models import Matiere
 
-from .vitesses import QUALITES, RAYON_PLEINE_VITESSE_MM, vitesses_depuis_usinabilite
+from .vitesses import QUALITES, vitesses_depuis_usinabilite
 
 NOMS_FRANCAIS = {
     "Steel": "Acier", "Stainless Steel": "Inox", "Aluminium": "Aluminium", "Copper": "Cuivre", "Brass": "Laiton",
@@ -100,7 +100,7 @@ def importer_materiaux(entrees, correspondance, poste=None, remplacer_calcules=T
             "percage_circulaire_bp_tours": e["circ_bp"], "diametre_percage_mm": e["diametre"],
             "temporisation_pointage_s": e["pointage_s"], "temporisation_marquage_s": e["marquage_s"],
             "vitesse_marquage_mm_min": e["vitesse_marquage"], "percement_lineaire_mm": e["linear"], "chevauchement_mm": e["overcut"],
-            "intervalle_pieces_mm": e["intervalle"], "rayon_pleine_vitesse_mm": RAYON_PLEINE_VITESSE_MM, "origine": "calcule",
+            "intervalle_pieces_mm": e["intervalle"], "origine": "calcule",
         }
         parametre = ParametreCoupe.objects.filter(
             procede=ParametreCoupe.Procede.JET_EAU, matiere=matiere, epaisseur_mm=e["epaisseur"]

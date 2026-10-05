@@ -434,9 +434,17 @@ class ParametreCoupe(models.Model):
     intervalle_pieces_mm = models.FloatField("intervalle entre pièces (mm)", default=4, help_text="Espacement utilisé pour l'imbrication")
 
     # Réglages de calcul
-    rayon_pleine_vitesse_mm = models.FloatField(
-        "rayon de pleine vitesse (mm)", default=18.3,
-        help_text="Un arc de rayon supérieur est coupé à la vitesse élevée ; en dessous la vitesse décroît jusqu'à la vitesse basse.",
+    rayon_pleine_vitesse_coef = models.FloatField(
+        "rayon de pleine vitesse (× épaisseur)", default=1.98,
+        help_text="Un arc dont le rayon dépasse ce multiple de l'épaisseur est coupé à la vitesse élevée ; en dessous la vitesse "
+                  "décroît jusqu'à la vitesse basse (le jet se déporte d'autant plus dans les courbes que la tôle est épaisse).",
+    )
+    facteur_percage = models.FloatField(
+        "facteur de perçage", default=0.5,
+        help_text="Multiplie le temps de perçage calculé (tous les contours ne sont pas percés de la même façon) : calé sur la durée de perçage donnée par le logiciel de la machine.",
+    )
+    deplacement_par_contour_s = models.FloatField(
+        "déplacement entre contours (s)", default=2.75, help_text="Transferts hauts (déplacements à vide) comptés par contour",
     )
     seuil_angle_coin_deg = models.FloatField("angle d'un coin (°)", default=30, help_text="Au-delà de ce changement de direction, c'est un coin (ralentissement)")
     coefficient_ajustement = models.FloatField(
@@ -454,6 +462,10 @@ class ParametreCoupe(models.Model):
 
     def __str__(self):
         return f"{self.matiere} {self.epaisseur_mm:g} mm ({self.get_procede_display()})"
+
+    @property
+    def rayon_pleine_vitesse_mm(self):
+        return self.rayon_pleine_vitesse_coef * self.epaisseur_mm
 
 
 class VitesseCoupe(models.Model):

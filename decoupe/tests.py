@@ -1106,9 +1106,10 @@ class TempsDeDecoupeTests(TestCase):
         e = estimer_temps_decoupe(self.piece)
         coupe = 300 / (154.9 / 60) + 4 * 6 * (1 / (80.7 / 60) - 1 / (154.9 / 60)) + 12 / (80.7 / 60)
         self.assertAlmostEqual(e.coupe_s, coupe, places=3)
-        self.assertAlmostEqual(e.percage_s, 10.5, places=6)  # un contour : pointage + perçage stationnaire
+        self.assertAlmostEqual(e.percage_s, 10.5 * 0.5, places=6)  # un contour : (pointage + perçage stationnaire) × facteur de perçage
+        self.assertAlmostEqual(e.deplacements_s, 2.75, places=6)
         self.assertEqual((e.nb_percages, e.nb_coins), (1, 4))
-        self.assertAlmostEqual(e.total_s, coupe + 10.5, places=3)
+        self.assertAlmostEqual(e.total_s, coupe + 5.25 + 2.75, places=3)
 
     def test_trou_ajoute_un_percage_et_de_la_coupe(self):
         from .services.temps import estimer_temps_decoupe
@@ -1117,7 +1118,7 @@ class TempsDeDecoupeTests(TestCase):
         self.piece.contour_json["trous"] = [[[40, 20], [60, 20], [60, 30], [40, 30]]]
         apres = estimer_temps_decoupe(self.piece)
         self.assertEqual(apres.nb_percages, 2)
-        self.assertGreater(apres.total_s, avant.total_s + 10.5)
+        self.assertGreater(apres.total_s, avant.total_s + 8)  # perçage 5,25 s + déplacement 2,75 s + la coupe du trou
 
     def test_qualite_plus_fine_plus_lente_et_coefficient(self):
         from .services.temps import estimer_temps_decoupe
@@ -1372,6 +1373,8 @@ class ImportMaterialsLuaEtCalibrageTests(TestCase):
     DONNEES = Path(__file__).parent / "tests_data"
     # (nom dans le fichier, épaisseur mm, temps réel en minutes) — pièce « piece_calibrage.dxf », qualité 3
     TEMPS_REELS = [("Aluminium", 30, 46.5), ("Aluminium", 10, 11.75), ("Stainless Steel", 20, 78.0), ("Copper", 15, 39.0), ("Steel", 5, 14.1)]
+    # plaque percée (1101,7 mm de coupe, 4 contours), qualité 3
+    TEMPS_REELS_PLAQUE = [("Steel", 25, 27.75), ("Steel", 35, 43.5), ("Aluminium", 50, 27.75)]
 
     def setUp(self):
         from technique.models import PosteTravail
@@ -1391,8 +1394,8 @@ class ImportMaterialsLuaEtCalibrageTests(TestCase):
         from .services.lua_materiaux import ErreurLua, lire_materials_lua
 
         entrees = lire_materials_lua(self.texte)
-        self.assertEqual(len(entrees), 5)
-        acier = next(e for e in entrees if e["nom"] == "Steel")
+        self.assertEqual(len(entrees), 8)
+        acier = next(e for e in entrees if e["nom"] == "Steel" and e["epaisseur"] == 5)
         self.assertEqual((acier["epaisseur"], acier["usinabilite"], acier["densite"]), (5.0, 87.0, 7.8))
         self.assertEqual((acier["percage_hp_s"], acier["percage_bp_s"], acier["linear"], acier["overcut"], acier["intervalle"]), (5, 10, 1.5, 1.5, 4))
         self.assertEqual(acier["qualites"][2]["paliers"], 2)
@@ -1406,7 +1409,7 @@ class ImportMaterialsLuaEtCalibrageTests(TestCase):
         from .models import ParametreCoupe
 
         _entrees, stats = self.importer()
-        self.assertEqual((stats["crees"], stats["matieres_creees"]), (5, 4))  # aluminium ×2 : une seule matière
+        self.assertEqual((stats["crees"], stats["matieres_creees"]), (8, 4))  # aluminium ×3, acier ×3 : une seule matière chacun
         acier = ParametreCoupe.objects.get(matiere__nom="Acier", epaisseur_mm=5)
         self.assertEqual((acier.origine, acier.poste, acier.usinabilite, acier.percage_stationnaire_hp_s), ("calcule", self.poste, 87.0, 5))
         self.assertEqual(acier.vitesses.count(), 5)
@@ -1415,8 +1418,8 @@ class ImportMaterialsLuaEtCalibrageTests(TestCase):
         self.assertEqual(Matiere.objects.get(nom="Acier").usinabilite, 87.0)
         # un second import met à jour sans doublon
         _entrees, stats = self.importer()
-        self.assertEqual((stats["crees"], stats["mis_a_jour"]), (0, 5))
-        self.assertEqual(ParametreCoupe.objects.count(), 5)
+        self.assertEqual((stats["crees"], stats["mis_a_jour"]), (0, 8))
+        self.assertEqual(ParametreCoupe.objects.count(), 8)
 
     def test_import_ne_touche_pas_aux_releves_machine_et_ignore_les_matieres_non_associees(self):
         from technique.models import Matiere
@@ -1430,7 +1433,20 @@ class ImportMaterialsLuaEtCalibrageTests(TestCase):
         stats = importer_materiaux(entrees, {"Steel": "Acier", "Copper": ""}, poste=self.poste)
         releve.refresh_from_db()
         self.assertEqual((releve.origine, releve.percage_stationnaire_hp_s), ("machine", 99))
-        self.assertEqual((stats["proteges"], stats["ignores"], stats["crees"]), (1, 4, 0))
+        self.assertEqual((stats["proteges"], stats["ignores"], stats["crees"]), (1, 5, 2))  # acier 5 mm relevé protégé ; acier 25 et 35 créés
+
+    def piece_plaque(self):
+        """Plaque 155,5 × 142,4 mm percée d'un polygone et de deux cercles (1101,7 mm de coupe, 4 contours)."""
+        import math
+
+        polygone = [[14.734, 55.469], [14.734, 103.594], [40.0, 103.594], [40.0, 136.078], [69.906, 150.172], [104.625, 147.25],
+                    [123.703, 108.75], [113.219, 66.984], [85.719, 101.359], [73.344, 81.594], [74.031, 56.5]]
+        cercle = lambda cx, cy, r: [[cx + r * math.cos(2 * math.pi * i / 360), cy + r * math.sin(2 * math.pi * i / 360)] for i in range(360)]
+        return PieceDecoupe.objects.create(
+            nom="Plaque", fichier_source="decoupe/sources/plaque.dxf", format_source="dxf", statut=PieceDecoupe.Statut.OK, qualite_coupe=3,
+            contour_json={"exterieur": [[0, 0], [155.543, 0], [155.543, 142.414], [0, 142.414]],
+                          "trous": [polygone, cercle(16.625, 147.422, 5.0), cercle(97.406, 55.469, 10.0)]},
+        )
 
     def test_calage_sur_les_temps_reels(self):
         import tempfile
@@ -1445,19 +1461,37 @@ class ImportMaterialsLuaEtCalibrageTests(TestCase):
 
         self.importer()
         with tempfile.TemporaryDirectory() as media, override_settings(MEDIA_ROOT=media):
-            piece = PieceDecoupe(nom="Calibrage", epaisseur=10, qualite_coupe=3)
-            piece.fichier_source.save("piece_calibrage.dxf", File(open(self.DONNEES / "piece_calibrage.dxf", "rb")), save=False)
-            piece.save()
-            self.assertTrue(piece.importer_geometrie())
-        self.assertEqual(piece.nb_contours_interieurs, 5)
+            arrondie = PieceDecoupe(nom="Calibrage", epaisseur=10, qualite_coupe=3)
+            arrondie.fichier_source.save("piece_calibrage.dxf", File(open(self.DONNEES / "piece_calibrage.dxf", "rb")), save=False)
+            arrondie.save()
+            self.assertTrue(arrondie.importer_geometrie())
+        self.assertEqual(arrondie.nb_contours_interieurs, 5)
+        plaque = self.piece_plaque()
         ecarts = []
-        for nom, epaisseur, reel in self.TEMPS_REELS:
-            piece.matiere = Matiere.objects.get(nom=NOMS_FRANCAIS[nom])
-            piece.epaisseur = epaisseur
-            calcule = estimer_temps_decoupe(piece).total_min
-            ecarts.append(calcule / reel - 1)
-            self.assertAlmostEqual(calcule / reel, 1, delta=0.08, msg=f"{nom} {epaisseur} mm : calculé {calcule:.1f} min, réel {reel} min")
-        self.assertLess(sum(abs(e) for e in ecarts) / len(ecarts), 0.03)  # écart moyen < 3 %
+        for piece, cas in ((arrondie, self.TEMPS_REELS), (plaque, self.TEMPS_REELS_PLAQUE)):
+            for nom, epaisseur, reel in cas:
+                piece.matiere = Matiere.objects.get(nom=NOMS_FRANCAIS[nom])
+                piece.epaisseur = epaisseur
+                calcule = estimer_temps_decoupe(piece).total_min
+                ecarts.append(calcule / reel - 1)
+                self.assertAlmostEqual(calcule / reel, 1, delta=0.08, msg=f"{nom} {epaisseur} mm : calculé {calcule:.1f} min, réel {reel} min")
+        self.assertLess(sum(abs(e) for e in ecarts) / len(ecarts), 0.04)  # écart moyen < 4 % sur les 8 temps réels
+
+    def test_decomposition_du_logiciel_pour_la_plaque_en_alu_50(self):
+        """Le logiciel de la machine donne pour cette plaque : coupe 25 min 43 s, perçage 1 min 44 s, transferts 11 s."""
+        from technique.models import Matiere
+
+        from .services.lua_materiaux import NOMS_FRANCAIS
+        from .services.temps import estimer_temps_decoupe
+
+        self.importer()
+        plaque = self.piece_plaque()
+        plaque.matiere, plaque.epaisseur = Matiere.objects.get(nom=NOMS_FRANCAIS["Aluminium"]), 50
+        e = estimer_temps_decoupe(plaque)
+        self.assertAlmostEqual(e.longueur_coupe_mm - 4 * 30, 1101.7, delta=15)  # 4 contours × (amorce + chevauchement de 15 mm)
+        self.assertAlmostEqual(e.coupe_s, 25 * 60 + 43, delta=0.08 * 1543)
+        self.assertAlmostEqual(e.percage_s, 104, delta=10)
+        self.assertAlmostEqual(e.deplacements_s, 11, delta=0.5)
 
     def test_admin_import_en_deux_temps(self):
         from django.core.files.uploadedfile import SimpleUploadedFile
@@ -1471,8 +1505,8 @@ class ImportMaterialsLuaEtCalibrageTests(TestCase):
             self.assertContains(page, attendu)
         reponse = self.client.post(url, {"confirmer": "1", "poste": self.poste.pk, "remplacer": "on", "matiere__Steel": "Acier",
                                          "matiere__Stainless Steel": "Inox", "matiere__Aluminium": "Aluminium", "matiere__Copper": ""}, follow=True)
-        self.assertContains(reponse, "Import terminé : 4 paramètre(s) créé(s)")
-        self.assertEqual(ParametreCoupe.objects.count(), 4)
+        self.assertContains(reponse, "Import terminé : 7 paramètre(s) créé(s)")
+        self.assertEqual(ParametreCoupe.objects.count(), 7)
         # fichier invalide, ou confirmation sans fichier en mémoire
         invalide = self.client.post(url, {"fichier": SimpleUploadedFile("x.lua", b"rien")}, follow=True)
         self.assertContains(invalide, "materials.lua")

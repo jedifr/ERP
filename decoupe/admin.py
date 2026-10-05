@@ -167,7 +167,7 @@ class PieceDecoupeAdmin(PastillesMixin, ModelAdmin):
             return str(exc)
         texte = (
             f"{e.total_min:.1f} min par pièce — coupe {e.coupe_s / 60:.1f} min ({e.longueur_coupe_mm:.0f} mm, {e.nb_coins} coins), "
-            f"perçage {e.percage_s / 60:.1f} min ({e.nb_percages} perçages), marquage {e.marquage_s / 60:.1f} min. "
+            f"perçage {e.percage_s / 60:.1f} min ({e.nb_percages} contours), déplacements {e.deplacements_s / 60:.1f} min, marquage {e.marquage_s / 60:.1f} min. "
             f"Paramètres : {e.parametre}."
         )
         return format_html("{}{}", texte, mark_safe("".join(format_html("<br><em>{}</em>", a) for a in e.avertissements)))
@@ -562,5 +562,7 @@ class ParametreCoupeAdmin(ModelAdmin):
         ("Marquage, amorce et imbrication", {"fields": [
             "vitesse_marquage_mm_min", "temporisation_marquage_s", "percement_lineaire_mm", "chevauchement_mm", "intervalle_pieces_mm",
         ]}),
-        ("Réglages du calcul", {"fields": ["rayon_pleine_vitesse_mm", "seuil_angle_coin_deg", "coefficient_ajustement"]}),
+        ("Réglages du calcul", {"fields": [
+            "rayon_pleine_vitesse_coef", "seuil_angle_coin_deg", "facteur_percage", "deplacement_par_contour_s", "coefficient_ajustement",
+        ]}),
     ]
