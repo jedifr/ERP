@@ -13,6 +13,7 @@
     </label>
     <label>Marge de bord (mm)<input type="text" inputmode="decimal" data-i="marge" value="{{ b.marge|unlocalize }}"></label>
     <label>Chute récupérable (%)<input type="text" inputmode="decimal" data-i="chute" value="{{ b.chute|unlocalize }}"></label>
+    <label class="dp-case" title="Tient compte du contour réel des pièces (trous compris) et non de leur seul rectangle : moins de feuilles, calcul plus long."><input type="checkbox" data-i="forme" {% if b.forme %}checked{% endif %}> Selon la forme</label>
     {% if b.resultat %}<span class="dp-espacement">Écart entre pièces : <strong>{{ b.resultat.espacement_mm|floatformat:"-1" }} mm</strong></span>{% endif %}
   </div>
   {% if not b.toles %}<p class="dp-aide">Aucune tôle {{ b.groupe.matiere.nom }} de {{ b.groupe.epaisseur|floatformat:"-2" }} mm en base : créez l'article matière première (matière, épaisseur, coût) pour chiffrer la matière.</p>{% endif %}

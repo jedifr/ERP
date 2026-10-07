@@ -180,6 +180,10 @@ class PieceDecoupe(models.Model):
         "chute récupérable (%)", max_digits=5, decimal_places=2, default=0,
         help_text="Part des chutes réutilisée ailleurs : elle n'est pas facturée à la pièce (0 = toutes les chutes sont facturées).",
     )
+    imbrication_forme = models.BooleanField(
+        "imbriquer selon la forme", default=True,
+        help_text="L'imbrication tient compte du contour réel des pièces (trous compris) et non de leur seul rectangle englobant : moins de chutes, calcul un peu plus long.",
+    )
     imbrication_chiffrage = models.BooleanField(
         "chiffrer la matière par imbrication", default=False,
         help_text="La matière d'un article fabriqué lié à cette pièce est calculée par imbrication (surface consommée avec les chutes, selon la quantité) au lieu du rectangle de la nomenclature.",

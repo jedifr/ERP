@@ -86,15 +86,16 @@ def imbriquer_piece(piece, quantite, largeur_mm, longueur_mm):
     if piece.statut != piece.Statut.OK or not piece.contour_json or not piece.surface_mm2:
         raise ErreurMatiere("La géométrie de la pièce n'est pas encore importée.")
     espacement = espacement_pieces_mm(piece)
-    cle = _empreinte(piece, quantite, largeur_mm, longueur_mm, espacement)
+    forme = getattr(piece, "imbrication_forme", False)
+    cle = (_empreinte(piece, quantite, largeur_mm, longueur_mm, espacement), forme)
     if cle not in _CACHE:
         item = ItemANester(
             piece_id=piece.pk or 0, largeur_mm=piece.largeur_mm, hauteur_mm=piece.hauteur_mm, surface_mm2=piece.surface_mm2,
             quantite=int(quantite), pas_rotation_deg=piece.pas_rotation_deg, symetrie_autorisee=piece.symetrie_autorisee,
-            exterieur=(piece.contour_json or {}).get("exterieur") or [],
+            exterieur=(piece.contour_json or {}).get("exterieur") or [], trous=(piece.contour_json or {}).get("trous") or [],
         )
         resultat = imbriquer_meilleur(
-            [item], largeur_mm, longueur_mm, marge_bord_mm=piece.marge_bord_mm, espacement_pieces_mm=espacement
+            [item], largeur_mm, longueur_mm, marge_bord_mm=piece.marge_bord_mm, espacement_pieces_mm=espacement, forme=forme
         )
         if len(_CACHE) >= _CACHE_MAX:
             _CACHE.pop(next(iter(_CACHE)))

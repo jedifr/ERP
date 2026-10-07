@@ -36,6 +36,12 @@ def _nombre(valeur, defaut):
         return float(defaut)
 
 
+def _booleen(valeur, defaut):
+    if valeur is None or valeur == "":
+        return bool(defaut)
+    return str(valeur).lower() in ("1", "true", "on", "oui")
+
+
 def _bloc_groupe(groupe, choix, formats):
     """Contexte d'affichage de l'imbrication d'un groupe (choix : valeurs des commandes du panneau, sinon celles déjà retenues)."""
     pieces = groupe.pieces
@@ -48,7 +54,8 @@ def _bloc_groupe(groupe, choix, formats):
         tole = toles[0]
     marge = _nombre(choix.get("marge"), retenues.marge_bord_mm if retenues else 5)
     taux = max(0.0, min(100.0, _nombre(choix.get("chute"), retenues.taux_chute_recuperable if retenues else 0)))
-    bloc = {"groupe": groupe, "cle": groupe.cle, "toles": toles, "tole": tole, "marge": marge, "chute": taux, "formats": formats, "erreur": "", "avertissement": ""}
+    forme = _booleen(choix.get("forme"), retenues.imbrication_forme if retenues else True)
+    bloc = {"groupe": groupe, "cle": groupe.cle, "toles": toles, "tole": tole, "marge": marge, "chute": taux, "forme": forme, "formats": formats, "erreur": "", "avertissement": ""}
     if not pieces:
         bloc["erreur"] = "Aucune pièce réalisable dans ce groupe."
         return bloc
@@ -58,7 +65,7 @@ def _bloc_groupe(groupe, choix, formats):
         except ErreurMatiere as exc:
             bloc["avertissement"] = f"{exc} Le coût matière n'est pas calculé."
             tole = bloc["tole"] = None
-    lignes, meilleur = imb.comparer_formats(groupe, formats, marge, taux, tole)
+    lignes, meilleur = imb.comparer_formats(groupe, formats, marge, taux, tole, forme=forme)
     if meilleur is None:
         if formats and not imb.formats_compatibles(groupe.procede, formats):
             nom = "le laser" if groupe.procede == "laser" else "le jet d'eau"
@@ -95,7 +102,8 @@ def _bloc_groupe(groupe, choix, formats):
         "feuilles_masquees": max(resultat.nb_feuilles - MAX_FEUILLES_AFFICHEES, 0),
         "legende": [(p, couleurs[p.pk]) for p in pieces],
         "retenu": bool(retenues and retenues.tole_id == (tole.pk if tole else None) and retenues.format_tole_id == format_choisi.pk
-                       and retenues.marge_bord_mm == marge and float(retenues.taux_chute_recuperable) == taux),
+                       and retenues.marge_bord_mm == marge and float(retenues.taux_chute_recuperable) == taux
+                       and retenues.imbrication_forme == forme),
     })
     return bloc
 
@@ -265,9 +273,11 @@ class PiecesDevisMixin:
         tole = next((t for t in imb.toles_possibles(groupe) if str(t.pk) == str(donnees.get("tole"))), None) if donnees.get("tole") else None
         marge = max(0.0, _nombre(donnees.get("marge"), 5))
         taux = max(0.0, min(100.0, _nombre(donnees.get("chute"), 0)))
+        forme = _booleen(donnees.get("forme"), True)
         for piece in groupe.pieces:
             piece.tole, piece.format_tole, piece.marge_bord_mm, piece.taux_chute_recuperable = tole, format_tole, marge, taux
-            piece.save(update_fields=["tole", "format_tole", "marge_bord_mm", "taux_chute_recuperable"])
+            piece.imbrication_forme = forme
+            piece.save(update_fields=["tole", "format_tole", "marge_bord_mm", "taux_chute_recuperable", "imbrication_forme"])
             article = piece.article
             if tole is not None and article is not None and article.taux_marge_defaut is None and tole.taux_marge_defaut is not None:
                 article.taux_marge_defaut = tole.taux_marge_defaut  # l'article fabriqué reprend la marge de sa tôle

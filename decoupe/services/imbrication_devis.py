@@ -93,12 +93,12 @@ def toles_possibles(groupe):
     return exactes or list(candidates.order_by("reference"))
 
 
-def _empreinte(items, largeur, longueur, marge, espacement):
-    brut = json.dumps([[i.piece_id, i.quantite, i.largeur_mm, i.hauteur_mm, i.surface_mm2, i.pas_rotation_deg, i.symetrie_autorisee, i.exterieur] for i in items])
-    return hashlib.sha1(f"{brut}|{largeur}|{longueur}|{marge}|{espacement}".encode()).hexdigest()
+def _empreinte(items, largeur, longueur, marge, espacement, forme):
+    brut = json.dumps([[i.piece_id, i.quantite, i.largeur_mm, i.hauteur_mm, i.surface_mm2, i.pas_rotation_deg, i.symetrie_autorisee, i.exterieur, i.trous] for i in items])
+    return hashlib.sha1(f"{brut}|{largeur}|{longueur}|{marge}|{espacement}|{forme}".encode()).hexdigest()
 
 
-def imbriquer_groupe(groupe, format_tole, marge_mm, taux_chute, tole=None, quantites=None):
+def imbriquer_groupe(groupe, format_tole, marge_mm, taux_chute, tole=None, quantites=None, forme=True):
     """Imbrication du groupe dans `format_tole` ; ErreurMatiere si une pièce ne tient pas. Sans tôle, pas de coût (surfaces seules).
     `quantites` : {id de pièce: quantité} pour calculer avec d'autres quantités que celles des pièces (ligne de devis modifiée)."""
     quantites = quantites or {}
@@ -112,17 +112,18 @@ def imbriquer_groupe(groupe, format_tole, marge_mm, taux_chute, tole=None, quant
         ItemANester(
             piece_id=p.pk, largeur_mm=p.largeur_mm, hauteur_mm=p.hauteur_mm, surface_mm2=p.surface_mm2, quantite=int(quantites.get(p.pk, p.quantite)),
             pas_rotation_deg=p.pas_rotation_deg, symetrie_autorisee=p.symetrie_autorisee, exterieur=(p.contour_json or {}).get("exterieur") or [],
+            trous=(p.contour_json or {}).get("trous") or [],
         )
         for p in groupe.pieces
     ]
-    cle = _empreinte(items, format_tole.largeur_mm, format_tole.longueur_mm, marge_mm, espacement)
+    cle = _empreinte(items, format_tole.largeur_mm, format_tole.longueur_mm, marge_mm, espacement, forme)
     if cle not in _CACHE:
         if len(_CACHE) >= _CACHE_MAX:
             _CACHE.pop(next(iter(_CACHE)))
-        _CACHE[cle] = imbriquer_meilleur(items, format_tole.largeur_mm, format_tole.longueur_mm, marge_bord_mm=marge_mm, espacement_pieces_mm=espacement)
+        _CACHE[cle] = imbriquer_meilleur(items, format_tole.largeur_mm, format_tole.longueur_mm, marge_bord_mm=marge_mm, espacement_pieces_mm=espacement, forme=forme)
     resultat = _CACHE[cle]
     if resultat.pieces_non_placees:
-        noms = ", ".join(sorted({p.nom for p in groupe.pieces if p.pk in {n.piece_id for n in resultat.pieces_non_placees}})) or "une pièce"
+        noms = ", ".join(sorted({p.nom for p in groupe.pieces if p.pk in set(resultat.pieces_non_placees)})) or "une pièce"
         raise ErreurMatiere(f"Ne tient pas sur {format_tole} (marges comprises) : {noms}.")
 
     surface_feuille = format_tole.largeur_mm * format_tole.longueur_mm
@@ -149,13 +150,13 @@ def imbriquer_groupe(groupe, format_tole, marge_mm, taux_chute, tole=None, quant
     )
 
 
-def comparer_formats(groupe, formats, marge_mm, taux_chute, tole=None):
+def comparer_formats(groupe, formats, marge_mm, taux_chute, tole=None, forme=True):
     """[(format, ResultatGroupe | None, message d'erreur)] pour chaque format ; le moins cher (à défaut le moins consommateur) est
     marqué en tête par `meilleur`. Retourne (lignes, format_meilleur)."""
     lignes = []
     for f in formats:
         try:
-            lignes.append((f, imbriquer_groupe(groupe, f, marge_mm, taux_chute, tole), ""))
+            lignes.append((f, imbriquer_groupe(groupe, f, marge_mm, taux_chute, tole, forme=forme), ""))
         except ErreurMatiere as exc:
             lignes.append((f, None, str(exc)))
     valides = [r for _, r, _ in lignes if r is not None]
@@ -192,6 +193,7 @@ def cout_matiere_piece_devis(piece, quantite):
     if groupe is None:
         raise ErreurMatiere("La pièce n'est dans aucun groupe d'imbrication réalisable (matière, épaisseur ou procédé à revoir).")
     resultat = imbriquer_groupe(
-        groupe, piece.format_tole, piece.marge_bord_mm, float(piece.taux_chute_recuperable), piece.tole, quantites={piece.pk: int(quantite)}
+        groupe, piece.format_tole, piece.marge_bord_mm, float(piece.taux_chute_recuperable), piece.tole, quantites={piece.pk: int(quantite)},
+        forme=piece.imbrication_forme,
     )
     return next(r["total"] for r in resultat.par_piece if r["piece"].pk == piece.pk)

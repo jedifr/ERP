@@ -1940,3 +1940,104 @@ class LaserTests(TestCase):
         self.assertEqual(ReglageProcede.objects.get(procede="laser").coefficient_vitesse, 0.8)
         fiche = ParametreCoupe.objects.filter(procede="laser").first()
         self.assertContains(self.client.get(f"/admin/decoupe/parametrecoupe/{fiche.pk}/change/"), "Laser (tableau du constructeur)")
+
+
+class ImbricationSelonLaFormeTests(TestCase):
+    """Imbrication par la forme réelle : cellules élargies, tassement, contrôle exact, repli sur les rectangles."""
+
+    @staticmethod
+    def L(w=440, h=380, t=110):
+        return [(0, 0), (w, 0), (w, t), (t, t), (t, h), (0, h)]
+
+    @staticmethod
+    def item(pid, ext, quantite, trous=(), pas=90):
+        from shapely.geometry import Polygon
+
+        from .services.imbrication import ItemANester
+
+        p = Polygon(ext, trous)
+        x0, y0, x1, y1 = p.bounds
+        return ItemANester(
+            piece_id=pid, largeur_mm=x1 - x0, hauteur_mm=y1 - y0, surface_mm2=p.area, quantite=quantite, pas_rotation_deg=pas,
+            exterieur=list(ext), trous=[list(t) for t in trous],
+        )
+
+    def distance_mini(self, resultat, items, espacement):
+        from shapely.affinity import rotate, translate
+        from shapely.geometry import Polygon
+
+        base = {i.piece_id: Polygon(i.exterieur, i.trous) for i in items}
+        par_feuille = {}
+        for p in resultat.placements:
+            g = rotate(base[p.piece_id], p.rotation_deg, origin=(0, 0)) if p.rotation_deg else base[p.piece_id]
+            g = translate(g, xoff=-g.bounds[0] + p.x_mm, yoff=-g.bounds[1] + p.y_mm)
+            par_feuille.setdefault(p.numero_feuille, []).append(g)
+        mini = float("inf")
+        for liste in par_feuille.values():
+            for a in range(len(liste)):
+                for b in range(a + 1, len(liste)):
+                    mini = min(mini, liste[a].distance(liste[b]))
+        return mini
+
+    def test_les_equerres_s_emboitent(self):
+        from .services.imbrication import imbriquer_meilleur
+        from .services.imbrication_forme import imbriquer_forme
+
+        items = [self.item(1, self.L(), 30)]
+        rect = imbriquer_meilleur(items, 1500, 3000, 5, 10)
+        forme = imbriquer_forme(items, 1500, 3000, 5, 10)
+        self.assertEqual(forme.pieces_non_placees, [])
+        self.assertEqual(len(forme.placements), 30)
+        self.assertLess(forme.nb_feuilles, rect.nb_feuilles)  # 1 feuille au lieu de 2 : les équerres s'emboîtent
+        self.assertGreaterEqual(self.distance_mini(forme, items, 10), 10 - 1e-3)  # l'écart demandé est respecté entre toutes les pièces
+
+    def test_meilleur_prend_la_forme_seulement_si_elle_est_meilleure(self):
+        from .services.imbrication import etendue_derniere_feuille_mm, imbriquer_meilleur
+
+        items = [self.item(1, self.L(), 30)]
+        sans = imbriquer_meilleur(items, 1500, 3000, 5, 10)
+        avec = imbriquer_meilleur(items, 1500, 3000, 5, 10, forme=True)
+        self.assertLess(avec.nb_feuilles, sans.nb_feuilles)
+        carres = [self.item(2, [(0, 0), (100, 0), (100, 100), (0, 100)], 40)]
+        a, b = imbriquer_meilleur(carres, 1500, 3000, 5, 10), imbriquer_meilleur(carres, 1500, 3000, 5, 10, forme=True)
+        self.assertLessEqual((b.nb_feuilles, etendue_derniere_feuille_mm(b, 5)), (a.nb_feuilles, etendue_derniere_feuille_mm(a, 5)) )
+
+    def test_une_petite_piece_se_loge_dans_le_trou_d_une_grande(self):
+        from .services.imbrication import imbriquer_meilleur
+
+        cadre = self.item(1, [(0, 0), (600, 0), (600, 500), (0, 500)], 1, trous=[[(100, 100), (500, 100), (500, 400), (100, 400)]], pas=None)
+        petite = self.item(2, [(0, 0), (120, 0), (120, 120), (0, 120)], 1, pas=None)
+        # feuille juste de la taille du cadre : par les rectangles il faut deux feuilles, par la forme la petite pièce va dans le trou
+        rect = imbriquer_meilleur([cadre, petite], 600, 500, 0, 10)
+        forme = imbriquer_meilleur([cadre, petite], 600, 500, 0, 10, forme=True)
+        self.assertEqual(rect.nb_feuilles, 2)
+        self.assertEqual(forme.nb_feuilles, 1)
+        self.assertGreaterEqual(self.distance_mini(forme, [cadre, petite], 10), 10 - 1e-3)
+
+    def test_sans_contour_ou_hors_zone_repli_sur_les_rectangles(self):
+        from .services.imbrication import ItemANester, imbriquer_meilleur
+        from .services.imbrication_forme import ImbricationFormeImpossible, _controler, imbriquer_forme
+        from shapely.geometry import Polygon
+
+        sans_contour = ItemANester(piece_id=1, largeur_mm=200, hauteur_mm=100, surface_mm2=20000, quantite=3)
+        with self.assertRaises(ImbricationFormeImpossible):
+            imbriquer_forme([sans_contour], 1000, 1000, 5, 10)
+        resultat = imbriquer_meilleur([sans_contour], 1000, 1000, 5, 10, forme=True)  # pas d'erreur : rectangles
+        self.assertEqual((resultat.nb_feuilles, resultat.pieces_non_placees), (1, []))
+        from .services.imbrication import Placement
+
+        carre = Polygon([(0, 0), (100, 0), (100, 100), (0, 100)])
+        hors = [Placement(piece_id=1, numero_feuille=1, x_mm=950, y_mm=10, largeur_placee_mm=100, hauteur_placee_mm=100, rotation_deg=0)]
+        with self.assertRaises(ImbricationFormeImpossible):
+            _controler(hors, {1: carre}, 1000, 1000, 5, 10)
+        proches = [Placement(piece_id=1, numero_feuille=1, x_mm=10, y_mm=10, largeur_placee_mm=100, hauteur_placee_mm=100, rotation_deg=0),
+                   Placement(piece_id=1, numero_feuille=1, x_mm=115, y_mm=10, largeur_placee_mm=100, hauteur_placee_mm=100, rotation_deg=0)]
+        with self.assertRaises(ImbricationFormeImpossible):
+            _controler(proches, {1: carre}, 1000, 1000, 5, 10)  # 5 mm d'écart au lieu de 10
+
+    def test_rotation_interdite_respectee(self):
+        from .services.imbrication_forme import imbriquer_forme
+
+        items = [self.item(1, self.L(), 6, pas=None)]
+        resultat = imbriquer_forme(items, 1500, 3000, 5, 10)
+        self.assertEqual({p.rotation_deg for p in resultat.placements}, {0})

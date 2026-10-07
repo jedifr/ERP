@@ -100,3 +100,4 @@
 .dp-ajouter { padding: .45rem 1.1rem; font-weight: 700; color: white; background: var(--color-primary-600); border: 0; border-radius: 8px; cursor: pointer; }
 .dp-ajouter:hover:not(:disabled) { background: var(--color-primary-700); }
 .dp-ajouter:disabled { opacity: .5; cursor: not-allowed; }
+.dp-case { flex-direction: row !important; align-items: center; gap: .4rem !important; font-size: 13px !important; color: var(--color-base-700) !important; cursor: pointer; }

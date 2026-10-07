@@ -50,6 +50,7 @@ class ItemANester:
     pas_rotation_deg: int | None = None
     symetrie_autorisee: bool = True
     exterieur: list = field(default_factory=list)
+    trous: list = field(default_factory=list)  # utilisés par l'imbrication selon la forme (imbrication_forme.py)
 
     def polygone(self):
         """Contour réel si connu, sinon un rectangle synthétique largeur × hauteur — les deux
@@ -390,13 +391,24 @@ def etendue_derniere_feuille_mm(resultat, marge_bord_mm=0.0):
     return max(p.y_mm + p.hauteur_placee_mm for p in derniere) - min(p.y_mm for p in derniere) + 2 * marge_bord_mm
 
 
-def imbriquer_meilleur(items, largeur_feuille_mm, longueur_feuille_mm, marge_bord_mm=0.0, espacement_pieces_mm=0.0):
+def imbriquer_meilleur(items, largeur_feuille_mm, longueur_feuille_mm, marge_bord_mm=0.0, espacement_pieces_mm=0.0, forme=False):
     """Meilleur placement parmi plusieurs variantes : le moins de feuilles, puis la plus petite étendue utilisée sur la
-    dernière feuille (ce qui reste d'une feuille entamée se récupère). Toujours au moins aussi bon que l'étagère."""
+    dernière feuille (ce qui reste d'une feuille entamée se récupère). Toujours au moins aussi bon que l'étagère.
+    Avec `forme`, l'imbrication selon la forme réelle des pièces (imbrication_forme.py) entre dans la comparaison ; si elle
+    n'est pas possible (pas de contour, contrôle géométrique refusé), les rectangles seuls sont comparés."""
     candidats = [
         _imbriquer_maxrects(items, largeur_feuille_mm, longueur_feuille_mm, marge_bord_mm, espacement_pieces_mm, tri, score)
         for tri in ("aire", "dimension")
         for score in ("bssf", "bl")
     ]
     candidats.insert(0, calculer_imbrication(items, largeur_feuille_mm, longueur_feuille_mm, marge_bord_mm, espacement_pieces_mm))
+    if forme:
+        from .imbrication_forme import ImbricationFormeImpossible, imbriquer_forme
+
+        try:
+            candidat = imbriquer_forme(items, largeur_feuille_mm, longueur_feuille_mm, marge_bord_mm, espacement_pieces_mm)
+            if not candidat.pieces_non_placees:
+                candidats.append(candidat)
+        except ImbricationFormeImpossible:
+            pass
     return min(candidats, key=lambda r: (r.nb_feuilles, etendue_derniere_feuille_mm(r, marge_bord_mm)))

@@ -469,3 +469,39 @@ class CapaciteMachineEtFeuillesTests(TestCase):
         self.assertEqual(html.count("<figure class=\"dp-feuille\">"), total)
         self.assertIn(f"Feuille {total} sur {total}", html)
         self.assertIn("entamée : le reste est une chute récupérable", html)
+
+
+class ImbricationFormeDevisTests(TestCase):
+    """L'imbrication selon la forme est réglable par groupe et reportée sur les pièces retenues."""
+
+    setUp = ImbricationDevisTests.setUp
+    piece = ImbricationDevisTests.piece
+    imbriquer = ImbricationDevisTests.imbriquer
+
+    def test_case_selon_la_forme_et_retenue(self):
+        from decoupe.models import FormatTole
+
+        a = self.piece("a", 4)
+        html = self.imbriquer().json()["html"]
+        self.assertIn("Selon la forme", html)
+        self.assertRegex(html, r'data-i="forme"\s+checked')
+        html = self.imbriquer({"S235|10|laser": {"forme": "0"}}).json()["html"]
+        self.assertNotRegex(html, r'data-i="forme"\s+checked')
+        format_tole = FormatTole.objects.get(largeur_mm=1500, longueur_mm=3000)
+        self.client.post(
+            self.url + "imbrication/retenir/",
+            data=json.dumps({"cle": "S235|10|laser", "tole": self.tole.pk, "format": format_tole.pk, "marge": "5", "chute": "0", "forme": "0"}),
+            content_type="application/json",
+        )
+        a.refresh_from_db()
+        self.assertFalse(a.imbrication_forme)
+        self.assertNotRegex(self.imbriquer().json()["html"], r'data-i="forme"\s+checked')  # valeur retenue
+
+    def test_aucun_format_ne_contient_la_piece(self):
+        from decoupe.models import FormatTole
+
+        self.piece("a", 4)
+        FormatTole.objects.update(actif=False)
+        FormatTole.objects.create(largeur_mm=300, longueur_mm=300, actif=True)
+        html = self.imbriquer().json()["html"]
+        self.assertIn("Ne tient pas sur 300 × 300", html)  # sans exception : la liste des pièces non placées est bien lue

@@ -49,7 +49,7 @@ function demarrer() {
         const choix = {};
         zoneImb.querySelectorAll(".dp-groupe").forEach((groupe) => {
             const c = {};
-            groupe.querySelectorAll("select[data-i], input[data-i]").forEach((el) => { c[el.dataset.i] = el.value; });
+            groupe.querySelectorAll("select[data-i], input[data-i]").forEach((el) => { c[el.dataset.i] = el.type === "checkbox" ? (el.checked ? "1" : "0") : el.value; });
             if (formatsChoisis[groupe.dataset.cle]) c.format = formatsChoisis[groupe.dataset.cle];
             choix[groupe.dataset.cle] = c;
         });
@@ -131,7 +131,7 @@ function demarrer() {
             try {
                 const reponse = await fetch(zoneImb.dataset.urlRetenir, {
                     method: "POST", credentials: "same-origin", headers: { "X-CSRFToken": csrf(), "Content-Type": "application/json" },
-                    body: JSON.stringify({ cle: groupe.dataset.cle, tole: c.tole, format: bouton.dataset.format, marge: c.marge, chute: c.chute }),
+                    body: JSON.stringify({ cle: groupe.dataset.cle, tole: c.tole, format: bouton.dataset.format, marge: c.marge, chute: c.chute, forme: c.forme }),
                 });
                 const json = await reponse.json();
                 if (!reponse.ok) throw new Error(json.detail || "Erreur " + reponse.status);
