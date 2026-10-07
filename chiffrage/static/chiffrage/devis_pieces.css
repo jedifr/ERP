@@ -94,3 +94,7 @@
 .dp-retenir:hover { background: var(--color-primary-700); }
 .dp-exclue { color: #b91c1c; }
 .dp-imbrication.dp-calcul { opacity: .55; }
+.dp-chiffrage { border-color: color-mix(in oklch, var(--color-primary-500) 45%, white); }
+.dp-ajouter { padding: .45rem 1.1rem; font-weight: 700; color: white; background: var(--color-primary-600); border: 0; border-radius: 8px; cursor: pointer; }
+.dp-ajouter:hover:not(:disabled) { background: var(--color-primary-700); }
+.dp-ajouter:disabled { opacity: .5; cursor: not-allowed; }

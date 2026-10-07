@@ -3,6 +3,7 @@
 import datetime
 import json
 import tempfile
+from decimal import Decimal
 from pathlib import Path
 
 from django.contrib.auth import get_user_model
@@ -269,3 +270,127 @@ class ImbricationDevisTests(TestCase):
         page = self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/change/")
         self.assertContains(page, 'id="dp-imbrication"')
         self.assertContains(page, "/pieces/imbrication/retenir/")
+
+
+class ChiffrageDevisTests(TestCase):
+    """Étape 3 : les pièces prêtes deviennent des lignes du devis, chiffrées avec la matière répartie et le temps de coupe."""
+
+    def setUp(self):
+        from commercial.models import TauxTVA
+        from decoupe.models import FormatTole
+        from technique.models import TarifPoste
+
+        self._media = tempfile.TemporaryDirectory()
+        self.addCleanup(self._media.cleanup)
+        surcharge = override_settings(MEDIA_ROOT=self._media.name)
+        surcharge.enable()
+        self.addCleanup(surcharge.disable)
+        self.user = get_user_model().objects.create_superuser("chif-admin", "c@example.com", "pass-mot-de-passe-24")
+        self.client.force_login(self.user)
+        TauxTVA.objects.create(nom="Normal chiffrage pièces", taux=20, est_defaut=True)
+        tiers = Tiers.objects.create(code="CLI-CHF", raison_sociale="Client Chiffrage", type_tiers=Tiers.TypeTiers.CLIENT)
+        self.devis = Devis.objects.create(numero="DEV-CHF-1", client=tiers, date_creation=datetime.date(2026, 10, 7))
+        self.matiere = Matiere.objects.create(nom="S235", densite=7.85)
+        self.tole = Article.objects.create(
+            reference="TOLE-CHF", nature=Article.Nature.MATIERE_PREMIERE, matiere=self.matiere, epaisseur=10,
+            unite_cout=Article.UniteCout.SURFACE, cout_unitaire=60, taux_marge_defaut=25,
+        )
+        self.poste = PosteTravail.objects.create(nom="Laser chiffrage", mode_calcul=PosteTravail.ModeCalcul.HORAIRE)
+        TarifPoste.objects.create(poste=self.poste, cout_horaire=120, date_debut=datetime.date(2020, 1, 1))
+        ParametreCoupe.objects.filter(procede="laser").update(poste=self.poste)
+        self.format = FormatTole.objects.filter(actif=True).order_by("-longueur_mm").last()
+        self.url = f"/admin/chiffrage/devis/{self.devis.pk}/pieces/"
+
+    def piece(self, nom, quantite):
+        r = self.client.post(self.url + "importer/", {"fichier": SimpleUploadedFile(f"{nom}.dxf", (DONNEES / "piece_calibrage.dxf").read_bytes())})
+        piece = PieceDecoupe.objects.get(pk=r.json()["piece_id"])
+        self.client.post(f"{self.url}{piece.pk}/enregistrer/", {"matiere": "S235", "epaisseur": "10", "procede": "laser", "quantite": str(quantite)})
+        return PieceDecoupe.objects.get(pk=piece.pk)
+
+    def retenir(self):
+        return self.client.post(
+            self.url + "imbrication/retenir/",
+            data=json.dumps({"cle": "S235|10|laser", "tole": self.tole.pk, "format": self.format.pk, "marge": "5", "chute": "0"}),
+            content_type="application/json",
+        )
+
+    def ajouter(self):
+        return self.client.post(self.url + "ajouter-au-devis/")
+
+    def test_apercu_avant_et_apres_le_choix_du_format(self):
+        self.piece("a", 4)
+        html = self.client.post(self.url + "imbrication/", data="{}", content_type="application/json").json()["html"]
+        self.assertIn("Chiffrage des pièces", html)
+        self.assertIn("retenez la tôle et le format", html)
+        self.retenir()
+        html = self.client.post(self.url + "imbrication/", data="{}", content_type="application/json").json()["html"]
+        self.assertIn("Prix unitaire HT", html)
+        self.assertNotIn("À compléter", html)
+
+    def test_ajout_chiffre_les_lignes(self):
+        from decoupe.services import imbrication_devis as imb
+        from decoupe.services.devis_pieces import pieces_du_devis
+
+        from .models import DevisLigneOperation
+        from .moteur import cout_matiere_article
+
+        a, b = self.piece("a", 4), self.piece("b", 6)
+        self.retenir()
+        reponse = self.ajouter()
+        self.assertEqual(reponse.status_code, 200, reponse.content)
+        self.assertEqual((reponse.json()["ajoutees"], reponse.json()["mises_a_jour"]), (2, 0))
+        lignes = {l.article_id: l for l in self.devis.lignes.all()}
+        self.assertEqual(sorted(l.quantite for l in lignes.values()), [4.0, 6.0])
+        for piece in (a, b):
+            piece.refresh_from_db()
+            self.assertTrue(piece.imbrication_chiffrage)
+            ligne = lignes[piece.article_id]
+            self.assertGreater(ligne.cout_matiere_calcule, 0)
+            self.assertEqual(float(ligne.taux_marge_matiere_applique), 25.0)  # marge reprise de la tôle
+            self.assertEqual(ligne.prix_vente_matiere, (ligne.cout_matiere_calcule * Decimal("1.25")).quantize(Decimal("0.01")))
+            self.assertGreater(ligne.prix_vente_operations, 0)  # temps de coupe × tarif du poste
+            self.assertTrue(DevisLigneOperation.objects.filter(devis_ligne=ligne, poste=self.poste).exists())
+        # la matière des deux lignes = coût du lot imbriqué (réparti au prorata des surfaces)
+        groupes, _ = imb.grouper(pieces_du_devis(self.devis))
+        lot = imb.imbriquer_groupe(groupes[0], self.format, 5, 0, self.tole)
+        total_lignes = sum(l.cout_matiere_calcule for l in lignes.values())
+        self.assertLess(abs(total_lignes - lot.cout_total), Decimal("0.05"))
+        self.assertEqual(cout_matiere_article(a.article, 4, devis=self.devis), lignes[a.article_id].cout_matiere_calcule)
+
+    def test_ajout_idempotent_et_quantite_mise_a_jour(self):
+        a = self.piece("a", 4)
+        self.retenir()
+        self.ajouter()
+        avant = self.devis.lignes.get().cout_matiere_calcule
+        self.client.post(f"{self.url}{a.pk}/enregistrer/", {"quantite": "8"})
+        reponse = self.ajouter().json()
+        self.assertEqual((reponse["ajoutees"], reponse["mises_a_jour"]), (0, 1))
+        ligne = self.devis.lignes.get()
+        self.assertEqual(ligne.quantite, 8.0)
+        self.assertGreater(ligne.cout_matiere_calcule, avant)
+
+    def test_pas_de_ligne_sans_poste_ni_format(self):
+        self.piece("a", 4)
+        ParametreCoupe.objects.filter(procede="laser").update(poste=None)
+        Gamme.objects.all().delete()
+        reponse = self.ajouter().json()  # format non retenu
+        self.assertEqual((reponse["ajoutees"], reponse["resultats"][0]["etat"]), (0, "ignorée"))
+        self.assertIn("retenez la tôle", reponse["resultats"][0]["raison"])
+        self.retenir()
+        reponse = self.ajouter().json()  # format retenu mais aucun poste : gamme vide, donc pas de prix honnête
+        self.assertEqual(reponse["ajoutees"], 0)
+        self.assertIn("poste de travail", reponse["resultats"][0]["raison"])
+        self.assertFalse(self.devis.lignes.exists())
+
+    def test_devis_valide_et_droits(self):
+        self.piece("a", 4)
+        self.retenir()
+        simple = get_user_model().objects.create_user("simple-chf", "s@example.com", "pass-mot-de-passe-25", is_staff=True)
+        for codename in ("change_devis", "add_piecedecoupe", "add_article"):
+            simple.user_permissions.add(Permission.objects.get(codename=codename))
+        self.client.force_login(simple)
+        self.assertEqual(self.ajouter().status_code, 403)  # ni droit d'ajouter une ligne
+        self.client.force_login(self.user)
+        Devis.objects.filter(pk=self.devis.pk).update(statut=Devis.Statut.VALIDE)
+        self.assertEqual(self.ajouter().status_code, 409)
+        self.assertEqual(self.client.get(self.url + "ajouter-au-devis/").status_code, 405)

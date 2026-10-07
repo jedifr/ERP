@@ -6,6 +6,7 @@ créé à l'import : la référence suit la codification « Article » si elle e
 réglages de la pièce sont recopiés sur l'article (matière, épaisseur) et le temps de coupe alimente sa gamme dès que le
 paramètre de coupe a un poste de travail."""
 
+import datetime
 from pathlib import Path
 
 from django.core.files.base import ContentFile
@@ -103,6 +104,14 @@ def appliquer_reglages(piece, donnees):
     return piece
 
 
+def _date_gamme(piece):
+    """Date de début de la gamme : celle du devis si elle est antérieure à aujourd'hui, pour que le devis chiffre avec sa gamme."""
+    aujourdhui = datetime.date.today()
+    if piece.devis_id and piece.devis.date_creation:
+        return min(aujourdhui, piece.devis.date_creation)
+    return aujourdhui
+
+
 def verdict(piece, alimenter=False):
     """Verdict affichable : {ok, message, temps_min, avertissements, gamme}. Avec `alimenter`, le temps calculé alimente la
     gamme de l'article (jamais lors du simple affichage de la fiche)."""
@@ -117,7 +126,7 @@ def verdict(piece, alimenter=False):
     gamme = ""
     if alimenter and piece.article_id and piece.article.nature == Article.Nature.FABRIQUE:
         try:
-            etape, _ = alimenter_gamme(piece)
+            etape, _ = alimenter_gamme(piece, aujourdhui=_date_gamme(piece))
             gamme = f"Gamme de {piece.article_id} : étape {etape.ordre} sur {etape.poste}."
         except ErreurTemps as exc:
             gamme = str(exc)

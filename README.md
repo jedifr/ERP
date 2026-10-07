@@ -2964,7 +2964,7 @@ La fiche d'un devis (enregistré) a un panneau **« Pièces à découper »** so
 - **Retirer** une pièce supprime aussi son article s'il n'est utilisé nulle part (sinon l'article est conservé et le panneau le dit).
 - Un devis **validé** est verrouillé : les pièces s'affichent mais ne se modifient plus. Il faut les droits d'ajout de pièces à découper et d'articles.
 
-Étape suivante prévue : ajout des pièces aux lignes du devis avec leur prix (étape 3).
+
 
 ## Devis : imbrication des pièces dans la page (étape 2)
 
@@ -2977,3 +2977,14 @@ Sous les pièces, le panneau imbrique **ensemble** toutes les pièces d'une mêm
 - Une pièce **non réalisable** (laser hors base) est exclue de l'imbrication avec sa raison ; une pièce sans matière ou épaisseur est listée « à régler ».
 - **Retenir** enregistre tôle, format, marge et chute récupérable sur les pièces du groupe (il sert à l'étape suivante). Le calcul se met à jour tout seul à chaque import, réglage ou retrait de pièce. Sur un devis validé, le calcul reste consultable mais rien ne se retient.
 - Limite connue : l'imbrication place des rectangles englobants (pas les formes réelles) ; l'aperçu dessine les contours.
+
+## Devis : pièces ajoutées aux lignes avec leur prix (étape 3)
+
+Sous l'imbrication, le tableau **« Chiffrage des pièces »** donne, pour chaque pièce réalisable : temps de coupe par pièce, matière HT, opérations HT, prix unitaire et total HT. Le bouton **« Ajouter au devis »** crée (ou met à jour) la ligne de devis de chaque pièce prête, avec sa quantité, et la chiffre ; la page se recharge pour montrer les lignes et le récapitulatif.
+
+- **Matière** : la ligne reprend la part de matière que lui répartit l'imbrication **retenue** de son groupe, les autres pièces du groupe gardant leur quantité (une pièce n'est pas chiffrée comme si elle était seule sur la tôle). Si la quantité de la ligne change, l'imbrication est recalculée avec la nouvelle quantité.
+- **Opérations** : le temps de coupe de la gamme de l'article, au tarif du poste de travail. Une pièce n'est ajoutée que si le **poste** du paramètre de coupe est renseigné (sinon le prix serait faux) ; elle reste listée avec la raison.
+- **Marges** : l'article fabriqué reprend la marge de sa tôle au moment où l'on retient l'imbrication ; les marges du devis (taux global) et des postes s'appliquent comme sur toute ligne.
+- **Prêt = ** pièce réalisable (laser dans la base), tôle et format retenus, gamme alimentée. Une pièce non prête est ignorée avec sa raison ; les autres sont ajoutées.
+- Seul un devis **en brouillon** reçoit des lignes ; il faut le droit d'ajouter des lignes de devis. Ré-appuyer sur le bouton met à jour les lignes existantes sans doublon.
+- La gamme de l'article est datée du devis (si celui-ci est antérieur à aujourd'hui) pour que le devis la retrouve. Les pièces ajoutées sont marquées « matière par imbrication » : les autres chiffrages de l'article (commande…) retrouvent la tôle imbriquée.

@@ -97,14 +97,16 @@ def _empreinte(items, largeur, longueur, marge, espacement):
     return hashlib.sha1(f"{brut}|{largeur}|{longueur}|{marge}|{espacement}".encode()).hexdigest()
 
 
-def imbriquer_groupe(groupe, format_tole, marge_mm, taux_chute, tole=None):
-    """Imbrication du groupe dans `format_tole` ; ErreurMatiere si une pièce ne tient pas. Sans tôle, pas de coût (surfaces seules)."""
+def imbriquer_groupe(groupe, format_tole, marge_mm, taux_chute, tole=None, quantites=None):
+    """Imbrication du groupe dans `format_tole` ; ErreurMatiere si une pièce ne tient pas. Sans tôle, pas de coût (surfaces seules).
+    `quantites` : {id de pièce: quantité} pour calculer avec d'autres quantités que celles des pièces (ligne de devis modifiée)."""
+    quantites = quantites or {}
     if not groupe.pieces:
         raise ErreurMatiere("Aucune pièce réalisable dans ce groupe.")
     espacement = max(espacement_pieces_mm(p) for p in groupe.pieces)
     items = [
         ItemANester(
-            piece_id=p.pk, largeur_mm=p.largeur_mm, hauteur_mm=p.hauteur_mm, surface_mm2=p.surface_mm2, quantite=int(p.quantite),
+            piece_id=p.pk, largeur_mm=p.largeur_mm, hauteur_mm=p.hauteur_mm, surface_mm2=p.surface_mm2, quantite=int(quantites.get(p.pk, p.quantite)),
             pas_rotation_deg=p.pas_rotation_deg, symetrie_autorisee=p.symetrie_autorisee, exterieur=(p.contour_json or {}).get("exterieur") or [],
         )
         for p in groupe.pieces
@@ -128,12 +130,13 @@ def imbriquer_groupe(groupe, format_tole, marge_mm, taux_chute, tole=None):
     cout_total = arrondir(D(facturee) * prix_au_mm2(tole, format_tole.largeur_mm, format_tole.longueur_mm)) if tole is not None else None
     par_piece = []
     for p in groupe.pieces:
-        surface = p.surface_mm2 * p.quantite
+        quantite = int(quantites.get(p.pk, p.quantite))
+        surface = p.surface_mm2 * quantite
         part = surface / resultat.surface_pieces_mm2 if resultat.surface_pieces_mm2 else 0
         total = arrondir(cout_total * D(part)) if cout_total is not None else None
         par_piece.append({
-            "piece": p, "quantite": p.quantite, "surface_mm2": surface, "total": total,
-            "unitaire": arrondir_prix(total / D(p.quantite)) if total is not None else None,
+            "piece": p, "quantite": quantite, "surface_mm2": surface, "total": total,
+            "unitaire": arrondir_prix(total / D(quantite)) if total is not None else None,
         })
     return ResultatGroupe(
         format=format_tole, nb_feuilles=resultat.nb_feuilles, taux_utilisation_pct=resultat.taux_utilisation_pct,
@@ -160,3 +163,23 @@ def comparer_formats(groupe, formats, marge_mm, taux_chute, tole=None):
 
 def formats_actifs():
     return list(FormatTole.objects.filter(actif=True))
+
+
+def cout_matiere_piece_devis(piece, quantite):
+    """Coût matière (Decimal) de `quantite` exemplaires de `piece` dans l'imbrication retenue de son groupe, les autres pièces du
+    groupe gardant leur quantité : la ligne de devis d'une pièce n'est donc pas chiffrée comme si elle était seule sur la tôle.
+    Lève ErreurMatiere si la pièce n'est pas dans un groupe réalisable ou si tôle et format ne sont pas retenus."""
+    from .devis_pieces import pieces_du_devis
+
+    if piece.devis_id is None:
+        raise ErreurMatiere("La pièce n'est pas rattachée à un devis.")
+    if piece.tole_id is None or piece.format_tole_id is None:
+        raise ErreurMatiere("Retenez la tôle et le format de l'imbrication (panneau « Pièces à découper » du devis).")
+    groupes, _ = grouper(pieces_du_devis(piece.devis))
+    groupe = next((g for g in groupes if any(p.pk == piece.pk for p in g.pieces)), None)
+    if groupe is None:
+        raise ErreurMatiere("La pièce n'est dans aucun groupe d'imbrication réalisable (matière, épaisseur ou procédé à revoir).")
+    resultat = imbriquer_groupe(
+        groupe, piece.format_tole, piece.marge_bord_mm, float(piece.taux_chute_recuperable), piece.tole, quantites={piece.pk: int(quantite)}
+    )
+    return next(r["total"] for r in resultat.par_piece if r["piece"].pk == piece.pk)

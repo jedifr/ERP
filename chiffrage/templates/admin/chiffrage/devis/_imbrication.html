@@ -66,3 +66,33 @@
 </div>
 {% endfor %}
 {% if a_regler %}<p class="dp-aide">À régler avant imbrication : {% for p, raison in a_regler %}<strong>{{ p.nom }}</strong> ({{ raison }}){% if not forloop.last %}, {% endif %}{% endfor %}.</p>{% endif %}
+
+{% if chiffrage %}
+<div class="dp-groupe dp-chiffrage">
+  <h3 class="dp-groupe-titre">Chiffrage des pièces <span class="dp-groupe-nb">matière répartie par l'imbrication retenue + temps de coupe de la gamme</span></h3>
+  <table class="dp-table">
+    <thead><tr><th>Pièce</th><th class="n">Qté</th><th class="n">Temps de coupe / pièce</th><th class="n">Matière HT</th><th class="n">Opérations HT</th><th class="n">Prix unitaire HT</th><th class="n">Total HT</th><th>Dans le devis</th></tr></thead>
+    <tbody>
+    {% for c in chiffrage %}
+      <tr>
+        <td>{{ c.piece.nom }}</td><td class="n">{{ c.piece.quantite }}</td>
+        {% if c.pret %}
+          <td class="n">{{ c.temps_min|floatformat:2 }} min</td>
+          <td class="n">{{ c.prix.prix_vente_matiere|floatformat:2 }} €</td>
+          <td class="n">{{ c.prix.prix_vente_operations|floatformat:2 }} €</td>
+          <td class="n">{{ c.prix.prix_vente_unitaire|floatformat:2 }} €</td>
+          <td class="n"><strong>{{ c.prix.prix_vente_total|floatformat:2 }} €</strong></td>
+        {% else %}
+          <td colspan="5" class="dp-erreur-ligne">À compléter : {{ c.raison }}</td>
+        {% endif %}
+        <td>{% if c.ligne %}<span class="dp-etiquette dp-etiquette-choisi">oui</span>{% else %}<span class="dp-aide">non</span>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <div class="dp-pied">
+    <span class="dp-aide">Les prix reprennent les marges du devis (matière, poste). Une pièce déjà dans le devis voit sa quantité et son prix mis à jour.</span>
+    {% if peut_ajouter %}<button type="button" class="dp-ajouter" {% if not chiffrage|length %}disabled{% endif %}>Ajouter au devis</button>{% endif %}
+  </div>
+</div>
+{% endif %}

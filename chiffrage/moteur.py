@@ -98,14 +98,27 @@ def cout_composant(nomenclature_ligne):
     raise ChiffrageError(f"Unité de coût non définie pour l'article « {article} ».")
 
 
-def cout_matiere_article(article, quantite):
+def cout_matiere_article(article, quantite, devis=None):
     """Coût matière pour `quantite` unités de `article`. Seul un article FABRIQUE
     est décomposé via sa nomenclature ; toute autre nature — matière première,
     ou achetée telle quelle (service acheté, consommable, composant) — est
-    costée directement depuis son cout_unitaire."""
+    costée directement depuis son cout_unitaire. Dans un devis, un article créé depuis une pièce importée du devis est
+    chiffré avec l'imbrication retenue de son groupe de pièces (matière répartie entre les pièces)."""
     if article.nature == Article.Nature.FABRIQUE:
+        from decoupe.models import PieceDecoupe
+        from decoupe.services.imbrication_devis import cout_matiere_piece_devis
         from decoupe.services.matiere import ErreurMatiere, cout_matiere_imbrication, piece_de_chiffrage
 
+        if devis is not None:
+            piece_devis = PieceDecoupe.objects.filter(article=article, devis=devis, tole__isnull=False, format_tole__isnull=False).first()
+            if piece_devis is not None:
+                composants = article.composants.select_related("article_composant").exclude(article_composant=piece_devis.tole)
+                cout_par_unite = sum((cout_composant(n) for n in composants), ZERO)
+                try:
+                    matiere = cout_matiere_piece_devis(piece_devis, max(1, round(quantite)))
+                except ErreurMatiere as exc:
+                    raise ChiffrageError(f"Article « {article} » : matière par imbrication impossible — {exc}") from exc
+                return arrondir_prix(cout_par_unite * D(quantite) + matiere)
         piece = piece_de_chiffrage(article)
         composants = article.composants.select_related("article_composant")
         if piece is not None:
@@ -178,7 +191,7 @@ def calculer_ligne(devis, ligne):
     la première ligne en erreur. Utilisé isolément par le recalcul/aperçu en
     direct d'une ligne, pour qu'une ligne à problème n'empêche pas les
     autres lignes du même devis de se recalculer normalement."""
-    ligne.cout_matiere_calcule = cout_matiere_article(ligne.article, ligne.quantite)
+    ligne.cout_matiere_calcule = cout_matiere_article(ligne.article, ligne.quantite, devis=devis)
     taux = _taux_marge_matiere(devis, ligne)
     ligne.taux_marge_matiere_applique = taux
     if ligne.prix_vente_unitaire_force is not None:
@@ -220,7 +233,7 @@ def previsualiser_ligne(
         quantite=quantite,
         taux_marge_matiere_applique=taux_marge_matiere_applique,
     )
-    cout_matiere = cout_matiere_article(article, quantite)
+    cout_matiere = cout_matiere_article(article, quantite, devis=devis)
     taux = _taux_marge_matiere(devis, ligne_apercu)
 
     if prix_vente_unitaire_force is not None:

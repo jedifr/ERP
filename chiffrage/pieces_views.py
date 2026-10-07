@@ -20,6 +20,8 @@ from decoupe.services.apercu_svg import generer_svg_feuille, generer_svg_piece
 from decoupe.services.matiere import ErreurMatiere, prix_au_mm2
 from technique.models import Matiere
 
+from . import pieces_devis
+from .moteur import ChiffrageError
 from .models import Devis
 
 
@@ -111,6 +113,7 @@ class PiecesDevisMixin:
             path("<str:numero>/pieces/<int:piece_id>/supprimer/", vue(self.piece_supprimer_view), name="chiffrage_devis_piece_supprimer"),
             path("<str:numero>/pieces/imbrication/", vue(self.piece_imbrication_view), name="chiffrage_devis_pieces_imbrication"),
             path("<str:numero>/pieces/imbrication/retenir/", vue(self.piece_retenir_view), name="chiffrage_devis_pieces_retenir"),
+            path("<str:numero>/pieces/ajouter-au-devis/", vue(self.piece_ajouter_view), name="chiffrage_devis_pieces_ajouter"),
         ]
 
     # --- contexte de la fiche -------------------------------------------------------------------------------------
@@ -133,6 +136,7 @@ class PiecesDevisMixin:
             "url_importer": reverse("admin:chiffrage_devis_pieces_importer", args=[devis.pk]),
             "url_imbrication": reverse("admin:chiffrage_devis_pieces_imbrication", args=[devis.pk]),
             "url_retenir": reverse("admin:chiffrage_devis_pieces_retenir", args=[devis.pk]),
+            "url_ajouter": reverse("admin:chiffrage_devis_pieces_ajouter", args=[devis.pk]),
             "profils": ProfilImportDecoupe.objects.order_by("nom"),
         }}
 
@@ -212,7 +216,9 @@ class PiecesDevisMixin:
         blocs = [_bloc_groupe(g, choix.get(g.cle) or {}, formats) for g in groupes]
         html = render_to_string(
             "admin/chiffrage/devis/_imbrication.html",
-            {"blocs": blocs, "a_regler": a_regler, "editable": editable, "sans_format": not formats}, request=request,
+            {"blocs": blocs, "a_regler": a_regler, "editable": editable, "sans_format": not formats,
+             "chiffrage": pieces_devis.apercu(devis), "peut_ajouter": editable and request.user.has_perm("chiffrage.add_devisligne")},
+            request=request,
         )
         return JsonResponse({"html": html})
 
@@ -241,4 +247,26 @@ class PiecesDevisMixin:
         for piece in groupe.pieces:
             piece.tole, piece.format_tole, piece.marge_bord_mm, piece.taux_chute_recuperable = tole, format_tole, marge, taux
             piece.save(update_fields=["tole", "format_tole", "marge_bord_mm", "taux_chute_recuperable"])
+            article = piece.article
+            if tole is not None and article is not None and article.taux_marge_defaut is None and tole.taux_marge_defaut is not None:
+                article.taux_marge_defaut = tole.taux_marge_defaut  # l'article fabriqué reprend la marge de sa tôle
+                article.save(update_fields=["taux_marge_defaut"])
         return JsonResponse({"ok": True})
+
+    @method_decorator(require_POST)
+    def piece_ajouter_view(self, request, numero):
+        """Ajoute (ou met à jour) aux lignes du devis les pièces prêtes, avec leur quantité, et les chiffre."""
+        devis, refus = self._devis_modifiable(request, numero)
+        if refus:
+            return refus
+        if not request.user.has_perm("chiffrage.add_devisligne"):
+            raise PermissionDenied
+        try:
+            resultats = pieces_devis.ajouter_au_devis(devis)
+        except ChiffrageError as exc:
+            return JsonResponse({"detail": str(exc)}, status=409)
+        return JsonResponse({
+            "resultats": [{"nom": i.piece.nom, "etat": etat, "raison": i.raison} for i, etat in resultats],
+            "ajoutees": sum(1 for _, e in resultats if e == "ajoutée"),
+            "mises_a_jour": sum(1 for _, e in resultats if e == "mise à jour"),
+        })

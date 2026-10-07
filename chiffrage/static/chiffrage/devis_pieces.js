@@ -74,6 +74,35 @@ function demarrer() {
         }
     }
 
+    // Le formulaire du devis est modifié par l'utilisateur (hors champs du panneau) : l'ajout recharge la page, on le prévient.
+    let formulaireModifie = false;
+    document.addEventListener("input", (e) => {
+        if (e.target.closest && !e.target.closest("#dp-panneau") && e.target.closest("form")) formulaireModifie = true;
+    });
+
+    async function ajouterAuDevis(bouton) {
+        if (formulaireModifie && !window.confirm("Le devis a des modifications non enregistrées : l'ajout recharge la page et elles seront perdues. Continuer ?")) return;
+        bouton.disabled = true;
+        try {
+            const reponse = await fetch(panneau.dataset.urlAjouter, {
+                method: "POST", credentials: "same-origin", headers: { "X-CSRFToken": csrf() },
+            });
+            const json = await reponse.json();
+            if (!reponse.ok) throw new Error(json.detail || "Erreur " + reponse.status);
+            json.resultats.filter((r) => r.etat === "ignorée").forEach((r) => message(r.nom + " : non ajoutée — " + r.raison, true));
+            const n = json.ajoutees + json.mises_a_jour;
+            if (n) {
+                message(json.ajoutees + " ligne(s) ajoutée(s), " + json.mises_a_jour + " mise(s) à jour. La page se recharge…", false);
+                setTimeout(() => window.location.reload(), 1300);
+            } else {
+                bouton.disabled = false;
+            }
+        } catch (e) {
+            bouton.disabled = false;
+            message(e.message, true);
+        }
+    }
+
     function planifierImbrication() {
         if (!zoneImb) return;
         clearTimeout(minuteur);
@@ -93,6 +122,8 @@ function demarrer() {
                 planifierImbrication();
                 return;
             }
+            const ajouter = e.target.closest(".dp-ajouter");
+            if (ajouter) { ajouterAuDevis(ajouter); return; }
             const bouton = e.target.closest(".dp-retenir");
             if (!bouton) return;
             const groupe = bouton.closest(".dp-groupe");

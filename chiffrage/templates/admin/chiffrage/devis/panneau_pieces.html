@@ -1,6 +1,6 @@
 {% with p=panneau_pieces %}
 {% if p.actif %}
-<section class="dp-panneau" id="dp-panneau" data-url-importer="{{ p.url_importer }}">
+<section class="dp-panneau" id="dp-panneau" data-url-importer="{{ p.url_importer }}" data-url-ajouter="{{ p.url_ajouter }}">
   <h2 class="dp-titre-section">Pièces à découper <span class="dp-badge">Import DXF / DWG</span></h2>
   {% if p.editable %}
     <div class="dp-drop" id="dp-drop" tabindex="0" role="button" aria-label="Importer des fichiers DXF ou DWG">
