@@ -22,8 +22,9 @@ def _chemin_svg(polygone):
     return " ".join(morceaux)
 
 
-def generer_svg_feuille(largeur_feuille_mm, longueur_feuille_mm, placements):
-    """`placements` : itérable de (piece, x_mm, y_mm, rotation_deg, miroir)."""
+def generer_svg_feuille(largeur_feuille_mm, longueur_feuille_mm, placements, couleurs=None):
+    """`placements` : itérable de (piece, x_mm, y_mm, rotation_deg, miroir). `couleurs` : {id de pièce: (remplissage, trait)}
+    pour distinguer les pièces d'une même feuille (couleur bleue pour toutes sinon)."""
     elements = [
         f'<rect x="0" y="0" width="{largeur_feuille_mm}" height="{longueur_feuille_mm}" '
         'fill="#f5f5f5" stroke="#333333" stroke-width="1" />'
@@ -40,8 +41,9 @@ def generer_svg_feuille(largeur_feuille_mm, longueur_feuille_mm, placements):
         polygone = translate(polygone, xoff=-minx, yoff=-miny)
         polygone = translate(polygone, xoff=x_mm, yoff=y_mm)
         chemin = _chemin_svg(polygone)
+        remplissage, trait = (couleurs or {}).get(piece.pk, ("#cfe8ff", "#0b5fa5"))
         elements.append(
-            f'<path d="{chemin}" fill="#cfe8ff" stroke="#0b5fa5" stroke-width="0.5" fill-rule="evenodd" />'
+            f'<path d="{chemin}" fill="{remplissage}" stroke="{trait}" stroke-width="0.5" fill-rule="evenodd" />'
         )
 
     contenu = "".join(elements)

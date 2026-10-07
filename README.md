@@ -2964,4 +2964,16 @@ La fiche d'un devis (enregistré) a un panneau **« Pièces à découper »** so
 - **Retirer** une pièce supprime aussi son article s'il n'est utilisé nulle part (sinon l'article est conservé et le panneau le dit).
 - Un devis **validé** est verrouillé : les pièces s'affichent mais ne se modifient plus. Il faut les droits d'ajout de pièces à découper et d'articles.
 
-Étapes suivantes prévues : imbrication et comparaison des formats dans le même panneau (étape 2), puis ajout des pièces aux lignes du devis avec le prix (étape 3).
+Étape suivante prévue : ajout des pièces aux lignes du devis avec leur prix (étape 3).
+
+## Devis : imbrication des pièces dans la page (étape 2)
+
+Sous les pièces, le panneau imbrique **ensemble** toutes les pièces d'une même matière, épaisseur et procédé (un bloc « Imbrication — S235 · 10 mm · laser » par groupe) :
+
+- **Tôle** : liste des articles matière première de la matière (ou de sa famille) et de l'épaisseur du groupe ; une seule tôle est choisie d'office. Sans tôle en base, le panneau le dit et ne calcule pas le coût matière.
+- **Formats** : tous les formats actifs (menu *Formats de tôle*) sont calculés et comparés (feuilles, utilisation, surface consommée, coût). Le moins cher est signalé ; un clic sur une ligne affiche ce format.
+- **Réglages** : marge de bord et part de **chute récupérable** (0 % : toutes les chutes sont facturées). L'écart entre pièces suit le procédé : 6 mm au jet d'eau, au moins 10 mm au laser et croissant avec l'épaisseur.
+- **Résultat** : feuilles, utilisation, surface consommée, coût matière du lot, aperçu coloré de la première feuille (une couleur par pièce) et **coût matière réparti entre les pièces** au prorata de leur surface, selon la quantité.
+- Une pièce **non réalisable** (laser hors base) est exclue de l'imbrication avec sa raison ; une pièce sans matière ou épaisseur est listée « à régler ».
+- **Retenir** enregistre tôle, format, marge et chute récupérable sur les pièces du groupe (il sert à l'étape suivante). Le calcul se met à jour tout seul à chaque import, réglage ou retrait de pièce. Sur un devis validé, le calcul reste consultable mais rien ne se retient.
+- Limite connue : l'imbrication place des rectangles englobants (pas les formes réelles) ; l'aperçu dessine les contours.

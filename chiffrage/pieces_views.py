@@ -3,6 +3,8 @@
 Les vues sont appelées en AJAX par chiffrage/devis_pieces.js ; chaque carte de pièce est rendue côté serveur
 (admin/chiffrage/devis/_carte_piece.html), la même vue servant à l'affichage initial et aux mises à jour."""
 
+import json
+
 from django.core.exceptions import PermissionDenied
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
@@ -13,10 +15,70 @@ from django.views.decorators.http import require_POST
 
 from decoupe.models import GazCoupe, ProcedeCoupe, ProfilImportDecoupe
 from decoupe.services import devis_pieces
-from decoupe.services.apercu_svg import generer_svg_piece
+from decoupe.services import imbrication_devis as imb
+from decoupe.services.apercu_svg import generer_svg_feuille, generer_svg_piece
+from decoupe.services.matiere import ErreurMatiere, prix_au_mm2
 from technique.models import Matiere
 
 from .models import Devis
+
+
+def _nombre(valeur, defaut):
+    try:
+        return float(str(valeur).replace(",", "."))
+    except (TypeError, ValueError):
+        return float(defaut)
+
+
+def _bloc_groupe(groupe, choix, formats):
+    """Contexte d'affichage de l'imbrication d'un groupe (choix : valeurs des commandes du panneau, sinon celles déjà retenues)."""
+    pieces = groupe.pieces
+    retenues = pieces[0] if pieces else None
+    toles = imb.toles_possibles(groupe)
+    tole = next((t for t in toles if str(t.pk) == str(choix.get("tole"))), None) if choix.get("tole") else None
+    if tole is None and retenues is not None and retenues.tole_id and not choix:
+        tole = next((t for t in toles if t.pk == retenues.tole_id), None)
+    if tole is None and len(toles) == 1:
+        tole = toles[0]
+    marge = _nombre(choix.get("marge"), retenues.marge_bord_mm if retenues else 5)
+    taux = max(0.0, min(100.0, _nombre(choix.get("chute"), retenues.taux_chute_recuperable if retenues else 0)))
+    bloc = {"groupe": groupe, "cle": groupe.cle, "toles": toles, "tole": tole, "marge": marge, "chute": taux, "formats": formats, "erreur": "", "avertissement": ""}
+    if not pieces:
+        bloc["erreur"] = "Aucune pièce réalisable dans ce groupe."
+        return bloc
+    if tole is not None and formats:
+        try:
+            prix_au_mm2(tole, formats[0].largeur_mm, formats[0].longueur_mm)
+        except ErreurMatiere as exc:
+            bloc["avertissement"] = f"{exc} Le coût matière n'est pas calculé."
+            tole = bloc["tole"] = None
+    lignes, meilleur = imb.comparer_formats(groupe, formats, marge, taux, tole)
+    if meilleur is None:
+        bloc["erreur"] = lignes[0][2] if lignes else "Aucun format de tôle actif (menu Formats de tôle)."
+        return bloc
+    voulu = next((f for f in formats if str(f.pk) == str(choix.get("format"))), None) if choix.get("format") else None
+    if voulu is None and retenues is not None and retenues.format_tole_id and not choix:
+        voulu = next((f for f in formats if f.pk == retenues.format_tole_id), None)
+    format_choisi = voulu or meilleur
+    resultat = next((r for f, r, _ in lignes if f.pk == format_choisi.pk and r is not None), None)
+    if resultat is None:
+        format_choisi = meilleur
+        resultat = next(r for f, r, _ in lignes if f.pk == meilleur.pk)
+    couleurs = {p.pk: imb.COULEURS[i % len(imb.COULEURS)] for i, p in enumerate(pieces)}
+    par_id = {p.pk: p for p in pieces}
+    svg = generer_svg_feuille(
+        format_choisi.largeur_mm, format_choisi.longueur_mm,
+        [(par_id[pl.piece_id], pl.x_mm, pl.y_mm, pl.rotation_deg, pl.miroir) for pl in resultat.placements if pl.numero_feuille == 1],
+        couleurs=couleurs,
+    )
+    bloc.update({
+        "lignes": [{"format": f, "resultat": r, "erreur": e, "meilleur": f.pk == meilleur.pk, "choisi": f.pk == format_choisi.pk} for f, r, e in lignes],
+        "resultat": resultat, "format": format_choisi, "svg": svg, "autres_feuilles": max(resultat.nb_feuilles - 1, 0),
+        "legende": [(p, couleurs[p.pk]) for p in pieces],
+        "retenu": bool(retenues and retenues.tole_id == (tole.pk if tole else None) and retenues.format_tole_id == format_choisi.pk
+                       and retenues.marge_bord_mm == marge and float(retenues.taux_chute_recuperable) == taux),
+    })
+    return bloc
 
 
 def _carte(request, piece, editable=True, alimenter=False):
@@ -47,6 +109,8 @@ class PiecesDevisMixin:
             path("<str:numero>/pieces/importer/", vue(self.piece_importer_view), name="chiffrage_devis_pieces_importer"),
             path("<str:numero>/pieces/<int:piece_id>/enregistrer/", vue(self.piece_enregistrer_view), name="chiffrage_devis_piece_enregistrer"),
             path("<str:numero>/pieces/<int:piece_id>/supprimer/", vue(self.piece_supprimer_view), name="chiffrage_devis_piece_supprimer"),
+            path("<str:numero>/pieces/imbrication/", vue(self.piece_imbrication_view), name="chiffrage_devis_pieces_imbrication"),
+            path("<str:numero>/pieces/imbrication/retenir/", vue(self.piece_retenir_view), name="chiffrage_devis_pieces_retenir"),
         ]
 
     # --- contexte de la fiche -------------------------------------------------------------------------------------
@@ -67,6 +131,8 @@ class PiecesDevisMixin:
             "actif": True, "editable": editable, "verrouille": verrouille,
             "cartes": [_carte(request, p, editable) for p in devis_pieces.pieces_du_devis(devis)],
             "url_importer": reverse("admin:chiffrage_devis_pieces_importer", args=[devis.pk]),
+            "url_imbrication": reverse("admin:chiffrage_devis_pieces_imbrication", args=[devis.pk]),
+            "url_retenir": reverse("admin:chiffrage_devis_pieces_retenir", args=[devis.pk]),
             "profils": ProfilImportDecoupe.objects.order_by("nom"),
         }}
 
@@ -127,3 +193,52 @@ class PiecesDevisMixin:
         piece = get_object_or_404(devis.pieces_decoupe, pk=piece_id)
         conserve = devis_pieces.supprimer(piece)
         return JsonResponse({"ok": True, "article_conserve": conserve})
+
+    @method_decorator(require_POST)
+    def piece_imbrication_view(self, request, numero):
+        """Imbrication de chaque groupe (matière, épaisseur, procédé) du devis : calcul seul, rien n'est enregistré."""
+        from .admin import devis_verrouille
+
+        devis = get_object_or_404(Devis, pk=numero)
+        if not (self.has_view_permission(request, devis) and request.user.has_perm("decoupe.view_piecedecoupe")):
+            raise PermissionDenied
+        try:
+            choix = json.loads(request.body or "{}").get("choix") or {}
+        except (json.JSONDecodeError, AttributeError):
+            return JsonResponse({"detail": "Requête invalide."}, status=400)
+        groupes, a_regler = imb.grouper(devis_pieces.pieces_du_devis(devis))
+        formats = imb.formats_actifs()
+        editable = not devis_verrouille(devis) and self.has_change_permission(request, devis)
+        blocs = [_bloc_groupe(g, choix.get(g.cle) or {}, formats) for g in groupes]
+        html = render_to_string(
+            "admin/chiffrage/devis/_imbrication.html",
+            {"blocs": blocs, "a_regler": a_regler, "editable": editable, "sans_format": not formats}, request=request,
+        )
+        return JsonResponse({"html": html})
+
+    @method_decorator(require_POST)
+    def piece_retenir_view(self, request, numero):
+        """Retient tôle, format, marge et chute récupérable d'un groupe : reportés sur ses pièces (étape suivante : chiffrage)."""
+        devis, refus = self._devis_modifiable(request, numero)
+        if refus:
+            return refus
+        try:
+            donnees = json.loads(request.body or "{}")
+        except json.JSONDecodeError:
+            return JsonResponse({"detail": "Requête invalide."}, status=400)
+        groupes, _ = imb.grouper(devis_pieces.pieces_du_devis(devis))
+        groupe = next((g for g in groupes if g.cle == donnees.get("cle")), None)
+        if groupe is None:
+            return JsonResponse({"detail": "Groupe introuvable : rafraîchissez le panneau."}, status=404)
+        from decoupe.models import FormatTole
+
+        format_tole = FormatTole.objects.filter(pk=donnees.get("format"), actif=True).first()
+        if format_tole is None:
+            return JsonResponse({"detail": "Choisissez un format de tôle."}, status=400)
+        tole = next((t for t in imb.toles_possibles(groupe) if str(t.pk) == str(donnees.get("tole"))), None) if donnees.get("tole") else None
+        marge = max(0.0, _nombre(donnees.get("marge"), 5))
+        taux = max(0.0, min(100.0, _nombre(donnees.get("chute"), 0)))
+        for piece in groupe.pieces:
+            piece.tole, piece.format_tole, piece.marge_bord_mm, piece.taux_chute_recuperable = tole, format_tole, marge, taux
+            piece.save(update_fields=["tole", "format_tole", "marge_bord_mm", "taux_chute_recuperable"])
+        return JsonResponse({"ok": True})

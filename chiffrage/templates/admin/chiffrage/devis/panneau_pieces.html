@@ -23,6 +23,7 @@
     <p class="dp-aide">Vous pouvez consulter les pièces mais pas les modifier (droits insuffisants).</p>
   {% endif %}
   <div id="dp-cartes">{% for carte in p.cartes %}{{ carte|safe }}{% endfor %}</div>
+  <div id="dp-imbrication" class="dp-imbrication" data-url-imbrication="{{ p.url_imbrication }}" data-url-retenir="{{ p.url_retenir }}"></div>
   <div id="dp-messages" class="dp-messages" role="status"></div>
 </section>
 {% elif p.nouveau %}
