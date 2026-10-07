@@ -1,0 +1,43 @@
+{% load l10n %}
+<div class="dp-carte" data-piece="{{ piece.pk }}" data-url-enregistrer="{{ url_enregistrer }}" data-url-supprimer="{{ url_supprimer }}">
+  <div class="dp-apercu">{% if apercu %}{{ apercu|safe }}{% else %}<span class="dp-sans-apercu">Pas d'aperçu</span>{% endif %}</div>
+  <div class="dp-corps">
+    <div class="dp-ligne-titre">
+      <input type="text" data-champ="nom" value="{{ piece.nom }}" class="dp-nom" {% if not editable %}disabled{% endif %} aria-label="Nom de la pièce">
+      {% if piece.statut == "ok" %}<span class="dp-pastille dp-pastille-ok">Importée</span>{% else %}<span class="dp-pastille dp-pastille-ko">Erreur d'import</span>{% endif %}
+      {% if piece.article_id %}<a class="dp-article" href="{% url 'admin:technique_article_change' piece.article_id %}" target="_blank" title="Article fabriqué créé avec la pièce">{{ piece.article_id }}</a>{% endif %}
+      {% if editable %}<button type="button" class="dp-supprimer" title="Retirer la pièce du devis">Retirer</button>{% endif %}
+    </div>
+    {% if piece.statut == "ok" %}
+    <div class="dp-meta">{{ nom_fichier }} · {{ piece.largeur_mm|floatformat:0 }} × {{ piece.hauteur_mm|floatformat:0 }} mm · {{ piece.nb_contours_interieurs }} trou{{ piece.nb_contours_interieurs|pluralize:",s" }} · {{ piece.perimetre_decoupe_mm|floatformat:0 }} mm de contour</div>
+    {% endif %}
+    <div class="dp-champs">
+      <label>Matière
+        <select data-champ="matiere" {% if not editable %}disabled{% endif %}>
+          <option value="">—</option>
+          {% for m in matieres %}<option value="{{ m.pk }}" {% if m.pk == piece.matiere_id %}selected{% endif %}>{{ m.nom }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Épaisseur (mm)
+        <input type="text" inputmode="decimal" data-champ="epaisseur" value="{% if piece.epaisseur %}{{ piece.epaisseur|unlocalize }}{% endif %}" {% if not editable %}disabled{% endif %}>
+      </label>
+      <label>Procédé
+        <select data-champ="procede" {% if not editable %}disabled{% endif %}>{% for v, l in procedes %}<option value="{{ v }}" {% if v == piece.procede %}selected{% endif %}>{{ l }}</option>{% endfor %}</select>
+      </label>
+      <label class="dp-gaz" {% if piece.procede != "laser" %}hidden{% endif %}>Gaz
+        <select data-champ="gaz_coupe" {% if not editable %}disabled{% endif %}>
+          <option value="">Usuel de la matière</option>
+          {% for v, l in gaz %}<option value="{{ v }}" {% if v == piece.gaz_coupe %}selected{% endif %}>{{ l }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Quantité
+        <input type="number" min="1" step="1" data-champ="quantite" value="{{ piece.quantite }}" {% if not editable %}disabled{% endif %}>
+      </label>
+    </div>
+    <div class="dp-verdict {% if verdict.ok %}dp-verdict-ok{% elif verdict.ok is False %}dp-verdict-ko{% else %}dp-verdict-attente{% endif %}">
+      {% if verdict.ok %}Réalisable · {{ verdict.temps_min|floatformat:2 }} min de coupe par pièce{% else %}{{ verdict.message }}{% endif %}
+      {% for a in verdict.avertissements %}<div class="dp-detail">{{ a }}</div>{% endfor %}
+      {% if verdict.gamme %}<div class="dp-detail">{{ verdict.gamme }}</div>{% endif %}
+    </div>
+  </div>
+</div>

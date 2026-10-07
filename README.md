@@ -2953,3 +2953,15 @@ Les titres du menu latéral (Ventes, Production, Achats…) reprennent le style 
 ## Maquette : import DXF/DWG et imbrication dans le devis
 
 `docs/maquettes/maquette_devis_dxf.html` (et son image `.png`) : proposition d'écran pour importer des DXF/DWG, régler matière / épaisseur / procédé, imbriquer et ajouter les pièces au devis dans la même page. Maquette seule : rien n'est encore câblé.
+
+## Devis : import de DXF/DWG et réglage des pièces dans la page (étape 1)
+
+La fiche d'un devis (enregistré) a un panneau **« Pièces à découper »** sous les lignes :
+
+- **Importer** : glisser un ou plusieurs DXF/DWG (ou parcourir). Chaque fichier crée une **pièce à découper** (géométrie lue, aperçu, nombre de trous, longueur de contour) liée au devis, et un **article fabriqué** : référence « DEV-…-P01 », « -P02 »… ou, si une règle de codification « Article fabriqué créé depuis un devis » est configurée, le code suivant de la règle. Le procédé par défaut (laser ou jet d'eau) et le profil d'import des calques se choisissent avant le dépôt.
+- **Régler** chaque pièce sans quitter la page : nom, matière, épaisseur, procédé, gaz (laser ; vide = gaz usuel de la famille), quantité. Les réglages sont enregistrés à la volée et reportés sur l'article (matière, épaisseur, libellé).
+- **Verdict immédiat** : « Réalisable · x min de coupe par pièce », ou la raison du refus — par exemple « Non réalisable au laser : 7 mm n'est pas dans la base » avec la liste des épaisseurs possibles. Le temps de coupe alimente la **gamme** de l'article dès que le paramètre de coupe a un poste de travail (sinon le panneau le signale). L'affichage de la fiche n'écrit jamais rien.
+- **Retirer** une pièce supprime aussi son article s'il n'est utilisé nulle part (sinon l'article est conservé et le panneau le dit).
+- Un devis **validé** est verrouillé : les pièces s'affichent mais ne se modifient plus. Il faut les droits d'ajout de pièces à découper et d'articles.
+
+Étapes suivantes prévues : imbrication et comparaison des formats dans le même panneau (étape 2), puis ajout des pièces aux lignes du devis avec le prix (étape 3).

@@ -150,6 +150,14 @@ class PieceDecoupe(models.Model):
         "procédé de coupe", max_length=10, choices=ProcedeCoupe.choices, default=ProcedeCoupe.JET_EAU,
         help_text="Machine utilisée pour estimer le temps de découpe, l'écart entre pièces et la gamme. Au laser, une épaisseur absente de la base n'est pas réalisable.",
     )
+    devis = models.ForeignKey(
+        "chiffrage.Devis", verbose_name="devis d'origine", on_delete=models.SET_NULL, null=True, blank=True, related_name="pieces_decoupe",
+        help_text="Devis dans lequel la pièce a été importée (panneau « Pièces à découper » du devis).",
+    )
+    quantite = models.PositiveIntegerField("quantité", default=1, help_text="Quantité à découper pour le devis d'origine.")
+    article_cree_automatiquement = models.BooleanField(
+        "article créé à l'import", default=False, help_text="L'article fabriqué a été créé par l'import du devis : il disparaît avec la pièce s'il n'est utilisé nulle part.",
+    )
     gaz_coupe = models.CharField(
         "gaz de coupe (laser)", max_length=4, choices=GazCoupe.choices, blank=True,
         help_text="Laser uniquement. Vide : le gaz usuel de la famille de matière (oxygène pour l'acier, azote pour l'inox et l'alu…).",

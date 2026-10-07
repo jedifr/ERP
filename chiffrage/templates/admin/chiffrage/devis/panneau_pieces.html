@@ -1,0 +1,31 @@
+{% with p=panneau_pieces %}
+{% if p.actif %}
+<section class="dp-panneau" id="dp-panneau" data-url-importer="{{ p.url_importer }}">
+  <h2 class="dp-titre-section">Pièces à découper <span class="dp-badge">Import DXF / DWG</span></h2>
+  {% if p.editable %}
+    <div class="dp-drop" id="dp-drop" tabindex="0" role="button" aria-label="Importer des fichiers DXF ou DWG">
+      <div class="dp-drop-icone material-symbols-outlined">upload_file</div>
+      <div><strong>Glissez vos fichiers DXF / DWG ici</strong> ou <u>parcourez</u> — plusieurs à la fois.</div>
+      <div class="dp-drop-options">
+        <label>Procédé par défaut
+          <select id="dp-procede-defaut"><option value="laser">Laser</option><option value="jet_eau">Jet d'eau</option></select>
+        </label>
+        <label>Profil d'import (calques)
+          <select id="dp-profil"><option value="">Tout en découpe</option>{% for pr in p.profils %}<option value="{{ pr.pk }}">{{ pr.nom }}</option>{% endfor %}</select>
+        </label>
+      </div>
+      <input type="file" id="dp-fichiers" accept=".dxf,.dwg" multiple hidden>
+    </div>
+    <p class="dp-aide">Chaque pièce crée son <strong>article fabriqué</strong> ; le temps de coupe alimente sa gamme dès que le paramètre de coupe a un poste de travail. Une épaisseur absente de la base laser n'est pas réalisable.</p>
+  {% elif p.verrouille %}
+    <p class="dp-aide">Devis validé, donc verrouillé : repassez-le en brouillon pour modifier ses pièces.</p>
+  {% else %}
+    <p class="dp-aide">Vous pouvez consulter les pièces mais pas les modifier (droits insuffisants).</p>
+  {% endif %}
+  <div id="dp-cartes">{% for carte in p.cartes %}{{ carte|safe }}{% endfor %}</div>
+  <div id="dp-messages" class="dp-messages" role="status"></div>
+</section>
+{% elif p.nouveau %}
+<section class="dp-panneau"><h2 class="dp-titre-section">Pièces à découper</h2><p class="dp-aide">Enregistrez d'abord le devis (« Enregistrer et continuer les modifications ») pour importer des DXF / DWG.</p></section>
+{% endif %}
+{% endwith %}

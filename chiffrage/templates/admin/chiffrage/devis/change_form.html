@@ -35,3 +35,8 @@
     {% endif %}
     {{ block.super }}
 {% endblock %}
+
+{% block after_related_objects %}
+    {{ block.super }}
+    {% include "admin/chiffrage/devis/panneau_pieces.html" %}
+{% endblock %}

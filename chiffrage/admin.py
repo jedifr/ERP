@@ -27,6 +27,7 @@ from codification.mixins import CodificationInitialeMixin
 from codification.models import RegleCodification
 from commercial.models import TauxTVA
 
+from .pieces_views import PiecesDevisMixin
 from .builder_views import (
     contact_associe_adresse_view,
     convertir_en_commande_view,
@@ -344,7 +345,7 @@ class ExpireFilter(admin.SimpleListFilter):
 
 
 @admin.register(Devis)
-class DevisAdmin(ColonnesPersonnalisablesMixin, PastillesMixin, EnregistrerEtValiderMixin, EtapeSuivanteMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
+class DevisAdmin(PiecesDevisMixin, ColonnesPersonnalisablesMixin, PastillesMixin, EnregistrerEtValiderMixin, EtapeSuivanteMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
     codification_entite = RegleCodification.Entite.DEVIS
     form = DevisAdminForm
 
@@ -452,8 +453,8 @@ class DevisAdmin(ColonnesPersonnalisablesMixin, PastillesMixin, EnregistrerEtVal
                 messages.error(request, f"{devis} : validation refusée, le devis reste en brouillon. {raison}")
 
     class Media:
-        js = ["chiffrage/devis_admin_live.js", "chiffrage/devisligne_reorder.js"]
-        css = {"all": ["chiffrage/devis_admin_live.css"]}
+        js = ["chiffrage/devis_admin_live.js", "chiffrage/devisligne_reorder.js", "chiffrage/devis_pieces.js"]
+        css = {"all": ["chiffrage/devis_admin_live.css", "chiffrage/devis_pieces.css"]}
 
     # Fiche en deux colonnes : saisie à gauche, récapitulatif (montants, indices) à droite — voir fiche_deux_colonnes.css.
     CHAMPS_RECAPITULATIF = [
@@ -600,7 +601,7 @@ class DevisAdmin(ColonnesPersonnalisablesMixin, PastillesMixin, EnregistrerEtVal
                 self.admin_site.admin_view(previsualiser_ligne_view),
                 name="chiffrage_devisligne_previsualiser",
             ),
-        ]
+        ] + self.urls_pieces()
         return urls + super().get_urls()
 
     @admin.action(description="Recalculer le chiffrage")

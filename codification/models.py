@@ -21,6 +21,7 @@ class RegleCodification(models.Model):
         RETOUR_SOUS_TRAITANCE = "retour_sous_traitance", "Retour sous-traitance"
         TIERS = "tiers", "Tiers"
         EMPLACEMENT = "emplacement", "Emplacement"
+        ARTICLE = "article", "Article fabriqué créé depuis un devis"
 
     class FormatAnnee(models.TextChoices):
         QUATRE = "4", "4 chiffres (2026)"
