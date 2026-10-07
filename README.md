@@ -2945,3 +2945,11 @@ La génération de l'écriture d'une **facture fournisseur** gère l'autoliquida
 ## Séparateurs du menu « + Nouveau »
 
 Les titres de groupe du menu (Ventes, Achats, Données) sont maintenant des bandeaux explicites : fond teinté, liseré orange à gauche, texte plus grand et en gras, avec un espacement net entre les groupes.
+
+## Menu latéral : titres de groupe explicites
+
+Les titres du menu latéral (Ventes, Production, Achats…) reprennent le style des séparateurs du menu « + Nouveau » : bandeau teinté, liseré orange, majuscules en gras.
+
+## Maquette : import DXF/DWG et imbrication dans le devis
+
+`docs/maquettes/maquette_devis_dxf.html` (et son image `.png`) : proposition d'écran pour importer des DXF/DWG, régler matière / épaisseur / procédé, imbriquer et ajouter les pièces au devis dans la même page. Maquette seule : rien n'est encore câblé.
