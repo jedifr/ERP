@@ -13,16 +13,20 @@ from django.urls import path, reverse
 from django.utils.decorators import method_decorator
 from django.views.decorators.http import require_POST
 
-from decoupe.models import GazCoupe, ProcedeCoupe, ProfilImportDecoupe
+from decoupe.models import GazCoupe, PieceDecoupe, ProcedeCoupe, ProfilImportDecoupe
 from decoupe.services import devis_pieces
 from decoupe.services import imbrication_devis as imb
 from decoupe.services.apercu_svg import generer_svg_feuille, generer_svg_piece
 from decoupe.services.matiere import ErreurMatiere, prix_au_mm2
+from decoupe.services.parametres import reglage
 from technique.models import Matiere
 
 from . import pieces_devis
 from .moteur import ChiffrageError
 from .models import Devis
+
+
+MAX_FEUILLES_AFFICHEES = 40
 
 
 def _nombre(valeur, defaut):
@@ -56,7 +60,14 @@ def _bloc_groupe(groupe, choix, formats):
             tole = bloc["tole"] = None
     lignes, meilleur = imb.comparer_formats(groupe, formats, marge, taux, tole)
     if meilleur is None:
-        bloc["erreur"] = lignes[0][2] if lignes else "Aucun format de tôle actif (menu Formats de tôle)."
+        if formats and not imb.formats_compatibles(groupe.procede, formats):
+            nom = "le laser" if groupe.procede == "laser" else "le jet d'eau"
+            bloc["erreur"] = (
+                f"Aucun format de tôle actif ne tient dans {nom} ({reglage(groupe.procede).libelle_capacite}). "
+                "Ajoutez un format plus petit dans le menu « Formats de tôle »."
+            )
+        else:
+            bloc["erreur"] = lignes[0][2] if lignes else "Aucun format de tôle actif (menu Formats de tôle)."
         return bloc
     voulu = next((f for f in formats if str(f.pk) == str(choix.get("format"))), None) if choix.get("format") else None
     if voulu is None and retenues is not None and retenues.format_tole_id and not choix:
@@ -68,14 +79,20 @@ def _bloc_groupe(groupe, choix, formats):
         resultat = next(r for f, r, _ in lignes if f.pk == meilleur.pk)
     couleurs = {p.pk: imb.COULEURS[i % len(imb.COULEURS)] for i, p in enumerate(pieces)}
     par_id = {p.pk: p for p in pieces}
-    svg = generer_svg_feuille(
-        format_choisi.largeur_mm, format_choisi.longueur_mm,
-        [(par_id[pl.piece_id], pl.x_mm, pl.y_mm, pl.rotation_deg, pl.miroir) for pl in resultat.placements if pl.numero_feuille == 1],
-        couleurs=couleurs,
-    )
+    feuilles = []
+    for numero in range(1, min(resultat.nb_feuilles, MAX_FEUILLES_AFFICHEES) + 1):
+        placees = [pl for pl in resultat.placements if pl.numero_feuille == numero]
+        feuilles.append({
+            "numero": numero, "nb_pieces": len(placees), "partielle": numero == resultat.nb_feuilles and resultat.nb_feuilles > 0,
+            "svg": generer_svg_feuille(
+                format_choisi.largeur_mm, format_choisi.longueur_mm,
+                [(par_id[pl.piece_id], pl.x_mm, pl.y_mm, pl.rotation_deg, pl.miroir) for pl in placees], couleurs=couleurs,
+            ),
+        })
     bloc.update({
         "lignes": [{"format": f, "resultat": r, "erreur": e, "meilleur": f.pk == meilleur.pk, "choisi": f.pk == format_choisi.pk} for f, r, e in lignes],
-        "resultat": resultat, "format": format_choisi, "svg": svg, "autres_feuilles": max(resultat.nb_feuilles - 1, 0),
+        "resultat": resultat, "format": format_choisi, "feuilles": feuilles,
+        "feuilles_masquees": max(resultat.nb_feuilles - MAX_FEUILLES_AFFICHEES, 0),
         "legende": [(p, couleurs[p.pk]) for p in pieces],
         "retenu": bool(retenues and retenues.tole_id == (tole.pk if tole else None) and retenues.format_tole_id == format_choisi.pk
                        and retenues.marge_bord_mm == marge and float(retenues.taux_chute_recuperable) == taux),
@@ -95,6 +112,7 @@ def _carte(request, piece, editable=True, alimenter=False):
         {
             "piece": piece, "nom_fichier": (piece.fichier_source.name or "").rsplit("/", 1)[-1], "verdict": devis_pieces.verdict(piece, alimenter=alimenter), "apercu": apercu, "editable": editable,
             "matieres": Matiere.objects.order_by("nom"), "procedes": ProcedeCoupe.choices, "gaz": GazCoupe.choices,
+            "rotations": [("", "Aucune (sens imposé)"), *[(str(v), l) for v, l in PieceDecoupe.PasRotation.choices]],
             "url_enregistrer": reverse("admin:chiffrage_devis_piece_enregistrer", args=[piece.devis_id, piece.pk]),
             "url_supprimer": reverse("admin:chiffrage_devis_piece_supprimer", args=[piece.devis_id, piece.pk]),
         },
@@ -241,6 +259,9 @@ class PiecesDevisMixin:
         format_tole = FormatTole.objects.filter(pk=donnees.get("format"), actif=True).first()
         if format_tole is None:
             return JsonResponse({"detail": "Choisissez un format de tôle."}, status=400)
+        compatible, motif = imb.format_compatible(format_tole, groupe.procede)
+        if not compatible:
+            return JsonResponse({"detail": f"{format_tole} : {motif}"}, status=400)
         tole = next((t for t in imb.toles_possibles(groupe) if str(t.pk) == str(donnees.get("tole"))), None) if donnees.get("tole") else None
         marge = max(0.0, _nombre(donnees.get("marge"), 5))
         taux = max(0.0, min(100.0, _nombre(donnees.get("chute"), 0)))

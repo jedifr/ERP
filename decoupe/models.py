@@ -627,6 +627,14 @@ class ReglageProcede(models.Model):
         "coefficient de pondération des vitesses", default=1,
         help_text="Laser : multiplie les vitesses de coupe du constructeur (0,85 = 15 % plus lent) pour tenir compte des vitesses surestimées constatées. Sans effet sur le jet d'eau, dont le calcul est déjà calé sur des temps réels.",
     )
+    capacite_largeur_mm = models.FloatField(
+        "capacité de la machine : largeur (mm)", default=0,
+        help_text="Plus petite dimension de la plus grande tôle que la machine peut recevoir. 0 : pas de limite.",
+    )
+    capacite_longueur_mm = models.FloatField(
+        "capacité de la machine : longueur (mm)", default=0,
+        help_text="Plus grande dimension de la plus grande tôle que la machine peut recevoir (jet d'eau : 4000 × 2000 ; laser : 3000 × 1500). 0 : pas de limite.",
+    )
     espacement_minimum_mm = models.FloatField(
         "écart minimal entre pièces (mm)", default=4,
         help_text="Plancher de l'écart entre deux pièces à l'imbrication, quelles que soient la matière et l'épaisseur (jet d'eau : 6 ; laser : 10). Au laser, la base donne un écart plus grand quand l'épaisseur augmente : le plus grand des deux est retenu.",
@@ -640,8 +648,24 @@ class ReglageProcede(models.Model):
     def __str__(self):
         return self.get_procede_display()
 
+    def accepte(self, format_tole):
+        """Le format de tôle tient-il dans la machine ? (la tôle peut se présenter dans un sens ou dans l'autre)"""
+        if not self.capacite_largeur_mm or not self.capacite_longueur_mm:
+            return True
+        petite, grande = sorted((format_tole.largeur_mm, format_tole.longueur_mm))
+        cap_petite, cap_grande = sorted((self.capacite_largeur_mm, self.capacite_longueur_mm))
+        return petite <= cap_petite and grande <= cap_grande
+
+    @property
+    def libelle_capacite(self):
+        grande, petite = max(self.capacite_largeur_mm, self.capacite_longueur_mm), min(self.capacite_largeur_mm, self.capacite_longueur_mm)
+        return f"{grande:g} × {petite:g} mm"
+
     @classmethod
     def pour(cls, procede):
         """Réglage du procédé (créé avec les valeurs usuelles s'il n'existe pas encore)."""
-        defauts = {"jet_eau": {"espacement_minimum_mm": 6}, "laser": {"coefficient_vitesse": 0.85, "espacement_minimum_mm": 10}}
+        defauts = {
+            "jet_eau": {"espacement_minimum_mm": 6, "capacite_largeur_mm": 2000, "capacite_longueur_mm": 4000},
+            "laser": {"coefficient_vitesse": 0.85, "espacement_minimum_mm": 10, "capacite_largeur_mm": 1500, "capacite_longueur_mm": 3000},
+        }
         return cls.objects.get_or_create(procede=procede, defaults=defauts.get(procede, {}))[0]

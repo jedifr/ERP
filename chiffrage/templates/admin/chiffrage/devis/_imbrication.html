@@ -25,10 +25,18 @@
       <div class="dp-kpi"><small>Surface consommée</small><b>{{ b.resultat.surface_consommee_m2|floatformat:2 }} m²</b></div>
       <div class="dp-kpi"><small>Coût matière du lot</small><b>{% if b.resultat.cout_total is not None %}{{ b.resultat.cout_total|floatformat:2 }} €{% else %}—{% endif %}</b></div>
     </div>
-    <div class="dp-feuille">{{ b.svg|safe }}</div>
+    <div class="dp-feuilles">
+      {% for f in b.feuilles %}
+        <figure class="dp-feuille">
+          <figcaption>Feuille {{ f.numero }} sur {{ b.resultat.nb_feuilles }} · {{ f.nb_pieces }} pièce{{ f.nb_pieces|pluralize }}{% if f.partielle and b.resultat.nb_feuilles > 1 %} · <em>entamée : le reste est une chute récupérable</em>{% endif %}</figcaption>
+          {{ f.svg|safe }}
+        </figure>
+      {% endfor %}
+    </div>
+    {% if b.feuilles_masquees %}<p class="dp-aide">{{ b.feuilles_masquees }} feuille{{ b.feuilles_masquees|pluralize }} de plus non dessinée{{ b.feuilles_masquees|pluralize }} (les {{ b.feuilles|length }} premières sont affichées).</p>{% endif %}
     <div class="dp-legende">
       {% for p, c in b.legende %}<span><i style="background:{{ c.0 }};border-color:{{ c.1 }}"></i>{{ p.nom }} × {{ p.quantite }}</span>{% endfor %}
-      <span class="dp-legende-note">Feuille 1 sur {{ b.resultat.nb_feuilles }} · format {{ b.format }}{% if b.autres_feuilles %} · {{ b.autres_feuilles }} autre{{ b.autres_feuilles|pluralize }} feuille{{ b.autres_feuilles|pluralize }} identique{{ b.autres_feuilles|pluralize }} ou partielle{{ b.autres_feuilles|pluralize }}{% endif %}</span>
+      <span class="dp-legende-note">Format {{ b.format }} · {{ b.resultat.nb_feuilles }} feuille{{ b.resultat.nb_feuilles|pluralize }}</span>
     </div>
     <table class="dp-table">
       <caption>Comparaison des formats de tôle</caption>

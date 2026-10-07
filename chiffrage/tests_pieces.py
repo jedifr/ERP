@@ -49,6 +49,7 @@ class PanneauPiecesDevisTests(TestCase):
         article = piece.article
         self.assertEqual((article.reference, article.nature, article.libelle), ("DEV-PCS-1-P01", Article.Nature.FABRIQUE, "plaque"))
         self.assertTrue(piece.article_cree_automatiquement)
+        self.assertEqual(piece.pas_rotation_deg, 90)  # rotations autorisées par défaut (sens de matière libre)
         html = reponse.json()["html"]
         self.assertIn("DEV-PCS-1-P01", html)
         self.assertIn("Choisissez la matière et l&#x27;épaisseur", html)
@@ -109,7 +110,11 @@ class PanneauPiecesDevisTests(TestCase):
         self.importer()
         piece = PieceDecoupe.objects.get()
         url = f"{self.url}{piece.pk}/enregistrer/"
-        for donnees in ({"epaisseur": "abc"}, {"epaisseur": "-2"}, {"quantite": "0"}, {"quantite": "x"}, {"procede": "plasma"}, {"matiere": "Inconnue"}, {"nom": " "}, {"gaz_coupe": "H2"}):
+        r = self.client.post(url, {"rotation": ""})
+        piece.refresh_from_db()
+        self.assertIsNone(piece.pas_rotation_deg)  # sens imposé
+        self.assertEqual(self.client.post(url, {"rotation": "45"}).status_code, 200)
+        for donnees in ({"rotation": "30"}, {"epaisseur": "abc"}, {"epaisseur": "-2"}, {"quantite": "0"}, {"quantite": "x"}, {"procede": "plasma"}, {"matiere": "Inconnue"}, {"nom": " "}, {"gaz_coupe": "H2"}):
             self.assertEqual(self.client.post(url, donnees).status_code, 400, donnees)
 
     def test_suppression_et_article_conserve(self):
@@ -226,7 +231,7 @@ class ImbricationDevisTests(TestCase):
         from decoupe.models import FormatTole
 
         a, b = self.piece("a", 4), self.piece("b", 6)
-        format_tole = FormatTole.objects.filter(actif=True).first()
+        format_tole = FormatTole.objects.get(largeur_mm=1500, longueur_mm=3000)  # tient dans le laser
         r = self.client.post(
             self.url + "imbrication/retenir/",
             data=json.dumps({"cle": f"S235|10|laser", "tole": self.tole.pk, "format": format_tole.pk, "marge": "8", "chute": "25"}),
@@ -394,3 +399,73 @@ class ChiffrageDevisTests(TestCase):
         Devis.objects.filter(pk=self.devis.pk).update(statut=Devis.Statut.VALIDE)
         self.assertEqual(self.ajouter().status_code, 409)
         self.assertEqual(self.client.get(self.url + "ajouter-au-devis/").status_code, 405)
+
+
+class CapaciteMachineEtFeuillesTests(TestCase):
+    """Capacité de coupe par machine (laser 3000 × 1500, jet d'eau 4000 × 2000) et affichage de toutes les feuilles."""
+
+    # mêmes préparatifs et outils que les tests d'imbrication (sans rejouer leurs tests)
+    setUp = ImbricationDevisTests.setUp
+    piece = ImbricationDevisTests.piece
+    imbriquer = ImbricationDevisTests.imbriquer
+
+    def test_capacites_par_defaut(self):
+        from decoupe.models import FormatTole, ReglageProcede
+
+        self.assertEqual(ReglageProcede.pour("laser").libelle_capacite, "3000 × 1500 mm")
+        self.assertEqual(ReglageProcede.pour("jet_eau").libelle_capacite, "4000 × 2000 mm")
+        laser, jet = ReglageProcede.pour("laser"), ReglageProcede.pour("jet_eau")
+        petit, grand, tres_grand = FormatTole(largeur_mm=1500, longueur_mm=3000), FormatTole(largeur_mm=2000, longueur_mm=4000), FormatTole(largeur_mm=2000, longueur_mm=6000)
+        self.assertEqual((laser.accepte(petit), laser.accepte(grand), laser.accepte(tres_grand)), (True, False, False))
+        self.assertEqual((jet.accepte(petit), jet.accepte(grand), jet.accepte(tres_grand)), (True, True, False))
+        self.assertTrue(laser.accepte(FormatTole(largeur_mm=3000, longueur_mm=1500)))  # tôle présentée dans l'autre sens
+        ReglageProcede.objects.filter(procede="laser").update(capacite_largeur_mm=0)
+        self.assertTrue(ReglageProcede.pour("laser").accepte(tres_grand))  # 0 : pas de limite
+
+    def test_laser_exclut_les_formats_trop_grands_mais_pas_le_jet_d_eau(self):
+        self.piece("l", 4)
+        self.piece("j", 4, procede="jet_eau")
+        html = self.imbriquer().json()["html"].replace("&#x27;", "'")
+        laser, jet = html.split("Imbrication — S235 · 10 mm · jet d'eau")
+        self.assertIn("Dépasse la capacité du laser (3000 × 1500 mm)", laser)
+        self.assertEqual(laser.count("Dépasse la capacité du laser"), 2)  # 6000 × 2000 et 4000 × 2000
+        self.assertEqual(jet.count("Dépasse la capacité du jet d'eau (4000 × 2000 mm)"), 1)  # seul le 6000 × 2000
+        self.assertNotIn("Dépasse la capacité du laser", jet)
+
+    def test_retenir_un_format_trop_grand_est_refuse_et_le_choix_automatique_l_evite(self):
+        from decoupe.models import FormatTole
+
+        self.piece("l", 4)
+        grand = FormatTole.objects.get(largeur_mm=2000, longueur_mm=4000)
+        r = self.client.post(
+            self.url + "imbrication/retenir/",
+            data=json.dumps({"cle": "S235|10|laser", "tole": self.tole.pk, "format": grand.pk, "marge": "5", "chute": "0"}),
+            content_type="application/json",
+        )
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("capacité du laser", r.json()["detail"])
+        html = self.imbriquer({"S235|10|laser": {"format": grand.pk}}).json()["html"]  # format demandé impossible : on retombe sur le meilleur compatible
+        self.assertIn("Feuille 1 sur", html)
+        self.assertNotIn("Format 4000 × 2000", html)
+
+    def test_aucun_format_compatible(self):
+        from decoupe.models import FormatTole, ReglageProcede
+
+        self.piece("l", 4)
+        FormatTole.objects.filter(longueur_mm__lte=3000).update(actif=False)
+        html = self.imbriquer().json()["html"]
+        self.assertIn("Aucun format de tôle actif ne tient dans le laser (3000 × 1500 mm)", html)
+
+    def test_toutes_les_feuilles_sont_dessinees(self):
+        from decoupe.models import FormatTole
+
+        self.piece("beaucoup", 60)
+        FormatTole.objects.exclude(largeur_mm=1250, longueur_mm=2500).update(actif=False)  # un seul format : 2500 × 1250
+        html = self.imbriquer().json()["html"]
+        import re
+
+        total = int(re.search(r"Feuille 1 sur (\d+)", html).group(1))
+        self.assertGreater(total, 1)
+        self.assertEqual(html.count("<figure class=\"dp-feuille\">"), total)
+        self.assertIn(f"Feuille {total} sur {total}", html)
+        self.assertIn("entamée : le reste est une chute récupérable", html)

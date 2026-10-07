@@ -108,3 +108,12 @@ def dupliquer_vers_epaisseurs(modele, epaisseurs):
         calculer_vitesses(parametre)
         crees.append(parametre)
     return crees, existants
+
+
+def format_compatible(format_tole, procede):
+    """(compatible, message) : le format de tôle tient-il dans la machine du procédé (capacité des réglages de coupe) ?"""
+    r = reglage(procede)
+    if r.accepte(format_tole):
+        return True, ""
+    nom = "du laser" if procede == "laser" else "du jet d'eau"
+    return False, f"Dépasse la capacité {nom} ({r.libelle_capacite})."

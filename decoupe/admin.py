@@ -28,7 +28,7 @@ from .services.apercu_svg import generer_svg_feuille, generer_svg_piece
 from .services.gamme import alimenter_gamme
 from .services.matiere import ErreurMatiere, cout_matiere_imbrication
 from .services.lua_materiaux import NOMS_FRANCAIS, ErreurLua, importer_materiaux, lire_materials_lua, resume
-from .services.parametres import ErreurParametre, calculer_vitesses, dupliquer_vers_epaisseurs
+from .services.parametres import ErreurParametre, calculer_vitesses, dupliquer_vers_epaisseurs, format_compatible
 from .services.temps import ErreurTemps, estimer_temps_decoupe
 
 
@@ -182,9 +182,11 @@ class PieceDecoupeAdmin(PastillesMixin, ModelAdmin):
         retour = reverse("admin:decoupe_piecedecoupe_change", args=[piece.pk])
         toles = Article.objects.filter(nature=Article.Nature.MATIERE_PREMIERE).order_by("reference")
         formats = list(FormatTole.objects.filter(actif=True))
+        exclus = [f for f in formats if not format_compatible(f, piece.procede)[0]]
+        formats = [f for f in formats if f not in exclus]  # la machine du procédé ne reçoit pas les tôles plus grandes
         donnees = request.POST if request.method == "POST" else request.GET
         contexte = {**self.admin_site.each_context(request), "title": f"Simuler l'imbrication : {piece}", "piece": piece, "retour": retour,
-                    "toles": toles, "formats": formats}
+                    "toles": toles, "formats": formats, "formats_exclus": exclus}
         tole = toles.filter(pk=donnees.get("tole") or (piece.tole_id or "")).first()
         if piece.statut != piece.Statut.OK:
             self.message_user(request, "La géométrie de la pièce n'est pas encore importée.", level=messages.ERROR)

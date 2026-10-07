@@ -16,6 +16,7 @@ from technique.models import Article
 from ..models import FormatTole
 from .imbrication import ItemANester, etendue_derniere_feuille_mm, imbriquer_meilleur
 from .matiere import ErreurMatiere, espacement_pieces_mm, prix_au_mm2
+from .parametres import format_compatible
 from .temps import ErreurTemps, parametre_pour
 
 _CACHE = {}
@@ -103,6 +104,9 @@ def imbriquer_groupe(groupe, format_tole, marge_mm, taux_chute, tole=None, quant
     quantites = quantites or {}
     if not groupe.pieces:
         raise ErreurMatiere("Aucune pièce réalisable dans ce groupe.")
+    compatible, motif = format_compatible(format_tole, groupe.procede)
+    if not compatible:
+        raise ErreurMatiere(motif)
     espacement = max(espacement_pieces_mm(p) for p in groupe.pieces)
     items = [
         ItemANester(
@@ -161,6 +165,11 @@ def comparer_formats(groupe, formats, marge_mm, taux_chute, tole=None):
     return lignes, meilleur.format
 
 
+def formats_compatibles(procede, formats=None):
+    """Formats actifs qui tiennent dans la machine du procédé."""
+    return [f for f in (formats if formats is not None else formats_actifs()) if format_compatible(f, procede)[0]]
+
+
 def formats_actifs():
     return list(FormatTole.objects.filter(actif=True))
 
@@ -175,6 +184,9 @@ def cout_matiere_piece_devis(piece, quantite):
         raise ErreurMatiere("La pièce n'est pas rattachée à un devis.")
     if piece.tole_id is None or piece.format_tole_id is None:
         raise ErreurMatiere("Retenez la tôle et le format de l'imbrication (panneau « Pièces à découper » du devis).")
+    compatible, motif = format_compatible(piece.format_tole, piece.procede)
+    if not compatible:
+        raise ErreurMatiere(f"Le format retenu ({piece.format_tole}) ne convient plus : {motif[0].lower()}{motif[1:]}")
     groupes, _ = grouper(pieces_du_devis(piece.devis))
     groupe = next((g for g in groupes if any(p.pk == piece.pk for p in g.pieces)), None)
     if groupe is None:

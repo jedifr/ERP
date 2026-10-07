@@ -1935,7 +1935,7 @@ class LaserTests(TestCase):
         self.assertContains(self.client.get("/admin/decoupe/reglageprocede/"), "Laser fibre")
         reponse = self.client.post(
             "/admin/decoupe/reglageprocede/%d/change/" % ReglageProcede.objects.get(procede="laser").pk,
-            {"procede": "laser", "coefficient_vitesse": "0.8", "espacement_minimum_mm": "12"}, follow=True,
+            {"procede": "laser", "coefficient_vitesse": "0.8", "espacement_minimum_mm": "12", "capacite_largeur_mm": "1500", "capacite_longueur_mm": "3000"}, follow=True,
         )
         self.assertEqual(ReglageProcede.objects.get(procede="laser").coefficient_vitesse, 0.8)
         fiche = ParametreCoupe.objects.filter(procede="laser").first()

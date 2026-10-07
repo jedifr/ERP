@@ -45,7 +45,7 @@ def importer_pour_devis(devis, fichier, profil_import_id=None, procede=ProcedeCo
         raise ErreurPieceDevis(f"« {fichier.name} » : seuls les fichiers .dxf et .dwg sont acceptés.")
     profil = ProfilImportDecoupe.objects.filter(pk=profil_import_id).first() if profil_import_id else None
     nom = Path(fichier.name).stem[:200]
-    piece = PieceDecoupe(nom=nom, devis=devis, procede=procede, profil_import=profil, format_source=extension)
+    piece = PieceDecoupe(nom=nom, devis=devis, procede=procede, profil_import=profil, format_source=extension, pas_rotation_deg=90)
     piece.fichier_source.save(Path(fichier.name).name, ContentFile(fichier.read()), save=False)
     piece.save()
     piece.importer_geometrie()
@@ -88,6 +88,10 @@ def appliquer_reglages(piece, donnees):
         if donnees["gaz_coupe"] and donnees["gaz_coupe"] not in GazCoupe.values:
             raise ErreurPieceDevis("Gaz de coupe inconnu.")
         piece.gaz_coupe = donnees["gaz_coupe"]
+    if "rotation" in donnees:
+        if donnees["rotation"] and donnees["rotation"] not in {str(v) for v in PieceDecoupe.PasRotation.values}:
+            raise ErreurPieceDevis("Pas de rotation inconnu.")
+        piece.pas_rotation_deg = int(donnees["rotation"]) if donnees["rotation"] else None
     if "quantite" in donnees:
         try:
             piece.quantite = int(float(donnees["quantite"].replace(",", ".")))

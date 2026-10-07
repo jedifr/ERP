@@ -30,6 +30,11 @@
           {% for v, l in gaz %}<option value="{{ v }}" {% if v == piece.gaz_coupe %}selected{% endif %}>{{ l }}</option>{% endfor %}
         </select>
       </label>
+      <label title="Rotations autorisées à l'imbrication : « Aucune » si le sens de laminage ou de grain est imposé">Rotation
+        <select data-champ="rotation" {% if not editable %}disabled{% endif %}>
+          {% for v, l in rotations %}<option value="{{ v }}" {% if v == piece.pas_rotation_deg|default_if_none:""|stringformat:"s" %}selected{% endif %}>{{ l }}</option>{% endfor %}
+        </select>
+      </label>
       <label>Quantité
         <input type="number" min="1" step="1" data-champ="quantite" value="{{ piece.quantite }}" {% if not editable %}disabled{% endif %}>
       </label>

@@ -27,6 +27,7 @@
       {% for f in formats %}
         <label class="inline-flex items-center gap-2 mr-4"><input type="checkbox" name="formats" value="{{ f.pk }}" {% if f.pk in choisis %}checked{% endif %}> {{ f }}</label>
       {% empty %}<em>Aucun format actif : ajoutez-en dans « Formats de tôle ».</em>{% endfor %}
+      {% if formats_exclus %}<p class="text-sm mt-2" style="color:#b91c1c">Non proposés (plus grands que la machine : {{ piece.get_procede_display }}) : {% for f in formats_exclus %}{{ f }}{% if not forloop.last %}, {% endif %}{% endfor %}.</p>{% endif %}
     </div>
     <button type="submit" class="bg-primary-600 text-white font-semibold px-4 py-2 rounded-default">Simuler</button>
     <a href="{{ retour }}" class="border border-base-300 px-4 py-2 rounded-default ml-2">Retour à la pièce</a>
