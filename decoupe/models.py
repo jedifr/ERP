@@ -188,6 +188,10 @@ class PieceDecoupe(models.Model):
         "chiffrer la matière par imbrication", default=False,
         help_text="La matière d'un article fabriqué lié à cette pièce est calculée par imbrication (surface consommée avec les chutes, selon la quantité) au lieu du rectangle de la nomenclature.",
     )
+    parametres_forme = models.JSONField(
+        "forme paramétrique", null=True, blank=True,
+        help_text="Recette de la pièce créée depuis la bibliothèque de formes ({famille, cotes}) ; vide pour une pièce importée d'un fichier.",
+    )
     pas_rotation_deg = models.PositiveSmallIntegerField(
         choices=PasRotation.choices,
         null=True,
@@ -673,3 +677,33 @@ class ReglageProcede(models.Model):
             "laser": {"coefficient_vitesse": 0.85, "espacement_minimum_mm": 10, "capacite_largeur_mm": 1500, "capacite_longueur_mm": 3000},
         }
         return cls.objects.get_or_create(procede=procede, defaults=defauts.get(procede, {}))[0]
+
+
+class NormeCote(models.Model):
+    """Cotes normalisées utilisées par la bibliothèque de formes : brides EN 1092-1 (DN × PN) et rondelles ISO."""
+
+    class Famille(models.TextChoices):
+        BRIDE_EN1092 = "bride_en1092", "Bride EN 1092-1"
+        RONDELLE = "rondelle", "Rondelle ISO"
+
+    famille = models.CharField("famille", max_length=20, choices=Famille.choices)
+    designation = models.CharField("désignation", max_length=60, help_text="« DN50 PN16 », « ISO 7089 M10 »…")
+    valeurs = models.JSONField(
+        "cotes (mm)", default=dict,
+        help_text="Bride : dn, pn, D (Ø extérieur), K (cercle de perçage), n (nombre de trous), L (Ø des trous), tube_od (Ø du tube). "
+        "Rondelle : norme, taille, d1 (Ø intérieur), d2 (Ø extérieur), h (épaisseur).",
+    )
+    source = models.CharField("source", max_length=200, blank=True)
+    verifie = models.BooleanField(
+        "vérifié", default=False, help_text="Cochez une fois les cotes contrôlées avec la norme en vigueur : l'avertissement disparaît de l'écran du devis.",
+    )
+    ordre = models.PositiveIntegerField("ordre", default=0)
+
+    class Meta:
+        verbose_name = "Cote normalisée"
+        verbose_name_plural = "Cotes normalisées"
+        ordering = ["famille", "ordre", "designation"]
+        constraints = [models.UniqueConstraint(fields=["famille", "designation"], name="unique_norme_cote")]
+
+    def __str__(self):
+        return f"{self.get_famille_display()} {self.designation}"

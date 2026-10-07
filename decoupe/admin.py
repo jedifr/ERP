@@ -17,6 +17,7 @@ from .models import (
     ImbricationJob,
     ImbricationLigne,
     ImbricationPlacement,
+    NormeCote,
     ParametreCoupe,
     ReglageProcede,
     PieceDecoupe,
@@ -713,3 +714,25 @@ class FormatToleAdmin(ModelAdmin):
     list_display = ["libelle", "longueur_mm", "largeur_mm", "actif"]
     list_filter = ["actif"]
     search_fields = ["libelle"]
+
+
+@admin.register(NormeCote)
+class NormeCoteAdmin(ModelAdmin):
+    """Cotes normalisées de la bibliothèque de formes du devis (brides EN 1092-1, rondelles ISO) : à contrôler avec la norme."""
+
+    list_display = ["designation", "famille", "cotes", "verifie", "source"]
+    list_filter = ["famille", "verifie"]
+    search_fields = ["designation"]
+    actions = ["marquer_verifie"]
+
+    @admin.display(description="cotes")
+    def cotes(self, obj):
+        v = obj.valeurs
+        if obj.famille == NormeCote.Famille.BRIDE_EN1092:
+            return f"Ø{v.get('D')} · cercle Ø{v.get('K')} · {v.get('n')} × Ø{v.get('L')} · tube Ø{v.get('tube_od')}"
+        return f"Ø int. {v.get('d1')} · Ø ext. {v.get('d2')} · ép. {v.get('h')}"
+
+    @admin.action(description="Marquer comme vérifié avec la norme")
+    def marquer_verifie(self, request, queryset):
+        n = queryset.update(verifie=True)
+        self.message_user(request, f"{n} ligne(s) marquée(s) comme vérifiée(s).", messages.SUCCESS)

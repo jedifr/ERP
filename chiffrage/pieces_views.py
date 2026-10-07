@@ -14,7 +14,7 @@ from django.utils.decorators import method_decorator
 from django.views.decorators.http import require_POST
 
 from decoupe.models import GazCoupe, PieceDecoupe, ProcedeCoupe, ProfilImportDecoupe
-from decoupe.services import devis_pieces
+from decoupe.services import devis_pieces, formes
 from decoupe.services import imbrication_devis as imb
 from decoupe.services.apercu_svg import generer_svg_feuille, generer_svg_piece
 from decoupe.services.matiere import ErreurMatiere, prix_au_mm2
@@ -121,6 +121,7 @@ def _carte(request, piece, editable=True, alimenter=False):
             "piece": piece, "nom_fichier": (piece.fichier_source.name or "").rsplit("/", 1)[-1], "verdict": devis_pieces.verdict(piece, alimenter=alimenter), "apercu": apercu, "editable": editable,
             "matieres": Matiere.objects.order_by("nom"), "procedes": ProcedeCoupe.choices, "gaz": GazCoupe.choices,
             "rotations": [("", "Aucune (sens imposé)"), *[(str(v), l) for v, l in PieceDecoupe.PasRotation.choices]],
+            "forme_json": json.dumps(piece.parametres_forme) if piece.parametres_forme else "",
             "url_enregistrer": reverse("admin:chiffrage_devis_piece_enregistrer", args=[piece.devis_id, piece.pk]),
             "url_supprimer": reverse("admin:chiffrage_devis_piece_supprimer", args=[piece.devis_id, piece.pk]),
         },
@@ -137,6 +138,8 @@ class PiecesDevisMixin:
             path("<str:numero>/pieces/importer/", vue(self.piece_importer_view), name="chiffrage_devis_pieces_importer"),
             path("<str:numero>/pieces/<int:piece_id>/enregistrer/", vue(self.piece_enregistrer_view), name="chiffrage_devis_piece_enregistrer"),
             path("<str:numero>/pieces/<int:piece_id>/supprimer/", vue(self.piece_supprimer_view), name="chiffrage_devis_piece_supprimer"),
+            path("<str:numero>/pieces/formes/apercu/", vue(self.forme_apercu_view), name="chiffrage_devis_formes_apercu"),
+            path("<str:numero>/pieces/formes/ajouter/", vue(self.forme_ajouter_view), name="chiffrage_devis_formes_ajouter"),
             path("<str:numero>/pieces/imbrication/", vue(self.piece_imbrication_view), name="chiffrage_devis_pieces_imbrication"),
             path("<str:numero>/pieces/imbrication/retenir/", vue(self.piece_retenir_view), name="chiffrage_devis_pieces_retenir"),
             path("<str:numero>/pieces/ajouter-au-devis/", vue(self.piece_ajouter_view), name="chiffrage_devis_pieces_ajouter"),
@@ -163,6 +166,9 @@ class PiecesDevisMixin:
             "url_imbrication": reverse("admin:chiffrage_devis_pieces_imbrication", args=[devis.pk]),
             "url_retenir": reverse("admin:chiffrage_devis_pieces_retenir", args=[devis.pk]),
             "url_ajouter": reverse("admin:chiffrage_devis_pieces_ajouter", args=[devis.pk]),
+            "url_forme_apercu": reverse("admin:chiffrage_devis_formes_apercu", args=[devis.pk]),
+            "url_forme_ajouter": reverse("admin:chiffrage_devis_formes_ajouter", args=[devis.pk]),
+            "catalogue_formes": formes.catalogue() if editable else None,
             "profils": ProfilImportDecoupe.objects.order_by("nom"),
         }}
 
@@ -199,6 +205,57 @@ class PiecesDevisMixin:
             )
         except devis_pieces.ErreurPieceDevis as exc:
             return JsonResponse({"detail": str(exc)}, status=400)
+        return JsonResponse({"html": _carte(request, piece), "piece_id": piece.pk})
+
+    @staticmethod
+    def _saisie_forme(request):
+        try:
+            donnees = json.loads(request.body or b"{}")
+        except ValueError:
+            return None, JsonResponse({"detail": "Requête illisible."}, status=400)
+        cotes = donnees.get("cotes")
+        if not isinstance(donnees.get("famille"), str) or not isinstance(cotes, dict):
+            return None, JsonResponse({"detail": "Choisissez une forme."}, status=400)
+        return donnees, None
+
+    @method_decorator(require_POST)
+    def forme_apercu_view(self, request, numero):
+        """Aperçu d'une forme paramétrique (SVG, dimensions, nom) sans rien enregistrer."""
+        if not request.user.has_perm("decoupe.view_piecedecoupe"):
+            raise PermissionDenied
+        donnees, erreur = self._saisie_forme(request)
+        if erreur:
+            return erreur
+        try:
+            contour = formes.construire(donnees["famille"], donnees["cotes"])
+            nom = formes.nom_suggere(donnees["famille"], donnees["cotes"])
+        except formes.ErreurForme as exc:
+            return JsonResponse({"detail": str(exc)}, status=400)
+        largeur, hauteur = contour.dimensions
+        svg = generer_svg_piece(largeur, hauteur, contour.exterieur, contour.trous, None, None)
+        return JsonResponse({"svg": svg, "nom": nom, "largeur": round(largeur, 2), "hauteur": round(hauteur, 2), "trous": len(contour.trous)})
+
+    @method_decorator(require_POST)
+    def forme_ajouter_view(self, request, numero):
+        """Crée une pièce depuis la bibliothèque de formes ou, avec `piece_id`, modifie les cotes d'une pièce paramétrique."""
+        devis, refus = self._devis_modifiable(request, numero)
+        if refus:
+            return refus
+        donnees, erreur = self._saisie_forme(request)
+        if erreur:
+            return erreur
+        try:
+            if donnees.get("piece_id"):
+                piece = get_object_or_404(devis.pieces_decoupe, pk=donnees["piece_id"])
+                devis_pieces.modifier_forme(piece, donnees["famille"], donnees["cotes"])
+            else:
+                piece = devis_pieces.creer_depuis_forme(
+                    devis, donnees["famille"], donnees["cotes"], quantite=donnees.get("quantite") or 1,
+                    procede=donnees.get("procede") or ProcedeCoupe.LASER,
+                )
+        except (devis_pieces.ErreurPieceDevis, ValueError) as exc:
+            return JsonResponse({"detail": str(exc)}, status=400)
+        piece.refresh_from_db()
         return JsonResponse({"html": _carte(request, piece), "piece_id": piece.pk})
 
     @method_decorator(require_POST)

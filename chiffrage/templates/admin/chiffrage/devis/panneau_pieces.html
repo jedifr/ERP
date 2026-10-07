@@ -16,6 +16,28 @@
       </div>
       <input type="file" id="dp-fichiers" accept=".dxf,.dwg" multiple hidden>
     </div>
+    <details class="dp-formes" id="dp-formes" data-url-apercu="{{ p.url_forme_apercu }}" data-url-ajouter="{{ p.url_forme_ajouter }}">
+      <summary><span class="material-symbols-outlined">shapes</span> Bibliothèque de formes — rectangle, disque, bride, platine, équerre… ou cotes normalisées (EN 1092-1, rondelles)</summary>
+      <div class="dp-formes-corps">
+        <div class="dp-formes-saisie">
+          <label>Forme <select id="dpf-famille"></select></label>
+          <p class="dp-aide" id="dpf-description"></p>
+          <div id="dpf-champs" class="dp-champs"></div>
+          <div class="dp-champs">
+            <label>Quantité <input type="number" id="dpf-quantite" min="1" step="1" value="1"></label>
+            <label>Procédé <select id="dpf-procede"><option value="laser">Laser</option><option value="jet_eau">Jet d'eau</option></select></label>
+          </div>
+          <p class="dp-aide dp-attention" id="dpf-attention" hidden>Les cotes normalisées livrées avec l'application n'ont pas encore été vérifiées avec la norme : contrôlez-les (Production &gt; Cotes normalisées) avant de lancer une production.</p>
+          <div class="dp-formes-actions">
+            <button type="button" id="dpf-valider" class="dp-bouton">Ajouter la pièce au devis</button>
+            <button type="button" id="dpf-annuler" class="dp-bouton dp-bouton-discret" hidden>Annuler la modification</button>
+          </div>
+          <div id="dpf-erreur" class="dp-message dp-message-ko" role="alert" hidden></div>
+        </div>
+        <div class="dp-formes-apercu"><div id="dpf-svg" class="dp-apercu"></div><div id="dpf-resume" class="dp-meta"></div></div>
+      </div>
+    </details>
+    {{ p.catalogue_formes|json_script:"dp-catalogue-formes" }}
     <p class="dp-aide">Chaque pièce crée son <strong>article fabriqué</strong> ; le temps de coupe alimente sa gamme dès que le paramètre de coupe a un poste de travail. Une épaisseur absente de la base laser n'est pas réalisable.</p>
   {% elif p.verrouille %}
     <p class="dp-aide">Devis validé, donc verrouillé : repassez-le en brouillon pour modifier ses pièces.</p>

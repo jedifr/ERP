@@ -505,3 +505,88 @@ class ImbricationFormeDevisTests(TestCase):
         FormatTole.objects.create(largeur_mm=300, longueur_mm=300, actif=True)
         html = self.imbriquer().json()["html"]
         self.assertIn("Ne tient pas sur 300 × 300", html)  # sans exception : la liste des pièces non placées est bien lue
+
+
+class FormesParametriquesDevisTests(TestCase):
+    """Bibliothèque de formes dans le panneau du devis : aperçu, création de la pièce, modification des cotes."""
+
+    setUp = PanneauPiecesDevisTests.setUp
+
+    def poster(self, chemin, donnees):
+        return self.client.post(self.url + chemin, data=json.dumps(donnees), content_type="application/json")
+
+    def test_apercu_svg_et_erreur_de_cotes(self):
+        reponse = self.poster("formes/apercu/", {"famille": "disque", "cotes": {"diametre": "120"}})
+        self.assertEqual(reponse.status_code, 200)
+        corps = reponse.json()
+        self.assertEqual((corps["nom"], corps["largeur"], corps["hauteur"], corps["trous"]), ("Disque Ø120", 120.0, 120.0, 0))
+        self.assertIn("<svg", corps["svg"])
+        refus = self.poster("formes/apercu/", {"famille": "anneau", "cotes": {"diametre_ext": 40, "diametre_int": 50}})
+        self.assertEqual(refus.status_code, 400)
+        self.assertIn("diamètre intérieur", refus.json()["detail"])
+        self.assertEqual(self.poster("formes/apercu/", {"cotes": {}}).status_code, 400)
+
+    def test_creation_de_la_piece_et_de_l_article(self):
+        reponse = self.poster("formes/ajouter/", {"famille": "bride_en1092", "cotes": {"dn": "50", "pn": "PN16", "type_bride": "01"}, "quantite": 4, "procede": "jet_eau"})
+        self.assertEqual(reponse.status_code, 200)
+        piece = PieceDecoupe.objects.get()
+        self.assertEqual((piece.devis, piece.nom, piece.quantite, piece.procede, piece.statut), (self.devis, "Bride DN50 PN16 type 01", 4, "jet_eau", "ok"))
+        self.assertEqual(piece.parametres_forme["famille"], "bride_en1092")
+        self.assertEqual((round(piece.largeur_mm), round(piece.hauteur_mm), piece.nb_contours_interieurs), (165, 165, 5))
+        self.assertEqual(piece.article.nature, Article.Nature.FABRIQUE)
+        self.assertEqual(piece.pas_rotation_deg, 90)
+        html = reponse.json()["html"]
+        self.assertIn("Forme paramétrique", html)
+        self.assertIn("Modifier la forme", html)
+
+    def test_cotes_invalides_ne_creent_rien(self):
+        reponse = self.poster("formes/ajouter/", {"famille": "bride", "cotes": {"diametre_ext": 100, "alesage": 20, "diametre_percage": 150, "nb_trous": 4, "diametre_trou": 10}})
+        self.assertEqual(reponse.status_code, 400)
+        self.assertEqual((PieceDecoupe.objects.count(), Article.objects.count()), (0, 0))
+
+    def test_modification_des_cotes_garde_la_piece_et_l_article(self):
+        self.poster("formes/ajouter/", {"famille": "rectangle", "cotes": {"largeur": 200, "hauteur": 100}})
+        piece = PieceDecoupe.objects.get()
+        article = piece.article_id
+        ancien = piece.fichier_source.name
+        reponse = self.poster("formes/ajouter/", {"piece_id": piece.pk, "famille": "rectangle", "cotes": {"largeur": 300, "hauteur": 120, "rayon_angle": 10}})
+        self.assertEqual(reponse.status_code, 200)
+        piece.refresh_from_db()
+        self.assertEqual((piece.nom, piece.article_id, PieceDecoupe.objects.count()), ("Rectangle 300×120", article, 1))
+        self.assertEqual((round(piece.largeur_mm), round(piece.hauteur_mm)), (300, 120))
+        self.assertEqual(piece.parametres_forme["cotes"]["largeur"], 300)
+        self.assertNotEqual(piece.fichier_source.name, ancien)
+        self.assertEqual(Article.objects.get(pk=article).libelle, "Rectangle 300×120")
+
+    def test_nom_personnalise_conserve_a_la_modification(self):
+        self.poster("formes/ajouter/", {"famille": "disque", "cotes": {"diametre": 100}})
+        piece = PieceDecoupe.objects.get()
+        piece.nom = "Rondelle client X"
+        piece.save()
+        self.poster("formes/ajouter/", {"piece_id": piece.pk, "famille": "disque", "cotes": {"diametre": 150}})
+        piece.refresh_from_db()
+        self.assertEqual((piece.nom, round(piece.largeur_mm)), ("Rondelle client X", 150))
+
+    def test_piece_importee_sans_cotes_a_modifier(self):
+        self.client.post(self.url + "importer/", {"fichier": SimpleUploadedFile("p.dxf", (DONNEES / "piece_calibrage.dxf").read_bytes())})
+        piece = PieceDecoupe.objects.get()
+        self.assertEqual(self.poster("formes/ajouter/", {"piece_id": piece.pk, "famille": "disque", "cotes": {"diametre": 50}}).status_code, 400)
+
+    def test_devis_verrouille_et_panneau(self):
+        page = self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/change/")
+        self.assertContains(page, "Bibliothèque de formes")
+        self.assertContains(page, 'id="dp-catalogue-formes"')
+        self.assertContains(page, "bride_en1092")
+        self.devis.statut = Devis.Statut.VALIDE
+        self.devis.save()
+        self.assertEqual(self.poster("formes/ajouter/", {"famille": "disque", "cotes": {"diametre": 50}}).status_code, 409)
+        self.assertNotContains(self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/change/"), "Bibliothèque de formes")
+
+    def test_admin_cotes_normalisees_et_action_verifier(self):
+        from decoupe.models import NormeCote
+
+        self.assertContains(self.client.get("/admin/decoupe/normecote/"), "DN50 PN16")
+        ligne = NormeCote.objects.get(designation="DN50 PN16")
+        self.client.post("/admin/decoupe/normecote/", {"action": "marquer_verifie", "_selected_action": [ligne.pk]})
+        ligne.refresh_from_db()
+        self.assertTrue(ligne.verifie)

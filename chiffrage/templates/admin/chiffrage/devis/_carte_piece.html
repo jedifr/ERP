@@ -1,15 +1,16 @@
 {% load l10n %}
-<div class="dp-carte" data-piece="{{ piece.pk }}" data-url-enregistrer="{{ url_enregistrer }}" data-url-supprimer="{{ url_supprimer }}">
+<div class="dp-carte" data-piece="{{ piece.pk }}"{% if forme_json %} data-forme="{{ forme_json }}"{% endif %} data-url-enregistrer="{{ url_enregistrer }}" data-url-supprimer="{{ url_supprimer }}">
   <div class="dp-apercu">{% if apercu %}{{ apercu|safe }}{% else %}<span class="dp-sans-apercu">Pas d'aperçu</span>{% endif %}</div>
   <div class="dp-corps">
     <div class="dp-ligne-titre">
       <input type="text" data-champ="nom" value="{{ piece.nom }}" class="dp-nom" {% if not editable %}disabled{% endif %} aria-label="Nom de la pièce">
-      {% if piece.statut == "ok" %}<span class="dp-pastille dp-pastille-ok">Importée</span>{% else %}<span class="dp-pastille dp-pastille-ko">Erreur d'import</span>{% endif %}
+      {% if piece.statut == "ok" %}<span class="dp-pastille dp-pastille-ok">{% if forme_json %}Forme paramétrique{% else %}Importée{% endif %}</span>{% else %}<span class="dp-pastille dp-pastille-ko">Erreur d'import</span>{% endif %}
       {% if piece.article_id %}<a class="dp-article" href="{% url 'admin:technique_article_change' piece.article_id %}" target="_blank" title="Article fabriqué créé avec la pièce">{{ piece.article_id }}</a>{% endif %}
+      {% if editable and forme_json %}<button type="button" class="dp-modifier-forme" title="Changer les cotes de la forme">Modifier la forme</button>{% endif %}
       {% if editable %}<button type="button" class="dp-supprimer" title="Retirer la pièce du devis">Retirer</button>{% endif %}
     </div>
     {% if piece.statut == "ok" %}
-    <div class="dp-meta">{{ nom_fichier }} · {{ piece.largeur_mm|floatformat:0 }} × {{ piece.hauteur_mm|floatformat:0 }} mm · {{ piece.nb_contours_interieurs }} trou{{ piece.nb_contours_interieurs|pluralize:",s" }} · {{ piece.perimetre_decoupe_mm|floatformat:0 }} mm de contour</div>
+    <div class="dp-meta">{% if forme_json %}Cotes de la bibliothèque{% else %}{{ nom_fichier }}{% endif %} · {{ piece.largeur_mm|floatformat:0 }} × {{ piece.hauteur_mm|floatformat:0 }} mm · {{ piece.nb_contours_interieurs }} trou{{ piece.nb_contours_interieurs|pluralize:",s" }} · {{ piece.perimetre_decoupe_mm|floatformat:0 }} mm de contour</div>
     {% endif %}
     <div class="dp-champs">
       <label>Matière

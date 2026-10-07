@@ -231,6 +231,171 @@ function demarrer() {
             message(err.message, true);
         }
     });
+
+    // ---------------------------------------------------------------- bibliothèque de formes
+    const formes = document.getElementById("dp-formes");
+    const donneesCatalogue = document.getElementById("dp-catalogue-formes");
+    if (formes && donneesCatalogue) {
+        const catalogue = JSON.parse(donneesCatalogue.textContent);
+        const norm = catalogue.normalisees;
+        const selFamille = document.getElementById("dpf-famille");
+        const zoneChamps = document.getElementById("dpf-champs");
+        const boutonValider = document.getElementById("dpf-valider");
+        const boutonAnnuler = document.getElementById("dpf-annuler");
+        const zoneErreur = document.getElementById("dpf-erreur");
+        let pieceModifiee = null; // id de la pièce dont on modifie les cotes (sinon : création)
+        let minuteurForme = null;
+
+        const groupes = {};
+        catalogue.familles.forEach((f) => { (groupes[f.groupe] = groupes[f.groupe] || []).push(f); });
+        Object.keys(groupes).forEach((nomGroupe) => {
+            const og = document.createElement("optgroup");
+            og.label = nomGroupe;
+            groupes[nomGroupe].forEach((f) => { const o = document.createElement("option"); o.value = f.cle; o.textContent = f.libelle; og.appendChild(o); });
+            selFamille.appendChild(og);
+        });
+
+        function famille() { return catalogue.familles.find((f) => f.cle === selFamille.value); }
+
+        function options(p, f) {
+            if (f.cle === "bride_en1092" && p.cle === "dn") return norm.dn.map((v) => [String(v), "DN" + v]);
+            if (f.cle === "bride_en1092" && p.cle === "pn") return norm.pn.map((v) => [v, v]);
+            if (f.cle === "bride_en1092" && p.cle === "type_bride") return [["01", "01 — plate à souder (alésage)"], ["05", "05 — pleine"]];
+            if (f.cle === "rondelle" && p.cle === "norme") return norm.normes_rondelles.map((v) => [v, v]);
+            if (f.cle === "rondelle" && p.cle === "taille") return (norm.tailles_rondelles[valeur("norme")] || []).map((v) => [v, v]);
+            return null;
+        }
+
+        function valeur(cle) {
+            const el = zoneChamps.querySelector('[data-p="' + cle + '"]');
+            return el ? el.value : "";
+        }
+
+        function construireChamps(saisies) {
+            const f = famille();
+            document.getElementById("dpf-description").textContent = f.description;
+            document.getElementById("dpf-attention").hidden = !(f.normalisee && norm.brides_non_verifiees);
+            zoneChamps.textContent = "";
+            f.parametres.forEach((p) => {
+                const label = document.createElement("label");
+                label.textContent = p.libelle;
+                if (p.aide) label.title = p.aide;
+                const choix = options(p, f);
+                let champ;
+                if (choix) {
+                    champ = document.createElement("select");
+                    choix.forEach(([v, l]) => { const o = document.createElement("option"); o.value = v; o.textContent = l; champ.appendChild(o); });
+                } else {
+                    champ = document.createElement("input");
+                    champ.type = "text";
+                    champ.inputMode = "decimal";
+                }
+                champ.dataset.p = p.cle;
+                const initiale = saisies && saisies[p.cle] !== undefined ? saisies[p.cle] : p.defaut;
+                champ.value = String(initiale);
+                if (choix && ![...champ.options].some((o) => o.value === champ.value) && champ.options.length) champ.selectedIndex = 0;
+                label.appendChild(champ);
+                zoneChamps.appendChild(label);
+            });
+        }
+
+        function saisies() {
+            const cotes = {};
+            zoneChamps.querySelectorAll("[data-p]").forEach((el) => { cotes[el.dataset.p] = el.value; });
+            return cotes;
+        }
+
+        function montrerErreur(texte) {
+            zoneErreur.hidden = !texte;
+            zoneErreur.textContent = texte || "";
+            boutonValider.disabled = !!texte;
+        }
+
+        async function apercu() {
+            try {
+                const reponse = await fetch(formes.dataset.urlApercu, {
+                    method: "POST", credentials: "same-origin", headers: { "X-CSRFToken": csrf(), "Content-Type": "application/json" },
+                    body: JSON.stringify({ famille: selFamille.value, cotes: saisies() }),
+                });
+                const json = await reponse.json();
+                if (!reponse.ok) throw new Error(json.detail || "Erreur " + reponse.status);
+                document.getElementById("dpf-svg").innerHTML = json.svg;
+                document.getElementById("dpf-resume").textContent = json.nom + " — " + json.largeur + " × " + json.hauteur + " mm, " + json.trous + " perçage" + (json.trous > 1 ? "s" : "");
+                montrerErreur("");
+            } catch (e) {
+                document.getElementById("dpf-svg").textContent = "";
+                document.getElementById("dpf-resume").textContent = "";
+                montrerErreur(e.message);
+            }
+        }
+
+        function planifierApercu() {
+            clearTimeout(minuteurForme);
+            minuteurForme = setTimeout(apercu, 250);
+        }
+
+        function sortirDuModeModification() {
+            pieceModifiee = null;
+            boutonValider.textContent = "Ajouter la pièce au devis";
+            boutonAnnuler.hidden = true;
+        }
+
+        selFamille.addEventListener("change", () => { construireChamps(null); planifierApercu(); });
+        zoneChamps.addEventListener("input", planifierApercu);
+        zoneChamps.addEventListener("change", (e) => {
+            if (e.target.dataset.p === "norme") { construireChamps(Object.assign(saisies(), { taille: "" })); }
+            planifierApercu();
+        });
+        zoneChamps.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); boutonValider.click(); } });
+        formes.addEventListener("toggle", () => { if (formes.open) planifierApercu(); });
+        boutonAnnuler.addEventListener("click", () => { sortirDuModeModification(); construireChamps(null); planifierApercu(); });
+
+        boutonValider.addEventListener("click", async () => {
+            boutonValider.disabled = true;
+            try {
+                const json = await (async () => {
+                    const reponse = await fetch(formes.dataset.urlAjouter, {
+                        method: "POST", credentials: "same-origin", headers: { "X-CSRFToken": csrf(), "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            famille: selFamille.value, cotes: saisies(), piece_id: pieceModifiee,
+                            quantite: document.getElementById("dpf-quantite").value, procede: document.getElementById("dpf-procede").value,
+                        }),
+                    });
+                    const retour = await reponse.json();
+                    if (!reponse.ok) throw new Error(retour.detail || "Erreur " + reponse.status);
+                    return retour;
+                })();
+                const nouvelle = depuisHtml(json.html);
+                const existante = pieceModifiee ? cartes.querySelector('.dp-carte[data-piece="' + pieceModifiee + '"]') : null;
+                if (existante) existante.replaceWith(nouvelle); else cartes.appendChild(nouvelle);
+                message(pieceModifiee ? "Forme mise à jour." : "Pièce ajoutée au devis : choisissez sa matière et son épaisseur.", false);
+                nouvelle.scrollIntoView({ behavior: "smooth", block: "nearest" });
+                sortirDuModeModification();
+                planifierImbrication();
+            } catch (e) {
+                message(e.message, true);
+            } finally {
+                boutonValider.disabled = false;
+            }
+        });
+
+        cartes.addEventListener("click", (e) => {
+            const bouton = e.target.closest(".dp-modifier-forme");
+            if (!bouton) return;
+            const carte = bouton.closest(".dp-carte[data-piece]");
+            const recette = JSON.parse(carte.dataset.forme);
+            selFamille.value = recette.famille;
+            construireChamps(recette.cotes);
+            pieceModifiee = carte.dataset.piece;
+            boutonValider.textContent = "Mettre à jour la forme";
+            boutonAnnuler.hidden = false;
+            formes.open = true;
+            formes.scrollIntoView({ behavior: "smooth", block: "start" });
+            planifierApercu();
+        });
+
+        construireChamps(null);
+    }
 }
 
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", demarrer);

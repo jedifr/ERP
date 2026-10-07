@@ -12,12 +12,14 @@ from pathlib import Path
 from django.core.files.base import ContentFile
 from django.db import transaction
 from django.db.models import ProtectedError
+from django.utils.text import slugify
 
 from codification.models import RegleCodification
 from codification.services import enregistrer_code_utilise, generer_code
 from technique.models import Article, Matiere
 
 from ..models import GazCoupe, PieceDecoupe, ProcedeCoupe, ProfilImportDecoupe
+from . import formes
 from .gamme import alimenter_gamme
 from .temps import ErreurTemps, estimer_temps_decoupe
 
@@ -37,15 +39,19 @@ def _reference_article(devis):
 
 
 @transaction.atomic
-def importer_pour_devis(devis, fichier, profil_import_id=None, procede=ProcedeCoupe.LASER):
+def importer_pour_devis(devis, fichier, profil_import_id=None, procede=ProcedeCoupe.LASER, nom=None, parametres_forme=None):
     """Importe un DXF/DWG dans le devis : pièce, géométrie et article fabriqué. Retourne la pièce (statut « erreur » si la
-    géométrie n'a pas pu être lue : la pièce reste visible dans le devis pour être corrigée ou supprimée)."""
+    géométrie n'a pas pu être lue : la pièce reste visible dans le devis pour être corrigée ou supprimée).
+    `nom` et `parametres_forme` servent aux pièces créées depuis la bibliothèque de formes (nom lisible, recette)."""
     extension = fichier.name.rsplit(".", 1)[-1].lower() if "." in fichier.name else ""
     if extension not in (PieceDecoupe.FormatSource.DXF, PieceDecoupe.FormatSource.DWG):
         raise ErreurPieceDevis(f"« {fichier.name} » : seuls les fichiers .dxf et .dwg sont acceptés.")
     profil = ProfilImportDecoupe.objects.filter(pk=profil_import_id).first() if profil_import_id else None
-    nom = Path(fichier.name).stem[:200]
-    piece = PieceDecoupe(nom=nom, devis=devis, procede=procede, profil_import=profil, format_source=extension, pas_rotation_deg=90)
+    nom = (nom or Path(fichier.name).stem)[:200]
+    piece = PieceDecoupe(
+        nom=nom, devis=devis, procede=procede, profil_import=profil, format_source=extension, pas_rotation_deg=90,
+        parametres_forme=parametres_forme,
+    )
     piece.fichier_source.save(Path(fichier.name).name, ContentFile(fichier.read()), save=False)
     piece.save()
     piece.importer_geometrie()
@@ -57,6 +63,54 @@ def importer_pour_devis(devis, fichier, profil_import_id=None, procede=ProcedeCo
     piece.article = article
     piece.article_cree_automatiquement = True
     piece.save(update_fields=["article", "article_cree_automatiquement"])
+    return piece
+
+
+def creer_depuis_forme(devis, famille, cotes, quantite=1, procede=ProcedeCoupe.LASER):
+    """Crée dans le devis une pièce (et son article fabriqué) depuis la bibliothèque de formes : le contour calculé est écrit
+    en DXF comme n'importe quelle pièce importée, et la recette (famille + cotes) est gardée pour pouvoir la modifier."""
+    try:
+        contour = formes.construire(famille, cotes)
+        nom = formes.nom_suggere(famille, cotes)
+    except formes.ErreurForme as exc:
+        raise ErreurPieceDevis(str(exc))
+    fichier = ContentFile(formes.dxf_bytes(contour), name=f"{slugify(nom) or 'forme'}.dxf")
+    piece = importer_pour_devis(devis, fichier, procede=procede, nom=nom, parametres_forme={"famille": famille, "cotes": cotes})
+    if quantite and int(quantite) != 1:
+        piece.quantite = max(1, int(quantite))
+        piece.save(update_fields=["quantite"])
+    return piece
+
+
+@transaction.atomic
+def modifier_forme(piece, famille, cotes):
+    """Recalcule le contour d'une pièce paramétrique avec de nouvelles cotes (fichier DXF et géométrie remplacés). Le nom suit
+    la forme tant que l'utilisateur ne l'a pas personnalisé."""
+    if not piece.parametres_forme:
+        raise ErreurPieceDevis("Cette pièce vient d'un fichier : elle n'a pas de cotes à modifier.")
+    try:
+        contour = formes.construire(famille, cotes)
+        nouveau_nom = formes.nom_suggere(famille, cotes)
+    except formes.ErreurForme as exc:
+        raise ErreurPieceDevis(str(exc))
+    ancienne = piece.parametres_forme
+    try:
+        ancien_nom = formes.nom_suggere(ancienne["famille"], ancienne["cotes"])
+    except (formes.ErreurForme, KeyError):
+        ancien_nom = None
+    ancien_fichier = piece.fichier_source.name
+    piece.fichier_source.save(f"{slugify(nouveau_nom) or 'forme'}.dxf", ContentFile(formes.dxf_bytes(contour)), save=False)
+    piece.parametres_forme = {"famille": famille, "cotes": cotes}
+    if piece.nom == ancien_nom:
+        piece.nom = nouveau_nom[:200]
+    piece.save()
+    piece.importer_geometrie()
+    if ancien_fichier and ancien_fichier != piece.fichier_source.name:
+        piece.fichier_source.storage.delete(ancien_fichier)
+    article = piece.article
+    if article is not None and article.nature == Article.Nature.FABRIQUE and piece.article_cree_automatiquement:
+        article.libelle = piece.nom
+        article.save(update_fields=["libelle"])
     return piece
 
 
