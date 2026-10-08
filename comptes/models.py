@@ -59,6 +59,11 @@ class Societe(models.Model):
         help_text="Ex. conditions générales de vente, réserve de propriété.",
     )
     mentions_livraison = models.TextField("mentions sur les bons de livraison", blank=True)
+    mentions_facture = models.TextField(
+        "mentions sur les factures", blank=True,
+        help_text="Escompte, pénalités de retard et indemnité forfaitaire de recouvrement (40 €), imprimés en bas des factures. "
+        "Vide : texte légal par défaut (pas d'escompte, pénalités de 3 fois le taux d'intérêt légal, 40 €).",
+    )
 
     class Meta:
         verbose_name = "Société"

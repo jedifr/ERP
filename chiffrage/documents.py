@@ -1,6 +1,6 @@
-"""Documents PDF commerciaux : devis (offre au client) et bon de livraison.
+"""Documents PDF commerciaux : devis (offre au client), bon de livraison, accusé de réception, fiches de fabrication.
 
-La facture n'en fait pas partie : la facture légale est émise par Tiime."""
+La facture, l'avoir et la relance sont dans facturation/documents.py ; le bon de commande fournisseur dans achats/documents.py."""
 
 from functools import wraps
 

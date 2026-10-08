@@ -48,9 +48,12 @@ def enregistrer_modification_ligne(commande_ligne, champ, ancienne_valeur, nouve
 def _adresse_principale(client, champ_type, libelle):
     adresse = client.adresses.filter(**{champ_type: True}, est_principale=True).first()
     if adresse is None:
+        from django.urls import reverse
+
         raise ChiffrageError(
             f"Aucune adresse de {libelle} principale pour le client « {client} ». "
-            "Ajoutez-en une avant de lancer en production."
+            "Ajoutez-en une avant de lancer en production.",
+            lien=(reverse("admin:commercial_tiers_change", args=[client.pk]), f"Ajouter l'adresse de {libelle} du client"),
         )
     return adresse
 
@@ -197,9 +200,12 @@ def _creer_commande_et_ordres(devis):
         suite = f" : utilisez « {revision} »" if revision else ""
         raise ChiffrageError(f"Le devis « {devis} » a été remplacé par une révision{suite}.")
     if devis.est_expire:
+        from django.urls import reverse
+
         raise ChiffrageError(
             f"L'offre « {devis} » a expiré le {devis.date_validite:%d/%m/%Y} : prolongez sa date de "
-            "validité (si le client confirme) avant de la transformer en commande."
+            "validité (si le client confirme) avant de la transformer en commande.",
+            lien=(reverse("admin:chiffrage_devis_change", args=[devis.pk]), "Modifier la date de validité"),
         )
 
     commande = Commande.objects.create(

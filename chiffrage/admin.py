@@ -231,6 +231,15 @@ class EtapeSuivanteMixin:
         return self._refus_droit(request, commande, "Vous n'avez pas la permission de créer une facture.")
 
 
+def message_erreur(prefixe, exc):
+    """Texte d'un message d'erreur de chiffrage, suivi du lien vers la page où corriger quand l'erreur en porte un."""
+    texte = f"{prefixe}{exc}"
+    lien = getattr(exc, "lien", None)
+    if not lien:
+        return texte
+    return format_html('{} <a class="underline font-semibold" href="{}">{} →</a>', texte, lien[0], lien[1])
+
+
 class EnregistrerEtValiderMixin:
     """Bouton « Enregistrer et valider » de la barre d'enregistrement : enregistre la fiche, la valide quand le
     document a une validation (le devis), puis ouvre directement son PDF — un clic au lieu de quatre.
@@ -420,7 +429,7 @@ class DevisAdmin(PiecesDevisMixin, ColonnesPersonnalisablesMixin, PastillesMixin
         try:
             commande = lancer_en_production(devis)
         except ChiffrageError as exc:
-            return self._refus_droit(request, devis, f"{devis} : {exc}")
+            return self._refus_droit(request, devis, message_erreur(f"{devis} : ", exc))
         suite = etapes.etape_commande(commande)
         self.message_user(
             request,
@@ -631,7 +640,7 @@ class DevisAdmin(PiecesDevisMixin, ColonnesPersonnalisablesMixin, PastillesMixin
             try:
                 calculer_devis(devis)
             except ChiffrageError as exc:
-                self.message_user(request, f"{devis} : {exc}", level=messages.ERROR)
+                self.message_user(request, message_erreur(f"{devis} : ", exc), level=messages.ERROR)
             else:
                 self.message_user(request, f"{devis} : chiffrage recalculé.", level=messages.SUCCESS)
 
@@ -642,7 +651,7 @@ class DevisAdmin(PiecesDevisMixin, ColonnesPersonnalisablesMixin, PastillesMixin
             try:
                 commande = lancer_en_production(devis)
             except ChiffrageError as exc:
-                self.message_user(request, f"{devis} : {exc}", level=messages.ERROR)
+                self.message_user(request, message_erreur(f"{devis} : ", exc), level=messages.ERROR)
             else:
                 creees.append(commande)
                 self.message_user(
@@ -679,7 +688,7 @@ class DevisAdmin(PiecesDevisMixin, ColonnesPersonnalisablesMixin, PastillesMixin
             try:
                 revision = reviser_devis(devis, request.POST.get("motif", ""))
             except ChiffrageError as exc:
-                self.message_user(request, str(exc), level=messages.ERROR)
+                self.message_user(request, message_erreur("", exc), level=messages.ERROR)
                 return HttpResponseRedirect(retour)
             self.message_user(
                 request,
@@ -1004,7 +1013,7 @@ class CommandeAdmin(ColonnesPersonnalisablesMixin, PastillesMixin, EnregistrerEt
             try:
                 ordres = creer_ordres_fabrication(commande, regrouper=regrouper)
             except ChiffrageError as exc:
-                self.message_user(request, str(exc), level=messages.ERROR)
+                self.message_user(request, message_erreur("", exc), level=messages.ERROR)
                 return HttpResponseRedirect(retour)
             self.message_user(
                 request,
@@ -1134,7 +1143,7 @@ class CommandeLigneAdmin(ExportCsvMixin, ModelAdmin):
             try:
                 of = lancer_ligne_en_production(ligne)
             except ChiffrageError as exc:
-                self.message_user(request, f"{ligne} : {exc}", level=messages.ERROR)
+                self.message_user(request, message_erreur(f"{ligne} : ", exc), level=messages.ERROR)
             else:
                 self.message_user(
                     request, format_html("{} : ordre de fabrication {} créé.", ligne, lien_admin(of)), level=messages.SUCCESS

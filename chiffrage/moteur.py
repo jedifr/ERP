@@ -15,7 +15,19 @@ from .models import DevisLigne, DevisLigneOperation
 
 
 class ChiffrageError(Exception):
-    """Donnée de référence manquante ou incohérente empêchant le calcul."""
+    """Donnée de référence manquante ou incohérente empêchant le calcul. `lien` : (adresse, texte) de la page où la corriger,
+    affiché à la suite du message (voir chiffrage.admin.message_erreur)."""
+
+    def __init__(self, message="", lien=None):
+        super().__init__(message)
+        self.lien = lien
+
+
+def lien_article(article):
+    """Lien vers la fiche de l'article dont une donnée manque."""
+    from django.urls import reverse
+
+    return reverse("admin:technique_article_change", args=[article.pk]), "Renseigner le coût de l'article"
 
 
 def _valide_a_la_date(date_reference):
@@ -60,7 +72,7 @@ def cout_composant(nomenclature_ligne):
     quantite = D(nomenclature_ligne.quantite)
     cout_unitaire = D(article.cout_unitaire)
     if article.cout_unitaire is None:
-        raise ChiffrageError(f"L'article « {article} » n'a pas de coût unitaire renseigné.")
+        raise ChiffrageError(f"L'article « {article} » n'a pas de coût unitaire renseigné.", lien=lien_article(article))
 
     if article.unite_cout == Article.UniteCout.PIECE:
         return quantite * cout_unitaire
@@ -144,7 +156,7 @@ def cout_matiere_article(article, quantite, devis=None):
         return arrondir_prix(total)
 
     if article.cout_unitaire is None:
-        raise ChiffrageError(f"L'article « {article} » n'a pas de coût unitaire renseigné.")
+        raise ChiffrageError(f"L'article « {article} » n'a pas de coût unitaire renseigné.", lien=lien_article(article))
     return arrondir_prix(D(quantite) * D(article.cout_unitaire))
 
 

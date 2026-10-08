@@ -1,9 +1,13 @@
 from django.conf import settings
 from django.contrib import admin, messages
+from django.core.exceptions import PermissionDenied
+from django.http import HttpResponse, HttpResponseRedirect
+from django.shortcuts import get_object_or_404
 from django.urls import reverse
 from django.utils.html import escape, format_html
 from django.utils.safestring import mark_safe
 from unfold.admin import ModelAdmin, TabularInline
+from unfold.decorators import action as unfold_action
 
 from codification.mixins import CodificationInitialeMixin
 from codification.models import RegleCodification
@@ -76,6 +80,7 @@ class CommandeFournisseurAdmin(ExportCsvMixin, CodificationInitialeMixin, ModelA
     search_fields = ["numero", "fournisseur__raison_sociale"]
     autocomplete_fields = ["fournisseur"]
     inlines = [LigneCommandeFournisseurInline]
+    actions_detail = ["action_pdf"]
     readonly_fields = [
         "fournisseur_recap", "montant_total_ht_display", "montant_total_ttc_display",
         "reste_a_recevoir_recap", "receptions_recap", "factures_recap",
@@ -94,6 +99,24 @@ class CommandeFournisseurAdmin(ExportCsvMixin, CodificationInitialeMixin, ModelA
             (None, {"fields": saisie, "classes": ["fiche-saisie"]}),
             ("Récapitulatif", {"fields": self.CHAMPS_RECAPITULATIF, "classes": ["fiche-recap"]}),
         ]
+
+    @unfold_action(description="Bon de commande (PDF)", url_path="pdf")
+    def action_pdf(self, request, object_id):
+        from chiffrage.documents import DocumentError
+
+        from .documents import generer_pdf_commande_fournisseur
+
+        commande = get_object_or_404(CommandeFournisseur, pk=object_id)
+        if not self.has_view_permission(request, commande):
+            raise PermissionDenied
+        try:
+            contenu = generer_pdf_commande_fournisseur(commande)
+        except DocumentError as exc:
+            self.message_user(request, str(exc), level=messages.ERROR)
+            return HttpResponseRedirect(reverse("admin:achats_commandefournisseur_change", args=[commande.pk]))
+        reponse = HttpResponse(contenu, content_type="application/pdf")
+        reponse["Content-Disposition"] = f'inline; filename="bon-commande-{commande.pk}.pdf"'
+        return reponse
 
     @staticmethod
     def _euros(valeur):

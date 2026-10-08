@@ -1,6 +1,7 @@
 from django.contrib import admin, messages
 from django.contrib.admin.views.decorators import staff_member_required
-from django.http import HttpResponseRedirect, JsonResponse
+from django.core.exceptions import PermissionDenied
+from django.http import HttpResponse, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.template.response import TemplateResponse
 from django.utils.html import format_html
@@ -141,7 +142,7 @@ class FactureAdmin(ColonnesPersonnalisablesMixin, PastillesMixin, ExportCsvMixin
     autocomplete_fields = ["commande"]
     actions = ["action_generer_ecriture", "action_relancer"]
     actions_list = ["action_preparer_facture"]
-    actions_detail = ["action_creer_avoir"]
+    actions_detail = ["action_pdf", "action_relance_pdf", "action_creer_avoir"]
     readonly_fields = [
         "montants_calcules_display", "echeance_recap", "ecart_recap", "relances_recap", "avoirs_recap", "ecriture_recap",
     ]
@@ -361,6 +362,34 @@ class FactureAdmin(ColonnesPersonnalisablesMixin, PastillesMixin, ExportCsvMixin
                 "retour": retour,
             },
         )
+
+    def _reponse_pdf(self, request, object_id, generateur, nom, **extra):
+        from chiffrage.documents import DocumentError
+
+        facture = get_object_or_404(Facture, pk=object_id)
+        if not self.has_view_permission(request, facture):
+            raise PermissionDenied
+        try:
+            contenu = generateur(facture, **extra)
+        except DocumentError as exc:
+            self.message_user(request, str(exc), level=messages.ERROR)
+            return HttpResponseRedirect(reverse("admin:facturation_facture_change", args=[facture.pk]))
+        reponse = HttpResponse(contenu, content_type="application/pdf")
+        reponse["Content-Disposition"] = f'inline; filename="{nom}-{facture.pk}.pdf"'
+        return reponse
+
+    @unfold_action(description="PDF de la facture", url_path="pdf")
+    def action_pdf(self, request, object_id):
+        from .documents import generer_pdf_facture
+
+        return self._reponse_pdf(request, object_id, generer_pdf_facture, "facture")
+
+    @unfold_action(description="Lettre de relance (PDF)", url_path="relance-pdf")
+    def action_relance_pdf(self, request, object_id):
+        from .documents import generer_pdf_relance
+
+        niveau = request.GET.get("niveau")
+        return self._reponse_pdf(request, object_id, generer_pdf_relance, "relance", niveau=int(niveau) if niveau and niveau.isdigit() else None)
 
     @unfold_action(description="Créer un avoir", permissions=["creer_avoir"], url_path="creer-avoir")
     def action_creer_avoir(self, request, object_id):
