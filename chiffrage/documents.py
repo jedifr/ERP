@@ -25,7 +25,11 @@ from comptes.pdf import (
 
 
 class DocumentError(Exception):
-    """Document non générable dans l'état actuel."""
+    """Document non générable dans l'état actuel. `lien` : (adresse, texte) de la page où corriger ce qui manque."""
+
+    def __init__(self, message="", lien=None):
+        super().__init__(message)
+        self.lien = lien
 
 
 def _personnalisable(type_document, multiple=False):

@@ -45,7 +45,40 @@ def _identite_client(client):
     return " — ".join(morceaux)
 
 
-def generer_pdf_facture(facture):
+def categorie_tva(client, taux):
+    """Catégorie de TVA (UNTDID 5305) d'une ligne : S taux normal ou réduit, K livraison intracommunautaire, G exportation,
+    E exonérée, Z taux zéro."""
+    if taux and taux > 0:
+        return "S"
+    return {
+        Tiers.RegimeFiscal.INTRA_UE: "K", Tiers.RegimeFiscal.HORS_UE: "G", Tiers.RegimeFiscal.FRANCE_EXONERE: "E",
+    }.get(client.regime_fiscal, "Z")
+
+
+def calculer_facture(facture):
+    """Lignes et totaux d'une facture ou d'un avoir, en valeurs positives (le type du document porte le sens). La TVA est calculée
+    **par taux** sur la base HT totale puis arrondie (règle de la norme EN 16931), pas ligne à ligne.
+    Retourne un dictionnaire : lignes [{ligne, designation, quantite, prix, taux, categorie, total_ht}], groupes
+    [{taux, categorie, base, tva}], total_ht, total_tva, total_ttc."""
+    client = facture.commande.client
+    lignes = []
+    bases = {}
+    for ligne in facture.lignes.select_related("commande_ligne__article", "commande_ligne__taux_tva").all():
+        taux = D0(ligne._taux())
+        categorie = categorie_tva(client, taux)
+        total = abs(ligne.montant_ht)
+        lignes.append({"ligne": ligne, "quantite": ligne.quantite, "prix": arrondir_prix(ligne._prix()), "taux": taux, "categorie": categorie, "total_ht": total})
+        bases[(taux, categorie)] = bases.get((taux, categorie), ZERO) + total
+    groupes = [
+        {"taux": taux, "categorie": categorie, "base": arrondir(base), "tva": arrondir(base * taux / 100)}
+        for (taux, categorie), base in sorted(bases.items())
+    ]
+    total_ht = arrondir(sum((g["base"] for g in groupes), ZERO))
+    total_tva = arrondir(sum((g["tva"] for g in groupes), ZERO))
+    return {"lignes": lignes, "groupes": groupes, "total_ht": total_ht, "total_tva": total_tva, "total_ttc": arrondir(total_ht + total_tva)}
+
+
+def generer_pdf_facture(facture, police_embarquee=False):
     """Facture ou avoir en PDF. Refuse un document dont les lignes ne sont pas chiffrées ou dont le montant saisi diffère du total
     des lignes (un document légal doit être cohérent)."""
     st = styles()
@@ -76,37 +109,32 @@ def generer_pdf_facture(facture):
         if facture.motif:
             references.append(f"Motif : {facture.motif}")
 
-    lignes, par_taux = [], {}
-    total_ht = total_ttc = ZERO
-    for ligne in lignes_facture:
-        ht, ttc, taux = ligne.montant_ht, ligne.montant_ttc, D0(ligne._taux())
-        total_ht += ht
-        total_ttc += ttc
-        par_taux.setdefault(taux, [ZERO, ZERO])
-        par_taux[taux][0] += ht
-        par_taux[taux][1] += ttc - ht
-        signe = -1 if avoir else 1
+    calcul = calculer_facture(facture)
+    signe = -1 if avoir else 1  # le PDF montre un avoir en négatif ; le XML Factur-X, lui, reste en positif (type 381)
+    lignes = []
+    for c in calcul["lignes"]:
         lignes.append([
-            Paragraph(_designation(ligne), st["normal"]),
-            Paragraph(quantite(ligne.quantite), st["droite"]),
-            Paragraph(montant(arrondir_prix(ligne._prix())), st["droite"]),
-            Paragraph(f"{pourcent(taux)} %".replace(".", ","), st["droite"]),
-            Paragraph(montant(ht), st["droite"]),
+            Paragraph(_designation(c["ligne"]), st["normal"]),
+            Paragraph(quantite(c["ligne"].quantite), st["droite"]),
+            Paragraph(montant(c["prix"]), st["droite"]),
+            Paragraph(f"{pourcent(c['taux'])} %".replace(".", ","), st["droite"]),
+            Paragraph(montant(signe * c["total_ht"]), st["droite"]),
         ])
     table = tableau_lignes(
         ["Désignation", "Qté", "PU HT", "TVA", "Total HT"], lignes, [80 * mm, 20 * mm, 28 * mm, 16 * mm, 30 * mm], alignements_droite=(1, 2, 3, 4),
     )
 
-    totaux = [["Total HT", montant(arrondir(total_ht))]]
-    for taux in sorted(par_taux):
-        totaux.append([f"TVA {pourcent(taux)} % (base {montant(arrondir(par_taux[taux][0]))})".replace(".", ","), montant(arrondir(par_taux[taux][1]))])
-    totaux.append(["Total TTC", montant(arrondir(total_ttc))])
+    totaux = [["Total HT", montant(signe * calcul["total_ht"])]]
+    for g in calcul["groupes"]:
+        totaux.append([f"TVA {pourcent(g['taux'])} % (base {montant(signe * g['base'])})".replace(".", ","), montant(signe * g["tva"])])
+    totaux.append(["Total TTC", montant(signe * calcul["total_ttc"])])
     table_totaux = Table(totaux, colWidths=[74 * mm, 34 * mm])
     table_totaux.hAlign = "RIGHT"
     table_totaux.setStyle(TableStyle([
         ("ALIGN", (1, 0), (1, -1), "RIGHT"), ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
         ("LINEABOVE", (0, -1), (-1, -1), 0.8, GRIS), ("FONTSIZE", (0, 0), (-1, -1), 9),
     ]))
+    par_taux = {g["taux"]: g for g in calcul["groupes"]}
 
     conditions = []
     if not avoir:
@@ -136,6 +164,11 @@ def generer_pdf_facture(facture):
     if conditions:
         elements += [Paragraph("<br/>".join(conditions), st["normal"]), Spacer(1, 4 * mm)]
     elements += [Paragraph(echapper((societe.mentions_facture or "").strip() or MENTIONS_PAR_DEFAUT), st["petit"])]
+    if police_embarquee:
+        from comptes.pdf import polices_embarquees
+
+        with polices_embarquees():
+            return construire_pdf(elements, titre)
     return construire_pdf(elements, titre)
 
 

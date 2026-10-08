@@ -204,3 +204,121 @@ class LiensMessagesErreurTests(_Base):
         from chiffrage.moteur import ChiffrageError
 
         self.assertEqual(message_erreur("X : ", ChiffrageError("oups")), "X : oups")
+
+
+@lecture_pdf
+class FacturXTests(_Base):
+    """Factur-X (EN 16931) : XML valide au schéma officiel, incorporé à un PDF, avec les montants de la facture."""
+
+    def preparer(self):
+        Societe.objects.filter(pk=1).update(
+            raison_sociale="Mon Atelier SAS", adresse="12 rue des Forges", code_postal="69800", ville="Saint-Priest",
+            siret="73282932000074", tva_intracommunautaire="FR44732829320", iban="FR76 3000 1000 0000 0000 0000 000", bic="BNPAFRPP",
+        )
+        self.client_tiers.siret = "35600000000048"  # SIRET valide (clé de Luhn)
+        self.client_tiers.save()
+        self.adresse.pays = self.pays = type(self.pays).objects.get_or_create(code="FR", defaults={"nom": "France", "est_ue": True})[0]
+        self.adresse.save()
+        self.commande.adresse_facturation = self.adresse
+        self.commande.save()
+
+    def xml_du_pdf(self, pdf):
+        from facturx import get_xml_from_pdf
+
+        nom, contenu = get_xml_from_pdf(__import__("io").BytesIO(bytes(pdf)), check_xsd=True)
+        return nom, contenu.decode() if isinstance(contenu, bytes) else contenu
+
+    def test_facture_facturx_valide_et_complete(self):
+        from .facturx import generer_facturx
+
+        self.preparer()
+        pdf = generer_facturx(self.facture())
+        self.assertTrue(bytes(pdf).startswith(b"%PDF"))
+        nom, xml = self.xml_du_pdf(pdf)
+        self.assertEqual(nom, "factur-x.xml")
+        for attendu in ("urn:cen.eu:en16931:2017", "<ram:ID>FAC-PDF-1</ram:ID>", "<ram:TypeCode>380</ram:TypeCode>", "20260201", "73282932000074"[:9], "FR44732829320",
+                        "<ram:ChargeAmount>100.0000</ram:ChargeAmount>", 'unitCode="C62"', "<ram:LineTotalAmount>400.00</ram:LineTotalAmount>",
+                        "<ram:CalculatedAmount>80.00</ram:CalculatedAmount>", "<ram:GrandTotalAmount>480.00</ram:GrandTotalAmount>", "<ram:CategoryCode>S</ram:CategoryCode>",
+                        "<ram:IBANID>FR7630001000000000000000000</ram:IBANID>", "20260303"):
+            self.assertIn(attendu, xml, attendu)
+
+    def test_polices_incorporees_au_pdf(self):
+        import io
+
+        from .facturx import generer_facturx
+
+        self.preparer()
+        document = pymupdf.open(stream=io.BytesIO(bytes(generer_facturx(self.facture()))), filetype="pdf")
+        polices = {police[3] for page in document for police in page.get_fonts()}
+        self.assertTrue(polices and all("Vera" in p or "DejaVu" in p for p in polices), polices)
+        self.assertTrue(document.embfile_names())  # le XML est une pièce jointe du PDF
+        self.assertIn("OutputIntents", document.xref_object(document.pdf_catalog()))  # intention de sortie sRGB (PDF/A)
+        self.assertIn("pdfaid:part", document.get_xml_metadata())
+        nom, xml = self.xml_du_pdf(generer_facturx(self.facture("FAC-PDF-3")))  # le XML reste extractible et valide après l'ajout
+
+    def test_avoir_type_381_montants_positifs_et_facture_d_origine(self):
+        from .facturx import generer_facturx
+
+        self.preparer()
+        origine = self.facture("FAC-PDF-O")
+        avoir = Facture.objects.create(
+            numero="AV-PDF-1", commande=self.commande, date_facturation=datetime.date(2026, 2, 5), type_document=Facture.TypeDocument.AVOIR,
+            facture_origine=origine, motif="Pièces non conformes",
+        )
+        FactureLigne.objects.create(facture=avoir, commande_ligne=self.ligne, quantite=1)
+        _, xml = self.xml_du_pdf(generer_facturx(avoir))
+        for attendu in ("<ram:TypeCode>381</ram:TypeCode>", "<ram:LineTotalAmount>100.00</ram:LineTotalAmount>", "<ram:GrandTotalAmount>120.00</ram:GrandTotalAmount>",
+                        "<ram:IssuerAssignedID>FAC-PDF-O</ram:IssuerAssignedID>", "Pièces non conformes"):
+            self.assertIn(attendu, xml, attendu)
+
+    def test_livraison_intracommunautaire_categorie_k(self):
+        from .facturx import generer_facturx
+
+        self.preparer()
+        pays_de = type(self.pays).objects.get_or_create(code="DE", defaults={"nom": "Allemagne", "est_ue": True})[0]
+        self.adresse.pays = pays_de
+        self.adresse.save()
+        self.client_tiers.refresh_from_db()
+        self.client_tiers.numero_tva = "DE123456789"
+        self.client_tiers.regime_fiscal = Tiers.RegimeFiscal.INTRA_UE
+        self.client_tiers.save()
+        self.ligne.taux_tva = None
+        self.ligne.save()
+        _, xml = self.xml_du_pdf(generer_facturx(self.facture("FAC-PDF-K")))
+        for attendu in ("<ram:CategoryCode>K</ram:CategoryCode>", "262 ter I du CGI", "<ram:CountryID>DE</ram:CountryID>", "DE123456789"):
+            self.assertIn(attendu, xml, attendu)
+
+    def test_donnees_manquantes_signalees_avec_lien(self):
+        from chiffrage.documents import DocumentError
+
+        from .facturx import generer_facturx
+
+        self.preparer()
+        Societe.objects.filter(pk=1).update(siret="", tva_intracommunautaire="")
+        self.client_tiers.siret = ""
+        self.client_tiers.save()
+        with self.assertRaises(DocumentError) as cm:
+            generer_facturx(self.facture())
+        message = str(cm.exception)
+        for attendu in ("SIRET de la société", "TVA intracommunautaire de la société", "SIRET du client"):
+            self.assertIn(attendu, message)
+        self.assertEqual(cm.exception.lien[0], "/admin/comptes/societe/")
+        reponse = self.client.get(f"/admin/facturation/facture/{self.facture('FAC-PDF-2').pk}/facturx-pdf/", follow=True)
+        self.assertContains(reponse, "Compléter la fiche société")
+
+    def test_action_facturx_de_la_fiche(self):
+        self.preparer()
+        facture = self.facture()
+        reponse = self.client.get(f"/admin/facturation/facture/{facture.pk}/facturx-pdf/")
+        self.assertEqual((reponse.status_code, reponse["Content-Type"]), (200, "application/pdf"))
+        self.assertContains(self.client.get(f"/admin/facturation/facture/{facture.pk}/change/"), "Facture Factur-X")
+
+    def test_les_polices_standard_sont_restaurees(self):
+        from reportlab.pdfbase import pdfmetrics
+
+        from .facturx import generer_facturx
+
+        self.preparer()
+        avant = pdfmetrics.getFont("Helvetica")
+        generer_facturx(self.facture())
+        self.assertIs(pdfmetrics.getFont("Helvetica"), avant)

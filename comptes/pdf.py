@@ -1,7 +1,10 @@
 """Briques communes des documents PDF (ReportLab) : en-tête société, pied de page numéroté,
 filigrane, styles. Les documents eux-mêmes sont dans chiffrage/documents.py."""
 
+import contextlib
 import io
+import os
+import threading
 from pathlib import Path
 
 from django.conf import settings
@@ -30,6 +33,37 @@ def styles():
         "entete": ParagraphStyle("entete", parent=base["Normal"], fontName="Helvetica-Bold", fontSize=8, leading=10, textColor=colors.white),
         "entete_droite": ParagraphStyle("entete_droite", parent=base["Normal"], fontName="Helvetica-Bold", fontSize=8, leading=10, textColor=colors.white, alignment=2),
     }
+
+
+_VERROU_POLICES = threading.Lock()
+
+
+@contextlib.contextmanager
+def polices_embarquees():
+    """Polices TrueType (Bitstream Vera, fournie avec ReportLab) substituées à Helvetica le temps d'un document : un PDF/A-3
+    (Factur-X) exige des polices incorporées au fichier, ce que les polices standard du PDF ne sont pas. Le verrou évite que deux
+    documents simultanés se partagent le registre des polices."""
+    import reportlab
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+
+    dossier = os.path.join(os.path.dirname(reportlab.__file__), "fonts")
+    correspondance = {
+        "Helvetica": "Vera.ttf", "Helvetica-Bold": "VeraBd.ttf", "Helvetica-Oblique": "VeraIt.ttf", "Helvetica-BoldOblique": "VeraBI.ttf",
+    }
+    with _VERROU_POLICES:
+        anciennes = {nom: pdfmetrics._fonts.get(nom) for nom in correspondance}
+        try:
+            for nom, fichier in correspondance.items():
+                pdfmetrics._fonts.pop(nom, None)  # registerFont ignore un nom déjà enregistré (police standard déjà utilisée)
+                pdfmetrics.registerFont(TTFont(nom, os.path.join(dossier, fichier)))
+            yield
+        finally:
+            for nom, ancienne in anciennes.items():
+                if ancienne is None:
+                    pdfmetrics._fonts.pop(nom, None)
+                else:
+                    pdfmetrics._fonts[nom] = ancienne
 
 
 def echapper(texte):
@@ -169,5 +203,5 @@ def tableau_lignes(entetes, lignes, largeurs, alignements_droite=()):
     return table
 
 
-__all__ = ["Spacer", "Paragraph", "Table", "TableStyle", "styles", "echapper", "montant", "quantite",
+__all__ = ["polices_embarquees", "Spacer", "Paragraph", "Table", "TableStyle", "styles", "echapper", "montant", "quantite",
            "entete_societe", "construire_pdf", "tableau_lignes", "AMBRE", "GRIS", "GRIS_CLAIR", "mm"]

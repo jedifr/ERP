@@ -142,7 +142,7 @@ class FactureAdmin(ColonnesPersonnalisablesMixin, PastillesMixin, ExportCsvMixin
     autocomplete_fields = ["commande"]
     actions = ["action_generer_ecriture", "action_relancer"]
     actions_list = ["action_preparer_facture"]
-    actions_detail = ["action_pdf", "action_relance_pdf", "action_creer_avoir"]
+    actions_detail = ["action_pdf", "action_facturx_pdf", "action_relance_pdf", "action_creer_avoir"]
     readonly_fields = [
         "montants_calcules_display", "echeance_recap", "ecart_recap", "relances_recap", "avoirs_recap", "ecriture_recap",
     ]
@@ -372,7 +372,10 @@ class FactureAdmin(ColonnesPersonnalisablesMixin, PastillesMixin, ExportCsvMixin
         try:
             contenu = generateur(facture, **extra)
         except DocumentError as exc:
-            self.message_user(request, str(exc), level=messages.ERROR)
+            lien = getattr(exc, "lien", None)
+            self.message_user(
+                request, format_html('{} <a class="underline font-semibold" href="{}">{} →</a>', str(exc), lien[0], lien[1]) if lien else str(exc), level=messages.ERROR,
+            )
             return HttpResponseRedirect(reverse("admin:facturation_facture_change", args=[facture.pk]))
         reponse = HttpResponse(contenu, content_type="application/pdf")
         reponse["Content-Disposition"] = f'inline; filename="{nom}-{facture.pk}.pdf"'
@@ -383,6 +386,12 @@ class FactureAdmin(ColonnesPersonnalisablesMixin, PastillesMixin, ExportCsvMixin
         from .documents import generer_pdf_facture
 
         return self._reponse_pdf(request, object_id, generer_pdf_facture, "facture")
+
+    @unfold_action(description="Facture Factur-X (PDF + XML)", url_path="facturx-pdf")
+    def action_facturx_pdf(self, request, object_id):
+        from .facturx import generer_facturx
+
+        return self._reponse_pdf(request, object_id, generer_facturx, "facturx")
 
     @unfold_action(description="Lettre de relance (PDF)", url_path="relance-pdf")
     def action_relance_pdf(self, request, object_id):
