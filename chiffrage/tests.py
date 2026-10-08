@@ -577,7 +577,7 @@ class ReordonnerLignesDevisAdminTests(TestCase):
             "lignes-2-taux_marge_matiere_applique": "",
             "lignes-2-prix_vente_unitaire_force": "",
             "lignes-2-taux_tva": "",
-            "_continue": "Enregistrer et continuer les modifications",
+            "_continue": "Enregistrer",
         }
 
     def test_inversion_de_deux_lignes_persiste_sans_toucher_la_ligne_vide(self):

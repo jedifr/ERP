@@ -58,6 +58,26 @@ def espacement_pieces_mm(piece):
     return espacement
 
 
+def bord_tole_mm(matiere, epaisseur, procede, gaz=""):
+    """Bord de tôle (bande non découpée sur le pourtour) pour une matière, une épaisseur et un procédé : le plancher du procédé
+    (jet d'eau 5 mm, laser 10 mm), le bord du paramètre de coupe s'il est renseigné ; au laser jamais moins que l'épaisseur
+    (le bord grandit avec l'épaisseur, comme l'écart entre pièces)."""
+    from .parametres import meilleur_parametre, reglage
+
+    bord = float(reglage(procede).bord_tole_minimum_mm)
+    if procede == "laser" and epaisseur:
+        bord = max(bord, float(epaisseur))
+    if matiere is not None and epaisseur:
+        parametre = meilleur_parametre(matiere, epaisseur, procede, gaz if procede == "laser" else "")
+        if parametre and parametre.bord_tole_mm:
+            bord = max(bord, float(parametre.bord_tole_mm))
+    return bord
+
+
+def bord_tole_piece_mm(piece):
+    return bord_tole_mm(piece.matiere if piece.matiere_id else None, piece.epaisseur, piece.procede, piece.gaz_coupe)
+
+
 def prix_au_mm2(tole, largeur_mm, longueur_mm):
     """Prix de la tôle au mm² (Decimal), selon son unité de coût."""
     if tole.cout_unitaire is None:

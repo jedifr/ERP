@@ -388,10 +388,12 @@ UNFOLD = {
         lambda request: static("comptes/admin_extra.css"),
         lambda request: static("comptes/fiche_deux_colonnes.css"),
         lambda request: static("comptes/theme.css"),
+        lambda request: static("comptes/navigation_documents.css"),
     ],
     "SCRIPTS": [
         lambda request: static("comptes/anti_double_clic.js"),
         lambda request: static("comptes/filtre_client.js"),
+        lambda request: static("comptes/navigation_documents.js"),
     ],
     "SITE_TITLE": "ERP maison",
     "SITE_HEADER": "ERP maison",

@@ -64,11 +64,16 @@ function demarrer() {
     const formatsChoisis = {}; // groupe -> format cliqué dans le tableau de comparaison
     let minuteur = null;
 
-    function lireChoix() {
+    function lireChoix(brut) {
+        // Bord de tôle automatique : envoyé vide pour que le serveur le recalcule (sauf pour retenir, qui enregistre la valeur affichée).
         const choix = {};
         zoneImb.querySelectorAll(".dp-groupe").forEach((groupe) => {
             const c = {};
-            groupe.querySelectorAll("select[data-i], input[data-i]").forEach((el) => { c[el.dataset.i] = el.type === "checkbox" ? (el.checked ? "1" : "0") : el.value; });
+            groupe.querySelectorAll("select[data-i], input[data-i]").forEach((el) => {
+                if (el.type === "checkbox") c[el.dataset.i] = el.checked ? "1" : "0";
+                else if (el.dataset.auto === "1" && !brut) c[el.dataset.i] = "";
+                else c[el.dataset.i] = el.value;
+            });
             if (formatsChoisis[groupe.dataset.cle]) c.format = formatsChoisis[groupe.dataset.cle];
             choix[groupe.dataset.cle] = c;
         });
@@ -129,7 +134,11 @@ function demarrer() {
     }
 
     if (zoneImb) {
-        zoneImb.addEventListener("change", (e) => { if (e.target.dataset.i) planifierImbrication(); });
+        zoneImb.addEventListener("input", (e) => { if (e.target.dataset.auto === "1") e.target.dataset.auto = e.target.value.trim() === "" ? "1" : "0"; });
+        zoneImb.addEventListener("change", (e) => {
+            if (e.target.dataset.i === "marge" && e.target.value.trim() === "") e.target.dataset.auto = "1";
+            if (e.target.dataset.i) planifierImbrication();
+        });
         zoneImb.addEventListener("keydown", (e) => {
             if (e.key === "Enter" && e.target.matches("input[data-i]")) { e.preventDefault(); e.target.blur(); }
             if (e.key === "Enter" && e.target.matches("tr[data-i=format]")) e.target.click();
@@ -157,7 +166,7 @@ function demarrer() {
             const bouton = e.target.closest(".dp-retenir");
             if (!bouton) return;
             const groupe = bouton.closest(".dp-groupe");
-            const c = lireChoix()[groupe.dataset.cle];
+            const c = lireChoix(true)[groupe.dataset.cle];
             try {
                 const reponse = await fetch(zoneImb.dataset.urlRetenir, {
                     method: "POST", credentials: "same-origin", headers: { "X-CSRFToken": csrf(), "Content-Type": "application/json" },

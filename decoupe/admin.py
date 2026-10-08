@@ -706,7 +706,7 @@ class ParametreCoupeAdmin(ModelAdmin):
             "percage_circulaire_bp_tours", "diametre_percage_mm", "temporisation_pointage_s",
         ]}),
         ("Marquage, amorce et imbrication", {"fields": [
-            "vitesse_marquage_mm_min", "temporisation_marquage_s", "percement_lineaire_mm", "chevauchement_mm", "intervalle_pieces_mm",
+            "vitesse_marquage_mm_min", "temporisation_marquage_s", "percement_lineaire_mm", "chevauchement_mm", "intervalle_pieces_mm", "bord_tole_mm",
         ]}),
         ("Réglages du calcul", {"fields": [
             "rayon_pleine_vitesse_coef", "facteur_vitesse_courbe", "seuil_angle_coin_deg", "facteur_percage", "deplacement_par_contour_s",
@@ -719,7 +719,7 @@ class ParametreCoupeAdmin(ModelAdmin):
 class ReglageProcedeAdmin(ModelAdmin):
     """Pondération des vitesses du laser et écart minimal entre pièces de chaque procédé."""
 
-    list_display = ["procede", "coefficient_vitesse", "espacement_minimum_mm"]
+    list_display = ["procede", "coefficient_vitesse", "espacement_minimum_mm", "bord_tole_minimum_mm"]
 
     def has_add_permission(self, request):
         return False  # un réglage par procédé, créé avec les valeurs usuelles

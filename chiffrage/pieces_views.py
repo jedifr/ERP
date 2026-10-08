@@ -17,7 +17,7 @@ from decoupe.models import GazCoupe, PieceDecoupe, PieceProfile, ProcedeCoupe, P
 from decoupe.services import devis_pieces, devis_profiles, formes, profiles
 from decoupe.services import imbrication_devis as imb
 from decoupe.services.apercu_svg import generer_svg_feuille_a_plat, generer_svg_piece
-from decoupe.services.matiere import ErreurMatiere, prix_au_mm2
+from decoupe.services.matiere import ErreurMatiere, bord_tole_piece_mm, prix_au_mm2
 from decoupe.services.parametres import reglage
 from technique.models import Matiere
 
@@ -52,7 +52,15 @@ def _bloc_groupe(groupe, choix, formats):
         tole = next((t for t in toles if t.pk == retenues.tole_id), None)
     if tole is None and len(toles) == 1:
         tole = toles[0]
-    marge = _nombre(choix.get("marge"), retenues.marge_bord_mm if retenues else 5)
+    # Bord de tôle : automatique (matière, épaisseur, procédé : voir matiere.bord_tole_mm) tant qu'il n'est pas imposé ou retenu.
+    bord_auto = max((bord_tole_piece_mm(p) for p in pieces), default=5.0)
+    retenue = retenues is not None and retenues.tole_id is not None
+    if "marge" in choix and str(choix["marge"]).strip() != "":
+        marge, marge_auto = _nombre(choix["marge"], bord_auto), False
+    elif "marge" not in choix and retenue and not choix:
+        marge, marge_auto = float(retenues.marge_bord_mm), False
+    else:
+        marge, marge_auto = bord_auto, True
     taux = max(0.0, min(100.0, _nombre(choix.get("chute"), retenues.taux_chute_recuperable if retenues else 0)))
     forme = _booleen(choix.get("forme"), retenues.imbrication_forme if retenues else True)
     sens = choix.get("sens") or (retenues.sens_imbrication if retenues else "longueur")
@@ -62,7 +70,7 @@ def _bloc_groupe(groupe, choix, formats):
     if coin not in PieceDecoupe.CoinDepart.values:
         coin = "bas_gauche"
     bloc = {
-        "groupe": groupe, "cle": groupe.cle, "toles": toles, "tole": tole, "marge": marge, "chute": taux, "forme": forme, "formats": formats,
+        "groupe": groupe, "cle": groupe.cle, "toles": toles, "tole": tole, "marge": marge, "marge_auto": marge_auto, "chute": taux, "forme": forme, "formats": formats,
         "erreur": "", "avertissement": "", "epaisseurs_toles": [] if toles else imb.epaisseurs_toles_existantes(groupe), "sens": sens, "coin": coin, "sens_choix": PieceDecoupe.SensImbrication.choices,
         "coin_choix": PieceDecoupe.CoinDepart.choices,
     }

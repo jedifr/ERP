@@ -552,6 +552,10 @@ class ParametreCoupe(models.Model):
     percement_lineaire_mm = models.FloatField("percement linéaire (mm)", default=0, help_text="Amorce de coupe avant le contour")
     chevauchement_mm = models.FloatField("chevauchement (mm)", default=0, help_text="Recouvrement à la fermeture d'un contour")
     intervalle_pieces_mm = models.FloatField("intervalle entre pièces (mm)", default=4, help_text="Espacement utilisé pour l'imbrication")
+    bord_tole_mm = models.FloatField(
+        "bord de tôle (mm)", null=True, blank=True,
+        help_text="Bande non découpée sur le pourtour de la tôle pour cette épaisseur. Vide : la règle du procédé s'applique (plancher des réglages de coupe ; au laser, jamais moins que l'épaisseur). Le plus grand des deux est retenu.",
+    )
 
     # Réglages de calcul
     rayon_pleine_vitesse_coef = models.FloatField(
@@ -664,6 +668,10 @@ class ReglageProcede(models.Model):
         "capacité de la machine : longueur (mm)", default=0,
         help_text="Plus grande dimension de la plus grande tôle que la machine peut recevoir (jet d'eau : 4000 × 2000 ; laser : 3000 × 1500). 0 : pas de limite.",
     )
+    bord_tole_minimum_mm = models.FloatField(
+        "bord de tôle minimal (mm)", default=5,
+        help_text="Plancher du bord de tôle (bande non découpée sur le pourtour), quelles que soient la matière et l'épaisseur (jet d'eau : 5 constant ; laser : 10). Au laser, le bord grandit avec l'épaisseur (jamais moins que l'épaisseur) ; le paramètre de coupe peut imposer plus.",
+    )
     espacement_minimum_mm = models.FloatField(
         "écart minimal entre pièces (mm)", default=4,
         help_text="Plancher de l'écart entre deux pièces à l'imbrication, quelles que soient la matière et l'épaisseur (jet d'eau : 6 ; laser : 10). Au laser, la base donne un écart plus grand quand l'épaisseur augmente : le plus grand des deux est retenu.",
@@ -694,8 +702,8 @@ class ReglageProcede(models.Model):
     def pour(cls, procede):
         """Réglage du procédé (créé avec les valeurs usuelles s'il n'existe pas encore)."""
         defauts = {
-            "jet_eau": {"espacement_minimum_mm": 6, "capacite_largeur_mm": 2000, "capacite_longueur_mm": 4000},
-            "laser": {"coefficient_vitesse": 0.85, "espacement_minimum_mm": 10, "capacite_largeur_mm": 1500, "capacite_longueur_mm": 3000},
+            "jet_eau": {"espacement_minimum_mm": 6, "bord_tole_minimum_mm": 5, "capacite_largeur_mm": 2000, "capacite_longueur_mm": 4000},
+            "laser": {"coefficient_vitesse": 0.85, "espacement_minimum_mm": 10, "bord_tole_minimum_mm": 10, "capacite_largeur_mm": 1500, "capacite_longueur_mm": 3000},
         }
         return cls.objects.get_or_create(procede=procede, defaults=defauts.get(procede, {}))[0]
 

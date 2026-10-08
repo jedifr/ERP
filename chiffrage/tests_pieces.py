@@ -899,3 +899,83 @@ class MiniaturePdfEtTolesTests(TestCase):
         self.assertEqual(list(_miniatures_devis(self.devis)), [piece.article_id])
         pdf = generer_pdf_devis(self.devis)
         self.assertTrue(bytes(pdf).startswith(b"%PDF"))
+
+
+class BordDeToleEtNavigationTests(TestCase):
+    setUp = ImbricationDevisTests.setUp
+    piece = ImbricationDevisTests.piece
+    imbriquer = ImbricationDevisTests.imbriquer
+
+    def test_regle_du_bord_de_tole(self):
+        from decoupe.models import ParametreCoupe
+        from decoupe.services.matiere import bord_tole_mm
+
+        self.assertEqual(bord_tole_mm(self.matiere, 3, "jet_eau"), 5)  # jet d'eau : constant
+        self.assertEqual(bord_tole_mm(self.matiere, 25, "jet_eau"), 5)
+        self.assertEqual(bord_tole_mm(self.matiere, 3, "laser"), 10)  # laser : 10 mm au moins
+        self.assertEqual(bord_tole_mm(self.matiere, 12, "laser"), 12)  # puis égal à l'épaisseur
+        famille = self.matiere.famille or None
+        parametre = ParametreCoupe.objects.filter(procede="laser", epaisseur_mm=12).first()
+        if parametre is not None:
+            parametre.bord_tole_mm = 20
+            parametre.save()
+            from technique.models import Matiere, FamilleMatiere
+
+            nuance = Matiere.objects.create(nom="Acier test bord", densite=7.85, famille=parametre.famille)
+            self.assertEqual(bord_tole_mm(nuance, 12, "laser"), 20)  # le bord du paramètre l'emporte s'il est plus grand
+
+    def test_panneau_calcule_le_bord_puis_garde_la_valeur_imposee_ou_retenue(self):
+        from decoupe.models import FormatTole
+
+        a = self.piece("a", 4)  # laser, 10 mm d'épaisseur → bord de 10 mm
+        html = self.imbriquer().json()["html"]
+        self.assertRegex(html, r'data-i="marge"\s+data-auto="1"[^>]*value="10\.0"')
+        html = self.imbriquer({"S235|10|laser": {"marge": ""}}).json()["html"]
+        self.assertRegex(html, r'data-auto="1"')
+        html = self.imbriquer({"S235|10|laser": {"marge": "7"}}).json()["html"]
+        self.assertRegex(html, r'data-i="marge"\s+data-auto="0"[^>]*value="7\.0"')
+        format_tole = FormatTole.objects.get(largeur_mm=1500, longueur_mm=3000)
+        self.client.post(
+            self.url + "imbrication/retenir/",
+            data=json.dumps({"cle": "S235|10|laser", "tole": self.tole.pk, "format": format_tole.pk, "marge": "7", "chute": "0"}), content_type="application/json",
+        )
+        a.refresh_from_db()
+        self.assertEqual(a.marge_bord_mm, 7.0)
+        self.assertRegex(self.imbriquer().json()["html"], r'data-auto="0"[^>]*value="7\.0"')  # valeur retenue relue
+
+    def test_admin_expose_le_bord(self):
+        self.assertContains(self.client.get("/admin/decoupe/reglageprocede/"), "Bord de tôle minimal")
+
+    def test_boutons_enregistrer_et_enregistrer_et_fermer(self):
+        page = self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/change/")
+        self.assertContains(page, "Enregistrer et fermer")
+        self.assertRegex(page.content.decode(), r'name="_continue"[^>]*>\s*Enregistrer\s*<')
+        self.assertNotContains(page, "Enregistrer et continuer les modifications")
+        for url in ("/admin/commercial/tiers/add/", "/admin/technique/article/add/"):
+            self.assertContains(self.client.get(url), "Enregistrer et fermer")
+
+    def test_navigation_entre_devis(self):
+        tiers = self.devis.client
+        for i in range(1, 4):
+            Devis.objects.create(numero=f"DEV-NAV-{i}", client=tiers, date_creation=datetime.date(2026, 10, 7))
+        remplace = Devis.objects.create(numero="DEV-NAV-OLD", client=tiers, date_creation=datetime.date(2026, 10, 7), issue=Devis.Issue.REMPLACE)
+        r = self.client.get("/admin/navigation/chiffrage/devis/", {"actuel": "DEV-NAV-2"}).json()
+        numeros = [i["label"].split(" ")[0] for i in r["items"]]
+        self.assertIn("DEV-NAV-2", numeros)
+        self.assertNotIn("DEV-NAV-OLD", numeros)  # indices remplacés non proposés
+        self.assertEqual(sum(1 for i in r["items"] if i["courant"]), 1)
+        self.assertTrue(r["precedent"].endswith("/DEV-NAV-1/change/"))
+        self.assertTrue(r["suivant"].endswith("/DEV-NAV-3/change/"))
+        filtre = self.client.get("/admin/navigation/chiffrage/devis/", {"q": "NAV-3"}).json()
+        self.assertEqual([i["pk"] for i in filtre["items"]], ["DEV-NAV-3"])
+        self.assertEqual(filtre["ensemble"], 4)  # DEV-IMB-1 + 3, sans l'indice remplacé
+        self.assertEqual(self.client.get("/admin/navigation/inconnu/modele/").status_code, 404)
+
+    def test_navigation_respecte_les_droits(self):
+        simple = get_user_model().objects.create_user("sans-droit", "s@example.com", "pass-mot-de-passe-23", is_staff=True)
+        self.client.force_login(simple)
+        self.assertEqual(self.client.get("/admin/navigation/chiffrage/devis/").status_code, 403)
+
+    def test_script_de_navigation_charge_sur_les_fiches(self):
+        page = self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/change/")
+        self.assertContains(page, "navigation_documents")

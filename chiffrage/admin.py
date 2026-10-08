@@ -395,6 +395,10 @@ class DevisAdmin(PiecesDevisMixin, ColonnesPersonnalisablesMixin, PastillesMixin
     def peut_enregistrer_valider(self, request):
         return request.user.has_perm("chiffrage.valider_devis") and self.has_change_permission(request)
 
+    def queryset_navigation(self, qs):
+        """Menu de navigation entre devis : les indices remplacés (anciennes versions) ne sont pas proposés."""
+        return qs.exclude(issue=Devis.Issue.REMPLACE)
+
     def pret_pour_pdf(self, obj):
         return obj.statut == Devis.Statut.VALIDE
 

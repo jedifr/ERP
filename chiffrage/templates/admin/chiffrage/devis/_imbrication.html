@@ -11,7 +11,7 @@
         {% for t in b.toles %}<option value="{{ t.pk }}" {% if b.tole and t.pk == b.tole.pk %}selected{% endif %}>{{ t.reference }}{% if t.libelle %} — {{ t.libelle }}{% endif %}</option>{% endfor %}
       </select>
     </label>
-    <label>Marge de bord (mm)<input type="text" inputmode="decimal" data-i="marge" value="{{ b.marge|unlocalize }}"></label>
+    <label title="Bande non découpée sur le pourtour de la tôle : selon la matière, l'épaisseur et le procédé (paramètres de coupe). Modifiez la valeur pour l'imposer ; videz le champ pour revenir au calcul automatique.">Bord de tôle (mm){% if b.marge_auto %} <em class="dp-auto">auto</em>{% endif %}<input type="text" inputmode="decimal" data-i="marge" data-auto="{% if b.marge_auto %}1{% else %}0{% endif %}" placeholder="auto" value="{{ b.marge|unlocalize }}"></label>
     <label>Chute récupérable (%)<input type="text" inputmode="decimal" data-i="chute" value="{{ b.chute|unlocalize }}"></label>
     <label>Remplissage
       <select data-i="sens">{% for v, l in b.sens_choix %}<option value="{{ v }}" {% if v == b.sens %}selected{% endif %}>{{ l }}</option>{% endfor %}</select>
