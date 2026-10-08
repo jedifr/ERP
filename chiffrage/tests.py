@@ -5340,6 +5340,15 @@ class EnregistrerEtValiderTests(_FixtureModuleA, TestCase):
         reponse = self.client.post(f"/admin/chiffrage/devis/{self.devis.pk}/change/", donnees)
         self.assertRedirects(reponse, f"/admin/chiffrage/devis/{self.devis.pk}/pdf/", fetch_redirect_response=False)
 
+    def test_nouvel_onglet_reste_sur_la_fiche_et_porte_l_adresse_du_pdf(self):
+        self._valider()
+        donnees = {"statut": "valide", "issue": "en_attente", "lignes-TOTAL_FORMS": "0", "lignes-INITIAL_FORMS": "0",
+                   "_enregistrer_valider": "1", "_nouvel_onglet": "1"}
+        reponse = self.client.post(f"/admin/chiffrage/devis/{self.devis.pk}/change/", donnees)
+        fiche = f"/admin/chiffrage/devis/{self.devis.pk}/change/"
+        self.assertRedirects(reponse, f"{fiche}?ouvrir_pdf=%2Fadmin%2Fchiffrage%2Fdevis%2F{self.devis.pk}%2Fpdf%2F", fetch_redirect_response=False)
+        self.assertContains(self.client.get(fiche), "pdf_nouvel_onglet")
+
     def test_sans_droit_de_valider_pas_de_bouton_ni_validation(self):
         from django.contrib.auth import get_user_model
         from django.contrib.auth.models import Permission

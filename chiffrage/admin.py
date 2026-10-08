@@ -1,5 +1,6 @@
 import dataclasses
 import datetime
+from urllib.parse import quote
 
 from django import forms
 from django.conf import settings
@@ -281,7 +282,11 @@ class EnregistrerEtValiderMixin:
         if not self.pret_pour_pdf(obj):
             self.message_user(request, f"{obj} enregistré, mais pas validé.", level=messages.WARNING)
             return HttpResponseRedirect(fiche)
-        return HttpResponseRedirect(reverse(self.url_pdf, args=[obj.pk]))
+        pdf = reverse(self.url_pdf, args=[obj.pk])
+        if "_nouvel_onglet" in request.POST:
+            # Le script de la fiche a réservé un onglet pour le PDF : on reste sur la fiche, qui l'y ouvre (comptes/pdf_nouvel_onglet.js).
+            return HttpResponseRedirect(f"{fiche}?ouvrir_pdf={quote(pdf, safe='')}")
+        return HttpResponseRedirect(pdf)
 
 
 class DevisAdminForm(forms.ModelForm):

@@ -394,6 +394,7 @@ UNFOLD = {
         lambda request: static("comptes/anti_double_clic.js"),
         lambda request: static("comptes/filtre_client.js"),
         lambda request: static("comptes/navigation_documents.js"),
+        lambda request: static("comptes/pdf_nouvel_onglet.js"),
     ],
     "SITE_TITLE": "ERP maison",
     "SITE_HEADER": "ERP maison",
