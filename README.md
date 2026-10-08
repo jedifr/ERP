@@ -3035,3 +3035,7 @@ Sous la zone de dépôt du panneau « Pièces à découper » d'un devis, la **B
 ## Taille des vues d'imbrication
 
 Au-dessus des imbrications, le sélecteur « Imbrications par ligne » (1, 2, 3 ou 4) règle le nombre de feuilles côte à côte sur la largeur de l'écran ; le choix est mémorisé dans le navigateur. À partir de 2 par ligne, le bilan passe sous les feuilles ; sur un écran étroit (moins de 900 px) l'affichage revient à une feuille par ligne.
+
+## Adresses et contact du devis : jamais vidés par un faux changement de client
+
+Le script de la fiche devis (et de la commande) vidait l'adresse de facturation, l'adresse de livraison et le contact à chaque événement « change » du champ Client, puis ne proposait que les adresses « principales » du tiers. Un « change » parasite (initialisation du sélecteur, extension du navigateur, gestionnaire de mots de passe) effaçait donc des adresses choisies à la main. Le script compare maintenant le client au dernier client connu et ne fait rien si le client n'a pas réellement changé.

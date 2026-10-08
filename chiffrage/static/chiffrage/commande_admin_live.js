@@ -76,7 +76,13 @@
             return;
         }
 
+        // Un « change » qui ne change pas le client (select2, extension du navigateur…) ne doit jamais vider les adresses.
+        let dernierClient = $client.val() || "";
         $client.on("change", function () {
+            if (($client.val() || "") === dernierClient) {
+                return;
+            }
+            dernierClient = $client.val() || "";
             // Changer de client : les adresses (et le contact) du précédent ne valent plus, on repart de zéro
             // avant de proposer ceux du nouveau client.
             ["#id_adresse_facturation", "#id_adresse_livraison"].forEach(function (sel) {

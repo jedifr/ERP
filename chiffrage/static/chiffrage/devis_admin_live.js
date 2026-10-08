@@ -86,7 +86,15 @@
             return;
         }
 
+        // Dernier client connu : un événement « change » qui ne change pas le client (select2 qui s'initialise, extension du
+        // navigateur ou gestionnaire de mots de passe qui touche au formulaire) ne doit JAMAIS vider les adresses et le contact
+        // déjà enregistrés.
+        let dernierClient = $client.val() || "";
         $client.on("change", function () {
+            if (($client.val() || "") === dernierClient) {
+                return;
+            }
+            dernierClient = $client.val() || "";
             // Changer de client : les adresses (et le contact) du précédent ne valent plus, on repart de zéro
             // avant de proposer ceux du nouveau client.
             ["#id_adresse_facturation", "#id_adresse_livraison", "#id_contact"].forEach(function (sel) {
