@@ -44,6 +44,23 @@ function demarrer() {
 
     // ---------------------------------------------------------------- imbrication
     const zoneImb = document.getElementById("dp-imbrication");
+    const vues = document.getElementById("dp-vues");
+    if (vues && zoneImb) {
+        // Nombre de feuilles côte à côte (1 à 4), mémorisé dans le navigateur.
+        const appliquer = (n) => {
+            zoneImb.dataset.colonnes = n;
+            vues.querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", b.dataset.colonnes === String(n) ? "true" : "false"));
+        };
+        let initial = "1";
+        try { initial = window.localStorage.getItem("dp-colonnes") || "1"; } catch (e) { /* stockage indisponible */ }
+        appliquer(["1", "2", "3", "4"].includes(initial) ? initial : "1");
+        vues.addEventListener("click", (e) => {
+            const bouton = e.target.closest("button[data-colonnes]");
+            if (!bouton) return;
+            appliquer(bouton.dataset.colonnes);
+            try { window.localStorage.setItem("dp-colonnes", bouton.dataset.colonnes); } catch (err) { /* ignoré */ }
+        });
+    }
     const formatsChoisis = {}; // groupe -> format cliqué dans le tableau de comparaison
     let minuteur = null;
 

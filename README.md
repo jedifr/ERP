@@ -3031,3 +3031,7 @@ Sous la zone de dépôt du panneau « Pièces à découper » d'un devis, la **B
 - **Taux de marge** : libellés « (%) » et aide (20 = prix de vente × 1,20).
 - **Laser** : les vitesses ne sont jamais « calculées depuis l'usinabilité » ; les épaisseurs absentes du tableau du constructeur (0,5 mm) sont désormais « extrapolées du tableau du constructeur » (migration des 12 lignes concernées). La fiche d'un paramètre laser ne montre plus les réglages propres au jet d'eau (usinabilité, modes de perçage…), et inversement.
 - **Chiffrage des pièces** : la gamme est alimentée dès que le paramètre a un poste de travail, au lieu d'afficher « poste de travail à renseigner » pour un poste déjà renseigné ; le message indique la vraie raison.
+
+## Taille des vues d'imbrication
+
+Au-dessus des imbrications, le sélecteur « Imbrications par ligne » (1, 2, 3 ou 4) règle le nombre de feuilles côte à côte sur la largeur de l'écran ; le choix est mémorisé dans le navigateur. À partir de 2 par ligne, le bilan passe sous les feuilles ; sur un écran étroit (moins de 900 px) l'affichage revient à une feuille par ligne.

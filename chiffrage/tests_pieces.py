@@ -855,3 +855,13 @@ class ProfilesDevisTests(TestCase):
         self.assertContains(page, "tube_rond")
         self.assertContains(page, 'id="dp-profils"')
         self.assertContains(self.client.get("/admin/decoupe/profilesection/"), "UPN 100")
+
+
+class VuesImbricationTests(TestCase):
+    setUp = PanneauPiecesDevisTests.setUp
+
+    def test_panneau_propose_1_a_4_imbrications_par_ligne(self):
+        page = self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/change/")
+        self.assertContains(page, 'id="dp-vues"')
+        for n in "1234":
+            self.assertContains(page, f'data-colonnes="{n}" aria-pressed')

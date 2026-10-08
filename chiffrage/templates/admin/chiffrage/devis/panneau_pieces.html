@@ -46,7 +46,11 @@
   {% endif %}
   <div id="dp-cartes">{% for carte in p.cartes %}{{ carte|safe }}{% endfor %}</div>
   <div id="dp-profils" class="dp-profils" data-url-retenir="{{ p.url_profil_retenir }}">{% for carte in p.cartes_profils %}{{ carte|safe }}{% endfor %}</div>
-  <div id="dp-imbrication" class="dp-imbrication" data-url-imbrication="{{ p.url_imbrication }}" data-url-retenir="{{ p.url_retenir }}"></div>
+  <div class="dp-vues" id="dp-vues" role="group" aria-label="Imbrications par ligne">
+    <span>Imbrications par ligne</span>
+    {% for n in "1234" %}<button type="button" data-colonnes="{{ n }}" aria-pressed="false" title="{{ n }} imbrication{{ n|pluralize }} sur la largeur de l'écran">{{ n }}</button>{% endfor %}
+  </div>
+  <div id="dp-imbrication" class="dp-imbrication" data-colonnes="1" data-url-imbrication="{{ p.url_imbrication }}" data-url-retenir="{{ p.url_retenir }}"></div>
   <div id="dp-messages" class="dp-messages" role="status"></div>
 </section>
 {% elif p.nouveau %}
