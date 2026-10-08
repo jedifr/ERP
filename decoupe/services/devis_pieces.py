@@ -7,6 +7,7 @@ réglages de la pièce sont recopiés sur l'article (matière, épaisseur) et le
 paramètre de coupe a un poste de travail."""
 
 import datetime
+import re
 from pathlib import Path
 
 from django.core.files.base import ContentFile
@@ -28,7 +29,24 @@ class ErreurPieceDevis(Exception):
     """Import ou réglage refusé (message affichable)."""
 
 
-def _reference_article(devis):
+def _reference_depuis_nom(nom):
+    """Référence d'article tirée du nom (nom du fichier DXF) : caractères sûrs pour une URL, longueur limitée, libre en base."""
+    base = re.sub(r"[^\w .,+×Ø()'-]", "-", (nom or "").strip(), flags=re.UNICODE).strip(" .-")[:90]
+    if not base:
+        return None
+    reference, n = base, 2
+    while Article.objects.filter(pk=reference).exists():
+        reference = f"{base}-{n}"
+        n += 1
+    return reference
+
+
+def _reference_article(devis, nom=None):
+    """Référence de l'article fabriqué d'une pièce : son nom (nom du fichier DXF) s'il est libre ; à défaut la codification
+    « Article » configurée, puis « <devis>-P01 »."""
+    reference = _reference_depuis_nom(nom)
+    if reference:
+        return reference, False
     code = generer_code(RegleCodification.Entite.ARTICLE)
     if code and not Article.objects.filter(pk=code).exists():
         return code, True
@@ -56,7 +74,7 @@ def importer_pour_devis(devis, fichier, profil_import_id=None, procede=ProcedeCo
     piece.save()
     piece.importer_geometrie()
 
-    reference, par_regle = _reference_article(devis)
+    reference, par_regle = _reference_article(devis, nom)
     article = Article.objects.create(reference=reference, libelle=nom, nature=Article.Nature.FABRIQUE)
     if par_regle:
         enregistrer_code_utilise(RegleCodification.Entite.ARTICLE, reference)

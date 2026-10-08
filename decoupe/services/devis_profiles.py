@@ -45,7 +45,7 @@ def creer(devis, section_id, longueur, coupe_a=90, coupe_b=90, quantite=1, nom=N
         verifier_piece(piece)
     except ErreurProfile as exc:
         raise ErreurPieceDevis(str(exc))
-    reference, par_regle = _reference_article(devis)
+    reference, par_regle = _reference_article(devis, piece.nom)
     article = Article.objects.create(reference=reference, libelle=piece.nom, nature=Article.Nature.FABRIQUE)
     if par_regle:
         enregistrer_code_utilise(RegleCodification.Entite.ARTICLE, reference)

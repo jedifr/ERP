@@ -97,6 +97,53 @@ def _titre_et_references(titre, references):
     return refs
 
 
+def _miniature_contour(anneaux, largeur_mm, hauteur_mm, couleur_trait="#1d4ed8", couleur_fond="#dbeafe"):
+    """Miniature vectorielle (reportlab) d'un contour : anneaux = [extérieur, trous…] ; trous évidés (règle pair-impair)."""
+    from reportlab.graphics.shapes import Drawing, Path
+    from reportlab.lib import colors as c
+
+    minx = min(x for a in anneaux for x, _ in a)
+    maxx = max(x for a in anneaux for x, _ in a)
+    miny = min(y for a in anneaux for _, y in a)
+    maxy = max(y for a in anneaux for _, y in a)
+    w, h = largeur_mm * mm, hauteur_mm * mm
+    echelle = min((w - 2) / max(maxx - minx, 1e-6), (h - 2) / max(maxy - miny, 1e-6))
+    dx = (w - (maxx - minx) * echelle) / 2
+    dy = (h - (maxy - miny) * echelle) / 2
+    dessin = Drawing(w, h)
+    chemin = Path(fillColor=c.HexColor(couleur_fond), strokeColor=c.HexColor(couleur_trait), strokeWidth=0.4, fillMode=0)
+    for anneau in anneaux:
+        points = [(dx + (x - minx) * echelle, dy + (y - miny) * echelle) for x, y in anneau]
+        chemin.moveTo(*points[0])
+        for pt in points[1:]:
+            chemin.lineTo(*pt)
+        chemin.closePath()
+    dessin.add(chemin)
+    return dessin
+
+
+def _miniatures_devis(devis):
+    """{id d'article: miniature} des pièces à découper et des débits de profilés du devis (vide si aucune)."""
+    from decoupe.models import PieceDecoupe, PieceProfile
+    from decoupe.services import profiles
+
+    resultat = {}
+    for p in PieceDecoupe.objects.filter(devis=devis, article__isnull=False, statut=PieceDecoupe.Statut.OK):
+        donnees = p.contour_json or {}
+        if len(donnees.get("exterieur") or []) >= 3:
+            resultat[p.article_id] = _miniature_contour([donnees["exterieur"], *(donnees.get("trous") or [])], 18, 14)
+    for p in PieceProfile.objects.filter(devis=devis, article__isnull=False).select_related("section"):
+        h = max(p.section.hauteur_mm, 1.0)
+        # vue de côté du débit, hauteur exagérée pour rester lisible sur une miniature
+        h_dessin = max(h, p.longueur_mm * 0.12)
+        import math
+
+        ra = h_dessin / math.tan(math.radians(p.coupe_a_deg)) if p.coupe_a_deg < 90 else 0.0
+        rb = h_dessin / math.tan(math.radians(p.coupe_b_deg)) if p.coupe_b_deg < 90 else 0.0
+        resultat[p.article_id] = _miniature_contour([[(ra, 0), (p.longueur_mm, 0), (p.longueur_mm - rb, h_dessin), (0, h_dessin)]], 18, 14)
+    return resultat
+
+
 @_personnalisable("devis")
 def generer_pdf_devis(devis):
     """PDF de l'offre. Un devis non validé est imprimable mais marqué « PROVISOIRE » ; un devis
@@ -130,6 +177,7 @@ def generer_pdf_devis(devis):
     lignes = []
     par_taux = {}
     total_ht = total_ttc = ZERO
+    miniatures = _miniatures_devis(devis)
     for ligne in lignes_devis:
         ht = arrondir(ligne.prix_vente_total)
         ttc = ligne.prix_vente_ttc
@@ -141,17 +189,26 @@ def generer_pdf_devis(devis):
         if ligne.article.libelle:
             designation += f"<br/>{echapper(ligne.article.libelle)}"
         pu = arrondir_prix(ligne.prix_vente_unitaire) if ligne.prix_vente_unitaire is not None else ZERO
-        lignes.append([
+        cellules = [
             Paragraph(designation, st["normal"]),
             Paragraph(quantite(ligne.quantite), st["droite"]),
             Paragraph(montant(pu), st["droite"]),
             Paragraph(f"{pourcent(taux)} %".replace(".", ","), st["droite"]),
             Paragraph(montant(ht), st["droite"]),
-        ])
-    table = tableau_lignes(
-        ["Désignation", "Qté", "PU HT", "TVA", "Total HT"], lignes,
-        [80 * mm, 20 * mm, 28 * mm, 16 * mm, 30 * mm], alignements_droite=(1, 2, 3, 4),
-    )
+        ]
+        if miniatures:
+            cellules.insert(0, miniatures.get(ligne.article_id, ""))
+        lignes.append(cellules)
+    if miniatures:  # colonne de miniatures des pièces, seulement si le devis en contient
+        table = tableau_lignes(
+            ["", "Désignation", "Qté", "PU HT", "TVA", "Total HT"], lignes,
+            [22 * mm, 62 * mm, 18 * mm, 26 * mm, 16 * mm, 30 * mm], alignements_droite=(2, 3, 4, 5),
+        )
+    else:
+        table = tableau_lignes(
+            ["Désignation", "Qté", "PU HT", "TVA", "Total HT"], lignes,
+            [80 * mm, 20 * mm, 28 * mm, 16 * mm, 30 * mm], alignements_droite=(1, 2, 3, 4),
+        )
 
     totaux = [["Total HT", montant(arrondir(total_ht))]]
     for taux in sorted(par_taux):

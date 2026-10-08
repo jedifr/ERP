@@ -3039,3 +3039,9 @@ Au-dessus des imbrications, le sélecteur « Imbrications par ligne » (1, 2, 3 
 ## Adresses et contact du devis : jamais vidés par un faux changement de client
 
 Le script de la fiche devis (et de la commande) vidait l'adresse de facturation, l'adresse de livraison et le contact à chaque événement « change » du champ Client, puis ne proposait que les adresses « principales » du tiers. Un « change » parasite (initialisation du sélecteur, extension du navigateur, gestionnaire de mots de passe) effaçait donc des adresses choisies à la main. Le script compare maintenant le client au dernier client connu et ne fait rien si le client n'a pas réellement changé.
+
+## Référence de la pièce = nom du DXF, miniatures au PDF
+
+- L'article fabriqué créé avec une pièce porte désormais comme **référence le nom du fichier DXF** (sans l'extension), avec le même nom en libellé. Les pièces de la bibliothèque de formes et les débits de profilés prennent leur nom (« Bride DN50 PN16 type 01 »). Les caractères interdits dans une URL (`/ ? # :`…) sont remplacés par « - » ; si la référence existe déjà, « -2 », « -3 »… est ajouté. La codification « Article » et l'ancien « <devis>-P01 » ne servent plus que si le nom est inutilisable. Les articles déjà créés ne sont pas renommés (menu Articles).
+- Le **PDF du devis** affiche une miniature de chaque pièce (contour et trous ; vue de côté avec coupes pour un profilé) dans une colonne à gauche de la désignation, seulement si le devis contient des pièces.
+- Le message « Aucune tôle correspondante » signifie qu'aucun article **matière première** n'a la matière (ou une nuance de sa famille) **et** l'épaisseur de la pièce ; il liste maintenant ce qu'il faut créer et les épaisseurs déjà en base pour la matière.

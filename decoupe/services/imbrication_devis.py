@@ -105,6 +105,14 @@ def grouper(pieces):
     return list(groupes.values()), a_regler
 
 
+def epaisseurs_toles_existantes(groupe):
+    """Épaisseurs (mm) des tôles en base pour la matière du groupe (ou sa famille), toutes épaisseurs confondues."""
+    matieres = {groupe.matiere.pk}
+    if groupe.matiere.famille_id:
+        matieres |= set(groupe.matiere.famille.nuances.values_list("pk", flat=True))
+    return sorted({a.epaisseur for a in Article.objects.filter(nature=Article.Nature.MATIERE_PREMIERE, matiere__in=matieres, epaisseur__isnull=False)})
+
+
 def toles_possibles(groupe):
     """Tôles (articles matière première) de la matière — ou de sa famille — et de l'épaisseur du groupe."""
     matieres = {groupe.matiere.pk}

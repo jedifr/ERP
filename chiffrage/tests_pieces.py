@@ -47,20 +47,32 @@ class PanneauPiecesDevisTests(TestCase):
         piece = PieceDecoupe.objects.get()
         self.assertEqual((piece.devis, piece.statut, piece.procede, piece.nom, piece.quantite), (self.devis, "ok", "laser", "plaque", 1))
         article = piece.article
-        self.assertEqual((article.reference, article.nature, article.libelle), ("DEV-PCS-1-P01", Article.Nature.FABRIQUE, "plaque"))
+        self.assertEqual((article.reference, article.nature, article.libelle), ("plaque", Article.Nature.FABRIQUE, "plaque"))
         self.assertTrue(piece.article_cree_automatiquement)
         self.assertEqual(piece.pas_rotation_deg, 90)  # rotations autorisées par défaut (sens de matière libre)
         html = reponse.json()["html"]
-        self.assertIn("DEV-PCS-1-P01", html)
+        self.assertIn(">plaque</a>", html)
         self.assertIn("Choisissez la matière et l&#x27;épaisseur", html)
         self.assertEqual(self.importer("deuxieme.dxf").status_code, 200)
-        self.assertEqual(sorted(Article.objects.values_list("reference", flat=True)), ["DEV-PCS-1-P01", "DEV-PCS-1-P02"])
+        self.assertEqual(sorted(Article.objects.values_list("reference", flat=True)), ["deuxieme", "plaque"])
 
-    def test_codification_article_si_configuree(self):
+    def test_la_reference_est_le_nom_du_dxf_meme_avec_une_codification(self):
         RegleCodification.objects.create(entite=RegleCodification.Entite.ARTICLE, prefixe="PD-", nombre_chiffres=4)
-        self.importer()
-        self.assertEqual(PieceDecoupe.objects.get().article_id, "PD-0001")
-        self.assertEqual(RegleCodification.objects.get(pk="article").compteur_actuel, 1)
+        self.importer("Plexi 1 (AV INF).dxf")
+        self.assertEqual(PieceDecoupe.objects.get().article_id, "Plexi 1 (AV INF)")
+        self.assertEqual(RegleCodification.objects.get(pk="article").compteur_actuel, 0)  # le compteur n'avance pas
+
+    def test_reference_deja_prise_et_caracteres_interdits(self):
+        self.importer("a:b.dxf")
+        self.importer("a:b.dxf")
+        self.assertEqual(sorted(Article.objects.values_list("reference", flat=True)), ["a-b", "a-b-2"])
+
+    def test_sans_nom_exploitable_on_retombe_sur_la_codification(self):
+        from decoupe.services.devis_pieces import _reference_article
+
+        RegleCodification.objects.create(entite=RegleCodification.Entite.ARTICLE, prefixe="PD-", nombre_chiffres=4)
+        self.assertEqual(_reference_article(self.devis, "///"), ("PD-0001", True))
+        self.assertEqual(_reference_article(self.devis, None), ("PD-0001", True))
 
     def test_fichier_refuse_et_droits(self):
         refus = self.client.post(self.url + "importer/", {"fichier": SimpleUploadedFile("note.txt", b"x")})
@@ -122,11 +134,11 @@ class PanneauPiecesDevisTests(TestCase):
         self.importer("b.dxf")
         a, b = PieceDecoupe.objects.order_by("pk")
         self.assertEqual(self.client.post(f"{self.url}{a.pk}/supprimer/").json(), {"ok": True, "article_conserve": None})
-        self.assertFalse(Article.objects.filter(pk="DEV-PCS-1-P01").exists())
+        self.assertFalse(Article.objects.filter(pk="a").exists())
         DevisLigne.objects.create(devis=self.devis, article=b.article, quantite=1)
         reponse = self.client.post(f"{self.url}{b.pk}/supprimer/").json()
-        self.assertEqual(reponse["article_conserve"], "DEV-PCS-1-P02")
-        self.assertTrue(Article.objects.filter(pk="DEV-PCS-1-P02").exists())
+        self.assertEqual(reponse["article_conserve"], "b")
+        self.assertTrue(Article.objects.filter(pk="b").exists())
         self.assertFalse(PieceDecoupe.objects.exists())
 
     def test_devis_valide_verrouille(self):
@@ -146,7 +158,7 @@ class PanneauPiecesDevisTests(TestCase):
         page = self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/change/")
         self.assertContains(page, 'id="dp-drop"')
         self.assertContains(page, "dp-carte")
-        self.assertContains(page, "DEV-PCS-1-P01")
+        self.assertContains(page, ">plaque</a>")
         self.assertContains(page, "chiffrage/devis_pieces.")
         ajout = self.client.get("/admin/chiffrage/devis/add/")
         self.assertContains(ajout, "Enregistrez d'abord le devis")
@@ -865,3 +877,25 @@ class VuesImbricationTests(TestCase):
         self.assertContains(page, 'id="dp-vues"')
         for n in "1234":
             self.assertContains(page, f'data-colonnes="{n}" aria-pressed')
+
+
+class MiniaturePdfEtTolesTests(TestCase):
+    setUp = ImbricationDevisTests.setUp
+    piece = ImbricationDevisTests.piece
+    imbriquer = ImbricationDevisTests.imbriquer
+
+    def test_message_sans_tole_donne_les_epaisseurs_existantes(self):
+        self.piece("a", 2, epaisseur="5")
+        html = self.imbriquer().json()["html"]
+        self.assertIn("Aucune tôle S235 de 5 mm en base", html)
+        self.assertIn("Épaisseurs déjà en base pour cette matière : 10 mm", html)
+
+    def test_pdf_du_devis_avec_miniatures(self):
+        from chiffrage.documents import _miniatures_devis, generer_pdf_devis
+
+        piece = self.piece("a", 2)
+        self.client.post(f"{self.url}{piece.pk}/enregistrer/", {"matiere": "S235", "epaisseur": "10"})
+        ligne = DevisLigne.objects.create(devis=self.devis, article=piece.article, quantite=2, prix_vente_matiere=Decimal("20"))
+        self.assertEqual(list(_miniatures_devis(self.devis)), [piece.article_id])
+        pdf = generer_pdf_devis(self.devis)
+        self.assertTrue(bytes(pdf).startswith(b"%PDF"))

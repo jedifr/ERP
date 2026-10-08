@@ -63,7 +63,7 @@ def _bloc_groupe(groupe, choix, formats):
         coin = "bas_gauche"
     bloc = {
         "groupe": groupe, "cle": groupe.cle, "toles": toles, "tole": tole, "marge": marge, "chute": taux, "forme": forme, "formats": formats,
-        "erreur": "", "avertissement": "", "sens": sens, "coin": coin, "sens_choix": PieceDecoupe.SensImbrication.choices,
+        "erreur": "", "avertissement": "", "epaisseurs_toles": [] if toles else imb.epaisseurs_toles_existantes(groupe), "sens": sens, "coin": coin, "sens_choix": PieceDecoupe.SensImbrication.choices,
         "coin_choix": PieceDecoupe.CoinDepart.choices,
     }
     if not pieces:
