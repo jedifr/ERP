@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from django.db import transaction
+from django.urls import reverse
 
 from decoupe.services import devis_pieces, devis_profiles, imbrication_devis as imb
 from decoupe.services.temps import ErreurTemps, estimer_temps_decoupe
@@ -25,6 +26,20 @@ class LigneChiffrage:
     temps_min: float | None = None
     prix: dict | None = None
     ligne: object = None  # ligne du devis déjà liée à l'article
+    lien: tuple | None = None  # (adresse, texte, ouvrir dans un nouvel onglet) : où corriger ce qui manque
+
+
+def _lien_poste(piece):
+    """Lien vers le paramètre de coupe de la pièce quand c'est son poste de travail qui manque (None sinon)."""
+    from decoupe.services.temps import ErreurTemps, parametre_pour
+
+    try:
+        parametre = parametre_pour(piece)[0]
+    except ErreurTemps:
+        return None
+    if parametre.poste_id is None:
+        return reverse("admin:decoupe_parametrecoupe_change", args=[parametre.pk]), "Renseigner le poste de travail", True
+    return None
 
 
 def _gamme_prete(piece, devis):
@@ -51,12 +66,14 @@ def apercu(devis, avec_gamme=False):
             resultat.append(ligne)
             if piece.tole_id is None or piece.format_tole_id is None:
                 ligne.raison = "retenez la tôle et le format de l'imbrication"
+                ligne.lien = (f"#{groupe.ancre}", "Aller à l'imbrication", False)
                 continue
             if avec_gamme:
                 ligne.raison = _gamme_prete(piece, devis)
             elif not piece.article_id or not gamme_active(piece.article, devis.date_creation).exists():
                 ligne.raison = "la gamme de l'article n'est pas encore alimentée (elle l'est à l'ajout au devis ou quand la pièce est modifiée)"
             if ligne.raison:
+                ligne.lien = _lien_poste(piece) if "poste" in ligne.raison.lower() else ligne.lien
                 continue
             try:
                 ligne.temps_min = round(estimer_temps_decoupe(piece).total_min, 2)
@@ -73,7 +90,17 @@ def apercu(devis, avec_gamme=False):
             ligne.pret = True
         except ChiffrageError as exc:
             ligne.raison = str(exc)
+            ligne.lien = lien_prix_profil(piece.section)
     return resultat
+
+
+def lien_prix_profil(section):
+    """Lien vers ce qui manque pour chiffrer un profilé : l'article d'achat de la section, ou son coût."""
+    if section.article_id is None:
+        return reverse("admin:decoupe_profilesection_change", args=[section.pk]), "Rattacher l'article d'achat", True
+    if section.article.cout_unitaire is None:
+        return reverse("admin:technique_article_change", args=[section.article_id]), "Renseigner le coût de l'article", True
+    return None
 
 
 def ajouter_au_devis(devis):

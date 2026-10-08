@@ -979,3 +979,60 @@ class BordDeToleEtNavigationTests(TestCase):
     def test_script_de_navigation_charge_sur_les_fiches(self):
         page = self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/change/")
         self.assertContains(page, "navigation_documents")
+
+
+class LiensElementsManquantsTests(TestCase):
+    setUp = ImbricationDevisTests.setUp
+    piece = ImbricationDevisTests.piece
+    imbriquer = ImbricationDevisTests.imbriquer
+
+    def test_lien_vers_l_imbrication_pour_retenir_la_tole(self):
+        self.piece("a", 3)
+        html = self.imbriquer().json()["html"]
+        self.assertIn('id="dp-groupe-', html)
+        self.assertRegex(html, r'À compléter : retenez la tôle et le format de l&#x27;imbrication <a class="dp-lien" href="#dp-groupe-[^"]+">Aller à l&#x27;imbrication')
+
+    def test_lien_pour_creer_la_tole_manquante(self):
+        self.piece("a", 3, epaisseur="5")
+        html = self.imbriquer().json()["html"]
+        self.assertIn("/admin/technique/article/add/?nature=matiere_premiere&amp;matiere=", html)
+        self.assertIn("epaisseur=5&amp;unite_cout=surface", html)
+        self.assertIn("Créer la tôle", html)
+        page = self.client.get(f"/admin/technique/article/add/?nature=matiere_premiere&matiere={self.matiere.pk}&epaisseur=5&unite_cout=surface")
+        self.assertContains(page, 'value="5"')
+
+    def test_lien_vers_le_parametre_quand_le_poste_manque(self):
+        from decoupe.models import FormatTole, ParametreCoupe
+
+        a = self.piece("a", 3)
+        format_tole = FormatTole.objects.get(largeur_mm=1500, longueur_mm=3000)
+        self.client.post(
+            self.url + "imbrication/retenir/",
+            data=json.dumps({"cle": "S235|10|laser", "tole": self.tole.pk, "format": format_tole.pk, "marge": "5", "chute": "0"}), content_type="application/json",
+        )
+        ParametreCoupe.objects.filter(procede="laser").update(poste=None)
+        html = self.imbriquer().json()["html"]
+        from decoupe.services.temps import parametre_pour
+
+        a.refresh_from_db()
+        parametre = parametre_pour(a)[0]  # le paramètre réellement utilisé par la pièce (gaz usuel)
+        self.assertIn(f"/admin/decoupe/parametrecoupe/{parametre.pk}/change/", html)
+        self.assertIn("Renseigner le poste de travail", html)
+
+    def test_lien_profil_sans_article_d_achat(self):
+        from decoupe.models import ProfileSection
+
+        section = ProfileSection.objects.get(designation="UPN 100")
+        r = self.client.post(self.url.replace("/pieces/", "/") + "profils/ajouter/", data=json.dumps({"section": section.pk, "longueur": 1000, "quantite": 2}), content_type="application/json")
+        self.assertEqual(r.status_code, 200)
+        html = self.imbriquer().json()["html"]
+        self.assertIn(f"/admin/decoupe/profilesection/{section.pk}/change/", html)
+        self.assertIn("Rattacher l&#x27;article d&#x27;achat", html)
+        self.assertIn('id="dp-profil-', html)
+
+    def test_liens_des_pieces_a_regler(self):
+        piece = self.piece("a", 3, matiere="")
+        html = self.imbriquer().json()["html"]
+        self.assertIn(f'href="#dp-piece-{piece.pk}"', html)
+        page = self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/change/")
+        self.assertContains(page, f'id="dp-piece-{piece.pk}"')

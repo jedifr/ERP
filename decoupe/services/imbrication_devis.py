@@ -7,6 +7,7 @@ coût = surface facturée × prix de la tôle au mm². Le coût du lot est répa
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass, field
 from decimal import Decimal
 
@@ -39,6 +40,11 @@ class Groupe:
     @property
     def cle(self):
         return f"{self.matiere.pk}|{self.epaisseur:g}|{self.procede}"
+
+    @property
+    def ancre(self):
+        """Identifiant HTML du bloc d'imbrication du groupe (cible des liens « retenez la tôle et le format »)."""
+        return "dp-groupe-" + re.sub(r"\W", "-", self.cle)
 
     @property
     def libelle(self):

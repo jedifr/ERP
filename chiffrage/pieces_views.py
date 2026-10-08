@@ -71,7 +71,8 @@ def _bloc_groupe(groupe, choix, formats):
         coin = "bas_gauche"
     bloc = {
         "groupe": groupe, "cle": groupe.cle, "toles": toles, "tole": tole, "marge": marge, "marge_auto": marge_auto, "chute": taux, "forme": forme, "formats": formats,
-        "erreur": "", "avertissement": "", "epaisseurs_toles": [] if toles else imb.epaisseurs_toles_existantes(groupe), "sens": sens, "coin": coin, "sens_choix": PieceDecoupe.SensImbrication.choices,
+        "erreur": "", "avertissement": "", "epaisseurs_toles": [] if toles else imb.epaisseurs_toles_existantes(groupe),
+        "lien_creer_tole": "" if toles else reverse("admin:technique_article_add") + f"?nature=matiere_premiere&matiere={groupe.matiere.pk}&epaisseur={groupe.epaisseur:g}&unite_cout=surface", "sens": sens, "coin": coin, "sens_choix": PieceDecoupe.SensImbrication.choices,
         "coin_choix": PieceDecoupe.CoinDepart.choices,
     }
     if not pieces:
@@ -82,6 +83,7 @@ def _bloc_groupe(groupe, choix, formats):
             prix_au_mm2(tole, formats[0].largeur_mm, formats[0].longueur_mm)
         except ErreurMatiere as exc:
             bloc["avertissement"] = f"{exc} Le coût matière n'est pas calculé."
+            bloc["avertissement_lien"] = (reverse("admin:technique_article_change", args=[tole.pk]), "Renseigner le coût de la tôle")
             tole = bloc["tole"] = None
     lignes, meilleur = imb.comparer_formats(groupe, formats, marge, taux, tole, forme=forme, sens=sens, coin=coin)
     if meilleur is None:
@@ -180,6 +182,10 @@ def _carte_profil(request, piece, editable=True):
 COUPES = [(90, "Droite (90°)"), (45, "Biais 45°"), (60, "Biais 60°"), (30, "Biais 30°"), (22.5, "Biais 22,5°")]
 
 
+def profiles_lien(section):
+    return pieces_devis.lien_prix_profil(section)
+
+
 def _bloc_profil(section, pieces, choix):
     """Contexte d'affichage de l'imbrication des débits d'une section dans ses barres."""
     premiere = pieces[0]
@@ -197,6 +203,7 @@ def _bloc_profil(section, pieces, choix):
         "resultat": r, "barres": profiles.svg_barres(r, section, {p.pk: p for p in pieces}, couleurs), "legende": [(p, couleurs[p.pk]) for p in pieces],
         "retenu": all(p.trait_scie_mm == trait and p.marge_bout_mm == marge and float(p.taux_chute_recuperable) == taux for p in pieces),
         "avertissement": r.erreur_prix,
+        "avertissement_lien": (lambda l: (l[0], l[1]) if l else None)(profiles_lien(section)) if r.erreur_prix else None,
     })
     return bloc
 

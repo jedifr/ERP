@@ -156,3 +156,8 @@
 @media (max-width: 900px) { .dp-imbrication .dp-feuilles { grid-template-columns: minmax(0, 1fr) !important; } }
 
 .dp-auto { font-style: normal; font-size: 10px; font-weight: 700; color: var(--color-primary-700); background: #fdf0e1; border-radius: 999px; padding: 0 6px; margin-left: .25rem; }
+
+/* Liens vers ce qui manque (correction en un clic) */
+.dp-lien { color: var(--color-primary-700, #b45309); font-weight: 600; text-decoration: underline; white-space: nowrap; }
+.dp-carte, .dp-groupe { scroll-margin-top: 90px; }
+.dp-carte:target, .dp-groupe:target { outline: 2px solid var(--color-primary-600, #d9680c); outline-offset: 2px; }

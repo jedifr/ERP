@@ -1,5 +1,5 @@
 {% load l10n %}
-<div class="dp-carte" data-piece="{{ piece.pk }}"{% if forme_json %} data-forme="{{ forme_json }}"{% endif %} data-url-enregistrer="{{ url_enregistrer }}" data-url-supprimer="{{ url_supprimer }}">
+<div class="dp-carte" id="dp-piece-{{ piece.pk }}" data-piece="{{ piece.pk }}"{% if forme_json %} data-forme="{{ forme_json }}"{% endif %} data-url-enregistrer="{{ url_enregistrer }}" data-url-supprimer="{{ url_supprimer }}">
   <div class="dp-apercu">{% if apercu %}{{ apercu|safe }}{% else %}<span class="dp-sans-apercu">Pas d'aperçu</span>{% endif %}</div>
   <div class="dp-corps">
     <div class="dp-ligne-titre">

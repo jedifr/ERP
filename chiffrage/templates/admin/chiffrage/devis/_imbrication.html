@@ -1,9 +1,9 @@
 {% load l10n dp_filtres %}
 {% if sans_format %}<p class="dp-aide">Aucun format de tôle actif : ajoutez-en dans le menu « Formats de tôle ».</p>{% endif %}
 {% for b in blocs %}
-<div class="dp-groupe" data-cle="{{ b.cle }}">
+<div class="dp-groupe" id="{{ b.groupe.ancre }}" data-cle="{{ b.cle }}">
   <h3 class="dp-groupe-titre">Imbrication — {{ b.groupe.libelle }} <span class="dp-groupe-nb">{{ b.groupe.pieces|length }} pièce{{ b.groupe.pieces|length|pluralize }}{% if b.groupe.exclues %} · {{ b.groupe.exclues|length }} exclue{{ b.groupe.exclues|length|pluralize }}{% endif %}</span></h3>
-  {% if b.avertissement %}<div class="dp-message dp-message-ko">{{ b.avertissement }}</div>{% endif %}
+  {% if b.avertissement %}<div class="dp-message dp-message-ko">{{ b.avertissement }}{% if b.avertissement_lien %} <a class="dp-lien" href="{{ b.avertissement_lien.0 }}" target="_blank" rel="noopener">{{ b.avertissement_lien.1 }} ↗</a>{% endif %}</div>{% endif %}
   <div class="dp-barre">
     <label>Tôle
       <select data-i="tole">
@@ -22,7 +22,7 @@
     <label class="dp-case" title="Tient compte du contour réel des pièces (trous compris) et non de leur seul rectangle : moins de feuilles, calcul plus long."><input type="checkbox" data-i="forme" {% if b.forme %}checked{% endif %}> Selon la forme</label>
     {% if b.resultat %}<span class="dp-espacement">Écart entre pièces : <strong>{{ b.resultat.espacement_mm|floatformat:"-1" }} mm</strong></span>{% endif %}
   </div>
-  {% if not b.toles %}<p class="dp-aide">Aucune tôle {{ b.groupe.matiere.nom }} de {{ b.groupe.epaisseur|floatformat:"-2" }} mm en base : créez l'article matière première (nature « Matière première », matière {{ b.groupe.matiere.nom }}{% if b.groupe.matiere.famille %} ou une nuance de la famille {{ b.groupe.matiere.famille.nom }}{% endif %}, épaisseur {{ b.groupe.epaisseur|floatformat:"-2" }} mm, unité et coût) pour chiffrer la matière.{% if b.epaisseurs_toles %} Épaisseurs déjà en base pour cette matière : {% for e in b.epaisseurs_toles %}{{ e|floatformat:"-2" }} mm{% if not forloop.last %}, {% endif %}{% endfor %}.{% else %} Aucune tôle n'existe encore pour cette matière.{% endif %}</p>{% endif %}
+  {% if not b.toles %}<p class="dp-aide">Aucune tôle {{ b.groupe.matiere.nom }} de {{ b.groupe.epaisseur|floatformat:"-2" }} mm en base : créez l'article matière première (nature « Matière première », matière {{ b.groupe.matiere.nom }}{% if b.groupe.matiere.famille %} ou une nuance de la famille {{ b.groupe.matiere.famille.nom }}{% endif %}, épaisseur {{ b.groupe.epaisseur|floatformat:"-2" }} mm, unité et coût) pour chiffrer la matière. <a class="dp-lien" href="{{ b.lien_creer_tole }}" target="_blank" rel="noopener">Créer la tôle ↗</a>{% if b.epaisseurs_toles %} Épaisseurs déjà en base pour cette matière : {% for e in b.epaisseurs_toles %}{{ e|floatformat:"-2" }} mm{% if not forloop.last %}, {% endif %}{% endfor %}.{% else %} Aucune tôle n'existe encore pour cette matière.{% endif %}</p>{% endif %}
 % endif %}
   {% if b.erreur %}
     <div class="dp-message dp-message-ko">{{ b.erreur }}</div>
@@ -44,7 +44,7 @@
       <div><span>Chutes entre les pièces<small>comprises dans la surface consommée</small></span><b>{{ b.resultat.surface_chutes_internes_mm2|mm2_en_m2|floatformat:2 }} m²</b></div>
       {% if b.resultat.surface_recuperee_mm2 > 1 %}<div class="dp-moins"><span>− Chute récupérée ({{ b.chute|floatformat:"-1" }} %)<small>non facturée</small></span><b>− {{ b.resultat.surface_recuperee_mm2|mm2_en_m2|floatformat:2 }} m²</b></div>
       <div class="dp-total"><span>= Surface facturée</span><b>{{ b.resultat.surface_facturee_mm2|mm2_en_m2|floatformat:2 }} m²</b></div>{% endif %}
-      <div class="dp-prix"><span>Coût matière du lot<small>{% if b.tole %}sur la surface {% if b.resultat.surface_recuperee_mm2 > 1 %}facturée{% else %}consommée{% endif %}{% else %}choisissez une tôle{% endif %}</small></span><b>{% if b.resultat.cout_total is not None %}{{ b.resultat.cout_total|floatformat:2 }} €{% else %}—{% endif %}</b></div>
+      <div class="dp-prix"><span>Coût matière du lot<small>{% if b.tole %}sur la surface {% if b.resultat.surface_recuperee_mm2 > 1 %}facturée{% else %}consommée{% endif %}{% elif b.lien_creer_tole %}<a class="dp-lien" href="{{ b.lien_creer_tole }}" target="_blank" rel="noopener">créer la tôle ↗</a>{% else %}choisissez une tôle{% endif %}</small></span><b>{% if b.resultat.cout_total is not None %}{{ b.resultat.cout_total|floatformat:2 }} €{% else %}—{% endif %}</b></div>
     </aside>
     </div>
     {% if b.feuilles_masquees %}<p class="dp-aide">{{ b.feuilles_masquees }} feuille{{ b.feuilles_masquees|pluralize }} de plus non dessinée{{ b.feuilles_masquees|pluralize }} (les {{ b.feuilles|length }} premières sont affichées).</p>{% endif %}
@@ -84,10 +84,10 @@
       {% if editable and not b.retenu %}<button type="button" class="dp-retenir" data-format="{{ b.format.pk }}">Retenir « {{ b.format }} »</button>{% endif %}
     </div>
   {% endif %}
-  {% for p, raison in b.groupe.exclues %}<p class="dp-aide dp-exclue">Exclue de l'imbrication : <strong>{{ p.nom }}</strong> — {{ raison }}</p>{% endfor %}
+  {% for p, raison in b.groupe.exclues %}<p class="dp-aide dp-exclue">Exclue de l'imbrication : <a class="dp-lien" href="#dp-piece-{{ p.pk }}"><strong>{{ p.nom }}</strong></a> — {{ raison }} <a class="dp-lien" href="{% url 'admin:decoupe_parametrecoupe_changelist' %}?procede={{ b.groupe.procede }}" target="_blank" rel="noopener">Voir les paramètres de coupe ↗</a></p>{% endfor %}
 </div>
 {% endfor %}
-{% if a_regler %}<p class="dp-aide">À régler avant imbrication : {% for p, raison in a_regler %}<strong>{{ p.nom }}</strong> ({{ raison }}){% if not forloop.last %}, {% endif %}{% endfor %}.</p>{% endif %}
+{% if a_regler %}<p class="dp-aide">À régler avant imbrication : {% for p, raison in a_regler %}<a class="dp-lien" href="#dp-piece-{{ p.pk }}"><strong>{{ p.nom }}</strong></a> ({{ raison }}){% if not forloop.last %}, {% endif %}{% endfor %}.</p>{% endif %}
 
 {% for b in blocs_profils %}{% include "admin/chiffrage/devis/_imbrication_profils.html" %}{% endfor %}
 
@@ -107,7 +107,7 @@
           <td class="n">{{ c.prix.prix_vente_unitaire|floatformat:2 }} €</td>
           <td class="n"><strong>{{ c.prix.prix_vente_total|floatformat:2 }} €</strong></td>
         {% else %}
-          <td colspan="5" class="dp-erreur-ligne">À compléter : {{ c.raison }}</td>
+          <td colspan="5" class="dp-erreur-ligne">À compléter : {{ c.raison }}{% if c.lien %} <a class="dp-lien" href="{{ c.lien.0 }}"{% if c.lien.2 %} target="_blank" rel="noopener"{% endif %}>{{ c.lien.1 }}{% if c.lien.2 %} ↗{% else %} ↓{% endif %}</a>{% endif %}</td>
         {% endif %}
         <td>{% if c.ligne %}<span class="dp-etiquette dp-etiquette-choisi">oui</span>{% else %}<span class="dp-aide">non</span>{% endif %}</td>
       </tr>

@@ -1,7 +1,7 @@
 {% load l10n dp_filtres %}
-<div class="dp-groupe" data-cle="{{ b.cle }}" data-profil-groupe>
+<div class="dp-groupe" id="dp-profil-{{ b.section.pk }}" data-cle="{{ b.cle }}" data-profil-groupe>
   <h3 class="dp-groupe-titre">Imbrication des profilés — {{ b.section.designation }} <span class="dp-groupe-nb">{{ b.pieces|length }} débit{{ b.pieces|length|pluralize }} · barres de {{ b.section.longueur_barre_mm|floatformat:0 }} mm</span></h3>
-  {% if b.avertissement %}<div class="dp-message dp-message-ko">{{ b.avertissement }}</div>{% endif %}
+  {% if b.avertissement %}<div class="dp-message dp-message-ko">{{ b.avertissement }}{% if b.avertissement_lien %} <a class="dp-lien" href="{{ b.avertissement_lien.0 }}" target="_blank" rel="noopener">{{ b.avertissement_lien.1 }} ↗</a>{% endif %}</div>{% endif %}
   <div class="dp-barre">
     <label>Trait de scie (mm)<input type="text" inputmode="decimal" data-i="trait" value="{{ b.trait|unlocalize }}"></label>
     <label>Chute de tête (mm)<input type="text" inputmode="decimal" data-i="marge" value="{{ b.marge|unlocalize }}"></label>
