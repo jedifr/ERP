@@ -102,7 +102,7 @@ class Devis(models.Model):
         help_text="Ce qui change par rapport à l'indice précédent (renseigné à la création de la révision).",
     )
     taux_marge_globale = ChampDecimal(
-        "taux de marge globale",
+        "taux de marge globale (%)",
         null=True,
         blank=True,
         validators=[positif_ou_nul],
@@ -253,7 +253,7 @@ class DevisLigne(models.Model):
         "coût matière calculé", null=True, blank=True, editable=False, **PRIX,
     )
     taux_marge_matiere_applique = ChampDecimal(
-        "taux de marge matière appliqué",
+        "taux de marge matière appliqué (%)",
         null=True,
         blank=True,
         validators=[positif_ou_nul],
@@ -362,7 +362,7 @@ class DevisLigneOperation(models.Model):
     ordre = models.PositiveIntegerField("ordre")
     cout_calcule = ChampDecimal("coût calculé", null=True, blank=True, editable=False, **PRIX)
     taux_marge_applique = ChampDecimal(
-        "taux de marge appliqué",
+        "taux de marge appliqué (%)",
         null=True,
         blank=True,
         validators=[positif_ou_nul],

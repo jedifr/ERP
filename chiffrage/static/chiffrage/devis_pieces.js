@@ -32,8 +32,10 @@ function demarrer() {
         return t.content.firstElementChild;
     }
 
-    async function envoyer(url, donnees) {
-        const reponse = await fetch(url, { method: "POST", body: donnees, headers: { "X-CSRFToken": csrf() }, credentials: "same-origin" });
+    async function envoyer(url, donnees, json_) {
+        const entetes = { "X-CSRFToken": csrf() };
+        if (json_) entetes["Content-Type"] = "application/json";
+        const reponse = await fetch(url, { method: "POST", body: donnees, headers: entetes, credentials: "same-origin" });
         let json = {};
         try { json = await reponse.json(); } catch (e) { /* réponse non JSON */ }
         if (!reponse.ok) throw new Error(json.detail || "Erreur " + reponse.status);
@@ -124,6 +126,17 @@ function demarrer() {
             }
             const ajouter = e.target.closest(".dp-ajouter");
             if (ajouter) { ajouterAuDevis(ajouter); return; }
+            const retenirProfil = e.target.closest(".dp-retenir-profil");
+            if (retenirProfil) {
+                const c = lireChoix()["profil|" + retenirProfil.dataset.section];
+                try {
+                    await envoyer(document.getElementById("dp-profils").dataset.urlRetenir, JSON.stringify(Object.assign({ section: retenirProfil.dataset.section }, c)), true);
+                    planifierImbrication();
+                } catch (err) {
+                    message(err.message, true);
+                }
+                return;
+            }
             const bouton = e.target.closest(".dp-retenir");
             if (!bouton) return;
             const groupe = bouton.closest(".dp-groupe");
@@ -131,7 +144,7 @@ function demarrer() {
             try {
                 const reponse = await fetch(zoneImb.dataset.urlRetenir, {
                     method: "POST", credentials: "same-origin", headers: { "X-CSRFToken": csrf(), "Content-Type": "application/json" },
-                    body: JSON.stringify({ cle: groupe.dataset.cle, tole: c.tole, format: bouton.dataset.format, marge: c.marge, chute: c.chute, forme: c.forme }),
+                    body: JSON.stringify({ cle: groupe.dataset.cle, tole: c.tole, format: bouton.dataset.format, marge: c.marge, chute: c.chute, forme: c.forme, sens: c.sens, coin: c.coin }),
                 });
                 const json = await reponse.json();
                 if (!reponse.ok) throw new Error(json.detail || "Erreur " + reponse.status);
@@ -232,6 +245,42 @@ function demarrer() {
         }
     });
 
+    // ---------------------------------------------------------------- débits de profilés (cartes)
+    const zoneProfils = document.getElementById("dp-profils");
+    if (zoneProfils) {
+        zoneProfils.addEventListener("change", async (e) => {
+            const carte = e.target.closest(".dp-carte[data-profil]");
+            if (!carte || !e.target.dataset.champ) return;
+            const donnees = new FormData();
+            carte.querySelectorAll("[data-champ]").forEach((el) => donnees.append(el.dataset.champ, el.value));
+            try {
+                const json = await envoyer(carte.dataset.urlEnregistrer, donnees);
+                carte.replaceWith(depuisHtml(json.html));
+                planifierImbrication();
+            } catch (err) {
+                message(err.message, true);
+                e.target.focus();
+            }
+        });
+        zoneProfils.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" && e.target.matches("input[data-champ]")) { e.preventDefault(); e.target.blur(); }
+        });
+        zoneProfils.addEventListener("click", async (e) => {
+            const bouton = e.target.closest(".dp-supprimer");
+            if (!bouton) return;
+            const carte = bouton.closest(".dp-carte[data-profil]");
+            if (!window.confirm("Retirer ce débit du devis ? Son article fabriqué est supprimé s'il n'est utilisé nulle part.")) return;
+            try {
+                const json = await envoyer(carte.dataset.urlSupprimer, new FormData());
+                carte.remove();
+                planifierImbrication();
+                if (json.article_conserve) message("L'article " + json.article_conserve + " est conservé : il est utilisé ailleurs.", false);
+            } catch (err) {
+                message(err.message, true);
+            }
+        });
+    }
+
     // ---------------------------------------------------------------- bibliothèque de formes
     const formes = document.getElementById("dp-formes");
     const donneesCatalogue = document.getElementById("dp-catalogue-formes");
@@ -255,6 +304,16 @@ function demarrer() {
             selFamille.appendChild(og);
         });
 
+        const profils = catalogue.profils || [];
+        if (profils.length) {
+            const og = document.createElement("optgroup");
+            og.label = "Profilés (barres)";
+            profils.forEach((f) => { const o = document.createElement("option"); o.value = "profil:" + f.cle; o.textContent = f.libelle; og.appendChild(o); });
+            selFamille.appendChild(og);
+        }
+        const COUPES = [["90", "Droite (90°)"], ["45", "Biais 45°"], ["60", "Biais 60°"], ["30", "Biais 30°"], ["22.5", "Biais 22,5°"]];
+        function enProfil() { return selFamille.value.indexOf("profil:") === 0; }
+        function familleProfil() { return profils.find((f) => "profil:" + f.cle === selFamille.value); }
         function famille() { return catalogue.familles.find((f) => f.cle === selFamille.value); }
 
         function options(p, f) {
@@ -271,7 +330,40 @@ function demarrer() {
             return el ? el.value : "";
         }
 
+        function construireChampsProfil(saisies) {
+            const f = familleProfil();
+            document.getElementById("dpf-description").textContent = "Débit de profilé tiré d'une barre : longueur hors tout et coupes d'extrémité. Les débits d'une même section s'imbriquent dans les barres.";
+            const attention = document.getElementById("dpf-attention");
+            attention.hidden = !f.non_verifie;
+            attention.textContent = "Les masses et cotes des profilés livrés avec l'application ne sont pas vérifiées : contrôlez-les (Production > Sections de profilés) et rattachez-y l'article d'achat pour chiffrer la matière.";
+            document.getElementById("dpf-procede").closest("label").hidden = true;
+            zoneChamps.textContent = "";
+            const ajouter = (libelle, champ, cle) => {
+                const label = document.createElement("label");
+                label.textContent = libelle;
+                champ.dataset.p = cle;
+                label.appendChild(champ);
+                zoneChamps.appendChild(label);
+            };
+            const sel = document.createElement("select");
+            f.sections.forEach((x) => { const o = document.createElement("option"); o.value = x.id; o.textContent = x.designation; sel.appendChild(o); });
+            sel.value = saisies && saisies.section ? saisies.section : f.sections.length ? f.sections[0].id : "";
+            ajouter("Section", sel, "section");
+            const longueur = document.createElement("input");
+            longueur.type = "text"; longueur.inputMode = "decimal"; longueur.value = saisies && saisies.longueur ? saisies.longueur : "1000";
+            ajouter("Longueur hors tout (mm)", longueur, "longueur");
+            [["Coupe de l'extrémité A", "coupe_a"], ["Coupe de l'extrémité B", "coupe_b"]].forEach(([libelle, cle]) => {
+                const c = document.createElement("select");
+                COUPES.forEach(([v, l]) => { const o = document.createElement("option"); o.value = v; o.textContent = l; c.appendChild(o); });
+                c.value = saisies && saisies[cle] ? saisies[cle] : "90";
+                ajouter(libelle, c, cle);
+            });
+        }
+
         function construireChamps(saisies) {
+            document.getElementById("dpf-procede").closest("label").hidden = false;
+            document.getElementById("dpf-attention").textContent = "Les cotes normalisées livrées avec l'application n'ont pas encore été vérifiées avec la norme : contrôlez-les (Production > Cotes normalisées) avant de lancer une production.";
+            if (enProfil()) { construireChampsProfil(saisies); return; }
             const f = famille();
             document.getElementById("dpf-description").textContent = f.description;
             document.getElementById("dpf-attention").hidden = !(f.normalisee && norm.brides_non_verifiees);
@@ -313,14 +405,20 @@ function demarrer() {
 
         async function apercu() {
             try {
-                const reponse = await fetch(formes.dataset.urlApercu, {
+                const profil = enProfil();
+                const reponse = await fetch(profil ? formes.dataset.urlProfilApercu : formes.dataset.urlApercu, {
                     method: "POST", credentials: "same-origin", headers: { "X-CSRFToken": csrf(), "Content-Type": "application/json" },
-                    body: JSON.stringify({ famille: selFamille.value, cotes: saisies() }),
+                    body: JSON.stringify(profil ? saisies() : { famille: selFamille.value, cotes: saisies() }),
                 });
                 const json = await reponse.json();
                 if (!reponse.ok) throw new Error(json.detail || "Erreur " + reponse.status);
-                document.getElementById("dpf-svg").innerHTML = json.svg;
-                document.getElementById("dpf-resume").textContent = json.nom + " — " + json.largeur + " × " + json.hauteur + " mm, " + json.trous + " perçage" + (json.trous > 1 ? "s" : "");
+                if (profil) {
+                    document.getElementById("dpf-svg").innerHTML = json.svg + json.section_svg;
+                    document.getElementById("dpf-resume").textContent = json.nom + " — " + json.masse_lineique + " kg/m, " + json.masse + " kg le débit" + (json.prix ? " · " + json.prix : " · prix non renseigné");
+                } else {
+                    document.getElementById("dpf-svg").innerHTML = json.svg;
+                    document.getElementById("dpf-resume").textContent = json.nom + " — " + json.largeur + " × " + json.hauteur + " mm, " + json.trous + " perçage" + (json.trous > 1 ? "s" : "");
+                }
                 montrerErreur("");
             } catch (e) {
                 document.getElementById("dpf-svg").textContent = "";
@@ -354,9 +452,10 @@ function demarrer() {
             boutonValider.disabled = true;
             try {
                 const json = await (async () => {
-                    const reponse = await fetch(formes.dataset.urlAjouter, {
+                    const profil = enProfil();
+                    const reponse = await fetch(profil ? formes.dataset.urlProfilAjouter : formes.dataset.urlAjouter, {
                         method: "POST", credentials: "same-origin", headers: { "X-CSRFToken": csrf(), "Content-Type": "application/json" },
-                        body: JSON.stringify({
+                        body: JSON.stringify(profil ? Object.assign(saisies(), { quantite: document.getElementById("dpf-quantite").value }) : {
                             famille: selFamille.value, cotes: saisies(), piece_id: pieceModifiee,
                             quantite: document.getElementById("dpf-quantite").value, procede: document.getElementById("dpf-procede").value,
                         }),
@@ -366,6 +465,13 @@ function demarrer() {
                     return retour;
                 })();
                 const nouvelle = depuisHtml(json.html);
+                if (enProfil()) {
+                    document.getElementById("dp-profils").appendChild(nouvelle);
+                    message("Débit ajouté au devis.", false);
+                    nouvelle.scrollIntoView({ behavior: "smooth", block: "nearest" });
+                    planifierImbrication();
+                    return;
+                }
                 const existante = pieceModifiee ? cartes.querySelector('.dp-carte[data-piece="' + pieceModifiee + '"]') : null;
                 if (existante) existante.replaceWith(nouvelle); else cartes.appendChild(nouvelle);
                 message(pieceModifiee ? "Forme mise à jour." : "Pièce ajoutée au devis : choisissez sa matière et son épaisseur.", false);

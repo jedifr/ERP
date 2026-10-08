@@ -1,0 +1,54 @@
+{% load l10n dp_filtres %}
+<div class="dp-groupe" data-cle="{{ b.cle }}" data-profil-groupe>
+  <h3 class="dp-groupe-titre">Imbrication des profilés — {{ b.section.designation }} <span class="dp-groupe-nb">{{ b.pieces|length }} débit{{ b.pieces|length|pluralize }} · barres de {{ b.section.longueur_barre_mm|floatformat:0 }} mm</span></h3>
+  {% if b.avertissement %}<div class="dp-message dp-message-ko">{{ b.avertissement }}</div>{% endif %}
+  <div class="dp-barre">
+    <label>Trait de scie (mm)<input type="text" inputmode="decimal" data-i="trait" value="{{ b.trait|unlocalize }}"></label>
+    <label>Chute de tête (mm)<input type="text" inputmode="decimal" data-i="marge" value="{{ b.marge|unlocalize }}"></label>
+    <label>Chute récupérable (%)<input type="text" inputmode="decimal" data-i="chute" value="{{ b.chute|unlocalize }}"></label>
+    <span class="dp-espacement">Prix : <strong>{% if b.resultat.prix_metre %}{{ b.resultat.prix_metre|floatformat:2 }} €/m{% else %}non renseigné{% endif %}</strong></span>
+  </div>
+  {% if b.erreur %}
+    <div class="dp-message dp-message-ko">{{ b.erreur }}</div>
+  {% else %}
+    <div class="dp-travail">
+      <div class="dp-feuilles">
+        {% for br in b.barres %}
+          <figure class="dp-feuille">
+            <figcaption>Barre {{ br.numero }} sur {{ b.resultat.nb_barres }} · {{ br.nb }} débit{{ br.nb|pluralize }}{% if br.partielle %} · <strong class="dp-chute-titre">chute de bout {{ b.resultat.chute_bout_mm|floatformat:0 }} mm</strong>{% endif %}</figcaption>
+            {{ br.svg|safe }}
+          </figure>
+        {% endfor %}
+      </div>
+      <aside class="dp-bilan">
+        <div><span>Barres complètes<small>{{ b.resultat.nb_barres }} × {{ b.section.longueur_barre_mm|floatformat:0 }} mm</small></span><b>{{ b.resultat.barres_completes_mm|mm_en_m|floatformat:3 }} m</b></div>
+        <div class="dp-moins"><span>− Chute de bout<small>dernière barre</small></span><b>− {{ b.resultat.chute_bout_mm|mm_en_m|floatformat:3 }} m</b></div>
+        <div class="dp-total"><span>= Longueur consommée</span><b>{{ b.resultat.consommee_mm|mm_en_m|floatformat:3 }} m</b></div>
+        <div><span>Débits<small>utilisation {{ b.resultat.taux_utilisation_pct|floatformat:0 }} %</small></span><b>{{ b.resultat.pieces_mm|mm_en_m|floatformat:3 }} m</b></div>
+        <div><span>Chutes entre les débits<small>traits de scie, fonds de barres</small></span><b>{{ b.resultat.chutes_internes_mm|mm_en_m|floatformat:3 }} m</b></div>
+        {% if b.resultat.recuperee_mm > 1 %}<div class="dp-moins"><span>− Chute récupérée ({{ b.chute|floatformat:"-1" }} %)</span><b>− {{ b.resultat.recuperee_mm|mm_en_m|floatformat:3 }} m</b></div>
+        <div class="dp-total"><span>= Longueur facturée</span><b>{{ b.resultat.facturee_mm|mm_en_m|floatformat:3 }} m</b></div>{% endif %}
+        <div class="dp-prix"><span>Coût matière du lot<small>{{ b.resultat.facturee_mm|mm_en_m|floatformat:3 }} m × {% if b.resultat.prix_metre %}{{ b.resultat.prix_metre|floatformat:2 }} €/m{% else %}prix à renseigner{% endif %}</small></span><b>{% if b.resultat.cout_total is not None %}{{ b.resultat.cout_total|floatformat:2 }} €{% else %}—{% endif %}</b></div>
+      </aside>
+    </div>
+    <div class="dp-legende">
+      {% for p, c in b.legende %}<span><i style="background:{{ c.0 }};border-color:{{ c.1 }}"></i>{{ p.nom }} × {{ p.quantite }}</span>{% endfor %}
+      <span><i style="background:#e5e7eb"></i>Chute entre les débits</span><span><i class="dp-hachure"></i>Chute de bout</span>
+    </div>
+    <table class="dp-table">
+      <caption>Matière répartie entre les débits (au prorata de leur longueur)</caption>
+      <thead><tr><th>Débit</th><th class="n">Quantité</th><th class="n">Matière par pièce</th><th class="n">Total matière</th></tr></thead>
+      <tbody>
+      {% for r in b.resultat.par_piece %}
+        <tr><td>{{ r.piece.nom }}</td><td class="n">{{ r.quantite }}</td>
+          <td class="n">{% if r.unitaire is not None %}{{ r.unitaire|floatformat:2 }} €{% else %}—{% endif %}</td>
+          <td class="n">{% if r.total is not None %}{{ r.total|floatformat:2 }} €{% else %}—{% endif %}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <div class="dp-pied">
+      <span class="dp-aide">{% if b.retenu %}<strong class="dp-retenu">✓ Retenu</strong> : ces réglages serviront au chiffrage.{% else %}Les réglages ne sont enregistrés que si vous les retenez.{% endif %}</span>
+      {% if editable and not b.retenu %}<button type="button" class="dp-retenir-profil" data-section="{{ b.section.pk }}">Retenir ces réglages</button>{% endif %}
+    </div>
+  {% endif %}
+</div>

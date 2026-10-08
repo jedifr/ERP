@@ -154,10 +154,10 @@ class Article(models.Model):
         "coût unitaire", null=True, blank=True, help_text="Coût d'achat (matière première)", **PRIX,
     )
     taux_marge_defaut = ChampDecimal(
-        "taux de marge par défaut",
+        "taux de marge par défaut (%)",
         null=True,
         blank=True,
-        help_text="Marge par défaut sur le coût matière (articles fabriqués)", **TAUX,
+        help_text="En pourcentage du coût : 20 = prix de vente × 1,20. Marge par défaut sur le coût matière (articles fabriqués)", **TAUX,
     )
     taux_tva = models.ForeignKey(
         "commercial.TauxTVA",
@@ -234,10 +234,10 @@ class PosteTravail(models.Model):
         "nombre de machines", default=1, help_text="Capacité agrégée (usage planning)"
     )
     taux_marge_defaut = ChampDecimal(
-        "taux de marge par défaut",
+        "taux de marge par défaut (%)",
         null=True,
         blank=True,
-        help_text="Marge par défaut sur les opérations de ce poste", **TAUX,
+        help_text="En pourcentage du coût : 20 = prix de vente × 1,20. Marge par défaut sur les opérations de ce poste", **TAUX,
     )
 
     class Meta:

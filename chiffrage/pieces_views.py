@@ -13,10 +13,10 @@ from django.urls import path, reverse
 from django.utils.decorators import method_decorator
 from django.views.decorators.http import require_POST
 
-from decoupe.models import GazCoupe, PieceDecoupe, ProcedeCoupe, ProfilImportDecoupe
-from decoupe.services import devis_pieces, formes
+from decoupe.models import GazCoupe, PieceDecoupe, PieceProfile, ProcedeCoupe, ProfileSection, ProfilImportDecoupe
+from decoupe.services import devis_pieces, devis_profiles, formes, profiles
 from decoupe.services import imbrication_devis as imb
-from decoupe.services.apercu_svg import generer_svg_feuille, generer_svg_piece
+from decoupe.services.apercu_svg import generer_svg_feuille_a_plat, generer_svg_piece
 from decoupe.services.matiere import ErreurMatiere, prix_au_mm2
 from decoupe.services.parametres import reglage
 from technique.models import Matiere
@@ -55,7 +55,17 @@ def _bloc_groupe(groupe, choix, formats):
     marge = _nombre(choix.get("marge"), retenues.marge_bord_mm if retenues else 5)
     taux = max(0.0, min(100.0, _nombre(choix.get("chute"), retenues.taux_chute_recuperable if retenues else 0)))
     forme = _booleen(choix.get("forme"), retenues.imbrication_forme if retenues else True)
-    bloc = {"groupe": groupe, "cle": groupe.cle, "toles": toles, "tole": tole, "marge": marge, "chute": taux, "forme": forme, "formats": formats, "erreur": "", "avertissement": ""}
+    sens = choix.get("sens") or (retenues.sens_imbrication if retenues else "longueur")
+    if sens not in PieceDecoupe.SensImbrication.values:
+        sens = "longueur"
+    coin = choix.get("coin") or (retenues.coin_depart if retenues else "bas_gauche")
+    if coin not in PieceDecoupe.CoinDepart.values:
+        coin = "bas_gauche"
+    bloc = {
+        "groupe": groupe, "cle": groupe.cle, "toles": toles, "tole": tole, "marge": marge, "chute": taux, "forme": forme, "formats": formats,
+        "erreur": "", "avertissement": "", "sens": sens, "coin": coin, "sens_choix": PieceDecoupe.SensImbrication.choices,
+        "coin_choix": PieceDecoupe.CoinDepart.choices,
+    }
     if not pieces:
         bloc["erreur"] = "Aucune pièce réalisable dans ce groupe."
         return bloc
@@ -65,7 +75,7 @@ def _bloc_groupe(groupe, choix, formats):
         except ErreurMatiere as exc:
             bloc["avertissement"] = f"{exc} Le coût matière n'est pas calculé."
             tole = bloc["tole"] = None
-    lignes, meilleur = imb.comparer_formats(groupe, formats, marge, taux, tole, forme=forme)
+    lignes, meilleur = imb.comparer_formats(groupe, formats, marge, taux, tole, forme=forme, sens=sens, coin=coin)
     if meilleur is None:
         if formats and not imb.formats_compatibles(groupe.procede, formats):
             nom = "le laser" if groupe.procede == "laser" else "le jet d'eau"
@@ -88,14 +98,17 @@ def _bloc_groupe(groupe, choix, formats):
     par_id = {p.pk: p for p in pieces}
     feuilles = []
     for numero in range(1, min(resultat.nb_feuilles, MAX_FEUILLES_AFFICHEES) + 1):
-        placees = [pl for pl in resultat.placements if pl.numero_feuille == numero]
+        placees = [pl for pl in resultat.placements_affichage if pl.numero_feuille == numero]
         feuilles.append({
             "numero": numero, "nb_pieces": len(placees), "partielle": numero == resultat.nb_feuilles and resultat.nb_feuilles > 0,
-            "svg": generer_svg_feuille(
-                format_choisi.largeur_mm, format_choisi.longueur_mm,
+            "svg": generer_svg_feuille_a_plat(
+                resultat.largeur_x_mm, resultat.hauteur_y_mm,
                 [(par_id[pl.piece_id], pl.x_mm, pl.y_mm, pl.rotation_deg, pl.miroir) for pl in placees], couleurs=couleurs,
+                chute_bout=resultat.chute_bout if numero == resultat.nb_feuilles else None,
             ),
         })
+    if resultat.avertissement_coin:
+        bloc["avertissement"] = (bloc["avertissement"] + " " + resultat.avertissement_coin).strip()
     bloc.update({
         "lignes": [{"format": f, "resultat": r, "erreur": e, "meilleur": f.pk == meilleur.pk, "choisi": f.pk == format_choisi.pk} for f, r, e in lignes],
         "resultat": resultat, "format": format_choisi, "feuilles": feuilles,
@@ -103,7 +116,7 @@ def _bloc_groupe(groupe, choix, formats):
         "legende": [(p, couleurs[p.pk]) for p in pieces],
         "retenu": bool(retenues and retenues.tole_id == (tole.pk if tole else None) and retenues.format_tole_id == format_choisi.pk
                        and retenues.marge_bord_mm == marge and float(retenues.taux_chute_recuperable) == taux
-                       and retenues.imbrication_forme == forme),
+                       and retenues.imbrication_forme == forme and retenues.sens_imbrication == sens and retenues.coin_depart == resultat.coin_depart),
     })
     return bloc
 
@@ -129,6 +142,57 @@ def _carte(request, piece, editable=True, alimenter=False):
     )
 
 
+def _catalogue_profils():
+    """Sections de profilés par famille pour la bibliothèque de formes (menus et masses)."""
+    familles = []
+    for valeur, libelle in ProfileSection.Famille.choices:
+        sections = list(ProfileSection.objects.filter(famille=valeur).order_by("ordre", "designation"))
+        familles.append({
+            "cle": valeur, "libelle": libelle,
+            "sections": [{"id": s.pk, "designation": s.designation, "masse": s.masse_lineique, "barre": s.longueur_barre_mm, "prix": s.article_id is not None} for s in sections],
+            "non_verifie": any(not s.verifie for s in sections),
+        })
+    return familles
+
+
+def _carte_profil(request, piece, editable=True):
+    return render_to_string(
+        "admin/chiffrage/devis/_carte_profil.html",
+        {
+            "piece": piece, "editable": editable, "apercu": profiles.svg_debit(piece.longueur_mm, piece.section.hauteur_mm, piece.coupe_a_deg, piece.coupe_b_deg),
+            "section_svg": profiles.svg_section(piece.section, 64),
+            "sections": ProfileSection.objects.filter(famille=piece.section.famille).order_by("ordre", "designation"),
+            "coupes": COUPES, "url_enregistrer": reverse("admin:chiffrage_devis_profil_enregistrer", args=[piece.devis_id, piece.pk]),
+            "url_supprimer": reverse("admin:chiffrage_devis_profil_supprimer", args=[piece.devis_id, piece.pk]),
+        },
+        request=request,
+    )
+
+
+COUPES = [(90, "Droite (90°)"), (45, "Biais 45°"), (60, "Biais 60°"), (30, "Biais 30°"), (22.5, "Biais 22,5°")]
+
+
+def _bloc_profil(section, pieces, choix):
+    """Contexte d'affichage de l'imbrication des débits d'une section dans ses barres."""
+    premiere = pieces[0]
+    trait = max(0.0, _nombre(choix.get("trait"), premiere.trait_scie_mm))
+    marge = max(0.0, _nombre(choix.get("marge"), premiere.marge_bout_mm))
+    taux = max(0.0, min(100.0, _nombre(choix.get("chute"), premiere.taux_chute_recuperable)))
+    bloc = {"section": section, "cle": f"profil|{section.pk}", "pieces": pieces, "trait": trait, "marge": marge, "chute": taux, "erreur": "", "resultat": None}
+    try:
+        r = profiles.imbriquer_barres(pieces, section, None, trait, marge, taux)
+    except profiles.ErreurProfile as exc:
+        bloc["erreur"] = str(exc)
+        return bloc
+    couleurs = {p.pk: profiles.COULEURS[i % len(profiles.COULEURS)] for i, p in enumerate(pieces)}
+    bloc.update({
+        "resultat": r, "barres": profiles.svg_barres(r, section, {p.pk: p for p in pieces}, couleurs), "legende": [(p, couleurs[p.pk]) for p in pieces],
+        "retenu": all(p.trait_scie_mm == trait and p.marge_bout_mm == marge and float(p.taux_chute_recuperable) == taux for p in pieces),
+        "avertissement": r.erreur_prix,
+    })
+    return bloc
+
+
 class PiecesDevisMixin:
     """À mélanger à DevisAdmin : routes AJAX du panneau et contexte de la fiche."""
 
@@ -140,6 +204,11 @@ class PiecesDevisMixin:
             path("<str:numero>/pieces/<int:piece_id>/supprimer/", vue(self.piece_supprimer_view), name="chiffrage_devis_piece_supprimer"),
             path("<str:numero>/pieces/formes/apercu/", vue(self.forme_apercu_view), name="chiffrage_devis_formes_apercu"),
             path("<str:numero>/pieces/formes/ajouter/", vue(self.forme_ajouter_view), name="chiffrage_devis_formes_ajouter"),
+            path("<str:numero>/profils/apercu/", vue(self.profil_apercu_view), name="chiffrage_devis_profils_apercu"),
+            path("<str:numero>/profils/ajouter/", vue(self.profil_ajouter_view), name="chiffrage_devis_profils_ajouter"),
+            path("<str:numero>/profils/retenir/", vue(self.profil_retenir_view), name="chiffrage_devis_profils_retenir"),
+            path("<str:numero>/profils/<int:piece_id>/enregistrer/", vue(self.profil_enregistrer_view), name="chiffrage_devis_profil_enregistrer"),
+            path("<str:numero>/profils/<int:piece_id>/supprimer/", vue(self.profil_supprimer_view), name="chiffrage_devis_profil_supprimer"),
             path("<str:numero>/pieces/imbrication/", vue(self.piece_imbrication_view), name="chiffrage_devis_pieces_imbrication"),
             path("<str:numero>/pieces/imbrication/retenir/", vue(self.piece_retenir_view), name="chiffrage_devis_pieces_retenir"),
             path("<str:numero>/pieces/ajouter-au-devis/", vue(self.piece_ajouter_view), name="chiffrage_devis_pieces_ajouter"),
@@ -168,7 +237,11 @@ class PiecesDevisMixin:
             "url_ajouter": reverse("admin:chiffrage_devis_pieces_ajouter", args=[devis.pk]),
             "url_forme_apercu": reverse("admin:chiffrage_devis_formes_apercu", args=[devis.pk]),
             "url_forme_ajouter": reverse("admin:chiffrage_devis_formes_ajouter", args=[devis.pk]),
-            "catalogue_formes": formes.catalogue() if editable else None,
+            "catalogue_formes": ({**formes.catalogue(), "profils": _catalogue_profils()}) if editable else None,
+            "cartes_profils": [_carte_profil(request, p, editable) for p in devis_profiles.pieces_du_devis(devis)],
+            "url_profil_apercu": reverse("admin:chiffrage_devis_profils_apercu", args=[devis.pk]),
+            "url_profil_ajouter": reverse("admin:chiffrage_devis_profils_ajouter", args=[devis.pk]),
+            "url_profil_retenir": reverse("admin:chiffrage_devis_profils_retenir", args=[devis.pk]),
             "profils": ProfilImportDecoupe.objects.order_by("nom"),
         }}
 
@@ -206,6 +279,98 @@ class PiecesDevisMixin:
         except devis_pieces.ErreurPieceDevis as exc:
             return JsonResponse({"detail": str(exc)}, status=400)
         return JsonResponse({"html": _carte(request, piece), "piece_id": piece.pk})
+
+    @method_decorator(require_POST)
+    def profil_apercu_view(self, request, numero):
+        if not request.user.has_perm("decoupe.view_piecedecoupe"):
+            raise PermissionDenied
+        donnees, erreur = self._saisie_profil(request)
+        if erreur:
+            return erreur
+        section = ProfileSection.objects.filter(pk=donnees.get("section")).first()
+        if section is None:
+            return JsonResponse({"detail": "Choisissez une section de profilé."}, status=400)
+        try:
+            longueur, a, b = (float(str(donnees.get(k) or d).replace(",", ".")) for k, d in (("longueur", 0), ("coupe_a", 90), ("coupe_b", 90)))
+            piece = PieceProfile(section=section, longueur_mm=longueur, coupe_a_deg=a, coupe_b_deg=b)
+            profiles.verifier_piece(piece)
+        except (ValueError, profiles.ErreurProfile) as exc:
+            return JsonResponse({"detail": str(exc) if not isinstance(exc, ValueError) else "Longueur et angles sont des nombres."}, status=400)
+        prix = ""
+        try:
+            prix = f"{section.prix_au_metre():.2f} €/m"
+        except profiles.ErreurPrixProfile as exc:
+            prix = ""
+        return JsonResponse({
+            "svg": profiles.svg_debit(longueur, section.hauteur_mm, a, b), "section_svg": profiles.svg_section(section),
+            "nom": devis_profiles.nom_suggere(section, longueur), "masse": round(piece.masse_kg, 2), "masse_lineique": section.masse_lineique, "prix": prix,
+        })
+
+    @staticmethod
+    def _saisie_profil(request):
+        try:
+            donnees = json.loads(request.body or b"{}")
+        except ValueError:
+            return None, JsonResponse({"detail": "Requête illisible."}, status=400)
+        if not isinstance(donnees, dict):
+            return None, JsonResponse({"detail": "Requête illisible."}, status=400)
+        return donnees, None
+
+    @method_decorator(require_POST)
+    def profil_ajouter_view(self, request, numero):
+        devis, refus = self._devis_modifiable(request, numero)
+        if refus:
+            return refus
+        donnees, erreur = self._saisie_profil(request)
+        if erreur:
+            return erreur
+        try:
+            piece = devis_profiles.creer(
+                devis, donnees.get("section"), donnees.get("longueur"), donnees.get("coupe_a"), donnees.get("coupe_b"), donnees.get("quantite"),
+            )
+        except devis_pieces.ErreurPieceDevis as exc:
+            return JsonResponse({"detail": str(exc)}, status=400)
+        return JsonResponse({"html": _carte_profil(request, piece), "piece_id": piece.pk})
+
+    @method_decorator(require_POST)
+    def profil_enregistrer_view(self, request, numero, piece_id):
+        devis, refus = self._devis_modifiable(request, numero)
+        if refus:
+            return refus
+        piece = get_object_or_404(devis.pieces_profile, pk=piece_id)
+        try:
+            devis_profiles.modifier(piece, request.POST.dict())
+        except devis_pieces.ErreurPieceDevis as exc:
+            return JsonResponse({"detail": str(exc)}, status=400)
+        piece.refresh_from_db()
+        return JsonResponse({"html": _carte_profil(request, piece), "piece_id": piece.pk})
+
+    @method_decorator(require_POST)
+    def profil_supprimer_view(self, request, numero, piece_id):
+        devis, refus = self._devis_modifiable(request, numero)
+        if refus:
+            return refus
+        conserve = devis_profiles.supprimer(get_object_or_404(devis.pieces_profile, pk=piece_id))
+        return JsonResponse({"ok": True, "article_conserve": conserve})
+
+    @method_decorator(require_POST)
+    def profil_retenir_view(self, request, numero):
+        """Retient trait de scie, chute de tête et chute récupérable d'une section : reportés sur ses débits."""
+        devis, refus = self._devis_modifiable(request, numero)
+        if refus:
+            return refus
+        donnees, erreur = self._saisie_profil(request)
+        if erreur:
+            return erreur
+        pieces = list(devis.pieces_profile.filter(section_id=str(donnees.get("section") or "").replace("profil|", "") or 0))
+        if not pieces:
+            return JsonResponse({"detail": "Section introuvable : rafraîchissez le panneau."}, status=404)
+        trait, marge = max(0.0, _nombre(donnees.get("trait"), 3)), max(0.0, _nombre(donnees.get("marge"), 0))
+        taux = max(0.0, min(100.0, _nombre(donnees.get("chute"), 0)))
+        for p in pieces:
+            p.trait_scie_mm, p.marge_bout_mm, p.taux_chute_recuperable = trait, marge, taux
+            p.save(update_fields=["trait_scie_mm", "marge_bout_mm", "taux_chute_recuperable"])
+        return JsonResponse({"ok": True})
 
     @staticmethod
     def _saisie_forme(request):
@@ -296,11 +461,13 @@ class PiecesDevisMixin:
         groupes, a_regler = imb.grouper(devis_pieces.pieces_du_devis(devis))
         formats = imb.formats_actifs()
         editable = not devis_verrouille(devis) and self.has_change_permission(request, devis)
+        peut_gamme = editable and request.user.has_perm("technique.add_gamme") and request.user.has_perm("technique.change_gamme")
         blocs = [_bloc_groupe(g, choix.get(g.cle) or {}, formats) for g in groupes]
+        blocs_profils = [_bloc_profil(sec, pcs, choix.get(f"profil|{sec.pk}") or {}) for sec, pcs in profiles.groupes(devis_profiles.pieces_du_devis(devis))]
         html = render_to_string(
             "admin/chiffrage/devis/_imbrication.html",
-            {"blocs": blocs, "a_regler": a_regler, "editable": editable, "sans_format": not formats,
-             "chiffrage": pieces_devis.apercu(devis), "peut_ajouter": editable and request.user.has_perm("chiffrage.add_devisligne")},
+            {"blocs": blocs, "blocs_profils": blocs_profils, "a_regler": a_regler, "editable": editable, "sans_format": not formats,
+             "chiffrage": pieces_devis.apercu(devis, avec_gamme=peut_gamme), "peut_ajouter": editable and request.user.has_perm("chiffrage.add_devisligne")},
             request=request,
         )
         return JsonResponse({"html": html})
@@ -331,10 +498,12 @@ class PiecesDevisMixin:
         marge = max(0.0, _nombre(donnees.get("marge"), 5))
         taux = max(0.0, min(100.0, _nombre(donnees.get("chute"), 0)))
         forme = _booleen(donnees.get("forme"), True)
+        sens = donnees.get("sens") if donnees.get("sens") in PieceDecoupe.SensImbrication.values else "longueur"
+        coin = donnees.get("coin") if donnees.get("coin") in PieceDecoupe.CoinDepart.values else "bas_gauche"
         for piece in groupe.pieces:
             piece.tole, piece.format_tole, piece.marge_bord_mm, piece.taux_chute_recuperable = tole, format_tole, marge, taux
-            piece.imbrication_forme = forme
-            piece.save(update_fields=["tole", "format_tole", "marge_bord_mm", "taux_chute_recuperable", "imbrication_forme"])
+            piece.imbrication_forme, piece.sens_imbrication, piece.coin_depart = forme, sens, coin
+            piece.save(update_fields=["tole", "format_tole", "marge_bord_mm", "taux_chute_recuperable", "imbrication_forme", "sens_imbrication", "coin_depart"])
             article = piece.article
             if tole is not None and article is not None and article.taux_marge_defaut is None and tole.taux_marge_defaut is not None:
                 article.taux_marge_defaut = tole.taux_marge_defaut  # l'article fabriqué reprend la marge de sa tôle

@@ -80,6 +80,8 @@ from .production import (
     reviser_devis,
     synchroniser_lignes_commande,
 )
+from unfold.widgets import UnfoldAdminSelectWidget
+
 from .widgets import DelaiWidget
 
 
@@ -95,6 +97,9 @@ def taux_tva_display(obj):
 
 
 class TauxTVACompactChoiceField(forms.ModelChoiceField):
+    # Un champ déclaré à la main perd les widgets d'Unfold : sans ce widget la liste n'a pas de bordure.
+    widget = UnfoldAdminSelectWidget
+
     def label_from_instance(self, obj):
         return f"{pourcent(obj.taux)}%"
 

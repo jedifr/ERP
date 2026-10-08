@@ -192,6 +192,8 @@ def _estimer_laser(piece, parametre, avertissements):
     )
     if parametre.remarque:
         avertissements.append(f"{parametre} : {parametre.remarque}.")
+    if parametre.origine == "extrapole":
+        avertissements.append("Vitesse extrapolée du tableau du constructeur (épaisseur absente du tableau) : à confirmer.")
     if (piece.gravure_json or {}).get("traits"):
         avertissements.append("Le marquage n'est pas compté au laser.")
     coefficient = parametre.coefficient_ajustement or 1

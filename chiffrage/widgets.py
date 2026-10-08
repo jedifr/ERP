@@ -1,15 +1,17 @@
-from django import forms
 from django.utils.html import format_html, format_html_join
+
+from unfold.widgets import UnfoldAdminTextInputWidget
 
 from commercial.models import DelaiPropose
 
 
-class DelaiWidget(forms.TextInput):
+class DelaiWidget(UnfoldAdminTextInputWidget):
     """Champ texte libre pour Devis.delai, avec des suggestions venant du
     référentiel DelaiPropose affichées via un <datalist> HTML natif :
     l'utilisateur peut choisir une suggestion dans la liste déroulante ou
     taper n'importe quel autre texte — le <datalist> ne contraint jamais la
-    valeur saisie, contrairement à un <select>."""
+    valeur saisie, contrairement à un <select>. Dérive du champ texte d'Unfold : un TextInput Django nu n'a aucune
+    bordure et paraît absent de la fiche."""
 
     def render(self, name, value, attrs=None, renderer=None):
         attrs = {**(attrs or {}), "list": "delai-suggestions"}

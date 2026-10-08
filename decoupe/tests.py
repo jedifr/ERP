@@ -1835,7 +1835,7 @@ class LaserTests(TestCase):
         self.assertEqual(p.intervalle_pieces_mm, 10)
         self.assertEqual(ParametreCoupe.objects.get(procede="laser", famille__nom="Acier", gaz="O2", epaisseur_mm=25).intervalle_pieces_mm, 25)
         fine = ParametreCoupe.objects.get(procede="laser", famille__nom="Acier", gaz="O2", epaisseur_mm=0.5)
-        self.assertEqual(fine.origine, "calcule")
+        self.assertEqual(fine.origine, "extrapole")
         self.assertGreater(fine.vitesse_coupe_production_m_min, 9.7)
         self.assertLessEqual(fine.vitesse_coupe_production_m_min, 9.7 * 1.15 + 1e-6)  # plafonnée
         self.assertTrue(ParametreCoupe.objects.filter(procede="laser", famille__nom="Acier galvanisé").exists())

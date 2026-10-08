@@ -296,6 +296,7 @@ NAVIGATION = [
             _menu("Formats de tôle", "crop_landscape", "decoupe", "formattole"),
             _menu("Réglages de coupe", "tune", "decoupe", "reglageprocede"),
             _menu("Cotes normalisées", "straighten", "decoupe", "normecote"),
+            _menu("Sections de profilés", "view_column", "decoupe", "profilesection"),
         ],
     },
     {

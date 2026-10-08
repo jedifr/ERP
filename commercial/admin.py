@@ -7,6 +7,7 @@ from django.http import JsonResponse
 from django.urls import path
 from django.views.decorators.http import require_http_methods
 from unfold.admin import ModelAdmin, TabularInline
+from unfold.widgets import UnfoldAdminSelectWidget
 
 from codification.mixins import CodificationInitialeMixin
 from codification.models import RegleCodification
@@ -71,7 +72,7 @@ class ContactInlineForm(forms.ModelForm):
     adresse_associee_ref = forms.CharField(
         label="Adresse associée",
         required=False,
-        widget=forms.Select(choices=[("", "---------")]),
+        widget=UnfoldAdminSelectWidget(choices=[("", "---------")]),
         help_text="Uniquement les adresses déjà saisies dans le tableau ci-dessus.",
     )
 

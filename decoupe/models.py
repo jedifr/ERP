@@ -184,6 +184,24 @@ class PieceDecoupe(models.Model):
         "imbriquer selon la forme", default=True,
         help_text="L'imbrication tient compte du contour réel des pièces (trous compris) et non de leur seul rectangle englobant : moins de chutes, calcul un peu plus long.",
     )
+    class SensImbrication(models.TextChoices):
+        LONGUEUR = "longueur", "Dans le sens de la longueur de la tôle"
+        LARGEUR = "largeur", "Dans le sens de la largeur de la tôle"
+
+    class CoinDepart(models.TextChoices):
+        BAS_GAUCHE = "bas_gauche", "En bas à gauche"
+        HAUT_GAUCHE = "haut_gauche", "En haut à gauche"
+        BAS_DROITE = "bas_droite", "En bas à droite"
+        HAUT_DROITE = "haut_droite", "En haut à droite"
+
+    sens_imbrication = models.CharField(
+        "sens de l'imbrication", max_length=10, choices=SensImbrication.choices, default=SensImbrication.LONGUEUR,
+        help_text="Sens dans lequel la tôle se remplit : la chute de bout est la bande qui reste, sur toute la largeur (ou toute la longueur) de la tôle, après la dernière pièce.",
+    )
+    coin_depart = models.CharField(
+        "coin de départ", max_length=12, choices=CoinDepart.choices, default=CoinDepart.BAS_GAUCHE,
+        help_text="Coin de la tôle où commence l'imbrication (origine de la machine). Les coins « en haut à gauche » et « en bas à droite » retournent les pièces : refusés si une pièce ne peut pas être retournée.",
+    )
     imbrication_chiffrage = models.BooleanField(
         "chiffrer la matière par imbrication", default=False,
         help_text="La matière d'un article fabriqué lié à cette pièce est calculée par imbrication (surface consommée avec les chutes, selon la quantité) au lieu du rectangle de la nomenclature.",
@@ -503,9 +521,12 @@ class ParametreCoupe(models.Model):
         help_text="Indice d'usinabilité du logiciel de la machine ; vide : celui de la matière. Sert à calculer les vitesses.",
     )
     origine = models.CharField(
-        "origine des vitesses", max_length=8, default="machine",
-        choices=[("machine", "Relevées sur la machine"), ("calcule", "Calculées depuis l'usinabilité (estimation)")],
-        help_text="Les vitesses « calculées » sont une estimation à confirmer ; celles relevées sur la machine ne sont jamais écrasées par un calcul.",
+        "origine des vitesses", max_length=12, default="machine",
+        choices=[
+            ("machine", "Relevées sur la machine"), ("calcule", "Calculées depuis l'usinabilité (estimation)"),
+            ("extrapole", "Extrapolées du tableau du constructeur (estimation)"),
+        ],
+        help_text="Jet d'eau : les vitesses « calculées » depuis l'usinabilité sont une estimation à confirmer. Laser : jamais de calcul d'usinabilité, les vitesses viennent du tableau du constructeur (« extrapolées » : épaisseur absente du tableau). Les vitesses relevées sur la machine ne sont jamais écrasées.",
     )
 
     # Laser : vitesses du constructeur (pas de niveaux de qualité) et consommations
@@ -707,3 +728,93 @@ class NormeCote(models.Model):
 
     def __str__(self):
         return f"{self.get_famille_display()} {self.designation}"
+
+
+class ProfileSection(models.Model):
+    """Section de profilé du catalogue (cornière, UPN, tube) : cotes, masse linéique, longueur de barre et article d'achat."""
+
+    class Famille(models.TextChoices):
+        CORNIERE = "corniere", "Cornière"
+        UPN = "upn", "UPN"
+        TUBE_CARRE = "tube_carre", "Tube carré"
+        TUBE_RECTANGULAIRE = "tube_rectangulaire", "Tube rectangulaire"
+        TUBE_ROND = "tube_rond", "Tube rond"
+
+    famille = models.CharField("famille", max_length=20, choices=Famille.choices)
+    designation = models.CharField("désignation", max_length=60, unique=True, help_text="« L 50×50×5 », « UPN 100 », « Tube 40×40×3 »…")
+    dimensions = models.JSONField(
+        "cotes (mm)", default=dict,
+        help_text="Cornière : a, b, e. UPN : h, b, tw, tf. Tube carré : c, e. Tube rectangulaire : h, b, e. Tube rond : d, e.",
+    )
+    masse_lineique = models.FloatField("masse linéique (kg/m)")
+    longueur_barre_mm = models.FloatField("longueur de barre (mm)", default=6000, help_text="Longueur de barre achetée, dont sont tirés les débits.")
+    article = models.ForeignKey(
+        Article, verbose_name="article d'achat", on_delete=models.SET_NULL, null=True, blank=True, related_name="sections_profile",
+        limit_choices_to={"nature": Article.Nature.MATIERE_PREMIERE},
+        help_text="Matière première dont le coût sert au prix des débits : coût au mètre, au kilo (avec la masse linéique) ou à la barre.",
+    )
+    verifie = models.BooleanField("vérifié", default=False, help_text="Masses et cotes contrôlées avec le catalogue du fournisseur ou la norme.")
+    source = models.CharField("source", max_length=200, blank=True)
+    ordre = models.PositiveIntegerField("ordre", default=0)
+
+    class Meta:
+        verbose_name = "Section de profilé"
+        verbose_name_plural = "Sections de profilés"
+        ordering = ["famille", "ordre", "designation"]
+
+    def __str__(self):
+        return self.designation
+
+    @property
+    def hauteur_mm(self):
+        """Hauteur de la section vue de côté (dimension portée sur le dessin d'un débit)."""
+        d = self.dimensions
+        return float(d.get("h") or d.get("a") or d.get("c") or d.get("d") or 0)
+
+    def prix_au_metre(self):
+        """Prix d'un mètre de barre (Decimal) selon l'unité de coût de l'article d'achat ; ErreurPrixProfile si impossible."""
+        from .services.profiles import ErreurPrixProfile
+
+        a = self.article
+        if a is None:
+            raise ErreurPrixProfile(f"Aucun article d'achat n'est rattaché à « {self.designation} » (menu Sections de profilés).")
+        if a.cout_unitaire is None:
+            raise ErreurPrixProfile(f"L'article « {a} » n'a pas de coût unitaire renseigné.")
+        cout = D(a.cout_unitaire)
+        if a.unite_cout == Article.UniteCout.LONGUEUR:
+            return cout * D(a.poids_lineique) if a.poids_lineique else cout  # €/kg avec un poids linéique, sinon €/m
+        if a.unite_cout == Article.UniteCout.POIDS:
+            return cout * D(self.masse_lineique)
+        if a.unite_cout == Article.UniteCout.PIECE:
+            return cout / (D(self.longueur_barre_mm) / D(1000))  # prix de la barre entière
+        raise ErreurPrixProfile(f"Unité de coût de « {a} » non adaptée à un profilé (longueur, poids ou pièce).")
+
+
+class PieceProfile(models.Model):
+    """Débit de profilé d'un devis (longueur, coupes d'extrémité, quantité) : article fabriqué créé avec lui, matière chiffrée
+    par imbrication des débits dans les barres (voir services/profiles.py)."""
+
+    devis = models.ForeignKey("chiffrage.Devis", verbose_name="devis", on_delete=models.CASCADE, related_name="pieces_profile")
+    section = models.ForeignKey(ProfileSection, verbose_name="section", on_delete=models.PROTECT, related_name="pieces")
+    nom = models.CharField("nom", max_length=200)
+    longueur_mm = models.FloatField("longueur hors tout (mm)")
+    coupe_a_deg = models.FloatField("coupe de l'extrémité A (°)", default=90, help_text="90 : coupe droite ; 45 : biseau à 45°.")
+    coupe_b_deg = models.FloatField("coupe de l'extrémité B (°)", default=90)
+    quantite = models.PositiveIntegerField("quantité", default=1)
+    article = models.ForeignKey(Article, verbose_name="article fabriqué", on_delete=models.SET_NULL, null=True, blank=True, related_name="pieces_profile")
+    article_cree_automatiquement = models.BooleanField(default=False)
+    trait_scie_mm = models.FloatField("trait de scie (mm)", default=3)
+    marge_bout_mm = models.FloatField("chute de tête (mm)", default=0, help_text="Longueur de barre perdue à l'extrémité avant la première coupe.")
+    taux_chute_recuperable = models.DecimalField("chute récupérable (%)", max_digits=5, decimal_places=2, default=0)
+
+    class Meta:
+        verbose_name = "Débit de profilé"
+        verbose_name_plural = "Débits de profilés"
+        ordering = ["pk"]
+
+    def __str__(self):
+        return self.nom
+
+    @property
+    def masse_kg(self):
+        return self.longueur_mm / 1000 * self.section.masse_lineique

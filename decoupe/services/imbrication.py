@@ -80,6 +80,7 @@ class ResultatImbrication:
     surface_feuilles_mm2: float
     taux_utilisation_pct: float
     pieces_non_placees: list
+    axe: str = "y"  # axe sur lequel la feuille se remplit : « y » (de bas en haut) ou « x » (de gauche à droite)
 
 
 class _Etagere:
@@ -388,14 +389,64 @@ def etendue_derniere_feuille_mm(resultat, marge_bord_mm=0.0):
     if not derniere:
         return 0.0
     # bande occupée (les pièces sont tassées contre un bord de la feuille) + les deux marges de bord
+    if getattr(resultat, "axe", "y") == "x":
+        return max(p.x_mm + p.largeur_placee_mm for p in derniere) - min(p.x_mm for p in derniere) + 2 * marge_bord_mm
     return max(p.y_mm + p.hauteur_placee_mm for p in derniere) - min(p.y_mm for p in derniere) + 2 * marge_bord_mm
 
 
-def imbriquer_meilleur(items, largeur_feuille_mm, longueur_feuille_mm, marge_bord_mm=0.0, espacement_pieces_mm=0.0, forme=False):
+def _transposer_item(item):
+    """Même pièce vue dans le repère dont les axes x et y sont échangés (symétrie par rapport à la diagonale)."""
+    from dataclasses import replace
+
+    def echange(anneau):
+        return [(y, x) for x, y in anneau]
+
+    return replace(
+        item, largeur_mm=item.hauteur_mm, hauteur_mm=item.largeur_mm,
+        exterieur=echange(item.exterieur), trous=[echange(t) for t in item.trous],
+    )
+
+
+def _retransposer(resultat):
+    """Résultat d'une imbrication faite dans le repère transposé, ramené au repère réel. La transposition d'une pièce tournée de
+    θ est la pièce d'origine tournée de −θ : aucune pièce n'est retournée (miroir), les positions et dimensions s'échangent."""
+    placements = [
+        Placement(
+            piece_id=p.piece_id, numero_feuille=p.numero_feuille, x_mm=p.y_mm, y_mm=p.x_mm, largeur_placee_mm=p.hauteur_placee_mm,
+            hauteur_placee_mm=p.largeur_placee_mm, rotation_deg=(-p.rotation_deg) % 360, miroir=p.miroir,
+        )
+        for p in resultat.placements
+    ]
+    return ResultatImbrication(
+        placements=placements, nb_feuilles=resultat.nb_feuilles, surface_pieces_mm2=resultat.surface_pieces_mm2,
+        surface_feuilles_mm2=resultat.surface_feuilles_mm2, taux_utilisation_pct=resultat.taux_utilisation_pct,
+        pieces_non_placees=resultat.pieces_non_placees, axe="x",
+    )
+
+
+def _caler_sur_l_origine(resultat, marge_bord_mm):
+    """Ramène sur chaque feuille la bande de pièces contre le bord y = 0 (marge de bord comprise) : la chute de bout est alors
+    toujours à l'extrémité opposée, quelle que soit la variante qui a gagné (certaines tassent vers le haut)."""
+    from dataclasses import replace
+
+    decalage = {}
+    for p in resultat.placements:
+        decalage[p.numero_feuille] = min(decalage.get(p.numero_feuille, p.y_mm), p.y_mm)
+    placements = [replace(p, y_mm=p.y_mm - max(decalage[p.numero_feuille] - marge_bord_mm, 0.0)) for p in resultat.placements]
+    return replace(resultat, placements=placements)
+
+
+def imbriquer_meilleur(items, largeur_feuille_mm, longueur_feuille_mm, marge_bord_mm=0.0, espacement_pieces_mm=0.0, forme=False, axe="y"):
     """Meilleur placement parmi plusieurs variantes : le moins de feuilles, puis la plus petite étendue utilisée sur la
     dernière feuille (ce qui reste d'une feuille entamée se récupère). Toujours au moins aussi bon que l'étagère.
     Avec `forme`, l'imbrication selon la forme réelle des pièces (imbrication_forme.py) entre dans la comparaison ; si elle
-    n'est pas possible (pas de contour, contrôle géométrique refusé), les rectangles seuls sont comparés."""
+    n'est pas possible (pas de contour, contrôle géométrique refusé), les rectangles seuls sont comparés.
+    `axe` : sens de remplissage de la feuille (x : de gauche à droite, la chute de bout est à droite sur toute la hauteur ; y :
+    de bas en haut, la chute est en haut). La feuille s'étend de 0 à `largeur_feuille_mm` en x et de 0 à `longueur_feuille_mm`
+    en y. Pour « x », le problème est résolu dans le repère transposé puis ramené, sans jamais retourner une pièce."""
+    if axe == "x":
+        transposes = [_transposer_item(i) for i in items]
+        return _retransposer(imbriquer_meilleur(transposes, longueur_feuille_mm, largeur_feuille_mm, marge_bord_mm, espacement_pieces_mm, forme, axe="y"))
     candidats = [
         _imbriquer_maxrects(items, largeur_feuille_mm, longueur_feuille_mm, marge_bord_mm, espacement_pieces_mm, tri, score)
         for tri in ("aire", "dimension")
@@ -411,4 +462,5 @@ def imbriquer_meilleur(items, largeur_feuille_mm, longueur_feuille_mm, marge_bor
                 candidats.append(candidat)
         except ImbricationFormeImpossible:
             pass
-    return min(candidats, key=lambda r: (r.nb_feuilles, etendue_derniere_feuille_mm(r, marge_bord_mm)))
+    meilleur = min(candidats, key=lambda r: (r.nb_feuilles, etendue_derniere_feuille_mm(r, marge_bord_mm)))
+    return _caler_sur_l_origine(meilleur, marge_bord_mm)

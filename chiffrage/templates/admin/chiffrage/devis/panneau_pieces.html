@@ -16,7 +16,7 @@
       </div>
       <input type="file" id="dp-fichiers" accept=".dxf,.dwg" multiple hidden>
     </div>
-    <details class="dp-formes" id="dp-formes" data-url-apercu="{{ p.url_forme_apercu }}" data-url-ajouter="{{ p.url_forme_ajouter }}">
+    <details class="dp-formes" id="dp-formes" data-url-apercu="{{ p.url_forme_apercu }}" data-url-ajouter="{{ p.url_forme_ajouter }}" data-url-profil-apercu="{{ p.url_profil_apercu }}" data-url-profil-ajouter="{{ p.url_profil_ajouter }}">
       <summary><span class="material-symbols-outlined">shapes</span> Bibliothèque de formes — rectangle, disque, bride, platine, équerre… ou cotes normalisées (EN 1092-1, rondelles)</summary>
       <div class="dp-formes-corps">
         <div class="dp-formes-saisie">
@@ -45,6 +45,7 @@
     <p class="dp-aide">Vous pouvez consulter les pièces mais pas les modifier (droits insuffisants).</p>
   {% endif %}
   <div id="dp-cartes">{% for carte in p.cartes %}{{ carte|safe }}{% endfor %}</div>
+  <div id="dp-profils" class="dp-profils" data-url-retenir="{{ p.url_profil_retenir }}">{% for carte in p.cartes_profils %}{{ carte|safe }}{% endfor %}</div>
   <div id="dp-imbrication" class="dp-imbrication" data-url-imbrication="{{ p.url_imbrication }}" data-url-retenir="{{ p.url_retenir }}"></div>
   <div id="dp-messages" class="dp-messages" role="status"></div>
 </section>

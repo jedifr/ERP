@@ -3012,3 +3012,22 @@ Sous la zone de dépôt du panneau « Pièces à découper » d'un devis, la **B
 - **Cotes normalisées** : bride EN 1092-1 (DN × PN, type 01 plate à souder ou 05 pleine) et rondelles ISO 7089 / 7091 / 7093 / 7094. Les valeurs sont dans la table *Production > Cotes normalisées* (modifiable, avec l'action « Marquer comme vérifié avec la norme »).
 - **Les cotes livrées ne sont pas vérifiées** : brides PN10 / PN16 de DN10 à DN300 saisies de mémoire de la norme, rondelles reprises du paquet bd_warehouse (Apache-2.0). Un avertissement jaune reste affiché dans la bibliothèque tant qu'une ligne n'est pas marquée vérifiée : contrôlez-les avec la norme en vigueur avant toute production.
 - **Modifier la forme** : une pièce paramétrique garde sa recette (`PieceDecoupe.parametres_forme`). Le bouton « Modifier la forme » de sa carte recharge les cotes dans la bibliothèque ; la pièce, son article et ses réglages sont conservés, le DXF et la géométrie sont recalculés, et le nom suit la forme tant qu'il n'a pas été personnalisé.
+
+## Imbrication à plat, chute de bout et surface consommée
+
+- Les tôles sont dessinées **à plat** (longueur à l'horizontale), pièces vues comme dans leur fichier, origine en **bas à gauche** comme sur la machine.
+- **Remplissage** : dans le sens de la longueur (chute de bout à l'extrémité, sur toute la largeur) ou de la largeur (chute en haut, sur toute la longueur). **Départ** : bas gauche (défaut), haut gauche, bas droite, haut droite ; les deux coins « retournés » (haut gauche, bas droite) miroitent les pièces et sont refusés, avec un message, si une pièce ne peut pas être retournée (gravure) — le haut droite est un simple demi-tour de la tôle. Sens et départ sont retenus avec la tôle et le format.
+- La **chute de bout** (dernière feuille) est hachurée en rouge, la chute entre les pièces reste en gris. Le bilan à droite détaille : tôles complètes − chute de bout = **surface consommée**, qui sert au prix de la matière (si une part de chute récupérable est réglée, elle se déduit ensuite pour donner la surface facturée).
+
+## Profilés (cornière, UPN, tubes) dans la bibliothèque de formes
+
+- Groupe « Profilés (barres) » de la bibliothèque : choix de la section, longueur hors tout, coupe à chaque extrémité (droite ou biais), quantité. Chaque débit crée son **article fabriqué** et apparaît en carte modifiable sous les pièces.
+- Les débits d'une même section s'**imbriquent dans les barres** (longueur de barre de la section, trait de scie, chute de tête, chute récupérable), dessinées à l'horizontale avec la chute de bout en rouge ; bilan : barres complètes − chute de bout = **longueur consommée**, × prix au mètre. Le coût est réparti entre les débits au prorata de leur longueur et suit la quantité de la ligne du devis. Pas de temps de sciage pour l'instant (matière seule).
+- Catalogue : *Production > Sections de profilés* (cornières à ailes égales, UPN, tubes carrés, rectangulaires et ronds), **livré non vérifié** ; les masses des tubes sont calculées (angles vifs), à remplacer par votre base. Le **prix d'achat** vient de l'article rattaché à la section (au mètre, au kilo avec poids linéique, ou à la barre) ; l'action « Créer les articles d'achat manquants » les génère, il ne reste qu'à saisir le coût.
+
+## Corrections
+
+- **Champs invisibles** : « Délai » des devis (widget sans le style Unfold : vide, le champ disparaissait), listes « Taux de TVA » des lignes et adresse associée des contacts. Un test parcourt toutes les fiches d'ajout et échoue si un champ saisissable n'a pas le style Unfold.
+- **Taux de marge** : libellés « (%) » et aide (20 = prix de vente × 1,20).
+- **Laser** : les vitesses ne sont jamais « calculées depuis l'usinabilité » ; les épaisseurs absentes du tableau du constructeur (0,5 mm) sont désormais « extrapolées du tableau du constructeur » (migration des 12 lignes concernées). La fiche d'un paramètre laser ne montre plus les réglages propres au jet d'eau (usinabilité, modes de perçage…), et inversement.
+- **Chiffrage des pièces** : la gamme est alimentée dès que le paramètre a un poste de travail, au lieu d'afficher « poste de travail à renseigner » pour un poste déjà renseigné ; le message indique la vraie raison.

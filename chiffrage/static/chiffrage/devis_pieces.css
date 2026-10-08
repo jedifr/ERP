@@ -71,10 +71,12 @@
 .dp-kpi { padding: .5rem .75rem; border: 1px solid var(--color-base-200); border-radius: 10px; }
 .dp-kpi small { display: block; font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--color-base-500); }
 .dp-kpi b { font-size: 20px; color: var(--color-base-800, #1f2937); }
-.dp-feuilles { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 22rem), 1fr)); gap: .75rem; }
+.dp-travail { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 1rem; align-items: start; }
+.dp-feuilles { display: grid; grid-template-columns: minmax(0, 1fr); gap: .75rem; }
 .dp-feuille { margin: 0; border: 1px solid var(--color-base-200); border-radius: 10px; overflow: hidden; background: #f3f4f6; }
 .dp-feuille figcaption { padding: .3rem .6rem; font-size: 12px; color: var(--color-base-600, #4b5563); background: white; border-bottom: 1px solid var(--color-base-200); }
-.dp-feuille svg { display: block; width: 100%; height: auto; max-height: 340px; }
+.dp-feuille svg { display: block; width: 100%; height: auto; }
+.dp-chute-titre { color: #b91c1c; }
 .dp-legende { display: flex; flex-wrap: wrap; gap: .4rem 1rem; margin: .5rem 0 .9rem; font-size: 12px; color: var(--color-base-500); }
 .dp-legende i { display: inline-block; width: 12px; height: 12px; margin-right: 5px; border: 1px solid; border-radius: 3px; vertical-align: -2px; }
 .dp-legende-note { margin-left: auto; }
@@ -120,3 +122,24 @@
 .dp-attention { padding: .4rem .6rem; color: #92400e; background: #fef3c7; border-radius: 8px; }
 .dp-modifier-forme { padding: .15rem .6rem; font-size: 12px; color: var(--color-primary-700); background: transparent; border: 1px solid var(--color-primary-300, #a5b4fc); border-radius: 8px; cursor: pointer; }
 @media (max-width: 720px) { .dp-formes-corps { grid-template-columns: 1fr; } }
+
+/* Bilan de surface : tôles complètes − chute de bout = surface consommée */
+.dp-bilan { border: 1px solid var(--color-base-200); border-radius: 12px; overflow: hidden; background: white; }
+.dark .dp-bilan { background: var(--color-base-900); border-color: var(--color-base-700); }
+.dp-bilan > div { display: flex; justify-content: space-between; gap: .6rem; padding: .5rem .85rem; border-bottom: 1px solid var(--color-base-100, #f3f4f6); font-size: 13px; }
+.dp-bilan small { display: block; font-size: 11px; font-weight: 400; color: var(--color-base-500); }
+.dp-bilan b { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.dp-bilan .dp-moins { background: #fee2e2; color: #991b1b; }
+.dp-bilan .dp-moins small { color: #b91c1c; }
+.dp-bilan .dp-total { background: #dcfce7; color: #15803d; font-weight: 700; font-size: 15px; }
+.dp-bilan .dp-prix { background: #fdf0e1; color: #b45309; font-weight: 700; border-bottom: 0; }
+.dp-hachure { background: repeating-linear-gradient(45deg, #f87171 0 4px, #fee2e2 4px 9px) !important; }
+@media (max-width: 900px) { .dp-travail { grid-template-columns: 1fr; } }
+
+/* Débits de profilés */
+#dp-profils { display: grid; gap: .75rem; margin-top: .75rem; }
+#dp-profils:empty { display: none; }
+.dp-apercu-profil svg { max-height: 80px; }
+.dp-debit-apercu { max-width: 360px; margin-top: .5rem; }
+.dp-barre-svg { display: block; width: 100%; height: auto; }
+#dpf-svg { flex-direction: column; }

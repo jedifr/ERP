@@ -468,7 +468,7 @@ class CapaciteMachineEtFeuillesTests(TestCase):
         self.assertGreater(total, 1)
         self.assertEqual(html.count("<figure class=\"dp-feuille\">"), total)
         self.assertIn(f"Feuille {total} sur {total}", html)
-        self.assertIn("entamée : le reste est une chute récupérable", html)
+        self.assertIn("chute de bout", html)
 
 
 class ImbricationFormeDevisTests(TestCase):
@@ -590,3 +590,268 @@ class FormesParametriquesDevisTests(TestCase):
         self.client.post("/admin/decoupe/normecote/", {"action": "marquer_verifie", "_selected_action": [ligne.pk]})
         ligne.refresh_from_db()
         self.assertTrue(ligne.verifie)
+
+
+class SensEtCoinImbricationTests(TestCase):
+    """Tôles posées à plat (longueur à l'horizontale), sens de remplissage, coin de départ, chute de bout et surface consommée."""
+
+    setUp = ImbricationDevisTests.setUp
+    piece = ImbricationDevisTests.piece
+    imbriquer = ImbricationDevisTests.imbriquer
+
+    def resultat(self, sens="longueur", coin="bas_gauche", forme=True, quantite=7):
+        from decoupe.models import FormatTole
+        from decoupe.services import imbrication_devis as imb
+        from decoupe.services.devis_pieces import pieces_du_devis
+
+        self.piece("a", quantite)
+        groupe = imb.grouper(pieces_du_devis(self.devis))[0][0]
+        format_tole = FormatTole.objects.get(largeur_mm=1500, longueur_mm=3000)
+        return groupe, imb.imbriquer_groupe(groupe, format_tole, 5, 0, self.tole, forme=forme, sens=sens, coin=coin)
+
+    def polygones(self, groupe, resultat, placements):
+        from shapely.affinity import rotate, scale, translate
+        from shapely.geometry import Polygon
+
+        p = groupe.pieces[0]
+        base = Polygon(p.contour_json["exterieur"], p.contour_json["trous"])
+        sortie = []
+        for pl in placements:
+            g = scale(base, xfact=-1, origin=(0, 0)) if pl.miroir else base
+            g = rotate(g, pl.rotation_deg, origin=(0, 0)) if pl.rotation_deg else g
+            minx, miny, _, _ = g.bounds
+            sortie.append((pl.numero_feuille, translate(g, pl.x_mm - minx, pl.y_mm - miny)))
+        return sortie
+
+    def controle(self, groupe, resultat, placements):
+        from shapely.geometry import box
+
+        feuille = box(0, 0, resultat.largeur_x_mm, resultat.hauteur_y_mm)
+        polys = self.polygones(groupe, resultat, placements)
+        for _, g in polys:
+            self.assertTrue(feuille.buffer(1e-6).contains(g), "pièce hors de la tôle")
+        for i, (n1, g1) in enumerate(polys):
+            for n2, g2 in polys[:i]:
+                if n1 == n2:
+                    self.assertLess(g1.intersection(g2).area, 1.0, "pièces qui se chevauchent")
+
+    def test_les_quatre_coins_et_les_deux_sens_restent_valides(self):
+        from decoupe.services import imbrication_devis as imb
+
+        for forme in (False, True):
+            for sens in ("longueur", "largeur"):
+                for coin in ("bas_gauche", "haut_gauche", "bas_droite", "haut_droite"):
+                    with self.subTest(forme=forme, sens=sens, coin=coin):
+                        PieceDecoupe.objects.all().delete()
+                        groupe, r = self.resultat(sens, coin, forme)
+                        self.assertEqual((r.largeur_x_mm, r.hauteur_y_mm), (3000, 1500))
+                        self.controle(groupe, r, r.placements_affichage)
+                        self.assertEqual(r.coin_depart, coin)
+                        if r.chute_bout:
+                            from shapely.geometry import box
+
+                            x, y, w, h = r.chute_bout
+                            zone = box(x, y, x + w, y + h)
+                            for numero, g in self.polygones(groupe, r, r.placements_affichage):
+                                if numero == r.nb_feuilles:
+                                    self.assertLess(g.intersection(zone).area, 1.0, "une pièce de la dernière feuille est sur la chute de bout")
+
+    def test_la_chute_de_bout_est_a_l_extremite_du_sens_de_remplissage(self):
+        _, r = self.resultat("longueur", "bas_gauche")
+        x, y, w, h = r.chute_bout
+        self.assertEqual((y, h, round(x + w)), (0.0, 1500, 3000))  # bande pleine hauteur, à droite
+        PieceDecoupe.objects.all().delete()
+        _, r2 = self.resultat("largeur", "bas_gauche")
+        x, y, w, h = r2.chute_bout
+        self.assertEqual((x, w, round(y + h)), (0.0, 3000, 1500))  # bande pleine longueur, en haut
+        PieceDecoupe.objects.all().delete()
+        _, r3 = self.resultat("longueur", "haut_droite")
+        self.assertEqual(round(r3.chute_bout[0]), 0)  # départ à droite : la chute est à gauche
+
+    def test_surface_consommee_est_tole_complete_moins_chute_de_bout(self):
+        _, r = self.resultat()
+        self.assertAlmostEqual(r.surface_consommee_mm2 + r.chute_bout_mm2, r.nb_feuilles * 3000 * 1500, places=3)
+        self.assertAlmostEqual(r.chute_bout_mm2, r.chute_bout[2] * r.chute_bout[3] + (0 if r.nb_feuilles == 1 else 0), delta=1)
+        self.assertLess(r.surface_consommee_mm2, r.nb_feuilles * 3000 * 1500)
+
+    def test_le_coin_ne_change_pas_le_cout_le_sens_peut_le_changer(self):
+        _, a = self.resultat("longueur", "bas_gauche")
+        PieceDecoupe.objects.all().delete()
+        _, b = self.resultat("longueur", "haut_droite")
+        self.assertEqual((a.cout_total, a.surface_consommee_mm2), (b.cout_total, b.surface_consommee_mm2))
+
+    def test_coin_avec_retournement_refuse_si_piece_non_symetrique(self):
+        self.piece("a", 3)
+        PieceDecoupe.objects.update(symetrie_autorisee=False)
+        from decoupe.models import FormatTole
+        from decoupe.services import imbrication_devis as imb
+        from decoupe.services.devis_pieces import pieces_du_devis
+
+        groupe = imb.grouper(pieces_du_devis(self.devis))[0][0]
+        r = imb.imbriquer_groupe(groupe, FormatTole.objects.get(largeur_mm=1500, longueur_mm=3000), 5, 0, self.tole, coin="haut_gauche")
+        self.assertEqual(r.coin_depart, "bas_gauche")
+        self.assertIn("ne peut pas être retournée", r.avertissement_coin)
+        r2 = imb.imbriquer_groupe(groupe, FormatTole.objects.get(largeur_mm=1500, longueur_mm=3000), 5, 0, self.tole, coin="haut_droite")
+        self.assertEqual((r2.coin_depart, r2.avertissement_coin), ("haut_droite", ""))
+
+    def test_panneau_affiche_bilan_sens_depart_et_les_retient(self):
+        from decoupe.models import FormatTole
+
+        a = self.piece("a", 7)
+        html = self.imbriquer().json()["html"]
+        for texte in ("Tôles complètes", "− Chute de bout", "= Surface consommée", "data-i=\"sens\"", "data-i=\"coin\"", "En bas à gauche", "dp-tole"):
+            self.assertIn(texte, html)
+        html = self.imbriquer({"S235|10|laser": {"sens": "largeur", "coin": "haut_droite"}}).json()["html"]
+        self.assertRegex(html, r'<option value="largeur"\s+selected')
+        self.assertRegex(html, r'<option value="haut_droite"\s+selected')
+        format_tole = FormatTole.objects.get(largeur_mm=1500, longueur_mm=3000)
+        self.client.post(
+            self.url + "imbrication/retenir/",
+            data=json.dumps({"cle": "S235|10|laser", "tole": self.tole.pk, "format": format_tole.pk, "marge": "5", "chute": "0", "forme": "1", "sens": "largeur", "coin": "haut_droite"}),
+            content_type="application/json",
+        )
+        a.refresh_from_db()
+        self.assertEqual((a.sens_imbrication, a.coin_depart), ("largeur", "haut_droite"))
+        self.assertRegex(self.imbriquer().json()["html"], r'<option value="largeur"\s+selected')  # valeur retenue relue
+
+
+class ProfilesDevisTests(TestCase):
+    """Débits de profilés (cornière, UPN, tubes) : bibliothèque, article fabriqué, imbrication des barres, chiffrage."""
+
+    setUp = PanneauPiecesDevisTests.setUp
+
+    def poster(self, chemin, donnees):
+        return self.client.post(self.url.replace("/pieces/", "/") + chemin, data=json.dumps(donnees), content_type="application/json")
+
+    def section(self, designation="UPN 100", cout=1.10):
+        from decoupe.models import ProfileSection
+
+        section = ProfileSection.objects.get(designation=designation)
+        if cout is not None:
+            article = Article.objects.create(
+                reference="ACH-" + designation, nature=Article.Nature.MATIERE_PREMIERE, unite_cout=Article.UniteCout.LONGUEUR,
+                poids_lineique=section.masse_lineique, cout_unitaire=cout,
+            )
+            section.article = article
+            section.save()
+        return section
+
+    def ajouter(self, section, longueur=1450, quantite=4, a=90, b=90):
+        r = self.poster("profils/ajouter/", {"section": section.pk, "longueur": longueur, "coupe_a": a, "coupe_b": b, "quantite": quantite})
+        self.assertEqual(r.status_code, 200, r.content)
+        from decoupe.models import PieceProfile
+
+        return PieceProfile.objects.get(pk=r.json()["piece_id"])
+
+    def test_catalogue_seme_non_verifie(self):
+        from decoupe.models import ProfileSection
+
+        familles = set(ProfileSection.objects.values_list("famille", flat=True))
+        self.assertEqual(familles, {"corniere", "upn", "tube_carre", "tube_rectangulaire", "tube_rond"})
+        self.assertFalse(ProfileSection.objects.filter(verifie=True).exists())
+        self.assertAlmostEqual(ProfileSection.objects.get(designation="Tube Ø60.3×3.6").masse_lineique, 5.03, places=2)
+        self.assertEqual(ProfileSection.objects.get(designation="UPN 100").masse_lineique, 10.6)
+
+    def test_creation_du_debit_avec_son_article_et_carte(self):
+        section = self.section()
+        r = self.poster("profils/ajouter/", {"section": section.pk, "longueur": "1450", "coupe_a": "90", "coupe_b": "45", "quantite": 6})
+        self.assertEqual(r.status_code, 200)
+        from decoupe.models import PieceProfile
+
+        piece = PieceProfile.objects.get()
+        self.assertEqual((piece.nom, piece.quantite, piece.coupe_b_deg, piece.devis), ("UPN 100 L=1450", 6, 45.0, self.devis))
+        self.assertEqual(piece.article.nature, Article.Nature.FABRIQUE)
+        self.assertAlmostEqual(piece.masse_kg, 1.45 * 10.6, places=3)
+        self.assertIn("Profilé", r.json()["html"])
+
+    def test_cotes_invalides_refusees(self):
+        section = self.section()
+        for donnees in ({"longueur": "abc"}, {"longueur": "-5"}, {"longueur": "30", "coupe_a": 30, "coupe_b": 30}, {"longueur": "1000", "coupe_a": 10}, {"section": 0}):
+            r = self.poster("profils/ajouter/", {"section": section.pk, **donnees})
+            self.assertEqual(r.status_code, 400, donnees)
+        from decoupe.models import PieceProfile
+
+        self.assertEqual((PieceProfile.objects.count(), Article.objects.filter(nature="fabrique").count()), (0, 0))
+
+    def test_apercu(self):
+        section = self.section()
+        r = self.poster("profils/apercu/", {"section": section.pk, "longueur": "1450", "coupe_a": "45", "coupe_b": "90"})
+        corps = r.json()
+        self.assertEqual((r.status_code, corps["nom"], corps["masse_lineique"]), (200, "UPN 100 L=1450", 10.6))
+        self.assertIn("<polygon", corps["svg"])
+        self.assertEqual(corps["prix"], "11.66 €/m")  # 1,10 €/kg × 10,6 kg/m
+
+    def test_imbrication_des_barres_chute_de_bout_et_prix(self):
+        from decoupe.services import profiles
+
+        section = self.section()
+        a = self.ajouter(section, 1450, 3)
+        b = self.ajouter(section, 2000, 2)
+        r = profiles.imbriquer_barres([a, b], section, None, 3, 0, 0)
+        # 7 débits de 8350 mm au total (+ traits de scie) dans des barres de 6 m
+        self.assertEqual(r.nb_barres, 2)
+        self.assertAlmostEqual(r.pieces_mm, 1450 * 3 + 2000 * 2)
+        self.assertAlmostEqual(r.consommee_mm + r.chute_bout_mm, 2 * 6000)
+        self.assertAlmostEqual(r.facturee_mm, r.consommee_mm)  # chute récupérable 0 % : toute la consommée est facturée
+        self.assertEqual(r.cout_total, round(Decimal(r.consommee_mm) / 1000 * Decimal("1.10") * Decimal("10.6"), 2))
+        self.assertEqual(sum(x["total"] for x in r.par_piece), r.cout_total)
+        for barre in r.barres:  # aucun débit ne dépasse la barre
+            self.assertLessEqual(max(x + l for _, x, l in barre.pieces), 6000 + 1e-6)
+        recup = profiles.imbriquer_barres([a, b], section, None, 3, 0, 100)
+        self.assertAlmostEqual(recup.facturee_mm, recup.pieces_mm)  # tout le reste est récupéré
+
+    def test_debit_plus_long_que_la_barre(self):
+        from decoupe.services import profiles
+
+        section = self.section()
+        piece = self.ajouter(section, 5990, 1)
+        with self.assertRaises(profiles.ErreurProfile):
+            profiles.imbriquer_barres([piece], section, None, 3, 20, 0)
+
+    def test_panneau_imbrication_bilan_et_retenue(self):
+        section = self.section()
+        piece = self.ajouter(section, 1450, 7)
+        html = self.client.post(self.url + "imbrication/", data=json.dumps({"choix": {}}), content_type="application/json").json()["html"]
+        for texte in ("Imbrication des profilés — UPN 100", "= Longueur consommée", "− Chute de bout", "Barres complètes", "dp-barre-svg", "11,66 €/m"):
+            self.assertIn(texte, html)
+        self.poster("profils/retenir/", {"section": section.pk, "trait": "4", "marge": "10", "chute": "50"})
+        piece.refresh_from_db()
+        self.assertEqual((piece.trait_scie_mm, piece.marge_bout_mm, float(piece.taux_chute_recuperable)), (4, 10, 50.0))
+
+    def test_ajout_aux_lignes_du_devis_avec_le_prix_de_la_matiere(self):
+        from decimal import Decimal as Dec
+
+        section = self.section()
+        piece = self.ajouter(section, 1450, 7)
+        self.client.post(f"/admin/chiffrage/devis/{self.devis.pk}/pieces/ajouter-au-devis/")
+        ligne = self.devis.lignes.get(article=piece.article)
+        self.assertEqual(ligne.quantite, 7)
+        self.assertGreater(ligne.cout_matiere_calcule, 0)
+        from decoupe.services import profiles
+
+        attendu = profiles.cout_matiere_piece_profile(piece, 7)
+        self.assertEqual(ligne.cout_matiere_calcule, attendu)
+        self.assertIsInstance(attendu, Dec)
+
+    def test_sans_article_d_achat_le_prix_est_signale(self):
+        section = self.section(cout=None)
+        self.ajouter(section, 1000, 2)
+        html = self.client.post(self.url + "imbrication/", data=json.dumps({"choix": {}}), content_type="application/json").json()["html"]
+        self.assertIn("Aucun article d&#x27;achat", html)
+
+    def test_modification_et_suppression(self):
+        section = self.section()
+        piece = self.ajouter(section, 1450, 2)
+        r = self.client.post(f"{self.url.replace('/pieces/', '/')}profils/{piece.pk}/enregistrer/", {"longueur": "2000", "quantite": "5", "coupe_a": "45"})
+        self.assertEqual(r.status_code, 200)
+        piece.refresh_from_db()
+        self.assertEqual((piece.longueur_mm, piece.quantite, piece.coupe_a_deg, piece.nom), (2000, 5, 45, "UPN 100 L=2000"))
+        article = piece.article_id
+        self.client.post(f"{self.url.replace('/pieces/', '/')}profils/{piece.pk}/supprimer/")
+        self.assertFalse(Article.objects.filter(pk=article).exists())
+
+    def test_panneau_propose_les_profiles(self):
+        page = self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/change/")
+        self.assertContains(page, "tube_rond")
+        self.assertContains(page, 'id="dp-profils"')
+        self.assertContains(self.client.get("/admin/decoupe/profilesection/"), "UPN 100")

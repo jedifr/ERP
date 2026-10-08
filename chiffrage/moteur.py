@@ -110,6 +110,15 @@ def cout_matiere_article(article, quantite, devis=None):
         from decoupe.services.matiere import ErreurMatiere, cout_matiere_imbrication, piece_de_chiffrage
 
         if devis is not None:
+            from decoupe.models import PieceProfile
+            from decoupe.services.profiles import ErreurProfile, ErreurPrixProfile, cout_matiere_piece_profile
+
+            debit = PieceProfile.objects.filter(article=article, devis=devis).select_related("section", "section__article").first()
+            if debit is not None:
+                try:
+                    return arrondir_prix(cout_matiere_piece_profile(debit, max(1, round(quantite))))
+                except (ErreurProfile, ErreurPrixProfile) as exc:
+                    raise ChiffrageError(f"Article « {article} » : matière du profilé impossible — {exc}") from exc
             piece_devis = PieceDecoupe.objects.filter(article=article, devis=devis, tole__isnull=False, format_tole__isnull=False).first()
             if piece_devis is not None:
                 composants = article.composants.select_related("article_composant").exclude(article_composant=piece_devis.tole)

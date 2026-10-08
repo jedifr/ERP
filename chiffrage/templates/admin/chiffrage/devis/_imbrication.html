@@ -1,4 +1,4 @@
-{% load l10n %}
+{% load l10n dp_filtres %}
 {% if sans_format %}<p class="dp-aide">Aucun format de tôle actif : ajoutez-en dans le menu « Formats de tôle ».</p>{% endif %}
 {% for b in blocs %}
 <div class="dp-groupe" data-cle="{{ b.cle }}">
@@ -13,6 +13,12 @@
     </label>
     <label>Marge de bord (mm)<input type="text" inputmode="decimal" data-i="marge" value="{{ b.marge|unlocalize }}"></label>
     <label>Chute récupérable (%)<input type="text" inputmode="decimal" data-i="chute" value="{{ b.chute|unlocalize }}"></label>
+    <label>Remplissage
+      <select data-i="sens">{% for v, l in b.sens_choix %}<option value="{{ v }}" {% if v == b.sens %}selected{% endif %}>{{ l }}</option>{% endfor %}</select>
+    </label>
+    <label>Départ
+      <select data-i="coin">{% for v, l in b.coin_choix %}<option value="{{ v }}" {% if v == b.coin %}selected{% endif %}>{{ l }}</option>{% endfor %}</select>
+    </label>
     <label class="dp-case" title="Tient compte du contour réel des pièces (trous compris) et non de leur seul rectangle : moins de feuilles, calcul plus long."><input type="checkbox" data-i="forme" {% if b.forme %}checked{% endif %}> Selon la forme</label>
     {% if b.resultat %}<span class="dp-espacement">Écart entre pièces : <strong>{{ b.resultat.espacement_mm|floatformat:"-1" }} mm</strong></span>{% endif %}
   </div>
@@ -20,24 +26,30 @@
   {% if b.erreur %}
     <div class="dp-message dp-message-ko">{{ b.erreur }}</div>
   {% else %}
-    <div class="dp-kpis">
-      <div class="dp-kpi"><small>Feuilles</small><b>{{ b.resultat.nb_feuilles }}</b></div>
-      <div class="dp-kpi"><small>Utilisation</small><b>{{ b.resultat.taux_utilisation_pct|floatformat:0 }} %</b></div>
-      <div class="dp-kpi"><small>Surface consommée</small><b>{{ b.resultat.surface_consommee_m2|floatformat:2 }} m²</b></div>
-      <div class="dp-kpi"><small>Coût matière du lot</small><b>{% if b.resultat.cout_total is not None %}{{ b.resultat.cout_total|floatformat:2 }} €{% else %}—{% endif %}</b></div>
-    </div>
+    <div class="dp-travail">
     <div class="dp-feuilles">
       {% for f in b.feuilles %}
         <figure class="dp-feuille">
-          <figcaption>Feuille {{ f.numero }} sur {{ b.resultat.nb_feuilles }} · {{ f.nb_pieces }} pièce{{ f.nb_pieces|pluralize }}{% if f.partielle and b.resultat.nb_feuilles > 1 %} · <em>entamée : le reste est une chute récupérable</em>{% endif %}</figcaption>
+          <figcaption>Feuille {{ f.numero }} sur {{ b.resultat.nb_feuilles }} · {{ f.nb_pieces }} pièce{{ f.nb_pieces|pluralize }}{% if f.partielle and b.resultat.nb_feuilles > 1 %} · <strong class="dp-chute-titre">chute de bout {{ b.resultat.chute_bout_mm2|mm2_en_m2|floatformat:2 }} m²</strong>{% endif %}</figcaption>
           {{ f.svg|safe }}
         </figure>
       {% endfor %}
     </div>
+    <aside class="dp-bilan">
+      <div><span>Tôles complètes<small>{{ b.resultat.nb_feuilles }} × {{ b.resultat.largeur_x_mm|floatformat:"-1" }} × {{ b.resultat.hauteur_y_mm|floatformat:"-1" }} mm</small></span><b>{{ b.resultat.surface_feuilles_mm2|mm2_en_m2|floatformat:2 }} m²</b></div>
+      <div class="dp-moins"><span>− Chute de bout<small>{% if b.resultat.chute_bout %}dernière feuille : bande de {{ b.resultat.chute_bout.2|floatformat:0 }} × {{ b.resultat.chute_bout.3|floatformat:0 }} mm{% else %}aucune : feuille pleine{% endif %}</small></span><b>− {{ b.resultat.chute_bout_mm2|mm2_en_m2|floatformat:2 }} m²</b></div>
+      <div class="dp-total"><span>= Surface consommée</span><b>{{ b.resultat.surface_consommee_m2|floatformat:2 }} m²</b></div>
+      <div><span>Pièces (surface nette)<small>utilisation {{ b.resultat.taux_utilisation_pct|floatformat:0 }} %</small></span><b>{{ b.resultat.surface_pieces_mm2|mm2_en_m2|floatformat:2 }} m²</b></div>
+      <div><span>Chutes entre les pièces<small>comprises dans la surface consommée</small></span><b>{{ b.resultat.surface_chutes_internes_mm2|mm2_en_m2|floatformat:2 }} m²</b></div>
+      {% if b.resultat.surface_recuperee_mm2 > 1 %}<div class="dp-moins"><span>− Chute récupérée ({{ b.chute|floatformat:"-1" }} %)<small>non facturée</small></span><b>− {{ b.resultat.surface_recuperee_mm2|mm2_en_m2|floatformat:2 }} m²</b></div>
+      <div class="dp-total"><span>= Surface facturée</span><b>{{ b.resultat.surface_facturee_mm2|mm2_en_m2|floatformat:2 }} m²</b></div>{% endif %}
+      <div class="dp-prix"><span>Coût matière du lot<small>{% if b.tole %}sur la surface {% if b.resultat.surface_recuperee_mm2 > 1 %}facturée{% else %}consommée{% endif %}{% else %}choisissez une tôle{% endif %}</small></span><b>{% if b.resultat.cout_total is not None %}{{ b.resultat.cout_total|floatformat:2 }} €{% else %}—{% endif %}</b></div>
+    </aside>
+    </div>
     {% if b.feuilles_masquees %}<p class="dp-aide">{{ b.feuilles_masquees }} feuille{{ b.feuilles_masquees|pluralize }} de plus non dessinée{{ b.feuilles_masquees|pluralize }} (les {{ b.feuilles|length }} premières sont affichées).</p>{% endif %}
     <div class="dp-legende">
       {% for p, c in b.legende %}<span><i style="background:{{ c.0 }};border-color:{{ c.1 }}"></i>{{ p.nom }} × {{ p.quantite }}</span>{% endfor %}
-      <span class="dp-legende-note">Format {{ b.format }} · {{ b.resultat.nb_feuilles }} feuille{{ b.resultat.nb_feuilles|pluralize }}</span>
+      <span><i style="background:#e5e7eb"></i>Chute entre les pièces (consommée)</span><span><i class="dp-hachure"></i>Chute de bout (non consommée)</span><span class="dp-legende-note">Format {{ b.format }} · {{ b.resultat.nb_feuilles }} feuille{{ b.resultat.nb_feuilles|pluralize }}</span>
     </div>
     <table class="dp-table">
       <caption>Comparaison des formats de tôle</caption>
@@ -76,6 +88,8 @@
 {% endfor %}
 {% if a_regler %}<p class="dp-aide">À régler avant imbrication : {% for p, raison in a_regler %}<strong>{{ p.nom }}</strong> ({{ raison }}){% if not forloop.last %}, {% endif %}{% endfor %}.</p>{% endif %}
 
+{% for b in blocs_profils %}{% include "admin/chiffrage/devis/_imbrication_profils.html" %}{% endfor %}
+
 {% if chiffrage %}
 <div class="dp-groupe dp-chiffrage">
   <h3 class="dp-groupe-titre">Chiffrage des pièces <span class="dp-groupe-nb">matière répartie par l'imbrication retenue + temps de coupe de la gamme</span></h3>
@@ -86,7 +100,7 @@
       <tr>
         <td>{{ c.piece.nom }}</td><td class="n">{{ c.piece.quantite }}</td>
         {% if c.pret %}
-          <td class="n">{{ c.temps_min|floatformat:2 }} min</td>
+          <td class="n">{% if c.temps_min is not None %}{{ c.temps_min|floatformat:2 }} min{% else %}—{% endif %}</td>
           <td class="n">{{ c.prix.prix_vente_matiere|floatformat:2 }} €</td>
           <td class="n">{{ c.prix.prix_vente_operations|floatformat:2 }} €</td>
           <td class="n">{{ c.prix.prix_vente_unitaire|floatformat:2 }} €</td>

@@ -19,6 +19,7 @@ from .models import (
     ImbricationPlacement,
     NormeCote,
     ParametreCoupe,
+    ProfileSection,
     ReglageProcede,
     PieceDecoupe,
     ProfilImportDecoupe,
@@ -675,6 +676,26 @@ class ParametreCoupeAdmin(ModelAdmin):
             {**self.admin_site.each_context(request), "title": f"Dupliquer {modele}", "modele": modele, "retour": retour,
              "suggestion": "2, 3, 4, 5, 6, 8, 12, 15, 20, 25, 30"},
         )
+    def get_fieldsets(self, request, obj=None):
+        """Chaque procédé n'affiche que ses réglages : le laser n'a ni usinabilité, ni qualités, ni modes de perçage du jet d'eau."""
+        fieldsets = super().get_fieldsets(request, obj)
+        if obj is None or obj.pk is None:
+            return fieldsets
+        laser = obj.procede == ParametreCoupe.Procede.LASER
+        jet_seulement = {"usinabilite", "mode_percage", "percage_stationnaire_bp_s", "percage_circulaire_hp_tours", "percage_circulaire_bp_tours",
+                         "diametre_percage_mm", "vitesse_marquage_mm_min", "temporisation_marquage_s", "percement_lineaire_mm", "chevauchement_mm",
+                         "rayon_pleine_vitesse_coef", "facteur_vitesse_courbe", "seuil_angle_coin_deg"}
+        resultat = []
+        for titre, options in fieldsets:
+            champs = list(options["fields"])
+            if titre and titre.startswith("Laser") and not laser:
+                continue
+            if laser:
+                champs = [c for c in champs if c not in jet_seulement]
+            if champs:
+                resultat.append((titre, {**options, "fields": champs}))
+        return resultat
+
     fieldsets = [
         (None, {"fields": ["procede", "gaz", "famille", "matiere", "epaisseur_mm", "poste", "usinabilite", "origine"]}),
         ("Laser (tableau du constructeur)", {"fields": [
@@ -736,3 +757,39 @@ class NormeCoteAdmin(ModelAdmin):
     def marquer_verifie(self, request, queryset):
         n = queryset.update(verifie=True)
         self.message_user(request, f"{n} ligne(s) marquée(s) comme vérifiée(s).", messages.SUCCESS)
+
+
+@admin.register(ProfileSection)
+class ProfileSectionAdmin(ModelAdmin):
+    """Catalogue des profilés (cornières, UPN, tubes) de la bibliothèque de formes du devis, avec leur article d'achat."""
+
+    list_display = ["designation", "famille", "masse_lineique", "longueur_barre_mm", "article", "verifie"]
+    list_filter = ["famille", "verifie"]
+    search_fields = ["designation"]
+    autocomplete_fields = ["article"]
+    actions = ["creer_articles", "marquer_verifie"]
+
+    @admin.action(description="Créer les articles d'achat manquants (coût à renseigner)")
+    def creer_articles(self, request, queryset):
+        from technique.models import Article
+
+        crees = 0
+        for section in queryset.filter(article__isnull=True):
+            reference = f"PROF-{section.designation}"[:100]
+            article, cree = Article.objects.get_or_create(
+                reference=reference,
+                defaults={
+                    "libelle": f"{section.get_famille_display()} {section.designation}", "nature": Article.Nature.MATIERE_PREMIERE,
+                    "unite_cout": Article.UniteCout.LONGUEUR, "poids_lineique": section.masse_lineique,
+                },
+            )
+            section.article = article
+            section.save(update_fields=["article"])
+            crees += cree
+        self.message_user(
+            request, f"{crees} article(s) créé(s) en « longueur » avec le poids linéique : saisissez leur coût (€/kg).", messages.SUCCESS,
+        )
+
+    @admin.action(description="Marquer comme vérifié")
+    def marquer_verifie(self, request, queryset):
+        self.message_user(request, f"{queryset.update(verifie=True)} section(s) marquée(s) comme vérifiée(s).", messages.SUCCESS)

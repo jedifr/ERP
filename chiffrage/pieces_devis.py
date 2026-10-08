@@ -9,7 +9,7 @@ from decimal import Decimal
 
 from django.db import transaction
 
-from decoupe.services import devis_pieces, imbrication_devis as imb
+from decoupe.services import devis_pieces, devis_profiles, imbrication_devis as imb
 from decoupe.services.temps import ErreurTemps, estimer_temps_decoupe
 
 from .builder import ajouter_ligne_devis
@@ -32,15 +32,16 @@ def _gamme_prete(piece, devis):
     if not piece.article_id:
         return "pas d'article fabriqué"
     if not gamme_active(piece.article, devis.date_creation).exists():
-        devis_pieces.verdict(piece, alimenter=True)  # (ré)alimente la gamme depuis le temps de coupe si le poste est connu
+        verdict = devis_pieces.verdict(piece, alimenter=True)  # (ré)alimente la gamme depuis le temps de coupe si le poste est connu
         if not gamme_active(piece.article, devis.date_creation).exists():
-            return "poste de travail à renseigner sur le paramètre de coupe (la gamme de l'article est vide)"
+            return verdict["gamme"] or verdict["message"] or "la gamme de l'article est vide"
     return ""
 
 
 def apercu(devis, avec_gamme=False):
     """Une LigneChiffrage par pièce réalisable du devis, avec son prix quand tout est prêt. Ne modifie rien (sauf, si
-    `avec_gamme`, la gamme de l'article, pour la création effective des lignes)."""
+    `avec_gamme`, la gamme de l'article : alimentée depuis le temps de coupe dès que le paramètre a un poste de travail, ce
+    qui évite de réclamer un poste déjà renseigné après coup)."""
     groupes, _ = imb.grouper(devis_pieces.pieces_du_devis(devis))
     lignes_existantes = {l.article_id: l for l in devis.lignes.select_related("article")}
     resultat = []
@@ -54,7 +55,7 @@ def apercu(devis, avec_gamme=False):
             if avec_gamme:
                 ligne.raison = _gamme_prete(piece, devis)
             elif not piece.article_id or not gamme_active(piece.article, devis.date_creation).exists():
-                ligne.raison = "poste de travail à renseigner sur le paramètre de coupe (la gamme de l'article est vide)"
+                ligne.raison = "la gamme de l'article n'est pas encore alimentée (elle l'est à l'ajout au devis ou quand la pièce est modifiée)"
             if ligne.raison:
                 continue
             try:
@@ -63,6 +64,15 @@ def apercu(devis, avec_gamme=False):
                 ligne.pret = True
             except (ChiffrageError, ErreurTemps) as exc:
                 ligne.raison = str(exc)
+    # Débits de profilés : matière seule (pas de gamme de sciage tant que le temps n'est pas connu), chiffrée par imbrication des barres.
+    for piece in devis_profiles.pieces_du_devis(devis):
+        ligne = LigneChiffrage(piece=piece, pret=False, ligne=lignes_existantes.get(piece.article_id))
+        resultat.append(ligne)
+        try:
+            ligne.prix = previsualiser_ligne(devis, piece.article, piece.quantite)
+            ligne.pret = True
+        except ChiffrageError as exc:
+            ligne.raison = str(exc)
     return resultat
 
 
@@ -79,7 +89,7 @@ def ajouter_au_devis(devis):
             continue
         try:
             with transaction.atomic():
-                if not piece.imbrication_chiffrage:
+                if hasattr(piece, "imbrication_chiffrage") and not piece.imbrication_chiffrage:
                     piece.imbrication_chiffrage = True  # les autres chiffrages de l'article retrouvent ainsi la tôle imbriquée
                     piece.save(update_fields=["imbrication_chiffrage"])
                 if item.ligne is not None:
