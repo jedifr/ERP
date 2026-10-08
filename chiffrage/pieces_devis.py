@@ -10,7 +10,7 @@ from decimal import Decimal
 from django.db import transaction
 from django.urls import reverse
 
-from decoupe.services import devis_pieces, devis_profiles, imbrication_devis as imb
+from decoupe.services import devis_pieces, devis_profiles, imbrication_devis as imb, nomenclature
 from decoupe.services.temps import ErreurTemps, estimer_temps_decoupe
 
 from .builder import ajouter_ligne_devis
@@ -69,6 +69,7 @@ def apercu(devis, avec_gamme=False):
                 ligne.lien = (f"#{groupe.ancre}", "Aller à l'imbrication", False)
                 continue
             if avec_gamme:
+                nomenclature.alimenter_piece(piece)  # la matière première de la pièce (tôle) entre dans la nomenclature de l'article
                 ligne.raison = _gamme_prete(piece, devis)
             elif not piece.article_id or not gamme_active(piece.article, devis.date_creation).exists():
                 ligne.raison = "la gamme de l'article n'est pas encore alimentée (elle l'est à l'ajout au devis ou quand la pièce est modifiée)"
@@ -85,6 +86,8 @@ def apercu(devis, avec_gamme=False):
     for piece in devis_profiles.pieces_du_devis(devis):
         ligne = LigneChiffrage(piece=piece, pret=False, ligne=lignes_existantes.get(piece.article_id))
         resultat.append(ligne)
+        if avec_gamme:
+            nomenclature.alimenter_debit(piece)
         try:
             ligne.prix = previsualiser_ligne(devis, piece.article, piece.quantite)
             ligne.pret = True

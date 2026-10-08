@@ -188,6 +188,21 @@ def _date_gamme(piece):
     return aujourdhui
 
 
+def _nomenclature(piece):
+    """(Ré)alimente la nomenclature de l'article (matière première = tôle) et décrit le résultat pour le verdict de la carte."""
+    from .imbrication_devis import Groupe, toles_possibles
+    from . import nomenclature
+
+    ligne = nomenclature.alimenter_piece(piece)
+    if ligne is not None:
+        return f"Nomenclature : 1 × {ligne.article_composant_id} ({ligne.longueur_mm:g} × {ligne.largeur_mm:g} mm)."
+    if piece.matiere_id and piece.epaisseur and not piece.tole_id:
+        if len(toles_possibles(Groupe(piece.matiere, float(piece.epaisseur), piece.procede))) > 1:
+            return "Nomenclature : plusieurs tôles possibles, retenez-en une dans l'imbrication."
+        return "Nomenclature : aucune tôle de cette matière et de cette épaisseur en base."
+    return ""
+
+
 def verdict(piece, alimenter=False):
     """Verdict affichable : {ok, message, temps_min, avertissements, gamme}. Avec `alimenter`, le temps calculé alimente la
     gamme de l'article (jamais lors du simple affichage de la fiche)."""
@@ -206,6 +221,7 @@ def verdict(piece, alimenter=False):
             gamme = f"Gamme de {piece.article_id} : étape {etape.ordre} sur {etape.poste}."
         except ErreurTemps as exc:
             gamme = str(exc)
+        gamme = f"{gamme} {_nomenclature(piece)}".strip()
     return {
         "ok": True, "message": "Réalisable", "temps_min": round(estimation.total_min, 2),
         "avertissements": [a for a in estimation.avertissements if not a.startswith("Vitesses calculées")],

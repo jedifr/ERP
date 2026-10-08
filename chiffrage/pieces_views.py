@@ -14,7 +14,7 @@ from django.utils.decorators import method_decorator
 from django.views.decorators.http import require_POST
 
 from decoupe.models import GazCoupe, PieceDecoupe, PieceProfile, ProcedeCoupe, ProfileSection, ProfilImportDecoupe
-from decoupe.services import devis_pieces, devis_profiles, formes, profiles
+from decoupe.services import devis_pieces, devis_profiles, formes, nomenclature, profiles
 from decoupe.services import imbrication_devis as imb
 from decoupe.services.apercu_svg import generer_svg_feuille_a_plat, generer_svg_piece
 from decoupe.services.matiere import ErreurMatiere, bord_tole_piece_mm, prix_au_mm2
@@ -519,6 +519,8 @@ class PiecesDevisMixin:
             piece.tole, piece.format_tole, piece.marge_bord_mm, piece.taux_chute_recuperable = tole, format_tole, marge, taux
             piece.imbrication_forme, piece.sens_imbrication, piece.coin_depart = forme, sens, coin
             piece.save(update_fields=["tole", "format_tole", "marge_bord_mm", "taux_chute_recuperable", "imbrication_forme", "sens_imbrication", "coin_depart"])
+            if request.user.has_perm("technique.add_nomenclature") and request.user.has_perm("technique.change_nomenclature"):
+                nomenclature.alimenter_piece(piece)
             article = piece.article
             if tole is not None and article is not None and article.taux_marge_defaut is None and tole.taux_marge_defaut is not None:
                 article.taux_marge_defaut = tole.taux_marge_defaut  # l'article fabriqué reprend la marge de sa tôle

@@ -1036,3 +1036,96 @@ class LiensElementsManquantsTests(TestCase):
         self.assertIn(f'href="#dp-piece-{piece.pk}"', html)
         page = self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/change/")
         self.assertContains(page, f'id="dp-piece-{piece.pk}"')
+
+
+class NomenclatureDevisTests(TestCase):
+    """La matière première (tôle, profilé) entre dans la nomenclature de l'article fabriqué créé depuis le devis."""
+
+    setUp = ImbricationDevisTests.setUp
+    piece = ImbricationDevisTests.piece
+    imbriquer = ImbricationDevisTests.imbriquer
+
+    def lignes(self, article):
+        return list(article.composants.select_related("article_composant"))
+
+    def test_la_tole_unique_entre_dans_la_nomenclature_des_le_reglage(self):
+        piece = self.piece("a", 4)  # matière S235, 10 mm : une seule tôle possible
+        lignes = self.lignes(piece.article)
+        self.assertEqual([(l.article_composant, l.quantite) for l in lignes], [(self.tole, 1)])
+        self.assertEqual((round(max(piece.largeur_mm, piece.hauteur_mm), 2), round(min(piece.largeur_mm, piece.hauteur_mm), 2)), (lignes[0].longueur_mm, lignes[0].largeur_mm))
+        html = self.client.post(f"{self.url}{piece.pk}/enregistrer/", {"quantite": "4"}).json()["html"]
+        self.assertIn("Nomenclature : 1 × TOLE-S235-10", html)
+
+    def test_pas_de_doublon_et_changement_de_tole(self):
+        from decoupe.models import FormatTole
+
+        piece = self.piece("a", 4)
+        self.client.post(f"{self.url}{piece.pk}/enregistrer/", {"quantite": "5"})
+        self.assertEqual(len(self.lignes(piece.article)), 1)
+        autre = Article.objects.create(
+            reference="TOLE-S235-10-B", nature=Article.Nature.MATIERE_PREMIERE, matiere=self.matiere, epaisseur=10, unite_cout=Article.UniteCout.SURFACE, cout_unitaire=70,
+        )
+        format_tole = FormatTole.objects.get(largeur_mm=1500, longueur_mm=3000)
+        self.client.post(
+            self.url + "imbrication/retenir/",
+            data=json.dumps({"cle": "S235|10|laser", "tole": autre.pk, "format": format_tole.pk, "marge": "5", "chute": "0"}), content_type="application/json",
+        )
+        self.assertEqual([l.article_composant for l in self.lignes(piece.article)], [autre])  # l'ancienne tôle est remplacée
+
+    def test_plusieurs_toles_possibles_la_retenue_decide(self):
+        from decoupe.models import FormatTole
+
+        Article.objects.create(
+            reference="TOLE-S235-10-B", nature=Article.Nature.MATIERE_PREMIERE, matiere=self.matiere, epaisseur=10, unite_cout=Article.UniteCout.SURFACE, cout_unitaire=70,
+        )
+        piece = self.piece("a", 4)
+        self.assertEqual(self.lignes(piece.article), [])
+        html = self.client.post(f"{self.url}{piece.pk}/enregistrer/", {"quantite": "4"}).json()["html"]
+        self.assertIn("plusieurs tôles possibles", html)
+        format_tole = FormatTole.objects.get(largeur_mm=1500, longueur_mm=3000)
+        self.client.post(
+            self.url + "imbrication/retenir/",
+            data=json.dumps({"cle": "S235|10|laser", "tole": self.tole.pk, "format": format_tole.pk, "marge": "5", "chute": "0"}), content_type="application/json",
+        )
+        self.assertEqual([l.article_composant for l in self.lignes(piece.article)], [self.tole])
+
+    def test_une_ligne_saisie_a_la_main_n_est_pas_touchee(self):
+        from technique.models import Nomenclature
+
+        piece = self.piece("a", 4)
+        visserie = Article.objects.create(reference="VIS-M8", nature=Article.Nature.COMPOSANT, unite_cout=Article.UniteCout.PIECE, cout_unitaire=0.1)
+        Nomenclature.objects.create(article_parent=piece.article, article_composant=visserie, quantite=4)
+        self.client.post(f"{self.url}{piece.pk}/enregistrer/", {"quantite": "6"})
+        self.assertEqual(sorted(l.article_composant_id for l in self.lignes(piece.article)), ["TOLE-S235-10", "VIS-M8"])
+
+    def test_le_cout_matiere_n_est_pas_compte_deux_fois(self):
+        from chiffrage.moteur import cout_matiere_article
+        from decoupe.models import FormatTole
+
+        piece = self.piece("a", 4)
+        format_tole = FormatTole.objects.get(largeur_mm=1500, longueur_mm=3000)
+        self.client.post(
+            self.url + "imbrication/retenir/",
+            data=json.dumps({"cle": "S235|10|laser", "tole": self.tole.pk, "format": format_tole.pk, "marge": "5", "chute": "0"}), content_type="application/json",
+        )
+        from decoupe.services.imbrication_devis import cout_matiere_piece_devis
+
+        piece.refresh_from_db()
+        attendu = cout_matiere_piece_devis(piece, 4)
+        self.assertEqual(cout_matiere_article(piece.article, 4, devis=self.devis), attendu)  # la ligne de nomenclature de la tôle est ignorée
+
+    def test_debit_de_profile_nomenclature_de_l_article_d_achat(self):
+        from decoupe.models import ProfileSection
+
+        section = ProfileSection.objects.get(designation="UPN 100")
+        achat = Article.objects.create(reference="ACH-UPN100", nature=Article.Nature.MATIERE_PREMIERE, unite_cout=Article.UniteCout.LONGUEUR, poids_lineique=10.6, cout_unitaire=1.1)
+        section.article = achat
+        section.save()
+        r = self.client.post(self.url.replace("/pieces/", "/") + "profils/ajouter/", data=json.dumps({"section": section.pk, "longueur": 1450, "quantite": 3}), content_type="application/json")
+        from decoupe.models import PieceProfile
+
+        debit = PieceProfile.objects.get(pk=r.json()["piece_id"])
+        ligne = self.lignes(debit.article)
+        self.assertEqual([(l.article_composant, l.longueur_mm, l.largeur_mm, l.quantite) for l in ligne], [(achat, 1450.0, None, 1)])
+        self.client.post(f"{self.url.replace('/pieces/', '/')}profils/{debit.pk}/enregistrer/", {"longueur": "2000"})
+        self.assertEqual([l.longueur_mm for l in self.lignes(debit.article)], [2000.0])

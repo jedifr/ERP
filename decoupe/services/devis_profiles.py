@@ -9,6 +9,7 @@ from technique.models import Article
 
 from ..models import PieceProfile, ProfileSection
 from .devis_pieces import ErreurPieceDevis, _reference_article
+from . import nomenclature
 from .profiles import ErreurProfile, verifier_piece
 
 
@@ -51,6 +52,7 @@ def creer(devis, section_id, longueur, coupe_a=90, coupe_b=90, quantite=1, nom=N
         enregistrer_code_utilise(RegleCodification.Entite.ARTICLE, reference)
     piece.article, piece.article_cree_automatiquement = article, True
     piece.save()
+    nomenclature.alimenter_debit(piece)
     return piece
 
 
@@ -58,6 +60,7 @@ def creer(devis, section_id, longueur, coupe_a=90, coupe_b=90, quantite=1, nom=N
 def modifier(piece, donnees):
     """Met à jour un débit (section, longueur, coupes, quantité, nom, trait de scie, chute de tête, chute récupérable)."""
     ancien_nom = nom_suggere(piece.section, piece.longueur_mm)
+    piece._ancien_achat_id = piece.section.article_id
     if "section" in donnees:
         piece.section = ProfileSection.objects.filter(pk=donnees["section"]).first() or piece.section
     for champ, libelle in (("longueur", "Longueur"), ("coupe_a", "Coupe A"), ("coupe_b", "Coupe B"), ("trait_scie", "Trait de scie"), ("marge_bout", "Chute de tête")):
@@ -84,6 +87,7 @@ def modifier(piece, donnees):
     except ErreurProfile as exc:
         raise ErreurPieceDevis(str(exc))
     piece.save()
+    nomenclature.alimenter_debit(piece)
     if piece.article_id and piece.article_cree_automatiquement:
         piece.article.libelle = piece.nom
         piece.article.save(update_fields=["libelle"])
