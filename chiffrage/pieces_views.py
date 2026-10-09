@@ -85,9 +85,19 @@ def _bloc_groupe(groupe, choix, formats):
             bloc["avertissement"] = f"{exc} Le coût matière n'est pas calculé."
             bloc["avertissement_lien"] = (reverse("admin:technique_article_change", args=[tole.pk]), "Renseigner le coût de la tôle")
             tole = bloc["tole"] = None
-    lignes, meilleur = imb.comparer_formats(groupe, formats, marge, taux, tole, forme=forme, sens=sens, coin=coin)
+    tout = _booleen(choix.get("tout"), False)
+    obligatoires = {f.pk for f in formats if (retenues is not None and f.pk == retenues.format_tole_id) or str(f.pk) == str(choix.get("format"))}
+    lignes, meilleur, non_calcules, message_paliers = imb.comparer_par_paliers(
+        groupe, formats, marge, taux, tole, forme=forme, sens=sens, coin=coin, tout=tout, obligatoires=obligatoires,
+    )
+    bloc.update({"non_calcules": non_calcules, "message_paliers": message_paliers, "tout": tout})
     if meilleur is None:
-        if formats and not imb.formats_compatibles(groupe.procede, formats):
+        if formats and not imb.formats_pour_groupe(groupe, formats):
+            bloc["erreur"] = (
+                f"Aucun format de tôle n'est prévu pour {groupe.matiere.nom} : renseignez les familles ou nuances de vos formats "
+                "(menu Formats de tôle) ou laissez-les vides pour toutes les matières."
+            )
+        elif formats and not imb.formats_compatibles(groupe.procede, formats):
             nom = "le laser" if groupe.procede == "laser" else "le jet d'eau"
             bloc["erreur"] = (
                 f"Aucun format de tôle actif ne tient dans {nom} ({reglage(groupe.procede).libelle_capacite}). "

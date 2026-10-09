@@ -35,6 +35,35 @@ class FormatTole(models.Model):
     longueur_mm = models.FloatField("longueur (mm)")
     actif = models.BooleanField("proposé dans les simulations", default=True)
 
+    class Priorite(models.IntegerChoices):
+        USUEL = 1, "1 — en stock / usuel"
+        COMMANDE = 2, "2 — sur commande"
+        EXCEPTION = 3, "3 — exceptionnel"
+
+    priorite = models.PositiveSmallIntegerField(
+        "priorité d'utilisation", choices=Priorite.choices, default=Priorite.USUEL,
+        help_text="L'imbrication calcule d'abord les formats de priorité 1 ; elle n'essaie les suivants que si le taux de chutes entre pièces "
+                  "dépasse le seuil des réglages d'imbrication (ou sur demande : « Calculer tous les formats »).",
+    )
+    familles = models.ManyToManyField(
+        "technique.FamilleMatiere", verbose_name="familles de matière", blank=True, related_name="formats_tole",
+        help_text="Ce format n'existe que pour ces familles (et leurs nuances). Vide et sans nuance précisée : toutes les matières.",
+    )
+    matieres = models.ManyToManyField(
+        "technique.Matiere", verbose_name="nuances de matière", blank=True, related_name="formats_tole",
+        help_text="Ce format n'existe que pour ces nuances précises (en plus des familles ci-dessus).",
+    )
+
+    def convient_a(self, matiere):
+        """Vrai si le format existe pour cette matière : aucune restriction, ou la nuance / sa famille y figure."""
+        if not self.pk:
+            return True
+        familles = {f.pk for f in self.familles.all()}
+        nuances = {m.pk for m in self.matieres.all()}
+        if not familles and not nuances:
+            return True
+        return matiere.pk in nuances or (matiere.famille_id is not None and matiere.famille_id in familles)
+
     class Meta:
         verbose_name = "Format de tôle"
         verbose_name_plural = "Formats de tôle"
@@ -53,6 +82,27 @@ class FormatTole(models.Model):
         super().clean()
         if self.largeur_mm is not None and self.longueur_mm is not None and (self.largeur_mm <= 0 or self.longueur_mm <= 0):
             raise ValidationError("Les dimensions du format doivent être positives.")
+
+
+class ReglageImbrication(models.Model):
+    """Réglage unique de l'imbrication : seuil de chutes au-delà duquel les formats de priorité inférieure sont essayés."""
+
+    seuil_chutes_pct = models.FloatField(
+        "seuil de chutes entre pièces (%)", default=20,
+        help_text="Taux de chutes entre pièces = (surface consommée − surface des pièces) ÷ surface consommée ; la chute de bout de la dernière tôle, "
+                  "récupérée, n'y compte pas. Si le meilleur format d'un niveau de priorité dépasse ce taux, le niveau suivant est calculé aussi.",
+    )
+
+    class Meta:
+        verbose_name = "Réglage d'imbrication"
+        verbose_name_plural = "Réglage d'imbrication"
+
+    def __str__(self):
+        return "Réglage d'imbrication"
+
+    @classmethod
+    def charger(cls):
+        return cls.objects.get_or_create(pk=1)[0]
 
 
 class ProfilImportDecoupe(models.Model):

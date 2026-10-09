@@ -258,13 +258,63 @@ def comparer_formats(groupe, formats, marge_mm, taux_chute, tole=None, forme=Tru
     return lignes, meilleur.format
 
 
+def taux_chutes_pct(resultat):
+    """Taux de chutes entre pièces : (surface consommée − surface des pièces) ÷ surface consommée. La chute de bout, récupérée, est déjà
+    exclue de la surface consommée."""
+    if not resultat.surface_consommee_mm2:
+        return 0.0
+    return max(resultat.surface_consommee_mm2 - resultat.surface_pieces_mm2, 0.0) / resultat.surface_consommee_mm2 * 100
+
+
+def formats_pour_groupe(groupe, formats):
+    """Formats qui existent pour la matière du groupe (restrictions par famille ou nuance des formats de tôle)."""
+    return [f for f in formats if f.convient_a(groupe.matiere)]
+
+
+def comparer_par_paliers(groupe, formats, marge_mm, taux_chute, tole=None, forme=True, sens="longueur", coin="bas_gauche", seuil=None, tout=False, obligatoires=()):
+    """Comparaison des formats par niveaux de priorité : les formats de priorité 1 d'abord ; le niveau suivant n'est calculé que si le meilleur
+    format du niveau a un taux de chutes entre pièces supérieur au seuil (ou si `tout`). `obligatoires` : identifiants de formats à calculer
+    quoi qu'il arrive (le format retenu). Retourne (lignes, meilleur, non_calcules, message) ; `lignes` = [(format, résultat | None, erreur)]."""
+    from decoupe.models import ReglageImbrication
+
+    seuil = ReglageImbrication.charger().seuil_chutes_pct if seuil is None else seuil
+    candidats = formats_pour_groupe(groupe, formats)
+    lignes, message = [], ""
+    niveaux = sorted({f.priorite for f in candidats})
+    for niveau in niveaux:
+        du_niveau = [f for f in candidats if f.priorite == niveau]
+        l, meilleur_niveau = comparer_formats(groupe, du_niveau, marge_mm, taux_chute, tole, forme=forme, sens=sens, coin=coin)
+        lignes += l
+        if tout:
+            continue
+        if meilleur_niveau is not None:
+            resultat = next(r for f, r, _ in l if f.pk == meilleur_niveau.pk and r is not None)
+            chutes = taux_chutes_pct(resultat)
+            if chutes <= seuil:
+                break
+            message = f"Chutes de {chutes:.0f} % avec les formats de priorité {niveau} (seuil {seuil:g} %) : formats suivants calculés aussi."
+        else:
+            message = f"Aucun format de priorité {niveau} ne convient : formats suivants calculés aussi."
+    deja = {f.pk for f, _, _ in lignes}
+    for f in candidats:
+        if f.pk in obligatoires and f.pk not in deja:
+            lignes += comparer_formats(groupe, [f], marge_mm, taux_chute, tole, forme=forme, sens=sens, coin=coin)[0]
+            deja.add(f.pk)
+    non_calcules = [f for f in candidats if f.pk not in deja]
+    valides = [(f, r) for f, r, _ in lignes if r is not None]
+    meilleur = None
+    if valides:
+        meilleur = min(valides, key=lambda fr: (fr[1].cout_total if fr[1].cout_total is not None else Decimal(0), fr[1].surface_consommee_mm2, fr[1].nb_feuilles))[0]
+    return lignes, meilleur, non_calcules, message
+
+
 def formats_compatibles(procede, formats=None):
     """Formats actifs qui tiennent dans la machine du procédé."""
     return [f for f in (formats if formats is not None else formats_actifs()) if format_compatible(f, procede)[0]]
 
 
 def formats_actifs():
-    return list(FormatTole.objects.filter(actif=True))
+    return list(FormatTole.objects.filter(actif=True).prefetch_related("familles", "matieres"))
 
 
 def cout_matiere_piece_devis(piece, quantite):

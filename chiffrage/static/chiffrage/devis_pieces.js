@@ -62,6 +62,7 @@ function demarrer() {
         });
     }
     const formatsChoisis = {}; // groupe -> format cliqué dans le tableau de comparaison
+    const toutCalcule = {}; // groupe -> « Calculer tous les formats » demandé (sinon : formats par niveaux de priorité)
     let minuteur = null;
 
     function lireChoix(brut) {
@@ -75,6 +76,7 @@ function demarrer() {
                 else c[el.dataset.i] = el.value;
             });
             if (formatsChoisis[groupe.dataset.cle]) c.format = formatsChoisis[groupe.dataset.cle];
+            if (toutCalcule[groupe.dataset.cle]) c.tout = "1";
             choix[groupe.dataset.cle] = c;
         });
         return choix;
@@ -158,6 +160,12 @@ function demarrer() {
             if (e.key === "Enter" && e.target.matches("tr[data-i=format]")) e.target.click();
         });
         zoneImb.addEventListener("click", async (e) => {
+            const tout = e.target.closest(".dp-tout-formats");
+            if (tout) {
+                toutCalcule[tout.dataset.cle] = true;
+                planifierImbrication();
+                return;
+            }
             const ligne = e.target.closest("tr[data-i=format]");
             if (ligne) {
                 formatsChoisis[ligne.closest(".dp-groupe").dataset.cle] = ligne.dataset.valeur;

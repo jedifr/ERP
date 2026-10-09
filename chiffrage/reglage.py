@@ -50,8 +50,8 @@ def feuilles_du_groupe(groupe, quantites):
             return resultat.nb_feuilles, False, ""
         formats = imb.formats_compatibles(groupe.procede, imb.formats_actifs())
         marge = max((bord_tole_piece_mm(p) for p in pieces), default=5.0)
-        # On ne passe pas les quantités à comparer_formats (même signature que le panneau) : on garde le meilleur format puis on recalcule avec elles.
-        _, meilleur = imb.comparer_formats(groupe, formats, marge, 0.0, None)
+        # Formats par niveaux de priorité (comme le panneau) ; on garde le meilleur format puis on recalcule avec les quantités du devis.
+        _, meilleur, _, _ = imb.comparer_par_paliers(groupe, formats, marge, 0.0, None)
         if meilleur is None:
             return 1, True, "aucun format de tôle utilisable : 1 tôle comptée"
         resultat = imb.imbriquer_groupe(groupe, meilleur, marge, 0.0, None, quantites=quantites)

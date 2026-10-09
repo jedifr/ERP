@@ -67,8 +67,13 @@
           {% else %}<td colspan="4" class="dp-erreur-ligne">{{ l.erreur }}</td>{% endif %}
         </tr>
       {% endfor %}
+      {% for f in b.non_calcules %}
+        <tr class="dp-format dp-non-calcule"><td>{{ f }} <span class="dp-etiquette">priorité {{ f.priorite }}</span></td><td colspan="4">non calculé : un format de priorité inférieure suffit</td></tr>
+      {% endfor %}
       </tbody>
     </table>
+    {% if b.message_paliers %}<p class="dp-aide dp-attention">{{ b.message_paliers }}</p>{% endif %}
+    {% if b.non_calcules %}<p class="dp-aide"><button type="button" class="dp-tout-formats" data-cle="{{ b.cle }}">Calculer tous les formats</button> Les formats de priorité inférieure ne sont essayés que si les chutes entre pièces dépassent le seuil des réglages d'imbrication.</p>{% endif %}
     <table class="dp-table">
       <caption>Matière répartie entre les pièces (au prorata de leur surface)</caption>
       <thead><tr><th>Pièce</th><th class="n">Quantité</th><th class="n">Matière par pièce</th><th class="n">Total matière</th></tr></thead>

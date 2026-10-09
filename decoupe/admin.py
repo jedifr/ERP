@@ -13,6 +13,7 @@ from unfold.decorators import action as unfold_action
 
 from .admin_views import analyser_fichier_view, previsualiser_imbrication_view
 from .models import (
+    ReglageImbrication,
     FormatTole,
     ImbricationJob,
     ImbricationLigne,
@@ -743,9 +744,36 @@ class ReglageProcedeAdmin(ModelAdmin):
 class FormatToleAdmin(ModelAdmin):
     """Formats de tôle proposés à la simulation d'imbrication (3000 × 1500, 2500 × 1250…)."""
 
-    list_display = ["libelle", "longueur_mm", "largeur_mm", "actif"]
-    list_filter = ["actif"]
+    list_display = ["libelle", "longueur_mm", "largeur_mm", "priorite", "restriction_matieres", "actif"]
+    list_filter = ["priorite", "actif"]
     search_fields = ["libelle"]
+    filter_horizontal = ["familles", "matieres"]
+    fields = ["libelle", "longueur_mm", "largeur_mm", "priorite", "familles", "matieres", "actif"]
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).prefetch_related("familles", "matieres")
+
+    @admin.display(description="Matières")
+    def restriction_matieres(self, obj):
+        noms = [f.nom for f in obj.familles.all()] + [m.nom for m in obj.matieres.all()]
+        return ", ".join(noms) if noms else "toutes"
+
+
+@admin.register(ReglageImbrication)
+class ReglageImbricationAdmin(ModelAdmin):
+    """Seuil de chutes entre pièces au-delà duquel l'imbrication essaie les formats de priorité inférieure."""
+
+    list_display = ["__str__", "seuil_chutes_pct"]
+
+    def get_queryset(self, request):
+        ReglageImbrication.charger()
+        return super().get_queryset(request)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(NormeCote)
