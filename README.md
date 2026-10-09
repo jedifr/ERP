@@ -3144,3 +3144,5 @@ Le constructeur n'est plus une page séparée : dans l'onglet **Lignes du devis*
 ## Imbrication lourde : délai du serveur
 
 Une imbrication de grosses quantités (ex. 120 pièces + 30 autres, vraie forme) peut durer plusieurs dizaines de secondes sur un NAS modeste. Gunicorn coupait auparavant toute requête au bout de **30 s** : le navigateur recevait alors une page HTML et affichait « Imbrication : Unexpected token '<' … is not valid JSON ». Le délai est désormais de **300 s** (réglable avec `GUNICORN_TIMEOUT` dans le `.env`), le panneau n'empile plus les calculs (le plus récent remplace le précédent) et un message clair s'affiche si le serveur ne répond pas. Pour accélérer : réduire les quantités le temps de la saisie, ou décocher l'imbrication à la forme réelle. En cas de doute, `docker compose logs web` montre « WORKER TIMEOUT » quand un calcul a été coupé.
+
+Accélération de l'imbrication à la forme réelle : le tassement des pièces ne relit plus les rectangles englobants des voisines à chaque essai (calculés une fois, filtre vectorisé) ; même résultat, environ **3 fois plus rapide** (cas de 150 pièces sur 6 formats : 17 s → 6 s).

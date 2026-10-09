@@ -147,7 +147,7 @@ def _imbriquer(items, largeur_feuille_mm, longueur_feuille_mm, marge_bord_mm, es
             if meilleur:
                 break
         if meilleur is None:
-            feuille = {"occ": np.zeros((lignes, colonnes), dtype=np.float32), "fft": None, "posees": []}
+            feuille = {"occ": np.zeros((lignes, colonnes), dtype=np.float32), "fft": None, "posees": [], "bornes": []}
             feuilles.append(feuille)
             numero = len(feuilles) - 1
             meilleur = _meilleure_position(feuille, trames[item.piece_id], numero, item.piece_id, bloque, lignes, colonnes, c, b, largeur_utile, hauteur_utile, critere)
@@ -158,8 +158,10 @@ def _imbriquer(items, largeur_feuille_mm, longueur_feuille_mm, marge_bord_mm, es
         cle = (item.piece_id, trame.angle)
         if cle not in simplifiees:
             simplifiees[cle] = trame.polygone.simplify(TOLERANCE_SIMPLIFICATION_MM, preserve_topology=True)
-        x, y = _tasser(simplifiees[cle], x, y, feuille["posees"], zone, espacement_pieces_mm)
-        feuille["posees"].append(translate(simplifiees[cle], xoff=x, yoff=y))
+        x, y = _tasser(simplifiees[cle], x, y, feuille["posees"], feuille["bornes"], zone, espacement_pieces_mm)
+        posee = translate(simplifiees[cle], xoff=x, yoff=y)
+        feuille["posees"].append(posee)
+        feuille["bornes"].append(posee.bounds)  # calculées une fois : `.bounds` de shapely est coûteux appelé des millions de fois
         _occuper(feuille["occ"], trame.polygone, x, y, b, xs_grille, ys_grille)
         feuille["fft"] = None
         placements.append(Placement(
@@ -235,25 +237,26 @@ def _occuper(occ, polygone, x, y, b, xs_grille, ys_grille):
     occ[i0:i1, j0:j1] += shapely.contains_xy(elargi, X, Y)
 
 
-def _tasser(simplifie, x, y, posees, zone, espacement):
+def _tasser(simplifie, x, y, posees, bornes, zone, espacement):
     """Fait glisser la pièce (contour simplifié, coin bas-gauche en (x, y)) vers le bas puis vers la gauche tant qu'elle reste dans
     la zone (xmin, ymin, xmax, ymax) et à plus de `espacement` de ses voisines. Marge de sécurité de la simplification comprise."""
     minimum = espacement + 2 * TOLERANCE_SIMPLIFICATION_MM
     largeur, hauteur = simplifie.bounds[2], simplifie.bounds[3]
 
+    tableau = np.asarray(bornes, dtype=float).reshape(-1, 4)  # (xmin, ymin, xmax, ymax) des pièces déjà posées
+
     def possible(px, py):
         if px < zone[0] - 1e-9 or py < zone[1] - 1e-9 or px + largeur > zone[2] + 1e-9 or py + hauteur > zone[3] + 1e-9:
             return False
-        g = None
-        for voisine in posees:
-            vx0, vy0, vx1, vy1 = voisine.bounds
-            if vx1 < px - minimum or vx0 > px + largeur + minimum or vy1 < py - minimum or vy0 > py + hauteur + minimum:
-                continue
-            if g is None:
-                g = translate(simplifie, xoff=px, yoff=py)
-            if g.distance(voisine) < minimum:
-                return False
-        return True
+        if not len(tableau):
+            return True
+        # Seules les voisines dont le rectangle englobant touche la zone élargie sont comparées exactement (filtre vectorisé).
+        proches = np.nonzero(~((tableau[:, 2] < px - minimum) | (tableau[:, 0] > px + largeur + minimum)
+                               | (tableau[:, 3] < py - minimum) | (tableau[:, 1] > py + hauteur + minimum)))[0]
+        if not len(proches):
+            return True
+        g = translate(simplifie, xoff=px, yoff=py)
+        return all(g.distance(posees[k]) >= minimum for k in proches)
 
     for _ in range(3):
         bouge = False
