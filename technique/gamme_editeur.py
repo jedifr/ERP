@@ -56,7 +56,8 @@ def _ligne(etape, quantite, jour):
         "temps_fixe": etape.temps_fixe, "temps_variable": etape.temps_variable,
         "cout_forfaitaire": float(etape.cout_forfaitaire) if etape.cout_forfaitaire is not None else None,
         "cout_unitaire": unitaire, "cout_total": total, "probleme": probleme,
-        "minutes_par_piece": (etape.temps_variable or 0) + ((etape.temps_fixe or 0) / max(quantite, 1)) if horaire else None,
+        "minutes_par_piece": (etape.temps_variable or 0) + (0 if etape.origine == "decoupe" else (etape.temps_fixe or 0) / max(quantite, 1)) if horaire else None,
+        "mise_en_place_tole": etape.poste.temps_mise_en_place_min if etape.origine == "decoupe" else None,
     }
 
 
@@ -116,7 +117,7 @@ def enregistrer(article, lignes, jour=None):
         if ancienne is not None:
             vus.add(ancienne.pk)
         if ancienne is not None and ancienne.origine == "decoupe":
-            valeurs = {"temps_fixe": _nombre(ligne.get("temps_fixe")) or 0.0, "temps_variable": ancienne.temps_variable, "cout_forfaitaire": None}
+            valeurs = {"temps_fixe": 0.0, "temps_variable": ancienne.temps_variable, "cout_forfaitaire": None}  # réglage compté par tôle
         else:
             valeurs = _valeurs(ligne, poste)
         origine = ancienne.origine if ancienne is not None else "manuelle"

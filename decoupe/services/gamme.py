@@ -40,7 +40,7 @@ def alimenter_gamme(piece, aujourdhui=None):
             existante.date_fin = aujourdhui - datetime.timedelta(days=1)
             existante.save(update_fields=["date_fin"])
             ordre = existante.ordre
-            temps_fixe = existante.temps_fixe or 0
+            temps_fixe = 0  # le réglage de la découpe se compte par tôle (poste ou paramètre de coupe), pas par pièce
         else:
             ordre = (actives.aggregate(m=Max("ordre"))["m"] or 0) + 1
             temps_fixe = 0  # le réglage machine se saisit à la main ; un poste horaire exige un temps fixe

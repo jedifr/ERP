@@ -3115,3 +3115,17 @@ Chaque carte de pièce (onglet « Pièces et matière ») a un bloc **Opération
 ## Chronologie d'affaire
 
 Sur les fiches **devis** (onglet « Chronologie »), **commande** et **facture** : le fil de l'affaire, de l'offre à l'encaissement, daté et cliquable — devis et révisions (création, validation, acceptation / refus / remplacement, fin de validité), commande (créée, soldée, annulée), ordres de fabrication (lancement, échec de transmission au planning), livraisons (et annulations), factures et avoirs, relances de paiement, échéances et paiements. Le document ouvert est repéré (« vous êtes ici ») ; une ligne « Aujourd'hui » sépare le passé de ce qui est à venir (échéance de l'offre, règlement attendu, livraison prévue). Depuis n'importe quel document on retrouve la même affaire (toute la chaîne des indices du devis et ses commandes). Rien n'est stocké : la chronologie est recalculée depuis les documents et leur historique (`comptes/chronologie.py`, affichage via `ChronologieMixin`). Les dates de validation et d'acceptation d'un devis viennent de l'historique des modifications ; un devis dont l'historique n'a pas gardé ces changements n'affiche que sa création.
+
+## Réglage machine par tôle (laser et jet d'eau)
+
+Le temps de réglage d'une découpe est le temps de **mise en place d'une tôle** sur la machine : il s'applique **une fois par tôle** posée, quel que soit le nombre de pièces qu'elle porte, et autant de fois qu'il y a de tôles (matière, épaisseur, procédé ou machine différents = autres tôles). Avant, il était saisi sur l'étape de découpe de chaque pièce (donc compté pour chaque pièce).
+
+- **Saisie** : « Mise en place d'une tôle (min) » sur la fiche du **poste de travail** (valeur de la machine) et, en exception, sur un **paramètre de coupe** (matière × épaisseur : tôle épaisse plus longue à poser). Vide sur le paramètre = valeur du poste.
+- **Calcul** (`chiffrage/reglage.py`) : nombre de tôles de l'imbrication **retenue** de chaque groupe ; tant qu'aucune n'est retenue, de la **meilleure imbrication calculée**, avec un avertissement (« estimé »). Le coût (minutes × tarif horaire du poste) est réparti entre les pièces du groupe **au prorata de leur temps de coupe** et **inclus dans le prix des opérations** de chaque ligne de devis. Colonne informative **« dont réglage machine (HT) »** dans les lignes du devis (le détail « 2 tôles × 10 min, part 40 % » s'affiche au survol) et ligne « Mise en place machine » dans le bilan de chaque imbrication.
+- L'étape de découpe de la gamme n'a plus de réglage propre (l'éditeur d'opérations l'indique : « par tôle : 10 min »). Les autres opérations (ajustage, pliage…) gardent leur réglage par lot.
+- **Reprise des données** (migration) : le temps de réglage des étapes de découpe en cours devient le temps de mise en place de leur poste (valeur la plus fréquente, si le poste n'en avait pas), puis ces étapes sont remises à 0. L'historique des étapes closes n'est pas modifié.
+- Limite : une ligne de commande saisie directement (sans devis) n'a pas de pièces à découper, donc pas de réglage par tôle.
+
+## Date du jour à la création
+
+À la création d'un devis, d'une commande ou d'une facture, la date (de création, de commande, de facturation) est pré-remplie avec la date du jour, modifiable (`comptes/date_du_jour.py`).

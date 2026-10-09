@@ -44,6 +44,7 @@
       <div><span>Chutes entre les pièces<small>comprises dans la surface consommée</small></span><b>{{ b.resultat.surface_chutes_internes_mm2|mm2_en_m2|floatformat:2 }} m²</b></div>
       {% if b.resultat.surface_recuperee_mm2 > 1 %}<div class="dp-moins"><span>− Chute récupérée ({{ b.chute|floatformat:"-1" }} %)<small>non facturée</small></span><b>− {{ b.resultat.surface_recuperee_mm2|mm2_en_m2|floatformat:2 }} m²</b></div>
       <div class="dp-total"><span>= Surface facturée</span><b>{{ b.resultat.surface_facturee_mm2|mm2_en_m2|floatformat:2 }} m²</b></div>{% endif %}
+      {% if b.reglage and b.reglage.minutes_total %}<div><span>Mise en place machine<small>{{ b.reglage.feuilles }} tôle{{ b.reglage.feuilles|pluralize }}{% if b.reglage.minutes_par_tole %} × {{ b.reglage.minutes_par_tole|floatformat:"-1" }} min{% endif %} · une fois par tôle{% if not b.retenu %} · estimé : tôle non retenue{% endif %}</small></span><b>{{ b.reglage.minutes_total|floatformat:"-1" }} min</b></div>{% endif %}
       <div class="dp-prix"><span>Coût matière du lot<small>{% if b.tole %}sur la surface {% if b.resultat.surface_recuperee_mm2 > 1 %}facturée{% else %}consommée{% endif %}{% elif b.lien_creer_tole %}<a class="dp-lien" href="{{ b.lien_creer_tole }}" target="_blank" rel="noopener">créer la tôle ↗</a>{% else %}choisissez une tôle{% endif %}</small></span><b>{% if b.resultat.cout_total is not None %}{{ b.resultat.cout_total|floatformat:2 }} €{% else %}—{% endif %}</b></div>
     </aside>
     </div>

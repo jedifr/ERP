@@ -20,6 +20,8 @@ from comptes.colonnes import ColonnesPersonnalisablesMixin
 from comptes.liens import lien_admin
 from comptes.pastilles import A_FAIRE, EN_COURS, NEUTRE, PROBLEME, TERMINE, PastillesMixin
 from comptes.chronologie_admin import ChronologieMixin
+from comptes.date_du_jour import DateDuJourMixin
+from comptes.date_du_jour import DateDuJourMixin
 from comptes.puces import PucesMixin
 from comptes.montants import arrondir, pourcent, somme
 from comptes.concurrence import VerrouOptimisteMixin
@@ -148,10 +150,18 @@ class DevisLigneInline(TabularInline):
         "cout_matiere_calcule",
         "prix_vente_matiere",
         "prix_vente_operations",
+        "reglage_machine",
         "prix_vente_total",
         "prix_vente_unitaire",
         "prix_vente_ttc",
     ]
+
+    @admin.display(description="dont réglage machine (HT)")
+    def reglage_machine(self, obj):
+        """Information : part du réglage des tôles déjà comprise dans le prix des opérations (voir chiffrage/reglage.py)."""
+        if obj is None or obj.pk is None or obj.prix_vente_reglage is None:
+            return "—"
+        return format_html('<span title="{}">{} €</span>', obj.note_reglage, obj.prix_vente_reglage)
 
     def has_add_permission(self, request, obj=None):
         return not devis_verrouille(obj) and super().has_add_permission(request, obj)
@@ -366,7 +376,8 @@ class ExpireFilter(admin.SimpleListFilter):
 
 
 @admin.register(Devis)
-class DevisAdmin(ChronologieMixin, PucesMixin, PiecesDevisMixin, ColonnesPersonnalisablesMixin, PastillesMixin, EnregistrerEtValiderMixin, EtapeSuivanteMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
+class DevisAdmin(DateDuJourMixin, ChronologieMixin, PucesMixin, PiecesDevisMixin, ColonnesPersonnalisablesMixin, PastillesMixin, EnregistrerEtValiderMixin, EtapeSuivanteMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
+    champs_date_du_jour = ("date_creation",)
     puces = [('Tous', ''), ('Brouillons', '?statut__exact=brouillon'), ('Envoyés', '?statut__exact=valide&issue__exact=en_attente'), ('À relancer', '?validite=bientot'), ('Acceptés', '?issue__exact=accepte')]
     codification_entite = RegleCodification.Entite.DEVIS
     form = DevisAdminForm
@@ -852,7 +863,8 @@ class CommandeLigneInline(ColonnesPersonnalisablesMixin, TabularInline):
 
 
 @admin.register(Commande)
-class CommandeAdmin(ChronologieMixin, PucesMixin, ColonnesPersonnalisablesMixin, PastillesMixin, EnregistrerEtValiderMixin, EtapeSuivanteMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
+class CommandeAdmin(DateDuJourMixin, ChronologieMixin, PucesMixin, ColonnesPersonnalisablesMixin, PastillesMixin, EnregistrerEtValiderMixin, EtapeSuivanteMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
+    champs_date_du_jour = ("date_commande",)
     change_form_template = "admin/chronologie_change_form.html"
     puces = [('Toutes', ''), ('En cours', '?statut__exact=en_cours'), ('Soldées', '?statut__exact=soldee')]
     codification_entite = RegleCodification.Entite.COMMANDE

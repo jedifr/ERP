@@ -269,6 +269,12 @@ class DevisLigne(models.Model):
             "prix de vente matière de la ligne = quantité × ce prix unitaire."
         ), **PRIX,
     )
+    prix_vente_reglage = ChampDecimal(
+        "dont réglage machine (HT)", null=True, blank=True, editable=False,
+        help_text="Part de la mise en place des tôles (réglage machine) comprise dans le prix des opérations : information, déjà incluse.",
+        **MONTANT,
+    )
+    note_reglage = models.CharField("détail du réglage machine", max_length=250, blank=True, editable=False)
     prix_vente_matiere = ChampDecimal(
         "prix de vente matière (HT)", null=True, blank=True, editable=False, **MONTANT,
     )

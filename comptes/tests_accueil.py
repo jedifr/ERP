@@ -144,3 +144,16 @@ class ACompleterTests(TestCase):
         reponse = self.client.get(reverse("admin:decoupe_parametrecoupe_changelist") + "?sans_poste=oui")
         self.assertEqual(reponse.status_code, 200)
         self.assertContains(reponse, "Sans poste")
+
+
+class DateDuJourTests(TestCase):
+    def test_date_pre_remplie_a_la_creation(self):
+        from django.utils import timezone
+
+        self.client.force_login(_utilisateur("adm-dj", superuser=True))
+        aujourdhui = timezone.localdate().strftime("%Y-%m-%d")
+        for nom, champ in (("admin:chiffrage_devis_add", "date_creation"), ("admin:chiffrage_commande_add", "date_commande"), ("admin:facturation_facture_add", "date_facturation")):
+            reponse = self.client.get(reverse(nom))
+            self.assertEqual(reponse.context["adminform"].form.initial[champ].strftime("%Y-%m-%d"), aujourdhui, nom)
+        autre = self.client.get(reverse("admin:chiffrage_devis_add") + "?date_creation=2026-01-15")
+        self.assertEqual(str(autre.context["adminform"].form.initial["date_creation"]), "2026-01-15")

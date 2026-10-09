@@ -61,7 +61,9 @@ def cout_etape_gamme(etape, quantite, date_reference):
         # temps_fixe/temps_variable (Gamme) sont exprimés en MINUTES, alors que
         # TarifPoste.cout_horaire est un €/HEURE : diviser par 60 avant de les
         # multiplier est indispensable, sous peine de gonfler le coût x60.
-        temps_minutes = D((etape.temps_fixe or 0) + (etape.temps_variable or 0) * quantite)
+        # Étape de découpe : pas de réglage « par lot » ; la mise en place se compte par tôle (chiffrage/reglage.py).
+        reglage = 0 if getattr(etape, "origine", "") == "decoupe" else (etape.temps_fixe or 0)
+        temps_minutes = D(reglage + (etape.temps_variable or 0) * quantite)
         return arrondir_prix(temps_minutes / 60 * D(tarif.cout_horaire))
     return arrondir_prix(D0(etape.cout_forfaitaire) * D(quantite))
 
@@ -182,7 +184,16 @@ def _taux_marge_operation(devis, poste, operation_existante):
 
 
 def _synchroniser_operations_ligne(devis, ligne):
+    from .reglage import part_ligne
+
     etapes = list(gamme_active(ligne.article, devis.date_creation))
+    reglage = part_ligne(devis, ligne.article)
+    # Le réglage machine (par tôle) est ajouté à l'étape de découpe de l'article : il part dans le prix des opérations de la ligne.
+    ordre_decoupe = next((e.ordre for e in etapes if e.origine == "decoupe"), None)
+    if ordre_decoupe is None:
+        reglage = type(reglage)()
+    ligne.prix_vente_reglage = None
+    ligne.note_reglage = ""
     ordres_actifs = {etape.ordre for etape in etapes}
 
     existantes = {op.ordre: op for op in ligne.operations.all()}
@@ -197,11 +208,17 @@ def _synchroniser_operations_ligne(devis, ligne):
 
         operation.poste = etape.poste
         cout = cout_etape_gamme(etape, ligne.quantite, devis.date_creation)
+        if etape.ordre == ordre_decoupe:
+            cout += reglage.cout
         taux = _taux_marge_operation(devis, etape.poste, operation if operation.pk else None)
         operation.cout_calcule = cout
         operation.taux_marge_applique = taux
         operation.prix_vente = _vendu(cout, taux)
         operation.save()
+        if etape.ordre == ordre_decoupe and (reglage.cout or reglage.note):
+            ligne.prix_vente_reglage = _vendu(reglage.cout, taux)
+            ligne.note_reglage = (reglage.note + (" — " + " ; ".join(reglage.avertissements) if reglage.avertissements else ""))[:250]
+    ligne.save(update_fields=["prix_vente_reglage", "note_reglage"])
 
 
 def calculer_ligne(devis, ligne):
@@ -264,8 +281,15 @@ def previsualiser_ligne(
 
     prix_vente_operations = ZERO
     if article.nature == Article.Nature.FABRIQUE:
+        from .reglage import part_ligne
+
+        reglage = part_ligne(devis, article, quantite) if devis.pk else None
+        decoupe_vue = False
         for etape in gamme_active(article, devis.date_creation):
             cout_etape = cout_etape_gamme(etape, quantite, devis.date_creation)
+            if reglage is not None and etape.origine == "decoupe" and not decoupe_vue:
+                cout_etape += reglage.cout
+                decoupe_vue = True
             taux_operation = _taux_marge_operation(devis, etape.poste, None)
             prix_vente_operations += _vendu(cout_etape, taux_operation)
 

@@ -79,7 +79,9 @@
                 return input;
             };
             const cellules = horaire
-                ? [el("td", {}, champ("temps_fixe", l.temps_fixe)), el("td", {}, decoupe ? el("span", { title: "Calculé depuis la pièce" }, nombre(l.temps_variable)) : champ("temps_variable", l.temps_variable))]
+                ? [el("td", {}, decoupe
+                    ? el("span", { class: "ge-aide", title: "Le réglage de la découpe se compte une fois par tôle posée sur la machine (poste de travail ou paramètre de coupe), pas par pièce." }, "par tôle : " + (l.mise_en_place_tole !== null && l.mise_en_place_tole !== undefined ? nombre(l.mise_en_place_tole) + " min" : "non renseigné"))
+                    : champ("temps_fixe", l.temps_fixe)), el("td", {}, decoupe ? el("span", { title: "Calculé depuis la pièce" }, nombre(l.temps_variable)) : champ("temps_variable", l.temps_variable))]
                 : [el("td", { colspan: 2 }, el("span", { class: "ge-aide" }, "Forfait par pièce "), champ("cout_forfaitaire", l.cout_forfaitaire))];
             const boutons = el("td", { class: "ge-actions" });
             if (editable) {

@@ -20,6 +20,7 @@ from comptes.colonnes import ColonnesPersonnalisablesMixin
 from comptes.exports import ExportCsvMixin
 from comptes.pastilles import A_FAIRE, EN_COURS, NEUTRE, TERMINE, PastillesMixin
 from comptes.chronologie_admin import ChronologieMixin
+from comptes.date_du_jour import DateDuJourMixin
 from comptes.puces import PucesMixin
 from comptes.montants import arrondir, pourcent, somme
 from comptes.concurrence import VerrouOptimisteMixin
@@ -118,7 +119,8 @@ class RetardFilter(admin.SimpleListFilter):
 
 
 @admin.register(Facture)
-class FactureAdmin(ChronologieMixin, PucesMixin, ColonnesPersonnalisablesMixin, PastillesMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
+class FactureAdmin(DateDuJourMixin, ChronologieMixin, PucesMixin, ColonnesPersonnalisablesMixin, PastillesMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
+    champs_date_du_jour = ("date_facturation",)
     change_form_template = "admin/chronologie_change_form.html"
     puces = [('Toutes', ''), ('À payer', '?statut_paiement__exact=a_payer'), ('En retard', '?retard=en_retard'), ('Payées', '?statut_paiement__exact=paye'), ('Avoirs', '?type_document__exact=avoir')]
     codification_entite = RegleCodification.Entite.FACTURE

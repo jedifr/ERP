@@ -104,6 +104,12 @@ def _bloc_groupe(groupe, choix, formats):
     if resultat is None:
         format_choisi = meilleur
         resultat = next(r for f, r, _ in lignes if f.pk == meilleur.pk)
+    from .reglage import resume_groupe
+
+    try:
+        bloc["reglage"] = resume_groupe(groupe, resultat.nb_feuilles)
+    except Exception:  # information : jamais bloquante pour l'imbrication
+        bloc["reglage"] = None
     couleurs = {p.pk: imb.COULEURS[i % len(imb.COULEURS)] for i, p in enumerate(pieces)}
     par_id = {p.pk: p for p in pieces}
     feuilles = []

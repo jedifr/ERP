@@ -512,6 +512,10 @@ class ParametreCoupe(models.Model):
         help_text="Exception : un paramètre propre à une seule nuance, qui prend le pas sur celui de sa famille. Laisser vide en général.",
     )
     epaisseur_mm = models.FloatField("épaisseur (mm)")
+    temps_mise_en_place_min = models.FloatField(
+        "mise en place d'une tôle (min)", null=True, blank=True,
+        help_text="Exception à la valeur du poste de travail (ex. tôle épaisse plus longue à poser). Vide = valeur du poste.",
+    )
     poste = models.ForeignKey(
         "technique.PosteTravail", verbose_name="poste de travail", on_delete=models.PROTECT, null=True, blank=True,
         related_name="parametres_coupe", help_text="Machine de coupe : son tarif horaire valorise le temps calculé dans la gamme.",

@@ -708,7 +708,7 @@ class ParametreCoupeAdmin(ModelAdmin):
         return resultat
 
     fieldsets = [
-        (None, {"fields": ["procede", "gaz", "famille", "matiere", "epaisseur_mm", "poste", "usinabilite", "origine"]}),
+        (None, {"fields": ["procede", "gaz", "famille", "matiere", "epaisseur_mm", "poste", "temps_mise_en_place_min", "usinabilite", "origine"]}),
         ("Laser (tableau du constructeur)", {"fields": [
             "vitesse_coupe_production_m_min", "vitesse_coupe_max_m_min", "consommation_gaz_m3_h", "puissance_kw", "remarque",
         ]}),

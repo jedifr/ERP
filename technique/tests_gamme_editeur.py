@@ -44,7 +44,7 @@ class GammeEditeurTests(TestCase):
         self.assertEqual(etape.origine, "decoupe")
         self.assertEqual(etape.poste_id, self.laser.pk)  # le poste suit le paramètre de coupe
         self.assertEqual(etape.temps_variable, 1.5)
-        self.assertEqual(etape.temps_fixe, 5)
+        self.assertEqual(etape.temps_fixe, 0)  # le réglage de la découpe se compte par tôle, il ne se saisit plus sur l'étape
 
     def test_modifier_historise_et_ne_touche_pas_aux_anciens_calculs(self):
         ge.enregistrer(self.article, self._lignes({"id": None, "poste": self.pliage.pk, "temps_fixe": 10, "temps_variable": 2}))
