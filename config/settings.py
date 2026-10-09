@@ -273,109 +273,72 @@ def _superutilisateur(request):
     return request.user.is_superuser
 
 
+def _lien(titre, icone, url, badge=None):
+    element = {"title": titre, "icon": icone, "link": reverse_lazy(url), "permission": lambda request: request.user.is_staff}
+    if badge:
+        element["badge"] = badge
+    return element
+
+
+def _menu_b(titre, icone, app, modele, badge=None, **kw):
+    element = _menu(titre, icone, app, modele, **kw)
+    if badge:
+        element["badge"] = badge
+    return element
+
+
+# Menu court : ce qu'on ouvre tous les jours. Tout ce qui se règle une fois est dans la page « Paramétrage »
+# (cartes + recherche Ctrl+K), pas dans le menu.
 NAVIGATION = [
+    {"title": "", "items": [_lien("Aujourd'hui", "home", "admin:index")]},
     {
         "title": "Ventes",
         "separator": True,
         "items": [
-            _menu("Devis", "description", "chiffrage", "devis"),
+            _menu_b("Devis", "description", "chiffrage", "devis", badge="comptes.accueil.badge_devis"),
             _menu("Commandes clients", "shopping_cart", "chiffrage", "commande"),
             _menu("Livraisons (BL)", "local_shipping", "chiffrage", "livraison"),
-            _menu("Factures", "receipt_long", "facturation", "facture"),
+            _menu_b("Factures", "receipt_long", "facturation", "facture", badge="comptes.accueil.badge_factures"),
+            _menu("Clients et fournisseurs", "handshake", "commercial", "tiers"),
         ],
     },
     {
-        "title": "Production",
+        "title": "Atelier",
         "separator": True,
         "items": [
-            _menu("Ordres de fabrication", "build", "chiffrage", "ordrefabrication"),
+            _menu_b("Ordres de fabrication", "build", "chiffrage", "ordrefabrication", badge="comptes.accueil.badge_of"),
             _menu("Pièces à découper", "content_cut", "decoupe", "piecedecoupe"),
             _menu("Imbrications", "grid_view", "decoupe", "imbricationjob"),
-            _menu("Profils d'import", "layers", "decoupe", "profilimportdecoupe"),
-            _menu("Paramètres de coupe", "speed", "decoupe", "parametrecoupe"),
-            _menu("Formats de tôle", "crop_landscape", "decoupe", "formattole"),
-            _menu("Réglages de coupe", "tune", "decoupe", "reglageprocede"),
-            _menu("Cotes normalisées", "straighten", "decoupe", "normecote"),
-            _menu("Sections de profilés", "view_column", "decoupe", "profilesection"),
+            _menu("Envois sous-traitance", "outbound", "soustraitance", "envoisoustraitance"),
+            _menu("Retours sous-traitance", "keyboard_return", "soustraitance", "retoursoustraitance"),
         ],
     },
     {
-        "title": "Achats",
+        "title": "Achats et stock",
         "separator": True,
         "items": [
             _menu("Commandes fournisseur", "local_shipping", "achats", "commandefournisseur"),
             _menu("Réceptions", "move_to_inbox", "achats", "reception"),
             _menu("Factures fournisseur", "request_quote", "achats", "facturefournisseur"),
-            _menu("Envois sous-traitance", "outbound", "soustraitance", "envoisoustraitance"),
-            _menu("Retours sous-traitance", "keyboard_return", "soustraitance", "retoursoustraitance"),
-            _menu("Fournisseurs d'article", "contact_page", "achats", "articlefournisseur"),
-            _menu("Tarifs d'achat", "sell", "achats", "tarifachatarticle"),
-        ],
-    },
-    {
-        "title": "Stock",
-        "separator": True,
-        "items": [
-            _menu("Lots", "inventory_2", "stock", "lot"),
-            _menu("Mouvements de stock", "sync_alt", "stock", "mouvementstock"),
-            _menu("Alertes de stock", "warning", "stock", "alertestock"),
-            _menu("Transferts", "swap_horiz", "stock", "transfert"),
+            _menu("Lots et mouvements", "inventory_2", "stock", "lot"),
+            _menu_b("Alertes de stock", "warning", "stock", "alertestock", badge="comptes.accueil.badge_alertes_stock"),
             _menu("Inventaires", "fact_check", "stock", "inventaire"),
-            _menu("Emplacements", "warehouse", "stock", "emplacement"),
         ],
     },
     {
-        "title": "Comptabilité",
+        "title": "Gestion",
         "separator": True,
-        "collapsible": True,
         "items": [
-            _menu("Écritures comptables", "list_alt", "comptabilite", "ecriturecomptable"),
-            _menu("Journaux comptables", "book", "comptabilite", "journalcomptable"),
-            _menu("Plan comptable", "account_balance", "comptabilite", "comptecomptable"),
-            _menu("Postes de gestion", "workspaces", "comptabilite", "postegestion"),
-            _menu("Codes analytiques", "label", "comptabilite", "codeanalytique"),
-            _menu("Comptes de vente d'article", "trending_up", "comptabilite", "articlecomptevente"),
-            _menu("Comptes d'achat d'article", "trending_down", "comptabilite", "articlecompteachat"),
-            _menu("Comptes comptables de tiers", "badge", "comptabilite", "tierscomptecomptable"),
-            _menu("Paramètres comptables", "settings", "comptabilite", "parametrescomptables"),
-            _menu("Export comptable", "outbox", "comptabilite", "parametresexportcomptable"),
-        ],
-    },
-    {
-        "title": "Données de base",
-        "separator": True,
-        "collapsible": True,
-        "items": [
-            _menu("Tiers (clients, fournisseurs)", "handshake", "commercial", "tiers"),
-            _menu("Adresses", "location_on", "commercial", "adresse"),
-            _menu("Contacts", "contacts", "commercial", "contact"),
             _menu("Articles", "category", "technique", "article"),
-            _menu("Matières", "science", "technique", "matiere"),
-            _menu("Familles de matière", "category", "technique", "famillematiere"),
             _menu("Nomenclatures", "account_tree", "technique", "nomenclature"),
-            _menu("Gammes", "route", "technique", "gamme"),
-            _menu("Postes de travail", "precision_manufacturing", "technique", "postetravail"),
-            _menu("Tarifs de poste", "payments", "technique", "tarifposte"),
-            _menu("Taux de TVA", "percent", "commercial", "tauxtva"),
-            _menu("Conditions de paiement", "schedule", "commercial", "conditionpaiement"),
-            _menu("Délais proposés", "timer", "commercial", "delaipropose"),
-            _menu("Devises", "euro", "commercial", "devise"),
-            _menu("Pays", "public", "commercial", "pays"),
+            _menu("Écritures comptables", "list_alt", "comptabilite", "ecriturecomptable"),
         ],
     },
     {
-        "title": "Administration",
+        "title": "Réglages",
         "separator": True,
-        "collapsible": True,
-        "items": [
-            _menu("Société (en-tête des documents)", "business", "comptes", "societe"),
-            _menu("Modèles de documents (PDF)", "edit_document", "documents", "modeledocument", _superutilisateur),
-            _menu("Règles de codification", "tag", "codification", "reglecodification"),
-            _menu("Utilisateurs", "person", "auth", "user", _superutilisateur),
-            _menu("Groupes", "groups", "auth", "group", _superutilisateur),
-            _menu("Audit des droits", "admin_panel_settings", "auth", "user", _superutilisateur, url="admin:auth_user_audit_droits"),
-            _menu("Journal des connexions", "login", "comptes", "evenementconnexion"),
-        ],
+        "items": [_menu_b("Paramétrage", "tune", "comptes", "societe", badge="comptes.accueil.badge_parametrage", url="parametrage",
+                          droit=lambda request: request.user.is_staff)],
     },
 ]
 
@@ -389,6 +352,7 @@ UNFOLD = {
         lambda request: static("comptes/fiche_deux_colonnes.css"),
         lambda request: static("comptes/theme.css"),
         lambda request: static("comptes/navigation_documents.css"),
+        lambda request: static("comptes/accueil.css"),
     ],
     "SCRIPTS": [
         lambda request: static("comptes/anti_double_clic.js"),
@@ -444,4 +408,5 @@ UNFOLD = {
 
 
 if not STOCK_ACTIF:
-    UNFOLD["SIDEBAR"]["navigation"] = [g for g in UNFOLD["SIDEBAR"]["navigation"] if g.get("title") != "Stock"]
+    for _groupe in UNFOLD["SIDEBAR"]["navigation"]:
+        _groupe["items"] = [i for i in _groupe["items"] if i["title"] not in ("Lots et mouvements", "Alertes de stock", "Inventaires")]

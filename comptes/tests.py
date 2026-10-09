@@ -1059,16 +1059,17 @@ class StockActifMenuTests(TestCase):
         code = (
             "import json, os, django; os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings'); django.setup();"
             "from django.conf import settings;"
-            "print(json.dumps([g['title'] for g in settings.UNFOLD['SIDEBAR']['navigation']]))"
+            "print(json.dumps([i['title'] for g in settings.UNFOLD['SIDEBAR']['navigation'] for i in g['items']]))"
         )
         env = {**os.environ, "DJANGO_STOCK_ACTIF": valeur}
         sortie = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, check=True)
         return json.loads(sortie.stdout.strip().splitlines()[-1])
 
     def test_menu_stock_present_par_defaut(self):
-        self.assertIn("Stock", self._titres_menu("true"))
+        self.assertIn("Alertes de stock", self._titres_menu("true"))
 
     def test_menu_stock_masque_si_desactive(self):
         titres = self._titres_menu("false")
-        self.assertNotIn("Stock", titres)
-        self.assertIn("Ventes", titres)
+        self.assertNotIn("Alertes de stock", titres)
+        self.assertNotIn("Lots et mouvements", titres)
+        self.assertIn("Devis", titres)

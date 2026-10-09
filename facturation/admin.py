@@ -19,6 +19,7 @@ from comptabilite.generation import GenerationEcritureError, generer_ecriture_fa
 from comptes.colonnes import ColonnesPersonnalisablesMixin
 from comptes.exports import ExportCsvMixin
 from comptes.pastilles import A_FAIRE, EN_COURS, NEUTRE, TERMINE, PastillesMixin
+from comptes.puces import PucesMixin
 from comptes.montants import arrondir, pourcent, somme
 from comptes.concurrence import VerrouOptimisteMixin
 from comptes.historique import HistoriqueLectureSeule
@@ -116,7 +117,8 @@ class RetardFilter(admin.SimpleListFilter):
 
 
 @admin.register(Facture)
-class FactureAdmin(ColonnesPersonnalisablesMixin, PastillesMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
+class FactureAdmin(PucesMixin, ColonnesPersonnalisablesMixin, PastillesMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
+    puces = [('Toutes', ''), ('À payer', '?statut_paiement__exact=a_payer'), ('En retard', '?retard=en_retard'), ('Payées', '?statut_paiement__exact=paye'), ('Avoirs', '?type_document__exact=avoir')]
     codification_entite = RegleCodification.Entite.FACTURE
 
     pastilles = {

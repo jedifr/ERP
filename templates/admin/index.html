@@ -19,24 +19,59 @@
             </ul>
         </div>
     {% endif %}
-    {% if kpis %}
-        <div class="tuiles">
-            {% for kpi in kpis %}
-                <a href="{% url kpi.link %}{{ kpi.link_query }}" class="tuile tuile-{{ kpi.theme }}{% if kpi.attention %} tuile-attention{% endif %}">
-                    <span class="tuile-icone material-symbols-outlined">{{ kpi.icon }}</span>
-                    <span>
-                        <span class="tuile-titre">{{ kpi.title }}</span>
-                        <span class="tuile-valeur block">{{ kpi.value }}</span>
-                        <span class="tuile-note block">{{ kpi.hint }}</span>
-                    </span>
-                </a>
+    <div class="accueil-entete">
+        <h1>Aujourd'hui, {{ dashboard_date|date:"l j F" }}</h1>
+        {% if profil_libelle %}<span class="accueil-profil">Vue {{ profil_libelle }}</span>{% endif %}
+    </div>
+
+    {% if flux_affaire %}
+        <nav class="flux-affaire" aria-label="Avancement des affaires">
+            {% for e in flux_affaire %}
+                <a href="{{ e.url }}" class="flux-etape"><span class="flux-nombre">{{ e.nombre }}</span><span class="flux-libelle">{{ e.libelle }}</span></a>
             {% endfor %}
-        </div>
+        </nav>
+    {% endif %}
+
+    <section class="cartes-action">
+        {% for c in cartes_action %}
+            <a href="{{ c.url }}" class="carte-action carte-{{ c.ton }}">
+                <span class="material-symbols-outlined">{{ c.icone }}</span>
+                <span class="carte-nombre">{{ c.nombre }}</span>
+                <span class="carte-titre">{{ c.titre }}</span>
+                <span class="carte-note">{{ c.note }}</span>
+            </a>
+        {% empty %}
+            <p class="accueil-calme">Rien d'urgent : tout est à jour.</p>
+        {% endfor %}
+    </section>
+    {% if cartes_calmes and cartes_action %}
+        <p class="accueil-calme">À jour : {% for c in cartes_calmes %}<a href="{{ c.url }}">{{ c.titre|lower }}</a>{% if not forloop.last %} · {% endif %}{% endfor %}.</p>
+    {% endif %}
+
+    {% if kpis %}
+        <details class="accueil-repli">
+            <summary>Chiffres du mois</summary>
+            <div class="tuiles">
+                {% for kpi in kpis %}
+                    <a href="{% url kpi.link %}{{ kpi.link_query }}" class="tuile tuile-{{ kpi.theme }}{% if kpi.attention %} tuile-attention{% endif %}">
+                        <span class="tuile-icone material-symbols-outlined">{{ kpi.icon }}</span>
+                        <span>
+                            <span class="tuile-titre">{{ kpi.title }}</span>
+                            <span class="tuile-valeur block">{{ kpi.value }}</span>
+                            <span class="tuile-note block">{{ kpi.hint }}</span>
+                        </span>
+                    </a>
+                {% endfor %}
+            </div>
+        </details>
     {% endif %}
 
     <div class="flex flex-col lg:flex-row lg:gap-8">
         <div class="grow">
-            {% include "unfold/helpers/app_list_default.html" %}
+            <details class="accueil-repli">
+                <summary>Toutes les applications</summary>
+                {% include "unfold/helpers/app_list_default.html" %}
+            </details>
         </div>
 
         {% include "unfold/helpers/history.html" %}

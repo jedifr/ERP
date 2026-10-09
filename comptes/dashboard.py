@@ -15,6 +15,7 @@ from decoupe.models import PieceDecoupe
 from facturation.models import Facture
 from stock.models import AlerteStock
 
+from .accueil import contexte_accueil
 from .securite import diagnostics
 
 
@@ -167,6 +168,8 @@ def dashboard_callback(request, context):
     if not settings.STOCK_ACTIF:
         context["kpis"] = [k for k in context["kpis"] if k["title"] != "Alertes de stock"]
     context["dashboard_date"] = aujourdhui
+    if getattr(request, "user", None) is not None:
+        context.update(contexte_accueil(request))
     if getattr(getattr(request, "user", None), "is_superuser", False):
         context["alertes_securite"] = diagnostics()
 

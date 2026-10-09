@@ -58,4 +58,7 @@ def raccourcis_ecrans(request):
         if nom.startswith("admin:stock_") and not settings.STOCK_ACTIF:
             continue
         resultats.append((titre, "Écran", _url(nom, parametres), icone, f"{titre} {mots}"))
+    from .parametrage import ecrans_pour_recherche
+
+    resultats.extend(ecrans_pour_recherche(request))
     return resultats

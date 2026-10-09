@@ -19,6 +19,7 @@ from comptes.exports import ExportCsvMixin
 from comptes.colonnes import ColonnesPersonnalisablesMixin
 from comptes.liens import lien_admin
 from comptes.pastilles import A_FAIRE, EN_COURS, NEUTRE, PROBLEME, TERMINE, PastillesMixin
+from comptes.puces import PucesMixin
 from comptes.montants import arrondir, pourcent, somme
 from comptes.concurrence import VerrouOptimisteMixin
 from comptes.historique import HistoriqueLectureSeule
@@ -364,7 +365,8 @@ class ExpireFilter(admin.SimpleListFilter):
 
 
 @admin.register(Devis)
-class DevisAdmin(PiecesDevisMixin, ColonnesPersonnalisablesMixin, PastillesMixin, EnregistrerEtValiderMixin, EtapeSuivanteMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
+class DevisAdmin(PucesMixin, PiecesDevisMixin, ColonnesPersonnalisablesMixin, PastillesMixin, EnregistrerEtValiderMixin, EtapeSuivanteMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
+    puces = [('Tous', ''), ('Brouillons', '?statut__exact=brouillon'), ('Envoyés', '?statut__exact=valide&issue__exact=en_attente'), ('À relancer', '?validite=bientot'), ('Acceptés', '?issue__exact=accepte')]
     codification_entite = RegleCodification.Entite.DEVIS
     form = DevisAdminForm
 
@@ -849,7 +851,8 @@ class CommandeLigneInline(ColonnesPersonnalisablesMixin, TabularInline):
 
 
 @admin.register(Commande)
-class CommandeAdmin(ColonnesPersonnalisablesMixin, PastillesMixin, EnregistrerEtValiderMixin, EtapeSuivanteMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
+class CommandeAdmin(PucesMixin, ColonnesPersonnalisablesMixin, PastillesMixin, EnregistrerEtValiderMixin, EtapeSuivanteMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
+    puces = [('Toutes', ''), ('En cours', '?statut__exact=en_cours'), ('Soldées', '?statut__exact=soldee')]
     codification_entite = RegleCodification.Entite.COMMANDE
 
     list_display = ["numero", "client", "reference_client", "devis", "date_commande", "statut", "devise"]

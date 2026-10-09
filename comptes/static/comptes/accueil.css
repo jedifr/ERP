@@ -1,0 +1,45 @@
+/* Accueil « Aujourd'hui » et page « Paramétrage » */
+.accueil-entete { display: flex; align-items: baseline; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap; }
+.accueil-entete h1 { font-size: 1.5rem; font-weight: 600; text-transform: capitalize; }
+.accueil-profil { font-size: .8rem; padding: .15rem .6rem; border-radius: 999px; background: rgb(0 0 0 / .06); }
+.flux-affaire { display: flex; flex-wrap: wrap; gap: .25rem; margin-bottom: 1.5rem; }
+.flux-etape { display: flex; flex-direction: column; align-items: center; min-width: 6.5rem; padding: .6rem 1rem; border: 1px solid rgb(0 0 0 / .1); border-radius: .5rem; text-decoration: none; position: relative; }
+.flux-etape:not(:last-child)::after { content: "›"; position: absolute; right: -.7rem; top: 50%; transform: translateY(-50%); opacity: .4; }
+.flux-nombre { font-size: 1.4rem; font-weight: 600; }
+.flux-libelle { font-size: .75rem; opacity: .7; }
+.flux-etape:hover, .carte-action:hover, .carte-param li a:hover { background: rgb(0 0 0 / .04); }
+.cartes-action, .cartes-param { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: 1rem; margin-bottom: 1rem; }
+.cartes-param { grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr)); }
+.carte-action { display: grid; grid-template-columns: auto 1fr; column-gap: .75rem; padding: 1rem; border: 1px solid rgb(0 0 0 / .1); border-left-width: 4px; border-radius: .5rem; text-decoration: none; }
+.carte-action .material-symbols-outlined { grid-row: span 3; font-size: 1.8rem; opacity: .6; }
+.carte-nombre { font-size: 1.8rem; font-weight: 700; line-height: 1.1; }
+.carte-titre { font-weight: 600; }
+.carte-note { font-size: .8rem; opacity: .65; }
+.carte-ko { border-left-color: #dc2626; }
+.carte-attention { border-left-color: #f59e0b; }
+.carte-normal { border-left-color: #64748b; }
+.accueil-calme { font-size: .85rem; opacity: .7; margin-bottom: 1.5rem; }
+.accueil-repli { margin-bottom: 1.5rem; }
+.accueil-repli > summary { cursor: pointer; font-weight: 600; margin-bottom: .75rem; }
+.carte-param { padding: 1rem; border: 1px solid rgb(0 0 0 / .1); border-radius: .5rem; }
+.carte-param header { display: flex; align-items: center; gap: .5rem; margin-bottom: .4rem; }
+.carte-param h2 { font-weight: 600; font-size: 1rem; flex: 1; }
+.carte-param p { font-size: .8rem; opacity: .7; margin-bottom: .6rem; }
+.carte-param ul { display: flex; flex-wrap: wrap; gap: .3rem; }
+.carte-param li a { display: inline-block; padding: .15rem .6rem; border-radius: 999px; border: 1px solid rgb(0 0 0 / .1); font-size: .8rem; text-decoration: none; }
+.pastille-param { font-size: .7rem; padding: .1rem .55rem; border-radius: 999px; }
+.pastille-ok { background: #dcfce7; color: #166534; }
+.pastille-attention { background: #fef3c7; color: #92400e; }
+.pastille-ko { background: #fee2e2; color: #991b1b; }
+/* Puces de filtre au-dessus des listes */
+.puces-liste { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: 1rem; }
+.puce { padding: .2rem .8rem; border-radius: 999px; border: 1px solid rgb(0 0 0 / .15); font-size: .85rem; text-decoration: none; }
+.puce:hover { background: rgb(0 0 0 / .05); }
+.puce-active { background: #f59e0b; border-color: #f59e0b; color: #fff; font-weight: 600; }
+.puce-nombre { margin-left: .35rem; opacity: .7; }
+:root[data-theme="dark"] .flux-etape, :root[data-theme="dark"] .carte-action, :root[data-theme="dark"] .carte-param, :root[data-theme="dark"] .puce, :root[data-theme="dark"] .carte-param li a { border-color: rgb(255 255 255 / .15); }
+:root[data-theme="dark"] .flux-etape:hover, :root[data-theme="dark"] .carte-action:hover, :root[data-theme="dark"] .puce:hover { background: rgb(255 255 255 / .06); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .flux-etape, :root:not([data-theme="light"]) .carte-action, :root:not([data-theme="light"]) .carte-param, :root:not([data-theme="light"]) .puce { border-color: rgb(255 255 255 / .15); }
+  :root:not([data-theme="light"]) .accueil-profil { background: rgb(255 255 255 / .1); }
+}
