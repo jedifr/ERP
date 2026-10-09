@@ -80,21 +80,35 @@ function demarrer() {
         return choix;
     }
 
+    let requeteImbrication = null;
     async function rafraichirImbrication() {
         if (!zoneImb) return;
+        // Une imbrication lourde peut durer plusieurs dizaines de secondes (grosses quantités, vraie forme) : on n'en empile pas
+        // plusieurs, la plus récente remplace la précédente côté navigateur.
+        if (requeteImbrication) requeteImbrication.abort();
+        const controleur = new AbortController();
+        requeteImbrication = controleur;
         zoneImb.classList.add("dp-calcul");
+        zoneImb.setAttribute("aria-busy", "true");
         try {
             const reponse = await fetch(zoneImb.dataset.urlImbrication, {
                 method: "POST", credentials: "same-origin", headers: { "X-CSRFToken": csrf(), "Content-Type": "application/json" },
-                body: JSON.stringify({ choix: lireChoix() }),
+                body: JSON.stringify({ choix: lireChoix() }), signal: controleur.signal,
             });
-            const json = await reponse.json();
+            let json = null;
+            try { json = await reponse.json(); } catch (e) { /* réponse HTML : erreur ou délai dépassé côté serveur */ }
+            if (!json) throw new Error("le serveur n'a pas répondu à temps (code " + reponse.status + "). L'imbrication est lourde : réduisez les quantités, désactivez l'imbrication à la forme réelle, ou augmentez GUNICORN_TIMEOUT dans le .env du NAS.");
             if (!reponse.ok) throw new Error(json.detail || "Erreur " + reponse.status);
             zoneImb.innerHTML = json.html;
         } catch (e) {
+            if (e.name === "AbortError") return; // remplacée par une demande plus récente
             message("Imbrication : " + e.message, true);
         } finally {
-            zoneImb.classList.remove("dp-calcul");
+            if (requeteImbrication === controleur) {
+                requeteImbrication = null;
+                zoneImb.classList.remove("dp-calcul");
+                zoneImb.removeAttribute("aria-busy");
+            }
         }
     }
 

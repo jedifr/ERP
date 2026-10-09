@@ -157,3 +157,13 @@ class DateDuJourTests(TestCase):
             self.assertEqual(reponse.context["adminform"].form.initial[champ].strftime("%Y-%m-%d"), aujourdhui, nom)
         autre = self.client.get(reverse("admin:chiffrage_devis_add") + "?date_creation=2026-01-15")
         self.assertEqual(str(autre.context["adminform"].form.initial["date_creation"]), "2026-01-15")
+
+
+class DelaiServeurTests(TestCase):
+    def test_gunicorn_laisse_le_temps_aux_imbrications_lourdes(self):
+        """Gunicorn coupe par défaut une requête après 30 s : l'imbrication de grosses quantités sur un NAS modeste dépasse ce délai
+        (le navigateur reçoit alors une page HTML, pas du JSON : « Unexpected token '<' »)."""
+        from pathlib import Path
+
+        script = (Path(__file__).resolve().parent.parent / "entrypoint.sh").read_text()
+        self.assertIn('--timeout "${GUNICORN_TIMEOUT:-300}"', script)
