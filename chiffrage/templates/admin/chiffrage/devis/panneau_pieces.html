@@ -3,6 +3,11 @@
 <section class="dp-panneau" id="dp-panneau" data-url-importer="{{ p.url_importer }}" data-url-ajouter="{{ p.url_ajouter }}">
   <h2 class="dp-titre-section">Pièces à découper <span class="dp-badge">Import DXF / DWG</span></h2>
   {% if p.editable %}
+    <ol class="dp-etapes" aria-label="Les 3 étapes">
+      <li class="{% if p.cartes or p.cartes_profils %}fait{% else %}courant{% endif %}"><b>1</b> Ajouter les pièces <small>DXF, bibliothèque ou profilés</small></li>
+      <li class="{% if p.cartes or p.cartes_profils %}courant{% endif %}"><b>2</b> Choisir la matière et l'imbrication <small>sur chaque pièce, puis « Retenir »</small></li>
+      <li><b>3</b> Ajouter au devis <small>les lignes se créent avec leur gamme et leur nomenclature</small></li>
+    </ol>
     <div class="dp-drop" id="dp-drop" tabindex="0" role="button" aria-label="Importer des fichiers DXF ou DWG">
       <div class="dp-drop-icone material-symbols-outlined">upload_file</div>
       <div><strong>Glissez vos fichiers DXF / DWG ici</strong> ou <u>parcourez</u> — plusieurs à la fois.</div>

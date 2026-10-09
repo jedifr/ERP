@@ -43,3 +43,25 @@
   :root:not([data-theme="light"]) .flux-etape, :root:not([data-theme="light"]) .carte-action, :root:not([data-theme="light"]) .carte-param, :root:not([data-theme="light"]) .puce { border-color: rgb(255 255 255 / .15); }
   :root:not([data-theme="light"]) .accueil-profil { background: rgb(255 255 255 / .1); }
 }
+/* Fiche devis en onglets (voir devis_onglets.js) */
+.devis-onglets { display: flex; gap: .25rem; border-bottom: 2px solid rgb(0 0 0 / .08); margin-bottom: 1.25rem; }
+.devis-onglet { display: inline-flex; align-items: center; gap: .4rem; padding: .6rem 1.1rem; font-weight: 500; opacity: .7; border-bottom: 3px solid transparent; margin-bottom: -2px; cursor: pointer; background: none; }
+.devis-onglet:hover { opacity: 1; }
+.devis-onglet.actif { opacity: 1; font-weight: 600; border-bottom-color: #f59e0b; color: #b45309; }
+.devis-onglet .material-symbols-outlined { font-size: 1.15rem; }
+.devis-onglet-nombre { font-size: .72rem; padding: 0 .45rem; border-radius: 999px; background: rgb(0 0 0 / .08); }
+div[data-onglet-actif="general"] > [data-onglet]:not([data-onglet="general"]),
+div[data-onglet-actif="pieces"] > [data-onglet]:not([data-onglet="pieces"]),
+div[data-onglet-actif="lignes"] > [data-onglet]:not([data-onglet="lignes"]) { display: none !important; }
+div[data-onglet-actif="pieces"], div[data-onglet-actif="lignes"] { display: block !important; }
+:root[data-theme="dark"] .devis-onglets { border-color: rgb(255 255 255 / .12); }
+:root[data-theme="dark"] .devis-onglet.actif { color: #fbbf24; }
+/* Étapes du panneau « Pièces et matière » */
+.dp-etapes { display: flex; flex-wrap: wrap; gap: .5rem; list-style: none; margin: 0 0 1rem; padding: 0; }
+.dp-etapes li { flex: 1 1 14rem; display: flex; flex-direction: column; padding: .5rem .8rem; border: 1px solid rgb(0 0 0 / .1); border-radius: .5rem; font-size: .85rem; opacity: .6; }
+.dp-etapes li b { display: inline-block; width: 1.4rem; height: 1.4rem; line-height: 1.4rem; text-align: center; border-radius: 50%; background: rgb(0 0 0 / .1); margin-right: .35rem; }
+.dp-etapes li small { opacity: .75; }
+.dp-etapes li.courant { opacity: 1; border-color: #f59e0b; }
+.dp-etapes li.courant b { background: #f59e0b; color: #fff; }
+.dp-etapes li.fait { opacity: .85; }
+.dp-etapes li.fait b { background: #16a34a; color: #fff; }

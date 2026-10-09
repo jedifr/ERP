@@ -1,5 +1,7 @@
 """Lot 1 de l'ergonomie : accueil « Aujourd'hui » par profil, page Paramétrage, menu court, puces de filtre."""
 
+import datetime
+
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group, Permission
 from django.test import RequestFactory, TestCase
@@ -89,3 +91,18 @@ class AccueilVuesTests(TestCase):
     def test_puce_active(self):
         reponse = self.client.get(reverse("admin:chiffrage_devis_changelist") + "?statut__exact=brouillon")
         self.assertContains(reponse, "puce puce-active")
+
+
+class FicheDevisOngletsTests(TestCase):
+    def test_script_onglets_charge_et_panneau_pieces_a_ses_etapes(self):
+        from chiffrage.models import Devis
+        from commercial.models import Tiers
+
+        self.client.force_login(_utilisateur("boss2", superuser=True))
+        client = Tiers.objects.create(code="CLI-ONG", raison_sociale="Client onglets")
+        devis = Devis.objects.create(numero="DEV-ONG-1", client=client, date_creation=datetime.date(2026, 10, 1))
+        reponse = self.client.get(reverse("admin:chiffrage_devis_change", args=[devis.pk]))
+        self.assertContains(reponse, "devis_onglets")
+        self.assertContains(reponse, 'id="lignes-group"')
+        self.assertContains(reponse, "dp-etapes")
+        self.assertContains(reponse, 'class="dp-panneau"')
