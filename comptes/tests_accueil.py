@@ -44,7 +44,7 @@ class ProfilsTests(TestCase):
         self.assertNotIn("Devis en brouillon", titres)  # profil atelier : pas de cartes commerciales
         sans_droit = _utilisateur("c2", "Commercial")
         sans_droit.groups.get().permissions.clear()  # groupe par défaut sans aucun droit
-        self.assertEqual(sum(accueil.cartes_action(_requete(sans_droit)), []), [])
+        self.assertEqual(accueil.cartes_action(_requete(sans_droit))[0], [])  # rien d'urgent sans droits
 
     def test_direction_voit_tout(self):
         titres = {c["titre"] for c in sum(accueil.cartes_action(_requete(_utilisateur("d1", superuser=True))), [])}
@@ -106,3 +106,36 @@ class FicheDevisOngletsTests(TestCase):
         self.assertContains(reponse, 'id="lignes-group"')
         self.assertContains(reponse, "dp-etapes")
         self.assertContains(reponse, 'class="dp-panneau"')
+
+
+class ACompleterTests(TestCase):
+    def setUp(self):
+        self.client.force_login(_utilisateur("boss3", superuser=True))
+
+    def test_page_et_controles(self):
+        from technique.models import PosteTravail
+
+        PosteTravail.objects.create(nom="Poste sans tarif", mode_calcul="horaire")
+        reponse = self.client.get(reverse("a_completer"))
+        self.assertContains(reponse, "Postes de travail sans tarif")
+        self.assertContains(reponse, "Poste sans tarif")
+        self.assertContains(reponse, "Informations de la société incomplètes")
+
+    def test_controle_disparait_une_fois_corrige(self):
+        from technique.models import PosteTravail, TarifPoste
+
+        from .a_completer import resultats
+
+        poste = PosteTravail.objects.create(nom="Poste P", mode_calcul="horaire")
+        requete = _requete(_utilisateur("s4", superuser=True))
+        self.assertIn("poste_tarif", [r["controle"].cle for r in resultats(requete)])
+        TarifPoste.objects.create(poste=poste, cout_horaire=50, date_debut=datetime.date(2026, 1, 1))
+        self.assertNotIn("poste_tarif", [r["controle"].cle for r in resultats(requete)])
+
+    def test_masque_sans_droit(self):
+        from .a_completer import resultats
+
+        self.assertEqual(resultats(_requete(_utilisateur("x5"))), [])
+
+    def test_carte_accueil_et_menu(self):
+        self.assertContains(self.client.get(reverse("admin:index")), reverse("a_completer"))

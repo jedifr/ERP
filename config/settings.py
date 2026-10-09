@@ -337,8 +337,12 @@ NAVIGATION = [
     {
         "title": "Réglages",
         "separator": True,
-        "items": [_menu_b("Paramétrage", "tune", "comptes", "societe", badge="comptes.accueil.badge_parametrage", url="parametrage",
-                          droit=lambda request: request.user.is_staff)],
+        "items": [
+            _menu_b("À compléter", "checklist", "comptes", "societe", badge="comptes.accueil.badge_a_completer", url="a_completer",
+                    droit=lambda request: request.user.is_staff),
+            _menu_b("Paramétrage", "tune", "comptes", "societe", badge="comptes.accueil.badge_parametrage", url="parametrage",
+                          droit=lambda request: request.user.is_staff),
+        ],
     },
 ]
 

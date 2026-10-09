@@ -63,6 +63,15 @@ def _n_pieces_erreur():
     return PieceDecoupe.objects.filter(statut="erreur").count()
 
 
+def _n_a_completer(request):
+    from .a_completer import nombre_bloquant
+
+    return nombre_bloquant(request)
+
+
+_n_a_completer.avec_requete = True  # seul compteur filtré selon les droits de l'utilisateur
+
+
 def _n_alertes_stock():
     from stock.models import AlerteStock
 
@@ -97,6 +106,8 @@ CARTES = [
      "admin:decoupe_piecedecoupe_changelist", "?statut__exact=erreur", _n_pieces_erreur),
     ({"atelier", "direction"}, "Alertes de stock", "sous le seuil", "warning", "attention", "stock.view_alertestock",
      "admin:stock_alertestock_changelist", "?statut__exact=active", _n_alertes_stock),
+    ({"commercial", "atelier", "comptabilite", "direction"}, "Données à compléter", "éléments qui faussent un calcul ou un document", "checklist", "attention", "",
+     "a_completer", "", _n_a_completer),
     ({"comptabilite", "direction"}, "Factures en retard", "à relancer", "schedule", "ko", "facturation.view_facture",
      "admin:facturation_facture_changelist", "?retard=en_retard", _n_factures_retard),
     ({"comptabilite", "direction"}, "Factures à encaisser", "émises, non soldées", "payments", "normal", "facturation.view_facture",
@@ -113,12 +124,12 @@ def cartes_action(request):
     for concernes, titre, note, icone, ton, droit, nom, parametres, compter in CARTES:
         if profil and not (profil & concernes):
             continue
-        if not utilisateur.has_perm(droit):
+        if droit and not utilisateur.has_perm(droit):
             continue
         if droit.startswith("stock.") and not settings.STOCK_ACTIF:
             continue
         try:
-            nombre = compter()
+            nombre = compter(request) if getattr(compter, "avec_requete", False) else compter()
         except Exception:
             continue
         carte = {"titre": titre, "note": note, "icone": icone, "ton": ton, "nombre": nombre, "url": reverse(nom) + parametres}
@@ -196,5 +207,14 @@ def badge_parametrage(request):
 
     try:
         return nombre_a_completer(request) or ""
+    except Exception:
+        return ""
+
+
+def badge_a_completer(request):
+    from .a_completer import nombre_controles
+
+    try:
+        return nombre_controles(request) or ""
     except Exception:
         return ""

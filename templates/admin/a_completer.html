@@ -1,0 +1,16 @@
+{% extends "admin/base_site.html" %}
+{% block breadcrumbs %}{% endblock %}
+{% block content %}
+<p class="mb-6 text-sm text-base-500 dark:text-base-400">Ce qui manque dans vos données et fausse un calcul, un document ou une facture. Cliquez sur un élément pour ouvrir sa fiche et le corriger ; la page est recalculée à chaque ouverture.</p>
+{% if not bloquants and not a_verifier %}
+  <p class="accueil-calme">Tout est à jour : rien à compléter.</p>
+{% endif %}
+{% if bloquants %}
+  <h2 class="ac-titre ac-ko">À corriger — fausse un calcul ou un document</h2>
+  <div class="cartes-param">{% for r in bloquants %}{% include "admin/_a_completer_carte.html" %}{% endfor %}</div>
+{% endif %}
+{% if a_verifier %}
+  <h2 class="ac-titre ac-attention">À vérifier</h2>
+  <div class="cartes-param">{% for r in a_verifier %}{% include "admin/_a_completer_carte.html" %}{% endfor %}</div>
+{% endif %}
+{% endblock %}

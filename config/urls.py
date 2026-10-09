@@ -19,6 +19,7 @@ from django.conf import settings
 from django.contrib import admin
 from django.urls import include, path, re_path
 
+from comptes.a_completer import a_completer_view
 from comptes.colonnes import mes_colonnes
 from comptes.navigation import navigation_view
 from comptes.parametrage import parametrage_view
@@ -27,6 +28,7 @@ from comptes.views import media_protege
 urlpatterns = [
     path("admin/mes-colonnes/", admin.site.admin_view(mes_colonnes), name="mes_colonnes"),
     path("admin/navigation/<str:app>/<str:modele>/", admin.site.admin_view(navigation_view), name="navigation_documents"),
+    path("admin/a-completer/", admin.site.admin_view(a_completer_view), name="a_completer"),
     path("admin/parametrage/", admin.site.admin_view(parametrage_view), name="parametrage"),
     path("admin/", admin.site.urls),
     path("api/v1/", include("technique.urls")),

@@ -65,3 +65,7 @@ div[data-onglet-actif="pieces"], div[data-onglet-actif="lignes"] { display: bloc
 .dp-etapes li.courant b { background: #f59e0b; color: #fff; }
 .dp-etapes li.fait { opacity: .85; }
 .dp-etapes li.fait b { background: #16a34a; color: #fff; }
+/* Centre « À compléter » */
+.ac-titre { font-size: 1rem; font-weight: 600; margin: 1.25rem 0 .75rem; padding-left: .6rem; border-left: 4px solid; }
+.ac-ko { border-color: #dc2626; }
+.ac-attention { border-color: #f59e0b; }
