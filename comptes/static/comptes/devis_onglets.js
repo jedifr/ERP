@@ -12,6 +12,7 @@ function initOnglets() {
     var recap = conteneur.querySelector(":scope > fieldset.fiche-recap");
     var lignes = conteneur.querySelector(":scope > #lignes-group");
     var pieces = conteneur.querySelector(":scope > #dp-panneau");
+    var chrono = conteneur.querySelector(":scope > #chronologie-affaire");
 
     var onglets = [{ cle: "general", titre: "Général", icone: "assignment", elements: [saisie, recap] }];
     if (pieces) onglets.push({ cle: "pieces", titre: "Pièces et matière", icone: "content_cut", elements: [pieces], compte: function () {
@@ -21,6 +22,9 @@ function initOnglets() {
         var n = 0;
         lignes.querySelectorAll("input[name$='-id']").forEach(function (i) { if (i.value && !/__prefix__/.test(i.name)) n++; });
         return n;
+    } });
+    if (chrono) onglets.push({ cle: "chrono", titre: "Chronologie", icone: "timeline", elements: [chrono], compte: function () {
+        return chrono.querySelectorAll(".chrono-evt:not(.chrono-aujourdhui):not(.chrono-futur)").length;
     } });
     if (onglets.length < 2) return;
 
