@@ -19,7 +19,8 @@
     function init(racine) {
         if (racine.dataset.pret) return;
         racine.dataset.pret = "1";
-        const editable = racine.dataset.editable === "1";
+        const brouillon = racine.dataset.brouillon === "1"; // article pas encore créé : étapes gardées en mémoire (constructeur de devis)
+        const editable = brouillon || racine.dataset.editable === "1";
         let autres = [];
         try { autres = JSON.parse(racine.dataset.autres || "[]"); } catch (e) { /* aucune autre pièce */ }
         let etat = null, modifie = false, lignes = [];
@@ -45,6 +46,14 @@
 
         async function action(corps) {
             erreur("");
+            if (brouillon) {
+                if (corps.action === "type") {
+                    const t = etat.types.find((x) => String(x.id) === String(corps.type));
+                    (t ? t.lignes : []).forEach((l) => lignes.push({ id: null, origine: "manuelle", ...l }));
+                    modifie = true; dessiner();
+                }
+                return;
+            }
             try { charger(await appeler(corps)); } catch (e) { erreur(e.message); }
         }
 
@@ -98,8 +107,8 @@
         function dessiner() {
             racine.replaceChildren();
             const n = lignes.length;
-            const resume = `${n} étape${n > 1 ? "s" : ""} · ${nombre(etat.total_minutes_par_piece)} min/pièce · ${euros(etat.total_cout_par_piece)}/pièce`;
-            const details = el("details", { class: "ge", open: modifie || n > 1 }, el("summary", {}, el("b", {}, "Opérations de fabrication"), el("span", { class: "ge-resume" }, " · " + resume)));
+            const resume = brouillon ? `${n} étape${n > 1 ? "s" : ""}` : `${n} étape${n > 1 ? "s" : ""} · ${nombre(etat.total_minutes_par_piece)} min/pièce · ${euros(etat.total_cout_par_piece)}/pièce`;
+            const details = el("details", { class: "ge", open: brouillon || modifie || n > 1 }, el("summary", {}, el("b", {}, "Opérations de fabrication"), el("span", { class: "ge-resume" }, " · " + resume)));
             if (n) {
                 details.append(el("table", { class: "ge-table" },
                     el("thead", {}, el("tr", {}, ["#", "Opération / poste", "Réglage (min)", "Par pièce (min)", "Coût / pièce", "Origine", ""].map((t) => el("th", {}, t)))),
@@ -137,22 +146,33 @@
                     });
                     barre.append(choix);
                 }
-                const enregistrer = el("button", { type: "button", class: "ge-enregistrer" }, "Enregistrer les opérations");
-                enregistrer.addEventListener("click", () => action({ action: "enregistrer", etapes: lignes.map((l) => ({ id: l.id, poste: l.poste, temps_fixe: l.temps_fixe, temps_variable: l.temps_variable, cout_forfaitaire: l.cout_forfaitaire })) }));
-                etiquetteModif = el("span", { class: "ge-modifie", hidden: !modifie }, "Modifications non enregistrées — ");
-                barre.append(el("span", { class: "ge-droite" }, etiquetteModif, enregistrer));
+                const enregistrer = brouillon ? null : el("button", { type: "button", class: "ge-enregistrer" }, "Enregistrer les opérations");
+                if (enregistrer) enregistrer.addEventListener("click", () => action({ action: "enregistrer", etapes: lignes.map((l) => ({ id: l.id, poste: l.poste, temps_fixe: l.temps_fixe, temps_variable: l.temps_variable, cout_forfaitaire: l.cout_forfaitaire })) }));
+                if (enregistrer) {
+                    etiquetteModif = el("span", { class: "ge-modifie", hidden: !modifie }, "Modifications non enregistrées — ");
+                    barre.append(el("span", { class: "ge-droite" }, etiquetteModif, enregistrer));
+                }
                 details.append(barre);
             }
-            details.append(el("p", { class: "ge-note" }, "Ces opérations font partie de la gamme de l'article " + (racine.dataset.libelle || "") + " : elles seront reprises dans les prochains devis de cette pièce. Les devis déjà établis gardent leurs anciens temps (historique par date)."));
+            if (!brouillon) details.append(el("p", { class: "ge-note" }, "Ces opérations font partie de la gamme de l'article " + (racine.dataset.libelle || "") + " : elles seront reprises dans les prochains devis de cette pièce. Les devis déjà établis gardent leurs anciens temps (historique par date)."));
             racine.append(details);
         }
 
         racine.addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target.tagName === "INPUT") { e.preventDefault(); e.target.blur(); } });
-        racine.recharger = () => { if (!modifie) action(null); };
-        appeler(null).then(charger).catch((e) => racine.replaceChildren(el("p", { class: "ge-aide" }, "Opérations indisponibles : " + e.message)));
+        racine.recharger = () => { if (!brouillon && !modifie) action(null); };
+        // Constructeur : les étapes saisies sont lues à la création de l'article (même format que l'API du constructeur).
+        racine.etapesBrouillon = () => lignes.map((l, i) => {
+            const nb = (x) => { const v = parseFloat(String(x ?? "").replace(",", ".")); return Number.isFinite(v) ? v : null; };
+            const horaire = l.mode === "horaire";
+            return { poste: l.poste, ordre: i + 1, temps_fixe: horaire ? nb(l.temps_fixe) || 0 : null, temps_variable: horaire ? nb(l.temps_variable) || 0 : null, cout_forfaitaire: horaire ? null : nb(l.cout_forfaitaire), date_debut: racine.dataset.dateDebut || null };
+        });
+        const charge = brouillon
+            ? fetch(racine.dataset.urlOptions, { credentials: "same-origin" }).then((r) => r.json().then((j) => { if (!r.ok) throw new Error(j.detail || "Erreur " + r.status); return { ...j, etapes: [], total_minutes_par_piece: 0, total_cout_par_piece: 0 }; }))
+            : appeler(null);
+        charge.then((d) => { charger(d); if (brouillon && d.postes.length) { lignes.push({ id: null, poste: d.postes[0].id, mode: d.postes[0].mode, origine: "manuelle", temps_fixe: null, temps_variable: null, cout_forfaitaire: null }); dessiner(); } }).catch((e) => racine.replaceChildren(el("p", { class: "ge-aide" }, "Opérations indisponibles : " + e.message)));
     }
 
-    function tout() { document.querySelectorAll(".gamme-editeur[data-url]").forEach(init); }
+    function tout() { document.querySelectorAll(".gamme-editeur[data-url], .gamme-editeur[data-url-options]").forEach(init); }
     function demarrer() {
         tout();
         const cartes = document.getElementById("dp-cartes");

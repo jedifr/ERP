@@ -1,7 +1,9 @@
+import datetime
+
 from django.conf import settings
 from django.contrib import admin, messages
 from django.contrib.admin.views.decorators import staff_member_required
-from django.db.models import Count
+from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import path, reverse
 from django.utils.html import escape, format_html
@@ -308,11 +310,31 @@ class ArticleAdmin(ColonnesPersonnalisablesMixin, ExportCsvMixin, ModelAdmin):
         return urls + super().get_urls()
 
 
+class TarifPosteInline(TabularInline):
+    """Tarifs horaires du poste, avec leur période (historique : un ancien devis se recalcule avec les taux d'époque)."""
+
+    model = TarifPoste
+    extra = 0
+    fields = ["cout_horaire", "date_debut", "date_fin"]
+    ordering = ["-date_debut"]
+    verbose_name = "tarif"
+    verbose_name_plural = "Tarifs (coût horaire, du plus récent au plus ancien — laissez la date de fin vide pour le tarif en cours)"
+
+
 @admin.register(PosteTravail)
 class PosteTravailAdmin(ModelAdmin):
-    list_display = ["nom", "type_operation", "mode_calcul", "nombre_machines", "taux_marge_defaut"]
+    list_display = ["nom", "type_operation", "mode_calcul", "nombre_machines", "cout_horaire_actuel", "taux_marge_defaut"]
     list_filter = ["mode_calcul"]
     search_fields = ["nom"]
+    inlines = [TarifPosteInline]
+
+    @admin.display(description="Coût horaire actuel")
+    def cout_horaire_actuel(self, obj):
+        aujourdhui = datetime.date.today()
+        tarif = obj.tarifs.filter(date_debut__lte=aujourdhui).filter(Q(date_fin__isnull=True) | Q(date_fin__gte=aujourdhui)).order_by("-date_debut").first()
+        if tarif is None:
+            return format_html('<span style="color:#b91c1c">aucun tarif</span>') if obj.mode_calcul == PosteTravail.ModeCalcul.HORAIRE else "—"
+        return f"{tarif.cout_horaire} €/h"
 
 
 @admin.register(TarifPoste)

@@ -136,9 +136,8 @@
         <div id="nomenclature-rows" class="space-y-3 mb-2"></div>
         <button type="button" id="add-nomenclature-row" class="text-primary-600 dark:text-primary-500 text-sm mb-6">+ Ajouter un composant</button>
 
-        <h3 class="font-medium mb-2">Gamme (étapes)</h3>
-        <div id="gamme-rows" class="space-y-3 mb-2"></div>
-        <button type="button" id="add-gamme-row" class="text-primary-600 dark:text-primary-500 text-sm mb-6">+ Ajouter une étape</button>
+        <h3 class="font-medium mb-2">Opérations de fabrication (gamme)</h3>
+        <div class="gamme-editeur mb-6" id="gamme-editeur" data-brouillon="1" data-url-options="{% url 'gamme_editeur_options' %}" data-date-debut="{{ devis.date_creation|date:'Y-m-d' }}"></div>
     </div>
 
     <button type="button" id="submit-ligne" class="bg-primary-600 hover:bg-primary-600/80 text-white rounded-default px-4 py-2 font-medium">
@@ -184,48 +183,7 @@
     </div>
 </template>
 
-<template id="template-gamme-row">
-    <div class="gamme-row border border-base-200 dark:border-base-700 rounded-default p-3">
-        <div class="flex justify-between items-start gap-3 mb-2">
-            <div class="grid grid-cols-3 gap-3 grow">
-                <div>
-                    <label class="block text-sm mb-1">Poste<span class="text-red-600">*</span></label>
-                    <select class="select-poste border border-base-200 dark:border-base-700 dark:bg-base-800 rounded-default px-3 py-2 w-full">
-                        <option value="">—</option>
-                        {% for poste in postes %}
-                        <option value="{{ poste.nom }}" data-mode="{{ poste.mode_calcul }}">{{ poste.nom }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-                <div>
-                    <label class="block text-sm mb-1">Ordre<span class="text-red-600">*</span></label>
-                    <input type="number" class="input-ordre border border-base-200 dark:border-base-700 dark:bg-base-800 rounded-default px-3 py-2 w-full" value="1">
-                </div>
-                <div>
-                    <label class="block text-sm mb-1">Date de début</label>
-                    <input type="date" class="input-date-debut border border-base-200 dark:border-base-700 dark:bg-base-800 rounded-default px-3 py-2 w-full">
-                </div>
-            </div>
-            <button type="button" class="remove-row text-red-600 mt-6">✕</button>
-        </div>
-        <div class="grid grid-cols-3 gap-3 champs-horaire hidden">
-            <div>
-                <label class="block text-sm mb-1">Temps fixe (min)</label>
-                <input type="number" step="any" class="input-temps-fixe border border-base-200 dark:border-base-700 dark:bg-base-800 rounded-default px-3 py-2 w-full">
-            </div>
-            <div>
-                <label class="block text-sm mb-1">Temps variable (min/pièce)</label>
-                <input type="number" step="any" class="input-temps-variable border border-base-200 dark:border-base-700 dark:bg-base-800 rounded-default px-3 py-2 w-full">
-            </div>
-        </div>
-        <div class="grid grid-cols-3 gap-3 champs-forfaitaire hidden">
-            <div>
-                <label class="block text-sm mb-1">Coût forfaitaire</label>
-                <input type="number" step="any" class="input-cout-forfaitaire border border-base-200 dark:border-base-700 dark:bg-base-800 rounded-default px-3 py-2 w-full">
-            </div>
-        </div>
-    </div>
-</template>
+
 
 {% csrf_token %}
 <script id="devis-builder-data" type="application/json">{"numero": "{{ devis.numero|escapejs }}", "date_creation": "{{ devis.date_creation|date:'Y-m-d' }}"}</script>

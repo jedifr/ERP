@@ -119,3 +119,58 @@ class GammeEditeurVueTests(TestCase):
     def test_sans_droit_interdit(self):
         self.client.force_login(get_user_model().objects.create_user("lambda-ge", password="pass-mot-de-passe-20", is_staff=True))
         self.assertEqual(self.client.get(self.url).status_code, 403)
+
+
+class PosteTarifsInlineTests(TestCase):
+    def setUp(self):
+        self.client.force_login(get_user_model().objects.create_superuser("adm-pt", "a@x.fr", "pass-mot-de-passe-20"))
+        self.poste = PosteTravail.objects.create(nom="Poste PT", mode_calcul="horaire")
+
+    def test_tarifs_dans_la_fiche_du_poste(self):
+        reponse = self.client.get(reverse("admin:technique_postetravail_change", args=[self.poste.pk]))
+        self.assertContains(reponse, "tarifs-TOTAL_FORMS")
+
+    def test_colonne_cout_horaire_actuel(self):
+        liste = reverse("admin:technique_postetravail_changelist")
+        self.assertContains(self.client.get(liste), "aucun tarif")
+        TarifPoste.objects.create(poste=self.poste, cout_horaire=72, date_debut=datetime.date(2020, 1, 1))
+        self.assertContains(self.client.get(liste), "72")
+
+    def test_poste_forfaitaire_sans_tarif_n_est_pas_signale(self):
+        from comptes.a_completer import _postes_sans_tarif
+
+        PosteTravail.objects.create(nom="Sous-traitance PT", mode_calcul="forfaitaire")
+        total, elements = _postes_sans_tarif()
+        self.assertEqual([e[0] for e in elements], ["Poste PT"])
+
+
+class ConstructeurEditeurTests(TestCase):
+    def test_page_constructeur_utilise_l_editeur_partage(self):
+        from chiffrage.models import Devis
+        from commercial.models import Tiers
+
+        self.client.force_login(get_user_model().objects.create_superuser("adm-cb", "a@x.fr", "pass-mot-de-passe-20"))
+        client = Tiers.objects.create(code="CLI-CB", raison_sociale="Client CB")
+        devis = Devis.objects.create(numero="DEV-CB-1", client=client, date_creation=datetime.date(2026, 10, 1))
+        reponse = self.client.get(reverse("admin:chiffrage_devis_builder", args=[devis.pk]))
+        self.assertContains(reponse, 'id="gamme-editeur"')
+        self.assertContains(reponse, reverse("gamme_editeur_options"))
+        self.assertNotContains(reponse, "template-gamme-row")
+        options = self.client.get(reverse("gamme_editeur_options")).json()
+        self.assertIn("postes", options)
+        self.assertIn("types", options)
+
+    def test_creation_d_article_avec_temps_a_zero(self):
+        """Un temps de réglage à 0 est une valeur valide (et non « absente ») pour un poste horaire."""
+        from chiffrage.builder_views import _creer_article_depuis_payload
+
+        poste = PosteTravail.objects.create(nom="Poste CB", mode_calcul="horaire")
+        TarifPoste.objects.create(poste=poste, cout_horaire=50, date_debut=datetime.date(2020, 1, 1))
+        composant = Article.objects.create(reference="MAT-CB", nature=Article.Nature.MATIERE_PREMIERE, taux_marge_defaut=10, cout_unitaire=5, unite_cout="piece")
+        article = _creer_article_depuis_payload({
+            "reference": "NEW-CB", "taux_marge_defaut": 20,
+            "composants": [{"article_composant": composant.pk, "quantite": 1}],
+            "etapes": [{"poste": poste.pk, "ordre": 1, "temps_fixe": 0, "temps_variable": 2.5, "date_debut": "2026-10-01"}],
+        })
+        etape = article.gamme_etapes.get()
+        self.assertEqual((etape.temps_fixe, etape.temps_variable), (0, 2.5))

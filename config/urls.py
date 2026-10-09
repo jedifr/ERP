@@ -24,12 +24,13 @@ from comptes.colonnes import mes_colonnes
 from comptes.navigation import navigation_view
 from comptes.parametrage import parametrage_view
 from comptes.views import media_protege
-from technique.gamme_editeur import gamme_editeur_view
+from technique.gamme_editeur import gamme_editeur_options_view, gamme_editeur_view
 
 urlpatterns = [
     path("admin/mes-colonnes/", admin.site.admin_view(mes_colonnes), name="mes_colonnes"),
     path("admin/navigation/<str:app>/<str:modele>/", admin.site.admin_view(navigation_view), name="navigation_documents"),
     path("admin/a-completer/", admin.site.admin_view(a_completer_view), name="a_completer"),
+    path("admin/gamme-editeur-options/", admin.site.admin_view(gamme_editeur_options_view), name="gamme_editeur_options"),
     path("admin/gamme-editeur/<str:reference>/", admin.site.admin_view(gamme_editeur_view), name="gamme_editeur"),
     path("admin/parametrage/", admin.site.admin_view(parametrage_view), name="parametrage"),
     path("admin/", admin.site.urls),

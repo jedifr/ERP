@@ -242,44 +242,6 @@
         document.getElementById("add-nomenclature-row").addEventListener("click", addNomenclatureRow);
     }
 
-    // ---- Gamme rows ----
-    const gammeRowsEl = document.getElementById("gamme-rows");
-    const templateGamme = document.getElementById("template-gamme-row");
-
-    function addGammeRow() {
-        const fragment = templateGamme.content.cloneNode(true);
-        const row = fragment.querySelector(".gamme-row");
-        gammeRowsEl.appendChild(fragment);
-
-        const ordreInput = row.querySelector(".input-ordre");
-        ordreInput.value = gammeRowsEl.children.length;
-
-        // Par défaut la date de début de l'étape, c'est la date de création
-        // du DEVIS — pas la date du jour : la validité d'une étape de gamme
-        // est vérifiée par rapport à devis.date_creation (gamme_active(),
-        // chiffrage/moteur.py), donc une étape datée d'aujourd'hui sur un
-        // devis créé à une date antérieure serait silencieusement exclue du
-        // calcul (aucune erreur, juste un prix d'opérations à 0).
-        const dateDebut = row.querySelector(".input-date-debut");
-        dateDebut.value = DEVIS_DATE_CREATION || new Date().toISOString().slice(0, 10);
-
-        const selectPoste = row.querySelector(".select-poste");
-        const champsHoraire = row.querySelector(".champs-horaire");
-        const champsForfaitaire = row.querySelector(".champs-forfaitaire");
-        selectPoste.addEventListener("change", () => {
-            const option = selectPoste.selectedOptions[0];
-            const mode = option ? option.dataset.mode : "";
-            champsHoraire.classList.toggle("hidden", mode !== "horaire");
-            champsForfaitaire.classList.toggle("hidden", mode !== "forfaitaire");
-        });
-
-        row.querySelector(".remove-row").addEventListener("click", () => row.remove());
-    }
-
-    if (document.getElementById("add-gamme-row")) {
-        document.getElementById("add-gamme-row").addEventListener("click", addGammeRow);
-    }
-
     // ---- Soumission ----
     function showMessage(text, isError) {
         const el = document.getElementById("form-message");
@@ -302,18 +264,10 @@
     }
 
     function collectGamme() {
-        const etapes = [];
-        gammeRowsEl.querySelectorAll(".gamme-row").forEach((row) => {
-            etapes.push({
-                poste: row.querySelector(".select-poste").value,
-                ordre: parseInt(row.querySelector(".input-ordre").value, 10) || null,
-                temps_fixe: parseFloat(row.querySelector(".input-temps-fixe").value) || null,
-                temps_variable: parseFloat(row.querySelector(".input-temps-variable").value) || null,
-                cout_forfaitaire: parseFloat(row.querySelector(".input-cout-forfaitaire").value) || null,
-                date_debut: row.querySelector(".input-date-debut").value || null,
-            });
-        });
-        return etapes;
+        // Les étapes sont saisies avec l'éditeur d'opérations partagé (comptes/gamme_editeur.js), en mode brouillon : la date de début
+        // est celle du DEVIS (une étape datée d'aujourd'hui sur un devis plus ancien serait exclue du calcul).
+        const editeur = document.getElementById("gamme-editeur");
+        return editeur && editeur.etapesBrouillon ? editeur.etapesBrouillon() : [];
     }
 
     const submitBtn = document.getElementById("submit-ligne");
@@ -375,8 +329,5 @@
     // Une ligne de chaque par défaut pour démarrer
     if (nomenclatureRowsEl) {
         addNomenclatureRow();
-    }
-    if (gammeRowsEl) {
-        addGammeRow();
     }
 })();

@@ -1,18 +1,7 @@
 # Tâches à faire plus tard
 
-## Regrouper « Tarifs de poste » dans « Postes de travail »
+Aucune tâche en attente.
 
-**Demande** : ne plus avoir deux écrans séparés ; tout saisir depuis la fiche du poste de travail.
-
-**Pourquoi c'est séparé aujourd'hui** : `technique.TarifPoste` est une table à part car un poste a *plusieurs* tarifs dans le temps (coût horaire avec date de début / date de fin, `DateRangeHistoriqueMixin`). Cela permet de recalculer un ancien devis avec les taux de l'époque.
-
-**Faisable sans toucher aux données** : on garde le modèle et l'historique, on change seulement l'écran.
-- Ajouter un inline tabulaire « Tarifs » (coût horaire, date de début, date de fin) dans la fiche `PosteTravailAdmin` (`technique/admin.py`), en lecture du tarif en cours bien visible en haut.
-- Afficher dans la liste des postes le tarif en cours (colonne « Coût horaire actuel »).
-- Retirer « Tarifs de poste » de la page Paramétrage (carte « Atelier ») et garder l'écran `TarifPosteAdmin` accessible seulement par l'URL, ou le supprimer de l'admin.
-- Contrôle « Postes de travail sans tarif » du centre « À compléter » : faire pointer chaque élément sur la fiche du poste (onglet tarifs).
-- Vérifier que la validation de non-chevauchement des périodes (mixin d'historique) fonctionne dans l'inline ; ajouter des tests.
-
-## Utiliser l'éditeur d'opérations dans le constructeur de devis
-
-L'éditeur (`technique/gamme_editeur.py`, `comptes/static/comptes/gamme_editeur.js`) travaille sur un article existant. Le constructeur crée l'article et sa gamme en une seule fois (`chiffrage/builder.py`, `creer_article_fabrique`) : deux façons de l'intégrer — (1) remplacer sa saisie d'étapes par l'éditeur après création de l'article, ou (2) ajouter un mode « brouillon » à l'éditeur (étapes en mémoire, envoyées à la création). Ajouter aussi les gammes types au constructeur.
+## Fait
+- Tarifs de poste regroupés dans la fiche du poste de travail (tableau « Tarifs » + colonne « Coût horaire actuel ») ; plus d'entrée séparée dans le Paramétrage.
+- Éditeur d'opérations de fabrication (gamme de l'article, gammes types) utilisé dans la fiche devis **et** dans le constructeur de devis (mode brouillon : étapes gardées en mémoire jusqu'à la création de l'article).

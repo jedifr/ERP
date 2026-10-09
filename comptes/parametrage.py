@@ -20,7 +20,7 @@ CARTES = [
         ("Profils d'import DXF", "decoupe", "profilimportdecoupe"),
     ], "formes"),
     ("atelier", "Atelier", "precision_manufacturing", "Postes de travail, tarifs de poste, gammes et gammes types", [
-        ("Postes de travail", "technique", "postetravail"), ("Tarifs de poste", "technique", "tarifposte"), ("Gammes", "technique", "gamme"), ("Gammes types", "technique", "gammetype"),
+        ("Postes de travail et tarifs", "technique", "postetravail"), ("Gammes", "technique", "gamme"), ("Gammes types", "technique", "gammetype"),
     ], "atelier"),
     ("articles", "Articles et matières", "category", "Matières, familles, nomenclatures, fournisseurs et tarifs d'achat", [
         ("Matières", "technique", "matiere"), ("Familles de matière", "technique", "famillematiere"), ("Nomenclatures", "technique", "nomenclature"),
@@ -91,7 +91,7 @@ def _etat_formes():
 def _etat_atelier():
     from technique.models import PosteTravail
 
-    sans_tarif = PosteTravail.objects.filter(tarifs__isnull=True).count()
+    sans_tarif = PosteTravail.objects.filter(mode_calcul=PosteTravail.ModeCalcul.HORAIRE, tarifs__isnull=True).count()
     return (f"{sans_tarif} poste{'s' if sans_tarif > 1 else ''} sans tarif", "ko") if sans_tarif else ("à jour", "ok")
 
 

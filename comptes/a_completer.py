@@ -54,7 +54,7 @@ def _coupe_sans_poste():
 def _postes_sans_tarif():
     from technique.models import PosteTravail
 
-    return _liens(PosteTravail.objects.filter(tarifs__isnull=True), "admin:technique_postetravail_change")
+    return _liens(PosteTravail.objects.filter(mode_calcul=PosteTravail.ModeCalcul.HORAIRE, tarifs__isnull=True), "admin:technique_postetravail_change")
 
 
 def _matieres_sans_cout():

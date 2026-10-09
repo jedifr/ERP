@@ -1236,9 +1236,9 @@ class DevisBuilderViewTests(TestCase):
         response = self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/constructeur/")
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Constructeur de devis")
-        # Les temps de gamme (temps_fixe/temps_variable) s'expriment en minutes.
-        self.assertContains(response, "Temps fixe (min)")
-        self.assertContains(response, "Temps variable (min/pièce)")
+        # Les étapes de gamme se saisissent avec l'éditeur d'opérations partagé (colonnes « Réglage (min) » / « Par pièce (min) » :
+        # les temps s'expriment en minutes, voir comptes/static/comptes/gamme_editeur.js).
+        self.assertContains(response, 'id="gamme-editeur"')
         # date_creation du devis exposée au JS (voir devis_builder.js :
         # les nouvelles étapes de gamme doivent par défaut être datées de
         # la date de création du devis, pas du jour — régression :

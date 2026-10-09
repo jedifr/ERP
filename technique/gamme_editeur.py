@@ -208,3 +208,19 @@ def gamme_editeur_view(request, reference):
     except ErreurGamme as exc:
         return JsonResponse({"detail": str(exc)}, status=400)
     return JsonResponse(etat(article, donnees.get("quantite") or 1))
+
+
+@require_http_methods(["GET"])
+def gamme_editeur_options_view(request):
+    """Postes et gammes types (avec leurs étapes) pour l'éditeur en mode brouillon (constructeur de devis : article pas encore créé)."""
+    if not request.user.has_perm("technique.view_gamme"):
+        raise PermissionDenied
+    return JsonResponse({
+        "postes": [{"id": p.pk, "nom": p.nom, "mode": p.mode_calcul} for p in PosteTravail.objects.order_by("nom")],
+        "types": [{
+            "id": t.pk, "nom": t.nom, "description": t.description, "etapes": t.etapes.count(),
+            "lignes": [{"poste": e.poste_id, "mode": e.poste.mode_calcul, "temps_fixe": e.temps_fixe, "temps_variable": e.temps_variable,
+                        "cout_forfaitaire": float(e.cout_forfaitaire) if e.cout_forfaitaire is not None else None}
+                       for e in t.etapes.select_related("poste").order_by("ordre")],
+        } for t in GammeType.objects.order_by("nom")],
+    })

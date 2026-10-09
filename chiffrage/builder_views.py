@@ -150,9 +150,9 @@ def _creer_article_depuis_payload(data):
             {
                 "poste": poste,
                 "ordre": e.get("ordre"),
-                "temps_fixe": e.get("temps_fixe") or None,
-                "temps_variable": e.get("temps_variable") or None,
-                "cout_forfaitaire": e.get("cout_forfaitaire") or None,
+                "temps_fixe": e.get("temps_fixe"),
+                "temps_variable": e.get("temps_variable"),
+                "cout_forfaitaire": e.get("cout_forfaitaire"),
                 "date_debut": datetime.date.fromisoformat(date_debut),
             }
         )
