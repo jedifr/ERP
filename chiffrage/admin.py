@@ -164,7 +164,9 @@ class DevisLigneInline(TabularInline):
         return format_html('<span title="{}">{} €</span>', obj.note_reglage, obj.prix_vente_reglage)
 
     def has_add_permission(self, request, obj=None):
-        return not devis_verrouille(obj) and super().has_add_permission(request, obj)
+        # Les lignes s'ajoutent par l'assistant « Ajouter une ligne » (onglet Lignes du devis) ou depuis les pièces à découper : ce tableau
+        # sert à modifier ou retirer les lignes existantes.
+        return False
 
     def has_change_permission(self, request, obj=None):
         return not devis_verrouille(obj) and super().has_change_permission(request, obj)
@@ -588,15 +590,6 @@ class DevisAdmin(DateDuJourMixin, ChronologieMixin, PucesMixin, PiecesDevisMixin
             comparaison["total_avant"],
             f"{total_apres} €" if total_apres is not None else "à chiffrer",
         )
-
-    def response_add(self, request, obj, post_url_continue=None):
-        # Bouton "Enregistrer et ouvrir le constructeur" du formulaire d'ajout :
-        # le devis (et ses lignes déjà saisies dans l'inline) vient d'être
-        # enregistré normalement par la vue d'admin ; on redirige simplement
-        # vers le constructeur au lieu de la liste/fiche par défaut.
-        if "_construire" in request.POST:
-            return HttpResponseRedirect(reverse("admin:chiffrage_devis_builder", args=[obj.pk]))
-        return super().response_add(request, obj, post_url_continue)
 
     def get_urls(self):
         urls = [

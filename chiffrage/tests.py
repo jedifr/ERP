@@ -1232,24 +1232,39 @@ class DevisBuilderViewTests(TestCase):
             statut=Devis.Statut.BROUILLON,
         )
 
-    def test_get_affiche_la_page(self):
+    def test_get_redirige_vers_l_onglet_lignes_de_la_fiche(self):
         response = self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/constructeur/")
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Constructeur de devis")
-        # Les étapes de gamme se saisissent avec l'éditeur d'opérations partagé (colonnes « Réglage (min) » / « Par pièce (min) » :
-        # les temps s'expriment en minutes, voir comptes/static/comptes/gamme_editeur.js).
-        self.assertContains(response, 'id="gamme-editeur"')
-        # date_creation du devis exposée au JS (voir devis_builder.js :
-        # les nouvelles étapes de gamme doivent par défaut être datées de
-        # la date de création du devis, pas du jour — régression :
-        # une étape datée d'aujourd'hui sur un devis créé à une date
-        # antérieure était silencieusement exclue du calcul des opérations).
-        self.assertContains(response, '"date_creation": "2026-01-01"')
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, f"/admin/chiffrage/devis/{self.devis.pk}/change/#onglet=lignes")
 
-    def test_lien_vers_la_fiche_article_sur_chaque_ligne(self):
-        ligne = DevisLigne.objects.create(devis=self.devis, article=self.composant, quantite=1)
-        response = self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/constructeur/")
-        self.assertContains(response, f"/admin/technique/article/{ligne.article.pk}/change/")
+    def test_la_fiche_porte_l_assistant_ajouter_une_ligne(self):
+        response = self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/change/")
+        self.assertContains(response, 'id="lignes-constructeur"')
+        self.assertContains(response, 'id="gamme-editeur"')  # opérations : éditeur partagé
+        self.assertContains(response, "Ajouter une ligne")
+        # date_creation du devis exposée au JS (devis_builder.js) : les nouvelles étapes de gamme sont datées de la date de création du
+        # DEVIS, pas du jour — sinon une étape plus récente que le devis serait exclue du calcul (prix d'opérations à 0).
+        self.assertContains(response, '"date_creation": "2026-01-01"')
+        self.devis.statut = Devis.Statut.VALIDE
+        self.devis.save()
+        self.assertNotContains(self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/change/"), 'id="lignes-constructeur"')
+
+    def test_apercu_ne_cree_rien(self):
+        payload = {
+            "quantite": 3, "apercu": True,
+            "nouvel_article": {
+                "reference": "PIECE-APERCU", "taux_marge_defaut": 10,
+                "composants": [{"article_composant": "VIS-VIEW", "quantite": 5}],
+                "etapes": [{"poste": "Poste-View", "ordre": 1, "cout_forfaitaire": 50, "date_debut": "2026-01-01"}],
+            },
+        }
+        reponse = self.client.post(f"/admin/chiffrage/devis/{self.devis.pk}/constructeur/", data=payload, content_type="application/json")
+        self.assertEqual(reponse.status_code, 200, reponse.content)
+        donnees = reponse.json()
+        self.assertTrue(donnees["apercu"])
+        self.assertIsNotNone(donnees["prix_vente_total"])
+        self.assertFalse(Article.objects.filter(pk="PIECE-APERCU").exists())
+        self.assertEqual(self.devis.lignes.count(), 0)
 
     def test_post_nouvel_article_cree_tout(self):
         payload = {
@@ -2251,48 +2266,30 @@ class AjoutDevisOuvrirConstructeurTests(TestCase):
 
     def _formulaire_de_base(self):
         return {
-            "numero": "DEV-CONSTRUIRE-01",
-            "client": self.client_tiers.pk,
-            "date_creation": "2026-01-01",
-            "statut": Devis.Statut.BROUILLON,
-            "taux_marge_globale": "",
-            "adresse_facturation": "",
-            "adresse_livraison": "",
-            "contact": "",
-            "lignes-TOTAL_FORMS": "1",
-            "lignes-INITIAL_FORMS": "0",
-            "lignes-MIN_NUM_FORMS": "0",
-            "lignes-MAX_NUM_FORMS": "1000",
-            "lignes-0-article": self.article.pk,
-            "lignes-0-quantite": "4",
-            "lignes-0-taux_marge_matiere_applique": "",
-            "lignes-0-prix_vente_unitaire_force": "",
-            "lignes-0-taux_tva": "",
-            "lignes-0-id": "",
-            "lignes-0-devis": "",
-            "_construire": "Enregistrer et ouvrir le constructeur",
+            "numero": "DEV-CONSTRUIRE-01", "client": self.client_tiers.pk, "date_creation": "2026-01-01", "statut": Devis.Statut.BROUILLON,
+            "taux_marge_globale": "", "adresse_facturation": "", "adresse_livraison": "", "contact": "",
+            "lignes-TOTAL_FORMS": "0", "lignes-INITIAL_FORMS": "0", "lignes-MIN_NUM_FORMS": "0", "lignes-MAX_NUM_FORMS": "1000",
         }
 
-    def test_redirige_vers_le_constructeur_apres_enregistrement(self):
-        response = self.client.post(
-            "/admin/chiffrage/devis/add/", data=self._formulaire_de_base(), follow=False
-        )
-        self.assertEqual(response.status_code, 302, getattr(response, "context", None))
-        self.assertEqual(response.url, "/admin/chiffrage/devis/DEV-CONSTRUIRE-01/constructeur/")
-
-        devis = Devis.objects.get(pk="DEV-CONSTRUIRE-01")
-        self.assertEqual(devis.lignes.count(), 1)
-        ligne = devis.lignes.first()
-        self.assertEqual(ligne.article, self.article)
-        self.assertEqual(ligne.quantite, 4)
-
-    def test_sans_bouton_construire_comportement_par_defaut_inchange(self):
+    def test_creation_puis_fiche_avec_les_onglets(self):
         data = self._formulaire_de_base()
-        del data["_construire"]
-        data["_save"] = "Enregistrer"
+        data["_continue"] = "1"
         response = self.client.post("/admin/chiffrage/devis/add/", data=data, follow=False)
         self.assertEqual(response.status_code, 302)
-        self.assertNotEqual(response.url, "/admin/chiffrage/devis/DEV-CONSTRUIRE-01/constructeur/")
+        self.assertEqual(response.url, "/admin/chiffrage/devis/DEV-CONSTRUIRE-01/change/")
+        self.assertContains(self.client.get(response.url), 'id="lignes-constructeur"')
+
+    def test_formulaire_d_ajout_sans_bouton_constructeur_et_marqueur_nouveau(self):
+        page = self.client.get("/admin/chiffrage/devis/add/")
+        self.assertNotContains(page, "_construire")
+        self.assertContains(page, 'id="devis-nouveau"')
+
+    def test_le_tableau_ne_sert_plus_a_ajouter_des_lignes(self):
+        """Les lignes s'ajoutent par l'assistant ; le tableau (inline) ne crée plus de ligne."""
+        data = self._formulaire_de_base()
+        data.update({"lignes-TOTAL_FORMS": "1", "lignes-0-article": self.article.pk, "lignes-0-quantite": "4", "lignes-0-id": "", "lignes-0-devis": "", "_save": "1"})
+        self.client.post("/admin/chiffrage/devis/add/", data=data, follow=False)
+        self.assertEqual(Devis.objects.get(pk="DEV-CONSTRUIRE-01").lignes.count(), 0)
 
 
 class ConvertirEnCommandeViewTests(TestCase):
@@ -3745,18 +3742,24 @@ class ValidationDuDevisTests(_FixtureModuleA, TestCase):
     """A-MG-01 : on ne valide pas n'importe quel devis — vide, non chiffrable ou
     vendu sous le coût sans habilitation — et seul un utilisateur habilité valide."""
 
-    def _formulaire(self, **lignes):
+    def _devis_brouillon(self, **champs_ligne):
+        """Devis en brouillon avec une ligne (les lignes ne se créent plus par le tableau de la fiche : voir l'assistant « Ajouter une ligne »)."""
+        devis = Devis.objects.create(numero="DEV-VALID-01", client=self.tiers, date_creation=datetime.date(2026, 1, 1))
+        ligne = DevisLigne.objects.create(devis=devis, article=self.article, quantite=3, **champs_ligne)
+        return devis, ligne
+
+    def _formulaire(self, ligne, **champs):
         data = {
             "numero": "DEV-VALID-01", "client": self.tiers.pk, "date_creation": "2026-01-01",
             "statut": Devis.Statut.VALIDE, "taux_marge_globale": "", "adresse_facturation": "",
             "adresse_livraison": "", "contact": "",
-            "lignes-TOTAL_FORMS": "1", "lignes-INITIAL_FORMS": "0",
+            "lignes-TOTAL_FORMS": "1", "lignes-INITIAL_FORMS": "1",
             "lignes-MIN_NUM_FORMS": "0", "lignes-MAX_NUM_FORMS": "1000",
             "lignes-0-article": self.article.pk, "lignes-0-quantite": "3",
             "lignes-0-taux_marge_matiere_applique": "", "lignes-0-prix_vente_unitaire_force": "",
-            "lignes-0-taux_tva": "", "lignes-0-id": "", "lignes-0-devis": "", "_save": "Enregistrer",
+            "lignes-0-taux_tva": "", "lignes-0-id": ligne.pk, "lignes-0-devis": ligne.devis_id, "_save": "Enregistrer",
         }
-        data.update({f"lignes-0-{cle}": valeur for cle, valeur in lignes.items()})
+        data.update({f"lignes-0-{cle}": valeur for cle, valeur in champs.items()})
         return data
 
     def _utilisateur_habilite(self, *, sous_cout=False):
@@ -3774,15 +3777,17 @@ class ValidationDuDevisTests(_FixtureModuleA, TestCase):
         return utilisateur
 
     def test_devis_normal_valide_et_chiffre_automatiquement(self):
-        response = self.client.post("/admin/chiffrage/devis/add/", self._formulaire(), follow=True)
-        devis = Devis.objects.get(pk="DEV-VALID-01")
+        devis, ligne = self._devis_brouillon()
+        response = self.client.post(f"/admin/chiffrage/devis/{devis.pk}/change/", self._formulaire(ligne), follow=True)
+        devis.refresh_from_db()
         self.assertEqual(devis.statut, Devis.Statut.VALIDE, response.content.decode()[:0])
         self.assertIsNotNone(devis.lignes.get().prix_vente_matiere)
 
     def test_devis_vendu_sous_le_cout_refuse_sans_permission(self):
         self.client.force_login(self._utilisateur_habilite())
+        devis, ligne = self._devis_brouillon()
         response = self.client.post(
-            "/admin/chiffrage/devis/add/", self._formulaire(prix_vente_unitaire_force="1"), follow=True
+            f"/admin/chiffrage/devis/{devis.pk}/change/", self._formulaire(ligne, prix_vente_unitaire_force="1"), follow=True
         )
         devis = Devis.objects.get(pk="DEV-VALID-01")
         self.assertEqual(devis.statut, Devis.Statut.BROUILLON)
@@ -3790,7 +3795,8 @@ class ValidationDuDevisTests(_FixtureModuleA, TestCase):
 
     def test_devis_vendu_sous_le_cout_accepte_avec_permission(self):
         self.client.force_login(self._utilisateur_habilite(sous_cout=True))
-        self.client.post("/admin/chiffrage/devis/add/", self._formulaire(prix_vente_unitaire_force="1"), follow=True)
+        devis, ligne = self._devis_brouillon()
+        self.client.post(f"/admin/chiffrage/devis/{devis.pk}/change/", self._formulaire(ligne, prix_vente_unitaire_force="1"), follow=True)
         self.assertEqual(Devis.objects.get(pk="DEV-VALID-01").statut, Devis.Statut.VALIDE)
 
     def test_utilisateur_sans_permission_de_validation_ne_voit_pas_le_statut(self):
@@ -3817,7 +3823,8 @@ class ValidationDuDevisTests(_FixtureModuleA, TestCase):
             )
         )
         self.client.force_login(simple)
-        self.client.post("/admin/chiffrage/devis/add/", self._formulaire(), follow=True)
+        devis, ligne = self._devis_brouillon()
+        self.client.post(f"/admin/chiffrage/devis/{devis.pk}/change/", self._formulaire(ligne), follow=True)
         self.assertEqual(Devis.objects.get(pk="DEV-VALID-01").statut, Devis.Statut.BROUILLON)
 
     def test_devis_sans_ligne_ne_peut_pas_etre_valide(self):

@@ -64,6 +64,10 @@ if [ -f "${PROJECT_DIR}/.env" ]; then
 else
     echo "!! Aucun .env existant trouvé : à configurer dans ${PROJECT_DIR} après la mise à jour."
 fi
+# Réglages de la sauvegarde (copie externe, chiffrement, alertes) : conservés comme le .env.
+if [ -f "${PROJECT_DIR}/sauvegarde.conf" ]; then
+    cp "${PROJECT_DIR}/sauvegarde.conf" "${NEW_DIR}/sauvegarde.conf"
+fi
 
 echo "==> Bascule vers la nouvelle version..."
 rm -rf "$OLD_DIR"

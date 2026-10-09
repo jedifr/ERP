@@ -1,0 +1,15 @@
+{% comment %}Lignes dépliables de l'onglet « Lignes du devis » : nomenclature et opérations de chaque article fabriqué (modifiables : elles appartiennent à l'article).{% endcomment %}
+{% if lignes_detail %}
+<section class="lignes-detail" id="lignes-detail" aria-label="Détail des lignes fabriquées">
+  <h2 class="chrono-titre">Nomenclature et opérations des articles fabriqués</h2>
+  {% for l in lignes_detail %}
+  <details>
+    <summary>{{ l.article_id }}{% if l.article.libelle %} — {{ l.article.libelle }}{% endif %} × {{ l.quantite|floatformat:"-2" }}</summary>
+    <div class="ge-cols">
+      <div class="nomenclature-editeur" data-url="{% url 'nomenclature_editeur' l.article_id %}" data-editable="{{ editable_detail|yesno:'1,0' }}" data-libelle="{{ l.article_id }}"></div>
+      <div class="gamme-editeur" data-url="{% url 'gamme_editeur' l.article_id %}" data-quantite="{{ l.quantite|floatformat:'0' }}" data-editable="{{ editable_detail|yesno:'1,0' }}" data-libelle="{{ l.article_id }}"></div>
+    </div>
+  </details>
+  {% endfor %}
+</section>
+{% endif %}

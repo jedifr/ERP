@@ -1,89 +1,12 @@
-{% extends "admin/base.html" %}
-{% load i18n static %}
-
-{% block content %}
-<div class="mb-6">
-    <h1 class="text-xl font-semibold text-font-important-light dark:text-font-important-dark">
-        Constructeur de devis — {{ devis.numero }}
-    </h1>
-    <p class="text-font-subtle-light dark:text-font-subtle-dark">
-        Client : {{ devis.client }} · Statut : {{ devis.get_statut_display }}
-        {% if devis.statut != "brouillon" %}
-            <span class="text-red-600 dark:text-red-500 font-medium">— devis non modifiable (pas en brouillon)</span>
-        {% endif %}
-    </p>
-    <p class="mt-2 flex flex-wrap items-center gap-4">
-        <a href="{% url 'admin:chiffrage_devis_change' devis.pk %}"
-           class="text-primary-600 dark:text-primary-500 underline">
-            ← Retour à la fiche devis
-        </a>
-    </p>
-</div>
-
-<div class="bg-white dark:bg-base-900 border border-base-200 dark:border-base-700 rounded-default p-4 mb-6">
-    <h2 class="font-semibold mb-3">Lignes existantes</h2>
-    <table class="w-full text-sm">
-        <thead>
-            <tr class="text-left border-b border-base-200 dark:border-base-700">
-                <th class="py-1 pr-4">Article</th>
-                <th class="py-1 pr-4">Quantité</th>
-                <th class="py-1 pr-4">Coût matière</th>
-                <th class="py-1 pr-4">Prix vente matière (HT)</th>
-                <th class="py-1 pr-4">Opérations</th>
-                <th class="py-1 pr-4">Prix vente opérations (HT)</th>
-                <th class="py-1 pr-4">Prix vente total (HT)</th>
-                <th class="py-1 pr-4">Prix vente unitaire (HT)</th>
-                <th class="py-1 pr-4">Taux TVA</th>
-                <th class="py-1 pr-4">Prix vente total (TTC)</th>
-            </tr>
-        </thead>
-        <tbody id="lignes-existantes">
-            {% for ligne in lignes %}
-            <tr class="border-b border-base-100 dark:border-base-800">
-                <td class="py-1 pr-4">
-                    <a href="{% url 'admin:technique_article_change' ligne.article.pk %}" target="_blank"
-                       class="text-primary-600 dark:text-primary-500 underline">{{ ligne.article }}</a>
-                </td>
-                <td class="py-1 pr-4">{{ ligne.quantite }}</td>
-                <td class="py-1 pr-4">{{ ligne.cout_matiere_calcule|default:"—" }}</td>
-                <td class="py-1 pr-4">{{ ligne.prix_vente_matiere|default:"—" }}</td>
-                <td class="py-1 pr-4">
-                    {% for op in ligne.operations.all %}{{ op.poste }} (#{{ op.ordre }}){% if not forloop.last %}, {% endif %}{% endfor %}
-                </td>
-                <td class="py-1 pr-4">{{ ligne.prix_vente_operations|floatformat:2 }}</td>
-                <td class="py-1 pr-4 font-medium">{{ ligne.prix_vente_total|default:"—" }}</td>
-                <td class="py-1 pr-4">{{ ligne.prix_vente_unitaire|floatformat:2|default:"—" }}</td>
-                <td class="py-1 pr-4">{{ ligne.taux_tva|default:"—" }}</td>
-                <td class="py-1 pr-4 font-medium">{{ ligne.prix_vente_ttc|default:"—" }}</td>
-            </tr>
-            {% empty %}
-            <tr><td colspan="10" class="py-2 text-font-subtle-light dark:text-font-subtle-dark">Aucune ligne pour l'instant.</td></tr>
-            {% endfor %}
-        </tbody>
-        {% if lignes %}
-        <tfoot>
-            <tr class="font-semibold border-t border-base-200 dark:border-base-700">
-                <td colspan="6" class="py-2 text-right pr-4">Total devis HT (matière + opérations)</td>
-                <td class="py-2">{{ devis.montant_total_ht|floatformat:2 }}</td>
-                <td></td>
-                <td></td>
-                <td></td>
-            </tr>
-            <tr class="font-semibold">
-                <td colspan="6" class="py-2 text-right pr-4">Total devis TTC</td>
-                <td></td>
-                <td></td>
-                <td></td>
-                <td class="py-2">{{ devis.montant_total_ttc|floatformat:2 }}</td>
-            </tr>
-        </tfoot>
-        {% endif %}
-    </table>
-</div>
-
-{% if devis.statut == "brouillon" %}
+{% comment %}Assistant « Ajouter une ligne » (ex-constructeur de devis), dans l'onglet « Lignes du devis » : article existant ou nouvel article fabriqué
+(nomenclature + opérations), aperçu du prix, création en une seule transaction. Voir chiffrage/static/chiffrage/devis_builder.js.{% endcomment %}
+{% load static %}
+{% if original and original.statut == "brouillon" %}
+<div id="lignes-constructeur" class="lc">
+  <button type="button" id="ouvrir-constructeur" class="lc-ouvrir">＋ Ajouter une ligne</button>
+  <div id="panneau-constructeur" hidden>
 <div class="bg-white dark:bg-base-900 border border-base-200 dark:border-base-700 rounded-default p-4">
-    <h2 class="font-semibold mb-3">Ajouter une ligne</h2>
+    <h2 class="font-semibold mb-3">Nouvelle ligne de devis</h2>
 
     <div id="form-message" class="hidden mb-3 p-3 rounded-default text-sm"></div>
 
@@ -140,13 +63,20 @@
         <div class="gamme-editeur mb-6" id="gamme-editeur" data-brouillon="1" data-url-options="{% url 'gamme_editeur_options' %}" data-date-debut="{{ devis.date_creation|date:'Y-m-d' }}"></div>
     </div>
 
-    <button type="button" id="submit-ligne" class="bg-primary-600 hover:bg-primary-600/80 text-white rounded-default px-4 py-2 font-medium">
-        Ajouter la ligne
-    </button>
+    <div id="lc-apercu" class="lc-apercu" hidden></div>
+    <div class="flex flex-wrap gap-3 items-center">
+        <button type="button" id="submit-ligne" class="bg-primary-600 hover:bg-primary-600/80 text-white rounded-default px-4 py-2 font-medium">
+            Ajouter la ligne
+        </button>
+        <button type="button" id="apercu-ligne" class="border border-base-300 dark:border-base-600 rounded-default px-4 py-2">Aperçu du prix</button>
+        <button type="button" id="fermer-constructeur" class="text-sm underline">Annuler</button>
+        <span class="text-xs opacity-70">Rien n'est créé tant que vous n'avez pas cliqué sur « Ajouter la ligne » : article, nomenclature, gamme et ligne sont créés ensemble, ou pas du tout.</span>
+    </div>
 </div>
-{% endif %}
 
-<template id="template-nomenclature-row">
+  </div>
+  <script id="devis-builder-data" type="application/json">{"numero": "{{ original.numero|escapejs }}", "date_creation": "{{ original.date_creation|date:'Y-m-d' }}", "url": "{% url 'admin:chiffrage_devis_builder' original.pk %}"}</script>
+  <template id="template-nomenclature-row">
     <div class="nomenclature-row border border-base-200 dark:border-base-700 rounded-default p-3">
         <div class="flex justify-between items-start gap-3 mb-2">
             <div class="relative grow">
@@ -182,10 +112,5 @@
         </div>
     </div>
 </template>
-
-
-
-{% csrf_token %}
-<script id="devis-builder-data" type="application/json">{"numero": "{{ devis.numero|escapejs }}", "date_creation": "{{ devis.date_creation|date:'Y-m-d' }}"}</script>
-<script src="{% static 'chiffrage/devis_builder.js' %}"></script>
-{% endblock %}
+</div>
+{% endif %}

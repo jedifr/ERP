@@ -8,21 +8,52 @@
 # dans <dossier du projet>_sauvegardes/avant_restauration.
 set -e
 
+NOUVEAU_NAS=""
+if [ "$1" = "--nouveau-nas" ]; then
+    NOUVEAU_NAS="oui"   # installation neuve (base vide) : pas de sauvegarde de sécurité de l'état actuel
+    shift
+fi
 if [ -z "$1" ]; then
-    echo "Usage : $0 fichier_base.sql.gz [fichiers.tar.gz]" >&2
+    echo "Usage : $0 [--nouveau-nas] fichier_base.sql.gz[.enc] [fichiers.tar.gz[.enc]]" >&2
+    echo "  --nouveau-nas : première installation sur un NAS neuf (voir docs/SAUVEGARDE.md)" >&2
+    echo "  Les fichiers .enc (copie externe chiffrée) sont déchiffrés avec CLE_CHIFFREMENT de sauvegarde.conf." >&2
     exit 1
 fi
 BASE_SAUVEGARDE="$1"
 MEDIA_SAUVEGARDE="$2"
-[ -f "$BASE_SAUVEGARDE" ] || { echo "!! Fichier introuvable : $BASE_SAUVEGARDE" >&2; exit 1; }
-gzip -t "$BASE_SAUVEGARDE" || { echo "!! Sauvegarde de base corrompue." >&2; exit 1; }
-if [ -n "$MEDIA_SAUVEGARDE" ]; then
-    [ -f "$MEDIA_SAUVEGARDE" ] || { echo "!! Fichier introuvable : $MEDIA_SAUVEGARDE" >&2; exit 1; }
-    gzip -t "$MEDIA_SAUVEGARDE" || { echo "!! Sauvegarde des fichiers corrompue." >&2; exit 1; }
-fi
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$PROJECT_DIR"
+
+TMP_RESTAURATION="$(mktemp -d)"
+nettoyer() { [ -n "$TMP_RESTAURATION" ] && rm -rf "$TMP_RESTAURATION"; return 0; }
+trap nettoyer EXIT
+
+# Déchiffre un fichier .enc (copie externe chiffrée) dans un dossier temporaire et affiche le chemin du fichier en clair.
+dechiffrer() {
+    case "$1" in
+        *.enc)
+            CLE_CHIFFREMENT=""
+            CONF="${ERP_SAUVEGARDE_CONF:-$PROJECT_DIR/sauvegarde.conf}"
+            # shellcheck disable=SC1090
+            [ -f "$CONF" ] && . "$CONF"
+            [ -n "$CLE_CHIFFREMENT" ] && [ -f "$CLE_CHIFFREMENT" ] || { echo "!! Fichier chiffré : indiquez CLE_CHIFFREMENT (fichier de la phrase secrète) dans sauvegarde.conf." >&2; return 1; }
+            clair="$TMP_RESTAURATION/$(basename "${1%.enc}")"
+            openssl enc -d -aes-256-cbc -pbkdf2 -in "$1" -out "$clair" -pass "file:$CLE_CHIFFREMENT" || { echo "!! Déchiffrement impossible (mauvaise phrase secrète ?)." >&2; return 1; }
+            echo "$clair"
+            ;;
+        *) echo "$1" ;;
+    esac
+}
+
+[ -f "$BASE_SAUVEGARDE" ] || { echo "!! Fichier introuvable : $BASE_SAUVEGARDE" >&2; exit 1; }
+BASE_SAUVEGARDE="$(dechiffrer "$BASE_SAUVEGARDE")" || exit 1
+gzip -t "$BASE_SAUVEGARDE" || { echo "!! Sauvegarde de base corrompue." >&2; exit 1; }
+if [ -n "$MEDIA_SAUVEGARDE" ]; then
+    [ -f "$MEDIA_SAUVEGARDE" ] || { echo "!! Fichier introuvable : $MEDIA_SAUVEGARDE" >&2; exit 1; }
+    MEDIA_SAUVEGARDE="$(dechiffrer "$MEDIA_SAUVEGARDE")" || exit 1
+    gzip -t "$MEDIA_SAUVEGARDE" || { echo "!! Sauvegarde des fichiers corrompue." >&2; exit 1; }
+fi
 
 if [ "$(id -u)" = "0" ]; then
     DOCKER_CMD="docker compose"
@@ -47,8 +78,10 @@ printf "Tapez RESTAURER pour continuer : "
 read -r confirmation
 [ "$confirmation" = "RESTAURER" ] || { echo "Annulé."; exit 1; }
 
-echo "==> Sauvegarde de sécurité de l'état actuel..."
-./sauvegarder-nas.sh "${PROJECT_DIR}_sauvegardes/avant_restauration" 5
+if [ -z "$NOUVEAU_NAS" ]; then
+    echo "==> Sauvegarde de sécurité de l'état actuel..."
+    ERP_SANS_COPIE_EXTERNE=1 ./sauvegarder-nas.sh "${PROJECT_DIR}_sauvegardes/avant_restauration" 5
+fi
 
 echo "==> Arrêt de l'application..."
 $DOCKER_CMD stop web

@@ -29,17 +29,8 @@ def devis_builder_view(request, numero):
     if request.method == "POST":
         return _traiter_ajout_ligne(request, devis)
 
-    context = admin.site.each_context(request)
-    context.update(
-        {
-            "title": f"Constructeur de devis — {devis.numero}",
-            "devis": devis,
-            "lignes": devis.lignes.select_related("article").prefetch_related("operations__poste"),
-            "postes": PosteTravail.objects.all().order_by("nom"),
-            "opts": Devis._meta,
-        }
-    )
-    return TemplateResponse(request, "chiffrage/devis_builder.html", context)
+    # Le constructeur est intégré à l'onglet « Lignes du devis » de la fiche : l'ancienne adresse y renvoie.
+    return redirect(reverse("admin:chiffrage_devis_change", args=[devis.pk]) + "#onglet=lignes")
 
 
 @staff_member_required
@@ -82,6 +73,7 @@ def _traiter_ajout_ligne(request, devis):
     # simple avertissement. calculer_ligne() (et non calculer_devis()) pour
     # ne juger que la ligne qu'on est en train d'ajouter, indépendamment de
     # l'état d'éventuelles autres lignes déjà présentes sur ce devis.
+    apercu = bool(payload.get("apercu"))  # calcule le prix puis annule tout : rien n'est créé
     try:
         with transaction.atomic():
             if payload.get("nouvel_article"):
@@ -95,9 +87,20 @@ def _traiter_ajout_ligne(request, devis):
 
             ligne = ajouter_ligne_devis(devis, article, quantite)
             calculer_ligne(devis, ligne)
+            ligne.refresh_from_db()
+            resultat_apercu = {
+                "ok": True, "apercu": True, "article": article.reference, "quantite": ligne.quantite,
+                "cout_matiere_calcule": ligne.cout_matiere_calcule, "prix_vente_matiere": ligne.prix_vente_matiere,
+                "prix_vente_operations": ligne.prix_vente_operations, "prix_vente_total": ligne.prix_vente_total,
+                "prix_vente_unitaire": ligne.prix_vente_unitaire, "prix_vente_ttc": ligne.prix_vente_ttc,
+            } if apercu else None
+            if apercu:
+                transaction.set_rollback(True)
     except ChiffrageError as exc:
         return JsonResponse({"detail": str(exc)}, status=400)
 
+    if apercu:
+        return JsonResponse(resultat_apercu)
     ligne.refresh_from_db()
 
     return JsonResponse(

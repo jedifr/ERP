@@ -109,3 +109,19 @@ div[data-onglet-actif="pieces"], div[data-onglet-actif="lignes"], div[data-ongle
 .chrono-futur .chrono-puce { border: 1px dashed rgb(0 0 0 / .35); background: var(--color-base-0, #fff); }
 .chrono-aujourdhui { border-top: 1px dashed #f59e0b; border-bottom: 1px dashed #f59e0b; margin: .3rem 0; }
 .chrono-aujourdhui .chrono-puce { background: #f59e0b; color: #fff; }
+/* Assistant « Ajouter une ligne » (onglet Lignes du devis) */
+.lc { margin-top: 1rem; }
+.lc-ouvrir { color: #fff; background: #f59e0b; font-weight: 600; padding: .45rem 1.1rem; border-radius: .5rem; margin-bottom: .75rem; }
+.lc-ouvrir.lc-ouvert { background: transparent; color: #b45309; border: 1px dashed #f59e0b; }
+.lc-apercu { display: flex; flex-wrap: wrap; gap: 1.8rem; align-items: center; background: #1c1917; color: #fff; border-radius: .6rem; padding: .7rem 1.1rem; margin: 1rem 0; }
+.lc-apercu[hidden] { display: none; }
+.lc-apercu small { display: block; color: #a8a29e; font-size: .7rem; }
+.lc-apercu b { font-size: 1.1rem; }
+div[data-onglet-actif="lignes"] > #lignes-constructeur { display: block !important; }
+.ge-titre { margin-bottom: .3rem; font-size: .85rem; }
+.lignes-detail { margin-top: 1.25rem; }
+.lignes-detail > details { border: 1px solid rgb(0 0 0 / .1); border-radius: .5rem; padding: .6rem .9rem; margin-bottom: .5rem; background: rgb(0 0 0 / .015); }
+.lignes-detail > details > summary { cursor: pointer; font-weight: 600; font-size: .9rem; }
+.lignes-detail .ge-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1.2rem; margin-top: .7rem; }
+@media (max-width: 1100px) { .lignes-detail .ge-cols { grid-template-columns: 1fr; } }
+.lignes-detail .ge { border-top: none; margin-top: 0; padding-top: 0; }

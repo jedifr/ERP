@@ -1,5 +1,6 @@
-(function () {
+function demarrerConstructeur() {
     "use strict";
+    if (!document.getElementById("lignes-constructeur")) return;
 
     const API_ARTICLES = "/api/v1/articles/";
     const API_MATIERES = "/api/v1/matieres/";
@@ -10,6 +11,7 @@
     const devisBuilderData = dataEl ? JSON.parse(dataEl.textContent) : {};
     const DEVIS_NUMERO = devisBuilderData.numero || null;
     const DEVIS_DATE_CREATION = devisBuilderData.date_creation || null;
+    const URL_AJOUT = devisBuilderData.url;
 
     const matiereCache = {};
 
@@ -270,64 +272,101 @@
         return editeur && editeur.etapesBrouillon ? editeur.etapesBrouillon() : [];
     }
 
-    const submitBtn = document.getElementById("submit-ligne");
-    if (submitBtn) {
-        submitBtn.addEventListener("click", () => {
-            const quantite = parseFloat(document.getElementById("ligne-quantite").value);
-            if (!quantite) {
-                showMessage("La quantité de la ligne de devis est requise.", true);
-                return;
-            }
-
-            const nouveau = document.querySelector("input[name=mode-article]:checked").value === "nouveau";
-            const payload = { quantite: quantite };
-
-            if (nouveau) {
-                const reference = document.getElementById("na-reference").value.trim();
-                if (!reference) {
-                    showMessage("La référence du nouvel article est requise.", true);
-                    return;
-                }
-                payload.nouvel_article = {
-                    reference: reference,
-                    libelle: document.getElementById("na-libelle").value.trim(),
-                    taux_marge_defaut: parseFloat(document.getElementById("na-taux-marge").value) || null,
-                    composants: collectNomenclature(),
-                    etapes: collectGamme(),
-                };
-            } else {
-                const reference = document.getElementById("article-existant-reference").value;
-                if (!reference) {
-                    showMessage("Sélectionnez un article existant dans la liste.", true);
-                    return;
-                }
-                payload.article_existant = reference;
-            }
-
-            fetch(window.location.pathname, {
-                method: "POST",
-                credentials: "same-origin",
-                headers: {
-                    "Content-Type": "application/json",
-                    "X-CSRFToken": csrfToken,
-                },
-                body: JSON.stringify(payload),
-            })
-                .then((response) => response.json().then((data) => ({ status: response.status, data })))
-                .then(({ status, data }) => {
-                    if (status >= 400) {
-                        showMessage(data.detail || "Erreur lors de l'ajout de la ligne.", true);
-                        return;
-                    }
-                    showMessage(`Ligne ajoutée (${data.article} × ${data.quantite}). Rechargement...`, false);
-                    setTimeout(() => window.location.reload(), 800);
-                })
-                .catch(() => showMessage("Erreur réseau lors de l'envoi.", true));
-        });
+    // ---- Ouverture / fermeture de l'assistant ----
+    const panneau = document.getElementById("panneau-constructeur");
+    const ouvrir = document.getElementById("ouvrir-constructeur");
+    let formulaireModifie = false;
+    document.addEventListener("input", (e) => {
+        if (e.target.closest && !e.target.closest("#lignes-constructeur") && !e.target.closest("#dp-panneau") && e.target.closest("form")) formulaireModifie = true;
+    });
+    if (ouvrir && panneau) {
+        ouvrir.addEventListener("click", () => { panneau.hidden = !panneau.hidden; ouvrir.classList.toggle("lc-ouvert", !panneau.hidden); });
+        const fermer = document.getElementById("fermer-constructeur");
+        if (fermer) fermer.addEventListener("click", () => { panneau.hidden = true; ouvrir.classList.remove("lc-ouvert"); });
     }
+
+    function construireCharge() {
+        const quantite = parseFloat(document.getElementById("ligne-quantite").value);
+        if (!quantite) {
+            showMessage("La quantité de la ligne de devis est requise.", true);
+            return null;
+        }
+        const nouveau = document.querySelector("input[name=mode-article]:checked").value === "nouveau";
+        const payload = { quantite: quantite };
+        if (nouveau) {
+            const reference = document.getElementById("na-reference").value.trim();
+            if (!reference) {
+                showMessage("La référence du nouvel article est requise.", true);
+                return null;
+            }
+            payload.nouvel_article = {
+                reference: reference,
+                libelle: document.getElementById("na-libelle").value.trim(),
+                taux_marge_defaut: parseFloat(document.getElementById("na-taux-marge").value) || null,
+                composants: collectNomenclature(),
+                etapes: collectGamme(),
+            };
+        } else {
+            const reference = document.getElementById("article-existant-reference").value;
+            if (!reference) {
+                showMessage("Sélectionnez un article existant dans la liste.", true);
+                return null;
+            }
+            payload.article_existant = reference;
+        }
+        return payload;
+    }
+
+    function envoyer(apercu) {
+        const payload = construireCharge();
+        if (!payload) return;
+        if (apercu) payload.apercu = true;
+        else if (formulaireModifie && !window.confirm("Le devis a des modifications non enregistrées : l'ajout recharge la page et elles seront perdues. Continuer ?")) return;
+        const zoneApercu = document.getElementById("lc-apercu");
+        fetch(URL_AJOUT, {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json", "X-CSRFToken": csrfToken },
+            body: JSON.stringify(payload),
+        })
+            .then((response) => response.json().then((data) => ({ status: response.status, data })))
+            .then(({ status, data }) => {
+                if (status >= 400) {
+                    showMessage(data.detail || "Erreur lors de l'ajout de la ligne.", true);
+                    return;
+                }
+                if (apercu) {
+                    const e = (x) => (x === null || x === undefined ? "—" : Number(x).toFixed(2).replace(".", ",") + " €");
+                    zoneApercu.hidden = false;
+                    zoneApercu.innerHTML = "";
+                    [["Matière", data.prix_vente_matiere], ["Opérations", data.prix_vente_operations], ["Prix unitaire HT", data.prix_vente_unitaire], ["Total HT", data.prix_vente_total], ["Total TTC", data.prix_vente_ttc]].forEach(([titre, valeur]) => {
+                        const bloc = document.createElement("div");
+                        const petit = document.createElement("small");
+                        petit.textContent = titre;
+                        const gras = document.createElement("b");
+                        gras.textContent = e(valeur);
+                        bloc.append(petit, gras);
+                        zoneApercu.appendChild(bloc);
+                    });
+                    showMessage("Aperçu : rien n'a été créé.", false);
+                    return;
+                }
+                showMessage(`Ligne ajoutée (${data.article} × ${data.quantite}). Rechargement...`, false);
+                try { window.sessionStorage.setItem("devis-onglet-apres-rechargement", "lignes"); } catch (e) { /* ignoré */ }
+                setTimeout(() => { window.location.hash = "#onglet=lignes"; window.location.reload(); }, 800);
+            })
+            .catch(() => showMessage("Erreur réseau lors de l'envoi.", true));
+    }
+
+    const submitBtn = document.getElementById("submit-ligne");
+    if (submitBtn) submitBtn.addEventListener("click", () => envoyer(false));
+    const apercuBtn = document.getElementById("apercu-ligne");
+    if (apercuBtn) apercuBtn.addEventListener("click", () => envoyer(true));
 
     // Une ligne de chaque par défaut pour démarrer
     if (nomenclatureRowsEl) {
         addNomenclatureRow();
     }
-})();
+}
+if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", demarrerConstructeur);
+else demarrerConstructeur();

@@ -152,10 +152,10 @@ class ConstructeurEditeurTests(TestCase):
         self.client.force_login(get_user_model().objects.create_superuser("adm-cb", "a@x.fr", "pass-mot-de-passe-20"))
         client = Tiers.objects.create(code="CLI-CB", raison_sociale="Client CB")
         devis = Devis.objects.create(numero="DEV-CB-1", client=client, date_creation=datetime.date(2026, 10, 1))
-        reponse = self.client.get(reverse("admin:chiffrage_devis_builder", args=[devis.pk]))
+        devis.save()
+        reponse = self.client.get(reverse("admin:chiffrage_devis_change", args=[devis.pk]))
         self.assertContains(reponse, 'id="gamme-editeur"')
         self.assertContains(reponse, reverse("gamme_editeur_options"))
-        self.assertNotContains(reponse, "template-gamme-row")
         options = self.client.get(reverse("gamme_editeur_options")).json()
         self.assertIn("postes", options)
         self.assertIn("types", options)
@@ -174,3 +174,53 @@ class ConstructeurEditeurTests(TestCase):
         })
         etape = article.gamme_etapes.get()
         self.assertEqual((etape.temps_fixe, etape.temps_variable), (0, 2.5))
+
+
+class NomenclatureEditeurTests(TestCase):
+    def setUp(self):
+        from . import nomenclature_editeur as ne
+
+        self.ne = ne
+        self.client.force_login(get_user_model().objects.create_superuser("adm-ne", "a@x.fr", "pass-mot-de-passe-20"))
+        self.fabrique = Article.objects.create(reference="FAB-NE", nature=Article.Nature.FABRIQUE, taux_marge_defaut=10)
+        self.vis = Article.objects.create(reference="VIS-NE", nature=Article.Nature.MATIERE_PREMIERE, taux_marge_defaut=10, cout_unitaire=1, unite_cout="piece")
+        self.tole = Article.objects.create(reference="TOLE-NE", nature=Article.Nature.MATIERE_PREMIERE, taux_marge_defaut=10, cout_unitaire=10, unite_cout="surface")
+        self.url = reverse("nomenclature_editeur", args=[self.fabrique.pk])
+
+    def post(self, lignes):
+        return self.client.post(self.url, {"lignes": lignes}, content_type="application/json")
+
+    def test_ajout_modification_et_retrait(self):
+        r = self.post([{"id": None, "composant": "VIS-NE", "quantite": "4"}, {"id": None, "composant": "TOLE-NE", "quantite": 1, "longueur_mm": "300", "largeur_mm": "200,5"}])
+        self.assertEqual(r.status_code, 200, r.content)
+        lignes = r.json()["lignes"]
+        self.assertEqual([(l["composant"], l["quantite"]) for l in lignes], [("VIS-NE", 4.0), ("TOLE-NE", 1.0)])
+        self.assertEqual(lignes[1]["largeur_mm"], 200.5)
+        r = self.post([{"id": lignes[0]["id"], "composant": "VIS-NE", "quantite": 6}])
+        self.assertEqual([(l["composant"], l["quantite"]) for l in r.json()["lignes"]], [("VIS-NE", 6.0)])  # la tôle est retirée
+        self.assertEqual(self.fabrique.composants.count(), 1)
+
+    def test_erreurs_lisibles_et_annulation_complete(self):
+        r = self.post([{"id": None, "composant": "VIS-NE", "quantite": 2}, {"id": None, "composant": "INCONNU", "quantite": 1}])
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("introuvable", r.json()["detail"])
+        self.assertEqual(self.fabrique.composants.count(), 0)  # tout ou rien
+        self.assertEqual(self.post([{"id": None, "composant": "VIS-NE", "quantite": "abc"}]).status_code, 400)
+        self.assertEqual(self.post([{"id": None, "composant": "FAB-NE", "quantite": 1}]).status_code, 400)  # son propre composant
+
+    def test_lecture_et_droits(self):
+        self.assertEqual(self.client.get(self.url).json()["lignes"], [])
+        self.client.force_login(get_user_model().objects.create_user("lambda-ne", password="pass-mot-de-passe-20", is_staff=True))
+        self.assertEqual(self.client.get(self.url).status_code, 403)
+
+    def test_lignes_depliables_dans_la_fiche_du_devis(self):
+        from chiffrage.models import Devis, DevisLigne
+        from commercial.models import Tiers
+
+        client = Tiers.objects.create(code="CLI-NE", raison_sociale="Client NE")
+        devis = Devis.objects.create(numero="DEV-NE-1", client=client, date_creation=datetime.date(2026, 10, 1))
+        DevisLigne.objects.create(devis=devis, article=self.fabrique, quantite=3)
+        DevisLigne.objects.create(devis=devis, article=self.vis, quantite=10)
+        page = self.client.get(reverse("admin:chiffrage_devis_change", args=[devis.pk]))
+        self.assertContains(page, reverse("nomenclature_editeur", args=[self.fabrique.pk]))
+        self.assertNotContains(page, reverse("nomenclature_editeur", args=[self.vis.pk]))  # seuls les articles fabriqués se dépliant

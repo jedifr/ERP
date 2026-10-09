@@ -1,0 +1,22 @@
+# Réglages de la sauvegarde : copiez ce fichier en « sauvegarde.conf » (même dossier que sauvegarder-nas.sh) et adaptez.
+# Ce fichier n'est lu que par les scripts du NAS ; il ne contient pas de secret (la phrase secrète est dans un fichier à part).
+
+# Copie hors du NAS, après chaque sauvegarde (règle 3-2-1 : 3 copies, 2 supports, 1 hors site). Choisir UNE destination :
+#   - disque USB ou dossier réseau déjà monté sur le NAS :   COPIE_EXTERNE="/volumeUSB1/usbshare/erp_sauvegardes"
+#   - autre NAS / serveur (rsync sur ssh, clé ssh sans mot de passe) : COPIE_EXTERNE="sauvegarde@192.168.1.50:/volume1/erp_sauvegardes"
+#   (un cloud — Synology C2, Backblaze, etc. — se branche avec Hyper Backup sur le dossier des sauvegardes : voir docs/SAUVEGARDE.md)
+COPIE_EXTERNE=""
+
+# Chiffrement de la copie externe (AES-256). Créez la phrase secrète UNE fois, et gardez-la AILLEURS que sur le NAS :
+#   openssl rand -base64 32 > /volume1/docker/erp.cle && chmod 600 /volume1/docker/erp.cle
+# Sans cette phrase, la copie chiffrée est illisible : notez-la dans un gestionnaire de mots de passe.
+CLE_CHIFFREMENT=""
+
+# Nombre de sauvegardes conservées dans la copie externe (dossier local ou monté ; pas de rotation côté rsync distant).
+GARDER_EXTERNE=30
+
+# Alerte si la sauvegarde échoue (en plus de l'e-mail du Planificateur de tâches de DSM) :
+#   ALERTE_URL="https://ntfy.sh/mon-sujet-secret"      (appelée en POST avec « message=… »)
+#   ALERTE_COMMANDE='echo "$MESSAGE_ALERTE" | mail -s "ERP : sauvegarde" moi@exemple.fr'
+ALERTE_URL=""
+ALERTE_COMMANDE=""

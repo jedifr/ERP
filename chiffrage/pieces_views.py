@@ -283,7 +283,23 @@ class PiecesDevisMixin:
         extra_context = dict(extra_context or {})
         devis = Devis.objects.filter(pk=object_id).first() if object_id else None
         extra_context.update(self.contexte_panneau_pieces(request, devis))
+        extra_context.update(self.contexte_lignes_detail(request, devis))
         return super().changeform_view(request, object_id, form_url, extra_context)
+
+    def contexte_lignes_detail(self, request, devis):
+        """Lignes fabriquées dépliables (nomenclature et opérations de l'article), modifiables tant que le devis n'est pas validé."""
+        from .admin import devis_verrouille
+        from technique.models import Article
+
+        if devis is None or devis.pk is None:
+            return {}
+        u = request.user
+        if not (u.has_perm("technique.view_gamme") and u.has_perm("technique.view_nomenclature")):
+            return {}
+        lignes = list(devis.lignes.filter(article__nature=Article.Nature.FABRIQUE).select_related("article").order_by("pk"))
+        editable = (not devis_verrouille(devis) and all(u.has_perm(f"technique.{a}_{m}") for m in ("gamme", "nomenclature") for a in ("add", "change"))
+                    and u.has_perm("technique.delete_nomenclature"))
+        return {"lignes_detail": lignes, "editable_detail": editable}
 
     # --- vues AJAX ------------------------------------------------------------------------------------------------
     def _devis_modifiable(self, request, numero):

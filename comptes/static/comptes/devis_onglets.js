@@ -13,12 +13,20 @@ function initOnglets() {
     var lignes = conteneur.querySelector(":scope > #lignes-group");
     var pieces = conteneur.querySelector(":scope > #dp-panneau");
     var chrono = conteneur.querySelector(":scope > #chronologie-affaire");
+    var constructeur = conteneur.querySelector(":scope > #lignes-constructeur");
+    var detail = conteneur.querySelector(":scope > #lignes-detail");
+    // Devis pas encore enregistré : « Pièces et matière » et « Lignes du devis » enregistrent le devis puis s'ouvrent.
+    var nouveau = !!document.getElementById("devis-nouveau");
 
     var onglets = [{ cle: "general", titre: "Général", icone: "assignment", elements: [saisie, recap] }];
-    if (pieces) onglets.push({ cle: "pieces", titre: "Pièces et matière", icone: "content_cut", elements: [pieces], compte: function () {
+    if (nouveau) {
+        onglets.push({ cle: "pieces", titre: "Pièces et matière", icone: "content_cut", elements: [] });
+        onglets.push({ cle: "lignes", titre: "Lignes du devis", icone: "list_alt", elements: [lignes] });
+    }
+    if (pieces && !nouveau) onglets.push({ cle: "pieces", titre: "Pièces et matière", icone: "content_cut", elements: [pieces], compte: function () {
         return pieces.querySelectorAll("#dp-cartes > *, #dp-profils > *").length;
     } });
-    if (lignes) onglets.push({ cle: "lignes", titre: "Lignes du devis", icone: "list_alt", elements: [lignes], compte: function () {
+    if (lignes && !nouveau) onglets.push({ cle: "lignes", titre: "Lignes du devis", icone: "list_alt", elements: [lignes, detail, constructeur], compte: function () {
         var n = 0;
         lignes.querySelectorAll("input[name$='-id']").forEach(function (i) { if (i.value && !/__prefix__/.test(i.name)) n++; });
         return n;
@@ -43,11 +51,24 @@ function initOnglets() {
         b.setAttribute("role", "tab");
         b.className = "devis-onglet";
         b.innerHTML = '<span class="material-symbols-outlined">' + o.icone + "</span><span>" + o.titre + '</span><span class="devis-onglet-nombre"></span>';
-        b.addEventListener("click", function () { activer(o.cle, true); });
+        b.addEventListener("click", function () {
+            if (nouveau && o.cle !== "general") { enregistrerPuisOuvrir(o.cle); return; }
+            activer(o.cle, true);
+        });
         nav.appendChild(b);
         boutons[o.cle] = b;
     });
     form.insertBefore(nav, conteneur);
+
+    function enregistrerPuisOuvrir(cle) {
+        // Le devis doit exister pour recevoir des pièces ou des lignes : on l'enregistre (en restant sur la fiche) puis on ouvre l'onglet.
+        if (!form.reportValidity()) { activer("general", false); return; }
+        try { window.sessionStorage.setItem("devis-onglet-apres-rechargement", cle); } catch (e) { /* ignoré */ }
+        var continuer = document.createElement("input");
+        continuer.type = "hidden"; continuer.name = "_continue"; continuer.value = "1";
+        form.appendChild(continuer);
+        if (form.requestSubmit) form.requestSubmit(); else form.submit();
+    }
 
     function majNombres() {
         onglets.forEach(function (o) {
@@ -84,6 +105,10 @@ function initOnglets() {
     }
 
     var voulu = (location.hash.match(/onglet=(\w+)/) || [])[1];
+    try {
+        var memorise = window.sessionStorage.getItem("devis-onglet-apres-rechargement");
+        if (memorise) { window.sessionStorage.removeItem("devis-onglet-apres-rechargement"); if (!nouveau) voulu = memorise; }
+    } catch (e) { /* ignoré */ }
     if (!boutons[voulu]) voulu = "general";
     activer(avecErreur() || voulu, false);
     majNombres();

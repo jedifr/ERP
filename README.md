@@ -3129,3 +3129,14 @@ Le temps de réglage d'une découpe est le temps de **mise en place d'une tôle*
 ## Date du jour à la création
 
 À la création d'un devis, d'une commande ou d'une facture, la date (de création, de commande, de facturation) est pré-remplie avec la date du jour, modifiable (`comptes/date_du_jour.py`).
+
+## Sauvegarde, vérification et transfert vers un autre NAS
+
+Voir **`docs/SAUVEGARDE.md`** (mode d'emploi complet). En bref : `sauvegarder-nas.sh` (base + fichiers déposés, somme de contrôle, copie externe chiffrée AES-256 vers un disque USB, un dossier réseau ou un autre NAS, alerte en cas d'échec), `verifier-sauvegarde.sh` (restauration d'essai dans une base temporaire, contrôle d'âge — à planifier chaque semaine), `restaurer-nas.sh` (lit aussi les copies chiffrées, `--nouveau-nas`), `exporter-transfert.sh` / `importer-transfert.sh` (une archive chiffrée, `.env` compris, pour changer de NAS). Réglages dans `sauvegarde.conf` (modèle : `sauvegarde.conf.exemple`, conservé par `update-nas.sh`). Les scripts sont testés avec un faux Docker (`comptes/tests_sauvegarde.py`) mais **pas encore sur le vrai NAS** : faites un premier essai et une restauration d'essai.
+
+## Constructeur de devis intégré à l'onglet « Lignes du devis »
+
+Le constructeur n'est plus une page séparée : dans l'onglet **Lignes du devis**, le bouton **＋ Ajouter une ligne** ouvre l'assistant sous le tableau (devis en brouillon) — **Article existant** (recherche) ou **Nouvel article fabriqué** (référence, libellé, marge, **nomenclature**, **opérations** avec gammes types), **Aperçu du prix** (même calcul que le devis, rien n'est créé) puis **Ajouter la ligne** (article, nomenclature, gamme et ligne créés ensemble ou pas du tout). L'ancienne adresse `/constructeur/` redirige vers l'onglet.
+- Le tableau des lignes ne sert plus à en ajouter (plus de ligne vide ni de lien « Ajouter ») : il modifie ou retire les lignes existantes. Sous le tableau, chaque **ligne fabriquée** se déplie pour modifier la **nomenclature** et les **opérations** de son article (partagées avec les autres devis qui l'utilisent ; tant que le devis n'est pas validé).
+- **Devis pas encore enregistré** : cliquer sur « Pièces et matière » ou « Lignes du devis » enregistre le devis (en restant sur la fiche) puis ouvre l'onglet. Les boutons du bas ne changent pas (le bouton « Enregistrer et ouvrir le constructeur » a disparu).
+- Code : `chiffrage/templates/admin/chiffrage/devis/_constructeur.html` et `_lignes_detail.html`, `chiffrage/static/chiffrage/devis_builder.js`, `comptes/static/comptes/nomenclature_editeur.js`, `technique/nomenclature_editeur.py`.

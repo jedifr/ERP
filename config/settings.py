@@ -365,6 +365,8 @@ UNFOLD = {
         lambda request: static("comptes/pdf_nouvel_onglet.js"),
         lambda request: static("comptes/devis_onglets.js"),
         lambda request: static("comptes/gamme_editeur.js"),
+        lambda request: static("comptes/nomenclature_editeur.js"),
+        lambda request: static("chiffrage/devis_builder.js"),
     ],
     "SITE_TITLE": "ERP maison",
     "SITE_HEADER": "ERP maison",

@@ -3,13 +3,6 @@
 
 {% block object-tools-items %}
     {% if original %}
-        <li>
-            <a href="{% url 'admin:chiffrage_devis_builder' original.pk %}"
-               class="cursor-pointer flex grow items-center gap-2 px-3 py-2 text-left whitespace-nowrap">
-                <span class="material-symbols-outlined">construction</span>
-                Constructeur de devis
-            </a>
-        </li>
         {% with commande=original.commandes.first %}
             {% if commande %}
                 <li>
@@ -39,5 +32,8 @@
 {% block after_related_objects %}
     {{ block.super }}
     {% include "admin/chiffrage/devis/panneau_pieces.html" %}
+    {% if not original %}<div id="devis-nouveau" hidden></div>{% endif %}
+    {% include "admin/chiffrage/devis/_lignes_detail.html" %}
+    {% include "admin/chiffrage/devis/_constructeur.html" %}
     {% include "admin/_chronologie.html" %}
 {% endblock %}
