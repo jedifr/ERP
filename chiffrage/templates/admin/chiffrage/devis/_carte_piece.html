@@ -45,5 +45,8 @@
       {% for a in verdict.avertissements %}<div class="dp-detail">{{ a }}</div>{% endfor %}
       {% if verdict.gamme %}<div class="dp-detail">{{ verdict.gamme }}</div>{% endif %}
     </div>
+    {% if operations %}
+    <div class="gamme-editeur" data-url="{{ operations.url }}" data-quantite="{{ piece.quantite }}" data-editable="{{ operations.editable|yesno:'1,0' }}" data-autres="{{ operations.autres }}" data-libelle="{{ piece.article_id }}"></div>
+    {% endif %}
   </div>
 </div>

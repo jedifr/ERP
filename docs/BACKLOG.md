@@ -12,3 +12,7 @@
 - Retirer « Tarifs de poste » de la page Paramétrage (carte « Atelier ») et garder l'écran `TarifPosteAdmin` accessible seulement par l'URL, ou le supprimer de l'admin.
 - Contrôle « Postes de travail sans tarif » du centre « À compléter » : faire pointer chaque élément sur la fiche du poste (onglet tarifs).
 - Vérifier que la validation de non-chevauchement des périodes (mixin d'historique) fonctionne dans l'inline ; ajouter des tests.
+
+## Utiliser l'éditeur d'opérations dans le constructeur de devis
+
+L'éditeur (`technique/gamme_editeur.py`, `comptes/static/comptes/gamme_editeur.js`) travaille sur un article existant. Le constructeur crée l'article et sa gamme en une seule fois (`chiffrage/builder.py`, `creer_article_fabrique`) : deux façons de l'intégrer — (1) remplacer sa saisie d'étapes par l'éditeur après création de l'article, ou (2) ajouter un mode « brouillon » à l'éditeur (étapes en mémoire, envoyées à la création). Ajouter aussi les gammes types au constructeur.

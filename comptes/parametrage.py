@@ -19,8 +19,8 @@ CARTES = [
         ("Cotes normalisées", "decoupe", "normecote"), ("Sections de profilés", "decoupe", "profilesection"),
         ("Profils d'import DXF", "decoupe", "profilimportdecoupe"),
     ], "formes"),
-    ("atelier", "Atelier", "precision_manufacturing", "Postes de travail, tarifs de poste, gammes", [
-        ("Postes de travail", "technique", "postetravail"), ("Tarifs de poste", "technique", "tarifposte"), ("Gammes", "technique", "gamme"),
+    ("atelier", "Atelier", "precision_manufacturing", "Postes de travail, tarifs de poste, gammes et gammes types", [
+        ("Postes de travail", "technique", "postetravail"), ("Tarifs de poste", "technique", "tarifposte"), ("Gammes", "technique", "gamme"), ("Gammes types", "technique", "gammetype"),
     ], "atelier"),
     ("articles", "Articles et matières", "category", "Matières, familles, nomenclatures, fournisseurs et tarifs d'achat", [
         ("Matières", "technique", "matiere"), ("Familles de matière", "technique", "famillematiere"), ("Nomenclatures", "technique", "nomenclature"),

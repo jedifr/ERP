@@ -232,6 +232,7 @@ function demarrer() {
             verdict.replaceWith(nouvelle.querySelector(".dp-verdict"));
             const article = carte.querySelector(".dp-article"), nouveauLien = nouvelle.querySelector(".dp-article");
             if (article && nouveauLien) article.replaceWith(nouveauLien);
+            carte.dispatchEvent(new CustomEvent("dp-verdict-change", { bubbles: true }));
             planifierImbrication();
         } catch (e) {
             verdict.classList.remove("dp-verdict-calcul");

@@ -305,6 +305,54 @@ class TarifPoste(DateRangeHistoriqueMixin, models.Model):
         return f"{self.poste} : {self.cout_horaire} €/h ({self.date_debut} → {self.date_fin or '…'})"
 
 
+class GammeType(models.Model):
+    """Gamme type (« Pliage + soudure », « Ébavurage + traitement »…) : une suite d'opérations réutilisable, qu'on ajoute
+    en un clic à la gamme d'un article fabriqué. Les étapes sont copiées dans la gamme de l'article : modifier ensuite la
+    gamme type ne change pas les gammes déjà créées."""
+
+    nom = models.CharField("nom", max_length=100, unique=True)
+    description = models.CharField("description", max_length=255, blank=True)
+
+    class Meta:
+        verbose_name = "Gamme type"
+        verbose_name_plural = "Gammes types"
+        ordering = ["nom"]
+
+    def __str__(self):
+        return self.nom
+
+
+class GammeTypeEtape(models.Model):
+    gamme_type = models.ForeignKey(GammeType, verbose_name="gamme type", on_delete=models.CASCADE, related_name="etapes")
+    ordre = models.PositiveIntegerField("ordre")
+    poste = models.ForeignKey(PosteTravail, verbose_name="poste", on_delete=models.PROTECT, related_name="gamme_type_etapes")
+    temps_fixe = models.FloatField("temps fixe (min)", null=True, blank=True, help_text="Réglage (poste horaire)")
+    temps_variable = models.FloatField("temps par pièce (min)", null=True, blank=True, help_text="Poste horaire")
+    cout_forfaitaire = ChampDecimal("coût forfaitaire par pièce", null=True, blank=True, help_text="Poste forfaitaire (sous-traitance)", **PRIX)
+
+    class Meta:
+        verbose_name = "Étape de gamme type"
+        verbose_name_plural = "Étapes de gamme type"
+        ordering = ["gamme_type", "ordre"]
+
+    def __str__(self):
+        return f"{self.gamme_type} — étape {self.ordre} ({self.poste})"
+
+    def clean(self):
+        super().clean()
+        if not self.poste_id:
+            return
+        if self.poste.mode_calcul == PosteTravail.ModeCalcul.HORAIRE:
+            if self.temps_fixe is None or self.temps_variable is None:
+                raise ValidationError("Un poste en mode horaire requiert un temps fixe et un temps par pièce.")
+            if self.cout_forfaitaire is not None:
+                raise ValidationError({"cout_forfaitaire": "Non applicable pour un poste en mode horaire."})
+        elif self.cout_forfaitaire is None:
+            raise ValidationError({"cout_forfaitaire": "Un poste en mode forfaitaire requiert un coût forfaitaire."})
+        elif self.temps_fixe is not None or self.temps_variable is not None:
+            raise ValidationError("Temps fixe/variable non applicables pour un poste en mode forfaitaire.")
+
+
 class Nomenclature(models.Model):
     """Ce qu'un article fabriqué consomme."""
 

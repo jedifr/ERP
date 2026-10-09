@@ -69,3 +69,22 @@ div[data-onglet-actif="pieces"], div[data-onglet-actif="lignes"] { display: bloc
 .ac-titre { font-size: 1rem; font-weight: 600; margin: 1.25rem 0 .75rem; padding-left: .6rem; border-left: 4px solid; }
 .ac-ko { border-color: #dc2626; }
 .ac-attention { border-color: #f59e0b; }
+/* Éditeur d'opérations de fabrication (gamme_editeur.js) */
+.ge { margin-top: .9rem; border-top: 1px dashed rgb(0 0 0 / .15); padding-top: .6rem; }
+.ge > summary { cursor: pointer; font-size: .85rem; }
+.ge-resume { opacity: .65; font-size: .8rem; }
+.ge-table { width: 100%; border-collapse: collapse; font-size: .85rem; margin-top: .5rem; }
+.ge-table th { font-size: .7rem; text-transform: uppercase; opacity: .6; text-align: left; padding: .2rem .4rem; }
+.ge-table td { padding: .25rem .4rem; border-top: 1px solid rgb(0 0 0 / .06); vertical-align: middle; }
+.ge-table input, .ge-table select, .ge-barre select { border: 1px solid rgb(0 0 0 / .2); border-radius: .35rem; padding: .2rem .4rem; width: 100%; background: transparent; }
+.ge-barre select { width: auto; }
+.ge-table input:disabled, .ge-table select:disabled { background: rgb(0 0 0 / .05); opacity: .8; }
+.ge-pastille { font-size: .7rem; padding: .05rem .5rem; border-radius: 999px; }
+.ge-auto { background: #e0f2fe; color: #075985; } .ge-main { background: #fef3c7; color: #92400e; }
+.ge-actions { white-space: nowrap; } .ge-actions button { padding: 0 .35rem; opacity: .6; } .ge-actions button:hover { opacity: 1; } .ge-retirer { color: #dc2626; }
+.ge-barre { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-top: .6rem; }
+.ge-ajouter { color: #b45309; font-weight: 600; border: 1px dashed #f59e0b; padding: .25rem .8rem; border-radius: .4rem; }
+.ge-droite { margin-left: auto; display: flex; gap: .5rem; align-items: center; font-size: .8rem; }
+.ge-enregistrer { background: #f59e0b; color: #fff; font-weight: 600; padding: .3rem .9rem; border-radius: .4rem; }
+.ge-note, .ge-aide { font-size: .75rem; opacity: .65; margin-top: .5rem; }
+.ge-erreur, .ge-ko { color: #b91c1c; font-size: .8rem; margin-top: .4rem; }

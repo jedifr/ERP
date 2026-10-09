@@ -14,7 +14,7 @@ from comptes.exports import ExportCsvMixin
 from achats.models import ArticleFournisseur
 from comptabilite.models import ArticleCompteAchat, ArticleCompteVente
 
-from .models import Article, FamilleMatiere, Gamme, Matiere, Nomenclature, PosteTravail, TarifPoste
+from .models import Article, FamilleMatiere, Gamme, GammeType, GammeTypeEtape, Matiere, Nomenclature, PosteTravail, TarifPoste
 from .services import DuplicationError, dupliquer_article
 
 
@@ -341,3 +341,23 @@ class GammeAdmin(ModelAdmin):
     list_filter = ["poste"]
     search_fields = ["article__reference"]
     autocomplete_fields = ["article", "poste"]
+
+
+class GammeTypeEtapeInline(TabularInline):
+    model = GammeTypeEtape
+    extra = 1
+    autocomplete_fields = ["poste"]
+
+
+@admin.register(GammeType)
+class GammeTypeAdmin(ModelAdmin):
+    """Gammes types : suites d'opérations (pliage, soudure, traitement…) qu'on ajoute en un clic à la gamme d'une pièce."""
+
+    list_display = ["nom", "description", "nombre_etapes"]
+    search_fields = ["nom"]
+    inlines = [GammeTypeEtapeInline]
+
+    @admin.display(description="Étapes")
+    def nombre_etapes(self, obj):
+        return obj.etapes.count()
+

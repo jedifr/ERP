@@ -147,9 +147,22 @@ def _carte(request, piece, editable=True, alimenter=False):
             "forme_json": json.dumps(piece.parametres_forme) if piece.parametres_forme else "",
             "url_enregistrer": reverse("admin:chiffrage_devis_piece_enregistrer", args=[piece.devis_id, piece.pk]),
             "url_supprimer": reverse("admin:chiffrage_devis_piece_supprimer", args=[piece.devis_id, piece.pk]),
+            "operations": _operations(request, piece),
         },
         request=request,
     )
+
+
+def _operations(request, piece):
+    """Éditeur des opérations de fabrication (gamme de l'article) : None si la pièce n'a pas d'article ou si l'utilisateur ne voit pas les gammes."""
+    if not piece.article_id or not request.user.has_perm("technique.view_gamme"):
+        return None
+    autres = [{"ref": p.article_id, "nom": p.nom} for p in PieceDecoupe.objects.filter(devis_id=piece.devis_id, article__isnull=False).exclude(pk=piece.pk).order_by("nom")]
+    return {
+        "url": reverse("gamme_editeur", args=[piece.article_id]),
+        "editable": request.user.has_perm("technique.add_gamme") and request.user.has_perm("technique.change_gamme"),
+        "autres": json.dumps(autres),
+    }
 
 
 def _catalogue_profils():
