@@ -551,6 +551,17 @@ class VitesseCoupeInline(TabularInline):
     ordering = ["qualite"]
 
 
+class SansPosteFilter(admin.SimpleListFilter):
+    title = "poste de travail"
+    parameter_name = "sans_poste"
+
+    def lookups(self, request, model_admin):
+        return [("oui", "Sans poste (chiffrés sans main-d'œuvre machine)")]
+
+    def queryset(self, request, queryset):
+        return queryset.filter(poste__isnull=True) if self.value() == "oui" else queryset
+
+
 @admin.register(ParametreCoupe)
 class ParametreCoupeAdmin(ModelAdmin):
     """Paramètres de coupe repris du logiciel de la machine (jet d'eau) : une fiche par famille de matière (ou par nuance
@@ -603,7 +614,7 @@ class ParametreCoupeAdmin(ModelAdmin):
             )
             return redirect(liste)
         return TemplateResponse(request, "admin/decoupe/importer_lua.html", contexte)
-    list_filter = ["procede", "gaz", "origine", "famille", "poste"]
+    list_filter = [SansPosteFilter, "procede", "gaz", "origine", "famille", "poste"]
     search_fields = ["famille__nom", "matiere__nom"]
     autocomplete_fields = ["famille", "matiere", "poste"]
     inlines = [VitesseCoupeInline]

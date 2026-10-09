@@ -28,6 +28,8 @@ class Controle:
     droit: str
     liste: str  # nom d'URL de la liste complète
     fonction: Callable
+    filtre: str = ""  # paramètres d'URL qui filtrent la liste sur les éléments à corriger
+    action: str = ""  # comment corriger en une fois (affiché sous la carte)
 
 
 def _liens(queryset, nom_url, libelle=str):
@@ -93,7 +95,8 @@ CONTROLES = [
     Controle("societe", KO, "Société", "Informations de la société incomplètes", "Elles figurent sur tous les PDF et dans la facture électronique.",
              "comptes.view_societe", "admin:comptes_societe_changelist", _societe),
     Controle("coupe_poste", KO, "Découpe", "Paramètres de coupe sans poste de travail", "Le temps de coupe n'alimente pas la gamme : la pièce est chiffrée sans main-d'œuvre machine.",
-             "decoupe.view_parametrecoupe", "admin:decoupe_parametrecoupe_changelist", _coupe_sans_poste),
+             "decoupe.view_parametrecoupe", "admin:decoupe_parametrecoupe_changelist", _coupe_sans_poste,
+             "?sans_poste=oui", "Pour tout corriger d'un coup : ouvrez la liste, cochez « tout sélectionner » puis l'action « Affecter un poste de travail »."),
     Controle("poste_tarif", KO, "Atelier", "Postes de travail sans tarif", "Les opérations sur ce poste sont chiffrées à zéro.",
              "technique.view_postetravail", "admin:technique_postetravail_changelist", _postes_sans_tarif),
     Controle("matiere_cout", ATTENTION, "Articles", "Matières premières sans coût", "Le coût matière des devis est faux ou nul.",
@@ -120,7 +123,7 @@ def resultats(request):
         except Exception:  # un contrôle en échec ne doit pas empêcher d'afficher les autres
             continue
         if total:
-            sortie.append({"controle": c, "total": total, "elements": elements, "plus": max(0, total - len(elements)) if elements else 0, "url": reverse(c.liste)})
+            sortie.append({"controle": c, "total": total, "elements": elements, "plus": max(0, total - len(elements)) if elements else 0, "url": reverse(c.liste) + c.filtre})
     sortie.sort(key=lambda r: 0 if r["controle"].gravite == KO else 1)
     return sortie
 

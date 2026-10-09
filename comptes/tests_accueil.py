@@ -139,3 +139,8 @@ class ACompleterTests(TestCase):
 
     def test_carte_accueil_et_menu(self):
         self.assertContains(self.client.get(reverse("admin:index")), reverse("a_completer"))
+
+    def test_filtre_sans_poste_et_lien_de_la_carte(self):
+        reponse = self.client.get(reverse("admin:decoupe_parametrecoupe_changelist") + "?sans_poste=oui")
+        self.assertEqual(reponse.status_code, 200)
+        self.assertContains(reponse, "Sans poste")

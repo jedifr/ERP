@@ -4,6 +4,7 @@
     <span class="pastille-param pastille-{{ r.controle.gravite }}">{{ r.total }}</span>
   </header>
   <p>{{ r.controle.consequence }}</p>
+  {% if r.controle.action %}<p><a href="{{ r.url }}"><b>Voir les {{ r.total }} dans la liste</b></a><br>{{ r.controle.action }}</p>{% endif %}
   {% if r.elements %}
     <ul>{% for libelle, url in r.elements %}<li><a href="{{ url }}">{{ libelle }}</a></li>{% endfor %}{% if r.plus %}<li><a href="{{ r.url }}">… et {{ r.plus }} autre{{ r.plus|pluralize }}</a></li>{% endif %}</ul>
   {% else %}
