@@ -1,0 +1,42 @@
+{% extends "admin/base_site.html" %}
+{% block breadcrumbs %}{% endblock %}
+{% block content %}
+<form method="get" class="grille-filtres">
+  <label>Procédé <select name="procede" onchange="this.form.submit()">{% for v, l in procedes %}<option value="{{ v }}" {% if v == g.procede %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
+  {% if g.procede == "laser" %}<label>Gaz <select name="gaz" onchange="this.form.submit()"><option value="">tous</option>{% for v, l in gaz_choix %}<option value="{{ v }}" {% if v == g.gaz %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>{% endif %}
+  <label>Afficher <select name="vue" onchange="this.form.submit()">{% for v, l in vues %}<option value="{{ v }}" {% if v == g.vue %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
+  <a href="{{ liste }}" class="grille-lien">Vue en liste</a>
+  <span class="grille-compte">{{ g.compte.total }} paramètre{{ g.compte.total|pluralize }}{% if g.compte.sans_poste %} · <b class="grille-ko">{{ g.compte.sans_poste }} sans poste</b>{% endif %}{% if g.compte.estimes %} · {{ g.compte.estimes }} estimé{{ g.compte.estimes|pluralize }}{% endif %}</span>
+</form>
+<p class="grille-legende"><span class="gc gc-ok">renseigné</span><span class="gc gc-estime">vitesses estimées</span><span class="gc gc-attention">à compléter</span><span class="gc gc-ko">sans poste</span><span class="gc gc-vide">pas de paramètre (cliquer pour créer)</span></p>
+
+{% if peut_modifier and g.lignes %}
+<form method="post" class="grille-affectation">{% csrf_token %}
+  <input type="hidden" name="procede" value="{{ g.procede }}"><input type="hidden" name="gaz" value="{{ g.gaz }}"><input type="hidden" name="vue" value="{{ g.vue }}">
+  <label>Affecter un poste à
+    <select name="cible">
+      <option value="tout">toute la grille affichée</option>
+      <optgroup label="Une matière (ligne)">{% for l in g.lignes %}<option value="ligne:{{ l.cle }}">{{ l.nom }}</option>{% endfor %}</optgroup>
+      <optgroup label="Une épaisseur (colonne)">{% for c in g.colonnes %}<option value="colonne:{{ c.valeur }}">{{ c.libelle }} mm</option>{% endfor %}</optgroup>
+    </select></label>
+  <label>→ <select name="poste"><option value="">(retirer le poste)</option>{% for p in postes %}<option value="{{ p.pk }}">{{ p.nom }}</option>{% endfor %}</select></label>
+  <button type="submit" onclick="return confirm('Modifier le poste de tous les paramètres de cette sélection ?')">Affecter</button>
+</form>
+{% endif %}
+
+{% if g.lignes %}
+<div class="grille-defilement"><table class="grille">
+  <thead><tr><th class="grille-coin">Matière \ épaisseur (mm)</th>{% for c in g.colonnes %}<th>{{ c.libelle }}</th>{% endfor %}</tr></thead>
+  <tbody>
+  {% for l in g.lignes %}
+    <tr><th class="grille-ligne">{{ l.nom }}</th>
+      {% for case in l.cases %}
+        {% if case.vide %}<td><a href="{{ case.url }}" class="gc gc-vide" title="Créer ce paramètre">＋</a></td>
+        {% else %}<td><a href="{{ case.url }}" class="gc gc-{{ case.etat }}" title="{{ case.titre }}">{{ case.texte }}</a></td>{% endif %}
+      {% endfor %}
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% else %}<p class="accueil-calme">Aucun paramètre de coupe pour ce procédé. Importez materials.lua (vue en liste) ou créez-en un.</p>{% endif %}
+{% endblock %}

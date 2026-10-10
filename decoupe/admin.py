@@ -571,7 +571,37 @@ class ParametreCoupeAdmin(ModelAdmin):
 
     list_display = ["cible_display", "epaisseur_mm", "procede", "gaz", "vitesse_production_display", "poste", "origine", "intervalle_pieces_mm", "coefficient_ajustement"]
     actions = ["action_calculer_vitesses", "action_affecter_poste"]
-    actions_list = ["action_importer_lua"]
+    actions_list = ["action_grille", "action_importer_lua"]
+
+    @unfold_action(description="Vue en grille", url_path="grille", icon="grid_on")
+    def action_grille(self, request):
+        """Grille matière × épaisseur d'un procédé : poste, vitesse ou mise en place de chaque paramètre, avec affectation d'un poste par ligne ou colonne."""
+        from technique.models import PosteTravail
+
+        from . import grille_parametres as grille
+
+        if not self.has_view_permission(request):
+            raise PermissionDenied
+        procede = request.GET.get("procede") or request.POST.get("procede") or ParametreCoupe.Procede.LASER
+        gaz = request.GET.get("gaz", request.POST.get("gaz", ""))
+        vue = request.GET.get("vue") or request.POST.get("vue") or "poste"
+        adresse = request.path
+        if request.method == "POST":
+            if not self.has_change_permission(request):
+                raise PermissionDenied
+            poste = PosteTravail.objects.filter(pk=request.POST.get("poste")).first() if request.POST.get("poste") else None
+            try:
+                n = grille.affecter_poste(procede, gaz, request.POST.get("cible", ""), poste)
+            except ValueError:
+                self.message_user(request, "Sélection inconnue : rien n'a été modifié.", level=messages.ERROR)
+            else:
+                self.message_user(request, f"{n} paramètre(s) affecté(s) à « {poste} »." if poste else f"Poste retiré de {n} paramètre(s).", level=messages.SUCCESS)
+            return redirect(f"{adresse}?procede={procede}&gaz={gaz}&vue={vue}")
+        donnees = grille.contexte_grille(procede, gaz, vue)
+        contexte = {**self.admin_site.each_context(request), "title": "Paramètres de coupe en grille", "g": donnees, "vues": grille.VUES, "postes": grille.postes(),
+                    "procedes": ParametreCoupe.Procede.choices, "gaz_choix": grille.gaz_choices(), "peut_modifier": self.has_change_permission(request),
+                    "liste": reverse("admin:decoupe_parametrecoupe_changelist"), "adresse": adresse}
+        return TemplateResponse(request, "admin/decoupe/grille_parametres.html", contexte)
     actions_detail = ["action_dupliquer_epaisseurs"]
 
     @unfold_action(description="Importer materials.lua (IGEMS)", url_path="importer-lua", icon="upload_file")

@@ -12,7 +12,7 @@ from django.urls import reverse
 # (clé, titre, icône, description, [(libellé, app, modèle ou None, droit, URL nommée facultative)], clé du contrôle d'état)
 CARTES = [
     ("decoupe", "Découpe", "content_cut", "Paramètres de coupe, réglages laser et jet d'eau, formats de tôle, bord de tôle", [
-        ("Paramètres de coupe", "decoupe", "parametrecoupe"), ("Réglages de coupe", "decoupe", "reglageprocede"),
+        ("Paramètres de coupe", "decoupe", "parametrecoupe"), ("Paramètres de coupe en grille", "decoupe", "parametrecoupe", "admin:decoupe_parametrecoupe_action_grille"), ("Réglages de coupe", "decoupe", "reglageprocede"),
         ("Formats de tôle", "decoupe", "formattole"), ("Imbrication : seuil de chutes", "decoupe", "reglageimbrication"), ("Imbrications (historique)", "decoupe", "imbricationjob"),
     ], "decoupe"),
     ("formes", "Formes et profilés", "straighten", "Cotes normalisées, sections de profilés, profils d'import DXF", [

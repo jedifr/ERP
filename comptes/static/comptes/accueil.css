@@ -131,3 +131,21 @@ div[data-onglet-actif="lignes"] > #lignes-constructeur { display: block !importa
 .pa-attention { background: #fef3c7; color: #92400e; font-weight: 600; }
 .pa-normal { background: #e0f2fe; color: #075985; }
 .pa-calme { opacity: .45; }
+/* Paramètres de coupe en grille */
+.grille-filtres { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; margin-bottom: .6rem; font-size: .85rem; }
+.grille-filtres select, .grille-affectation select { border: 1px solid rgb(0 0 0 / .2); border-radius: .4rem; padding: .2rem .5rem; background: transparent; }
+.grille-compte { margin-left: auto; opacity: .8; } .grille-ko { color: #b91c1c; } .grille-lien { text-decoration: underline; }
+.grille-legende { display: flex; flex-wrap: wrap; gap: .5rem; font-size: .75rem; margin-bottom: .8rem; }
+.grille-affectation { display: flex; flex-wrap: wrap; gap: .8rem; align-items: center; margin-bottom: 1rem; padding: .6rem .8rem; border: 1px dashed rgb(0 0 0 / .2); border-radius: .5rem; font-size: .85rem; }
+.grille-affectation button { background: #f59e0b; color: #fff; font-weight: 600; padding: .3rem .9rem; border-radius: .4rem; }
+.grille-defilement { overflow: auto; max-height: 70vh; border: 1px solid rgb(0 0 0 / .1); border-radius: .5rem; }
+.grille { border-collapse: separate; border-spacing: 0; font-size: .78rem; }
+.grille th, .grille td { padding: .15rem .3rem; text-align: center; border-bottom: 1px solid rgb(0 0 0 / .06); white-space: nowrap; }
+.grille thead th { position: sticky; top: 0; background: var(--color-base-0, #fff); z-index: 2; }
+.grille-ligne { position: sticky; left: 0; background: var(--color-base-0, #fff); text-align: left !important; z-index: 1; font-weight: 600; }
+.grille-coin { position: sticky; left: 0; z-index: 3 !important; text-align: left !important; }
+.gc { display: inline-block; min-width: 4.6rem; padding: .2rem .45rem; border-radius: .35rem; text-decoration: none; font-size: .75rem; }
+.gc-ok { background: #dcfce7; color: #166534; } .gc-estime { background: #e0f2fe; color: #075985; }
+.gc-attention { background: #fef3c7; color: #92400e; } .gc-ko { background: #fee2e2; color: #991b1b; font-weight: 600; }
+.gc-vide { border: 1px dashed rgb(0 0 0 / .25); opacity: .6; }
+a.gc:hover { filter: brightness(.95); outline: 1px solid rgb(0 0 0 / .25); }
