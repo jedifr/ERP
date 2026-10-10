@@ -755,12 +755,12 @@ class ProfilesDevisTests(TestCase):
 
         return PieceProfile.objects.get(pk=r.json()["piece_id"])
 
-    def test_catalogue_seme_non_verifie(self):
+    def test_catalogue_arcelor_charge_et_verifie(self):
         from decoupe.models import ProfileSection
 
         familles = set(ProfileSection.objects.values_list("famille", flat=True))
         self.assertEqual(familles, {"corniere", "corniere_inegale", "upn", "ipe", "hea", "heb", "tube_carre", "tube_rectangulaire", "tube_rond", "plat", "rond_plein", "carre_plein"})
-        self.assertFalse(ProfileSection.objects.filter(verifie=True).exists())
+        self.assertTrue(ProfileSection.objects.filter(verifie=True).exists())  # masses du catalogue ArcelorMittal 2020 reprises et vérifiées
         self.assertAlmostEqual(ProfileSection.objects.get(designation="Tube Ø60.3×3.6").masse_lineique, 5.03, places=2)
         self.assertEqual(ProfileSection.objects.get(designation="UPN 100").masse_lineique, 10.6)
 

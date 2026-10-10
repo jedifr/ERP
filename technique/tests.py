@@ -414,11 +414,11 @@ class CatalogueProfilesTests(TestCase):
     def test_masses_de_reference(self):
         import math
 
-        self.assertAlmostEqual(self.section("Tube 40×40×3").masse_lineique, 3.41, places=2)  # EN 10219 : angles arrondis
-        self.assertAlmostEqual(self.section("Tube 100×100×5").masse_lineique, 14.70, places=2)
+        self.assertAlmostEqual(self.section("Tube 40×40×3").masse_lineique, 3.30, places=2)  # catalogue ArcelorMittal 2020 (EN 10219, formé à froid)
+        self.assertAlmostEqual(self.section("Tube 100×100×5").masse_lineique, 14.41, places=2)
         self.assertAlmostEqual(self.section("Plat 40×5").masse_lineique, 40 * 5 * 7.85 / 1000, places=3)
-        self.assertAlmostEqual(self.section("Rond Ø20").masse_lineique, math.pi * 100 * 7.85 / 1000, places=3)
-        self.assertAlmostEqual(self.section("Carré 20").masse_lineique, 400 * 7.85 / 1000, places=3)
+        self.assertAlmostEqual(self.section("Rond Ø20").masse_lineique, math.pi * 100 * 7.85 / 1000, places=2)  # catalogue : 2,47
+        self.assertAlmostEqual(self.section("Carré 20").masse_lineique, 400 * 7.85 / 1000, places=2)  # catalogue : 3,14
         self.assertEqual(self.section("IPE 200").masse_lineique, 22.4)
         self.assertEqual(self.section("HEB 200").masse_lineique, 61.3)
         self.assertAlmostEqual(self.section("L 100×50×6").masse_lineique, 6 * 144 * 7.85 / 1000, places=3)
@@ -428,9 +428,28 @@ class CatalogueProfilesTests(TestCase):
 
         presentes = set(ProfileSection.objects.values_list("famille", flat=True))
         self.assertEqual(presentes, set(ProfileSection.Famille.values))
-        self.assertFalse(ProfileSection.objects.filter(verifie=True).exists())
         for section in ProfileSection.objects.all():
             section.full_clean()  # chaque ligne livrée a toutes ses cotes
+
+    def test_catalogue_arcelor_verifie_avec_sa_source(self):
+        from decoupe.profiles_catalogue_arcelor import LIGNES
+
+        s = self.section("Tube 40×40×3")
+        self.assertTrue(s.verifie)
+        self.assertIn("ArcelorMittal", s.source)
+        self.assertGreater(len(LIGNES), 600)
+        for famille, designation, cotes, masse, page in LIGNES:
+            section = self.section(designation)
+            self.assertEqual((section.famille, section.masse_lineique), (famille, masse), designation)
+
+    def test_formule_des_tubes_retrouve_le_catalogue_a_2_pour_cent(self):
+        from decoupe.profiles_catalogue_arcelor import LIGNES
+        from decoupe.profiles_data import aire_tube_rectangulaire, masse_aire
+
+        for famille, designation, cotes, masse, page in LIGNES:
+            if famille in ("tube_carre", "tube_rectangulaire"):
+                h, b = cotes.get("h", cotes.get("c")), cotes.get("b", cotes.get("c"))
+                self.assertAlmostEqual(masse_aire(aire_tube_rectangulaire(h, b, cotes["e"])) / masse, 1, delta=0.02, msg=designation)
 
     def test_masse_alu_et_inox_par_la_densite(self):
         s = self.section("Plat 40×5")
@@ -474,9 +493,11 @@ class CatalogueProfilesTests(TestCase):
         from .models import ProfileSection
 
         etendre = import_module("technique.migrations.0022_sections_catalogue_etendu").etendre
+        appliquer = import_module("technique.migrations.0023_catalogue_arcelor").appliquer
         s = self.section("Tube 40×40×3")
         ProfileSection.objects.filter(pk=s.pk).update(verifie=True, masse_lineique=9.99)
         nb = ProfileSection.objects.count()
         etendre(apps, None)
+        appliquer(apps, None)
         self.assertEqual(ProfileSection.objects.count(), nb)  # idempotent
         self.assertEqual(ProfileSection.objects.get(pk=s.pk).masse_lineique, 9.99)  # vérifié : jamais recalculé

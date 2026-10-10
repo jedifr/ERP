@@ -5,8 +5,9 @@ densités (`ProfileSection.masse_pour`), la section étant la même.
 
 - Cornières à ailes égales (EN 10056-1), UPN (EN 10279), IPE (EN 10365), HEA et HEB : masses du tableau usuel des fabricants.
 - Cornières à ailes inégales : masse calculée, angles vifs, aire t × (a + b − t) (environ 1 % sous le catalogue).
-- Tubes carrés et rectangulaires (EN 10219) : aire 2t(h + b − 2t) − (4 − π)(ro² − ri²) avec les rayons de la norme (t ≤ 6 : ro = 1,5 t,
-  ri = t ; t ≤ 10 : ro = 2 t, ri = 1,5 t ; au-delà ro = 2,5 t, ri = 2 t). Contrôles : 40×40×3 = 3,41 kg/m ; 100×100×5 = 14,7 kg/m.
+- Tubes carrés et rectangulaires formés à froid (EN 10219) : aire 2t(h + b − 2t) − (4 − π)(ro² − ri²) avec les rayons de la norme (t ≤ 6 :
+  ro = 2 t, ri = t ; t ≤ 10 : ro = 2,5 t, ri = 1,5 t ; au-delà ro = 3 t, ri = 2 t), qui retrouve le catalogue ArcelorMittal 2020 à moins de 2 %
+  (40×40×3 = 3,30 kg/m ; 100×100×5 = 14,4 kg/m). Les masses du catalogue lui-même sont reprises par `profiles_catalogue_arcelor.py`.
 - Tubes ronds (EN 10220) : π t (D − t) ; plats, ronds et carrés pleins : aire exacte.
 
 Ce ne sont que des valeurs de départ, à contrôler avec le catalogue du fournisseur (coche « Vérifié » ensuite) ; elles se remplacent ou se
@@ -80,10 +81,10 @@ CARRES_PLEINS = [8, 10, 12, 14, 16, 20, 25, 30, 40]
 def rayons_tube(e):
     """(rayon extérieur, rayon intérieur) des angles d'un tube carré ou rectangulaire selon l'épaisseur (EN 10219)."""
     if e <= 6:
-        return 1.5 * e, 1.0 * e
+        return 2.0 * e, 1.0 * e
     if e <= 10:
-        return 2.0 * e, 1.5 * e
-    return 2.5 * e, 2.0 * e
+        return 2.5 * e, 1.5 * e
+    return 3.0 * e, 2.0 * e
 
 
 def aire_tube_rectangulaire(h, b, e):
@@ -121,9 +122,9 @@ def lignes():
         for nom, h, b, tw, tf, m in table:
             ajouter(famille, nom, {"h": h, "b": b, "tw": tw, "tf": tf}, m, source)
     for c, e in TUBES_CARRES:
-        ajouter("tube_carre", f"Tube {_g(c)}×{_g(c)}×{_g(e)}", {"c": c, "e": e}, masse_aire(aire_tube_rectangulaire(c, c, e)), "masse calculée (EN 10219, angles arrondis)")
+        ajouter("tube_carre", f"Tube {_g(c)}×{_g(c)}×{_g(e)}", {"c": c, "e": e}, masse_aire(aire_tube_rectangulaire(c, c, e)), "masse calculée (EN 10219, formé à froid)")
     for h, b, e in TUBES_RECTANGULAIRES:
-        ajouter("tube_rectangulaire", f"Tube {_g(h)}×{_g(b)}×{_g(e)}", {"h": h, "b": b, "e": e}, masse_aire(aire_tube_rectangulaire(h, b, e)), "masse calculée (EN 10219, angles arrondis)")
+        ajouter("tube_rectangulaire", f"Tube {_g(h)}×{_g(b)}×{_g(e)}", {"h": h, "b": b, "e": e}, masse_aire(aire_tube_rectangulaire(h, b, e)), "masse calculée (EN 10219, formé à froid)")
     for d, e in TUBES_RONDS:
         ajouter("tube_rond", f"Tube Ø{_g(d)}×{_g(e)}", {"d": d, "e": e}, masse_aire(math.pi * e * (d - e)), "masse calculée (EN 10220)")
     for largeur, e in PLATS:
