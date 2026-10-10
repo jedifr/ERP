@@ -594,6 +594,27 @@ class ParametreCoupeAdmin(ModelAdmin):
             if not self.has_change_permission(request):
                 raise PermissionDenied
             poste = PosteTravail.objects.filter(pk=request.POST.get("poste")).first() if request.POST.get("poste") else None
+            if request.POST.get("creer"):
+                if not request.user.has_perm("decoupe.add_parametrecoupe"):
+                    raise PermissionDenied
+                if procede != ParametreCoupe.Procede.JET_EAU:
+                    self.message_user(request, "Au laser, les paramètres viennent du tableau du constructeur : ils ne se créent pas par estimation.", level=messages.WARNING)
+                    return redirect(f"{adresse}?procede={procede}&gaz={gaz}&vue={vue}")
+                try:
+                    crees, ignores = grille.creer_manquants(request.POST.get("cible", ""), poste)
+                except ValueError:
+                    self.message_user(request, "Sélection inconnue : rien n'a été créé.", level=messages.ERROR)
+                else:
+                    if crees:
+                        from comptes import lots
+
+                        lots._enregistrer_lot(request.user, ParametreCoupe, f"Paramètres jet d'eau créés depuis la grille ({len(crees)})", [], [("decoupe.ParametreCoupe", str(p.pk)) for p in crees])
+                        self.message_user(request, f"{len(crees)} paramètre(s) créé(s) (vitesses estimées d'après l'usinabilité)" + (f", poste « {poste} »" if poste else "") + ".", level=messages.SUCCESS)
+                    for libelle, motif in ignores[:8]:
+                        self.message_user(request, f"{libelle} : {motif}", level=messages.WARNING)
+                    if len(ignores) > 8:
+                        self.message_user(request, f"… et {len(ignores) - 8} autre(s) non créé(s).", level=messages.WARNING)
+                return redirect(f"{adresse}?procede={procede}&gaz={gaz}&vue={vue}")
             try:
                 n = grille.affecter_poste(procede, gaz, request.POST.get("cible", ""), poste)
             except ValueError:
@@ -603,7 +624,7 @@ class ParametreCoupeAdmin(ModelAdmin):
             return redirect(f"{adresse}?procede={procede}&gaz={gaz}&vue={vue}")
         donnees = grille.contexte_grille(procede, gaz, vue)
         contexte = {**self.admin_site.each_context(request), "title": "Paramètres de coupe en grille", "g": donnees, "vues": grille.VUES, "postes": grille.postes(),
-                    "procedes": ParametreCoupe.Procede.choices, "gaz_choix": grille.gaz_choices(), "peut_modifier": self.has_change_permission(request),
+                    "procedes": ParametreCoupe.Procede.choices, "gaz_choix": grille.gaz_choices(), "peut_modifier": self.has_change_permission(request), "peut_creer": self.has_add_permission(request),
                     "liste": reverse("admin:decoupe_parametrecoupe_changelist"), "adresse": adresse}
         return TemplateResponse(request, "admin/decoupe/grille_parametres.html", contexte)
     actions_detail = ["action_dupliquer_epaisseurs"]

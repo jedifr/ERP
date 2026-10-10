@@ -21,7 +21,12 @@
     </select></label>
   <label>→ <select name="poste"><option value="">(retirer le poste)</option>{% for p in postes %}<option value="{{ p.pk }}">{{ p.nom }}</option>{% endfor %}</select></label>
   <button type="submit" onclick="return confirm('Modifier le poste de tous les paramètres de cette sélection ?')">Affecter</button>
+  {% if peut_creer and g.procede == "jet_eau" %}<button type="submit" name="creer" value="1" title="Crée sans ouvrir leur fiche les paramètres absents de la sélection (vitesses estimées), avec le poste choisi" onclick="return confirm('Créer les paramètres manquants de cette sélection, avec le poste choisi (vitesses estimées d\'après l\'usinabilité) ?')">Créer les manquants</button>{% endif %}
 </form>
+{% if peut_creer and g.procede == "jet_eau" %}<form method="post" id="grille-creer" hidden>{% csrf_token %}
+  <input type="hidden" name="procede" value="{{ g.procede }}"><input type="hidden" name="gaz" value="{{ g.gaz }}"><input type="hidden" name="vue" value="{{ g.vue }}">
+  <input type="hidden" name="creer" value="1"><input type="hidden" name="cible" value=""><input type="hidden" name="poste" value="">
+</form>{% endif %}
 {% endif %}
 
 {% if g.lignes %}
@@ -31,7 +36,7 @@
   {% for l in g.lignes %}
     <tr><th class="grille-ligne">{{ l.nom }}</th>
       {% for case in l.cases %}
-        {% if case.vide %}<td><a href="{{ case.url }}" class="gc gc-vide" title="Créer ce paramètre">＋</a></td>
+        {% if case.vide %}<td><a href="{{ case.url }}" class="gc gc-vide" {% if peut_creer and g.procede == "jet_eau" %}data-cible="{{ case.cible }}" title="Créer ce paramètre tout de suite (poste choisi ci-dessus, vitesses estimées) ; Maj + clic : ouvrir la fiche"{% else %}title="Créer ce paramètre"{% endif %}>＋</a></td>
         {% else %}<td><a href="{{ case.url }}" class="gc gc-{{ case.etat }}" title="{{ case.titre }}">{{ case.texte }}</a></td>{% endif %}
       {% endfor %}
     </tr>
@@ -39,4 +44,20 @@
   </tbody>
 </table></div>
 {% else %}<p class="accueil-calme">Aucun paramètre de coupe pour ce procédé. Importez materials.lua (vue en liste) ou créez-en un.</p>{% endif %}
+<script>
+(function () {
+  var formulaire = document.getElementById("grille-creer");
+  if (!formulaire) return;
+  var choix = document.querySelector(".grille-affectation select[name=poste]");
+  document.querySelectorAll("a.gc-vide[data-cible]").forEach(function (a) {
+    a.addEventListener("click", function (e) {
+      if (e.shiftKey || e.ctrlKey || e.metaKey) return; // ouvrir la fiche du paramètre
+      e.preventDefault();
+      formulaire.cible.value = a.dataset.cible;
+      formulaire.poste.value = choix ? choix.value : "";
+      formulaire.submit();
+    });
+  });
+})();
+</script>
 {% endblock %}

@@ -71,7 +71,7 @@ def contexte_grille(procede, gaz="", vue="poste"):
         cases = []
         for e in epaisseurs:
             p = par_ligne[cle].get(e)
-            cases.append({"vide": True, "url": url_creation(procede, gaz, cle, e)} if p is None else {
+            cases.append({"vide": True, "url": url_creation(procede, gaz, cle, e), "cible": f"cell:{cle}:{e:g}"} if p is None else {
                 "pk": p.pk, "texte": _contenu(p, vue), "etat": _etat(p, vue), "url": reverse("admin:decoupe_parametrecoupe_change", args=[p.pk]),
                 "titre": f"{noms[cle]} · {_libelle_epaisseur(e)} mm · {p.get_origine_display()}",
             })
@@ -109,3 +109,52 @@ def postes():
 
 def gaz_choices():
     return list(GazCoupe.choices)
+
+
+def _cases_manquantes(cible):
+    """[(clé de ligne, épaisseur)] des cases vides de la sélection (jet d'eau) : « cell:<clé>:<épaisseur> », « ligne:<clé> », « colonne:<épaisseur> » ou « tout »."""
+    parametres = list(ParametreCoupe.objects.filter(procede=ProcedeCoupe.JET_EAU).select_related("famille", "matiere"))
+    epaisseurs = sorted({p.epaisseur_mm for p in parametres})
+    existants = {(_cle_ligne(p), p.epaisseur_mm) for p in parametres}
+    lignes = sorted({_cle_ligne(p) for p in parametres})
+    if cible.startswith("cell:"):
+        _, cle, e = cible.split(":", 2)
+        lignes, epaisseurs = [cle], [float(e)]
+    elif cible.startswith("ligne:"):
+        lignes = [cible.split(":", 1)[1]]
+    elif cible.startswith("colonne:"):
+        epaisseurs = [float(cible.split(":", 1)[1])]
+    elif cible != "tout":
+        raise ValueError("sélection inconnue")
+    return parametres, [(cle, e) for cle in lignes for e in epaisseurs if (cle, e) not in existants]
+
+
+def creer_manquants(cible, poste=None):
+    """Crée les paramètres jet d'eau absents de la sélection, sans ouvrir leur fiche : copie du paramètre le plus proche en épaisseur de la même
+    ligne (mêmes réglages, perçage proportionnel, vitesses estimées d'après l'usinabilité), avec `poste` s'il est donné, sinon celui du modèle.
+    Retourne (créés [ParametreCoupe], ignorés [(libellé, motif)])."""
+    from decoupe.services.parametres import ErreurParametre, dupliquer_vers_epaisseurs
+
+    parametres, manquantes = _cases_manquantes(cible)
+    par_ligne = defaultdict(list)
+    for p in parametres:
+        par_ligne[_cle_ligne(p)].append(p)
+    crees, ignores = [], []
+    for cle, e in manquantes:
+        modeles = par_ligne.get(cle)
+        nom = f"{_nom_ligne(modeles[0])} {_libelle_epaisseur(e)} mm" if modeles else f"{cle} {e:g} mm"
+        if not modeles:
+            ignores.append((nom, "aucun paramètre de cette matière pour servir de modèle"))
+            continue
+        modele = min(modeles, key=lambda p: abs(p.epaisseur_mm - e))
+        try:
+            nouveaux, _ = dupliquer_vers_epaisseurs(modele, [e])
+        except ErreurParametre as exc:
+            ignores.append((nom, str(exc)))
+            continue
+        for nouveau in nouveaux:
+            if poste is not None:
+                nouveau.poste = poste
+                nouveau.save(update_fields=["poste"])
+            crees.append(nouveau)
+    return crees, ignores

@@ -84,3 +84,59 @@ class GrilleParametresTests(TestCase):
 
     def test_bouton_vue_en_grille_sur_la_liste(self):
         self.assertContains(self.client.get(reverse("admin:decoupe_parametrecoupe_changelist")), "Vue en grille")
+
+
+class GrilleCreationDirecteTests(TestCase):
+    """Cliquer « + » (ou « Créer les manquants ») crée le paramètre jet d'eau tout de suite : copie du plus proche, vitesses estimées, poste choisi."""
+
+    def setUp(self):
+        from technique.models import FamilleMatiere
+
+        self.client.force_login(get_user_model().objects.create_superuser("adm-grille2", "g2@x.fr", "pass-mot-de-passe-21"))
+        ParametreCoupe.objects.all().delete()
+        self.acier = FamilleMatiere.objects.create(nom="Acier JE", usinabilite=87.6)
+        self.sans_usinabilite = FamilleMatiere.objects.create(nom="Marbre JE")
+        self.poste = PosteTravail.objects.create(nom="Jet JE", mode_calcul="horaire")
+        self.autre = PosteTravail.objects.create(nom="Jet JE 2", mode_calcul="horaire")
+        creer = lambda famille, e, **kw: ParametreCoupe.objects.create(procede="jet_eau", famille=famille, epaisseur_mm=e, poste=self.poste, **kw)
+        self.modele = creer(self.acier, 3, percage_stationnaire_hp_s=3.0)
+        creer(self.acier, 10)
+        creer(self.sans_usinabilite, 3)
+        self.url = reverse("admin:decoupe_parametrecoupe_action_grille")
+
+    def poster(self, cible, poste=None, procede="jet_eau"):
+        return self.client.post(self.url, {"procede": procede, "gaz": "", "vue": "poste", "creer": "1", "cible": cible, "poste": poste.pk if poste else ""}, follow=True)
+
+    def test_page_propose_la_creation_directe(self):
+        page = self.client.get(self.url + "?procede=jet_eau")
+        self.assertContains(page, 'data-cible="cell:f%d:10"' % self.sans_usinabilite.pk)
+        self.assertContains(page, "Créer les manquants")
+        self.assertContains(page, 'id="grille-creer"')
+
+    def test_clic_sur_une_case_vide_cree_le_parametre_avec_le_poste_choisi(self):
+        r = self.poster(f"cell:f{self.acier.pk}:5", self.autre)
+        self.assertContains(r, "1 paramètre(s) créé(s)")
+        p = ParametreCoupe.objects.get(procede="jet_eau", famille=self.acier, epaisseur_mm=5)
+        self.assertEqual((p.poste, p.origine), (self.autre, "calcule"))
+        self.assertTrue(p.vitesses.exists())  # vitesses estimées d'après l'usinabilité
+        self.assertEqual(p.percage_stationnaire_hp_s, 5.0)  # copié du modèle de 3 mm, proportionnel à l'épaisseur
+        r = self.poster(f"cell:f{self.acier.pk}:5", self.autre)  # déjà créé : rien de plus
+        self.assertEqual(ParametreCoupe.objects.filter(famille=self.acier, epaisseur_mm=5).count(), 1)
+
+    def test_creer_les_manquants_d_une_colonne_signale_ce_qui_ne_peut_pas_l_etre(self):
+        r = self.poster("colonne:10", None)
+        self.assertContains(r, "Marbre JE 10 mm")  # pas d'usinabilité : refusé avec le motif
+        self.assertFalse(ParametreCoupe.objects.filter(famille=self.sans_usinabilite, epaisseur_mm=10).exists())
+        r = self.poster("tout", self.poste)
+        self.assertTrue(ParametreCoupe.objects.filter(famille=self.acier, epaisseur_mm=3).exists())
+
+    def test_laser_refuse_et_lot_annulable(self):
+        from comptes import lots
+        from comptes.models import LotModification
+
+        r = self.poster(f"cell:f{self.acier.pk}:5", self.autre, procede="laser")
+        self.assertContains(r, "tableau du constructeur")
+        self.assertFalse(ParametreCoupe.objects.filter(famille=self.acier, epaisseur_mm=5).exists())
+        self.poster(f"cell:f{self.acier.pk}:5", self.autre)
+        lots.annuler(LotModification.objects.get())
+        self.assertFalse(ParametreCoupe.objects.filter(famille=self.acier, epaisseur_mm=5).exists())
