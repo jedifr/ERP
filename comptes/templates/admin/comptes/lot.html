@@ -1,0 +1,84 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<div class="max-w-5xl">
+  <p class="mb-4"><strong>{{ nombre }}</strong> {{ opts.verbose_name_plural }} sélectionné(s).
+    {% if phase == "saisie" %}Cochez ce que vous voulez modifier : un aperçu « avant → après » s'affiche avant toute écriture.{% endif %}</p>
+
+  {% if phase == "apercu" %}
+  <p class="mb-3"><strong>{{ nb_ok }}</strong> à modifier{% if nb_ignores %}, <strong>{{ nb_ignores }}</strong> ignoré(s){% endif %}{% if nb_erreurs %}, <strong class="text-red-600">{{ nb_erreurs }}</strong> en erreur (non modifié(s)){% endif %}.</p>
+  <div class="overflow-x-auto mb-4">
+    <table class="w-full text-sm">
+      <thead><tr class="text-left"><th class="py-1 pr-3">Objet</th><th class="py-1">Changements</th></tr></thead>
+      <tbody>
+      {% for l in lignes %}
+        <tr class="border-t border-base-200 align-top">
+          <td class="py-1 pr-3 whitespace-nowrap">{{ l.objet }}</td>
+          <td class="py-1">
+            {% if l.ignore %}<span class="text-font-subtle-light">Ignoré : {{ l.ignore }}</span>
+            {% elif l.erreur %}<span class="text-red-600">Erreur : {{ l.erreur }}</span>
+            {% else %}{% for libelle, avant, apres in l.changements %}<div>{{ libelle }} : <span class="line-through opacity-60">{{ avant }}</span> → <strong class="text-green-700">{{ apres }}</strong></div>{% endfor %}{% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <form method="post">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="{{ action }}">
+    {% for id in ids %}<input type="hidden" name="_selected_action" value="{{ id }}">{% endfor %}
+
+    {% if phase == "apercu" %}
+      {% for nom, valeur in reprise %}<input type="hidden" name="{{ nom }}" value="{{ valeur }}">{% endfor %}
+      <input type="hidden" name="lot_phase" value="appliquer">
+      <div class="flex gap-3">
+        {% if nb_ok %}<button type="submit" class="bg-primary-600 text-white font-semibold px-4 py-2 rounded-default">Appliquer à {{ nb_ok }} objet(s)</button>{% endif %}
+        <button type="submit" name="lot_phase" value="saisie" class="border border-base-300 px-4 py-2 rounded-default">Modifier la saisie</button>
+        <a href="../" class="border border-base-300 px-4 py-2 rounded-default">Annuler</a>
+      </div>
+      <p class="mt-3 text-sm text-font-subtle-light">Chaque lot est tracé (Lots de modifications) et peut être annulé tant que les valeurs n'ont pas changé depuis.</p>
+    {% else %}
+      <input type="hidden" name="lot_phase" value="apercu">
+      {% if periode %}
+      <label class="block mb-4"><span class="font-semibold">Date d'effet</span><br>
+        <input type="date" name="date_effet" value="{{ date_effet }}" class="border border-base-300 rounded-default px-2 py-1">
+        <span class="block text-sm text-font-subtle-light">Les lignes en vigueur sont closes la veille ; de nouvelles lignes les remplacent à partir de cette date (l'historique et les anciens devis restent intacts).</span>
+      </label>
+      {% endif %}
+      {% for c in champs %}
+      <div class="border-t border-base-200 py-3 flex gap-3 items-start">
+        <input type="checkbox" name="c_{{ c.spec.nom }}" value="1" {% if c.coche %}checked{% endif %} class="mt-1">
+        <div class="grow">
+          <div class="font-semibold">{{ c.spec.libelle }}</div>
+          {% if c.spec.aide %}<div class="text-sm text-font-subtle-light">{{ c.spec.aide }}</div>{% endif %}
+          <div class="mt-1 flex gap-2 flex-wrap items-center">
+            {% if c.spec.genre == "nombre" %}
+              {% if c.modes|length > 1 %}<select name="m_{{ c.spec.nom }}" class="border border-base-300 rounded-default px-2 py-1">{% for code, lib in c.modes %}<option value="{{ code }}" {% if c.mode == code %}selected{% endif %}>{{ lib }}</option>{% endfor %}</select>{% endif %}
+              <input type="text" inputmode="decimal" name="v_{{ c.spec.nom }}" value="{{ c.valeur }}" class="border border-base-300 rounded-default px-2 py-1 w-32">
+              {% if c.spec.unites %}<select name="u_{{ c.spec.nom }}" class="border border-base-300 rounded-default px-2 py-1">{% for code, lib in c.spec.unites %}<option value="{{ code }}" {% if c.unite == code %}selected{% endif %}>{{ lib }}</option>{% endfor %}</select>{% endif %}
+            {% elif c.spec.genre == "choix" or c.spec.genre == "tristate" %}
+              <select name="v_{{ c.spec.nom }}" class="border border-base-300 rounded-default px-2 py-1">{% if c.spec.vide_permis %}<option value="">(aucun)</option>{% endif %}{% for code, lib in c.choix %}<option value="{{ code }}" {% if c.valeur == code %}selected{% endif %}>{{ lib }}</option>{% endfor %}</select>
+            {% elif c.spec.genre == "fk" %}
+              <select name="v_{{ c.spec.nom }}" class="border border-base-300 rounded-default px-2 py-1">{% if c.spec.vide_permis %}<option value="">(aucun)</option>{% endif %}{% for o in c.objets %}<option value="{{ o.pk }}" {% if c.valeur == o.pk|stringformat:"s" %}selected{% endif %}>{{ o }}</option>{% endfor %}</select>
+            {% elif c.spec.genre == "m2m" %}
+              <select name="v_{{ c.spec.nom }}" multiple size="6" class="border border-base-300 rounded-default px-2 py-1 min-w-64">{% for o in c.objets %}<option value="{{ o.pk }}" {% if o.pk|stringformat:"s" in c.valeur %}selected{% endif %}>{{ o }}</option>{% endfor %}</select>
+              <span class="text-sm text-font-subtle-light">Remplace la sélection actuelle (aucune = toutes).</span>
+            {% elif c.spec.genre == "date" %}
+              <input type="date" name="v_{{ c.spec.nom }}" value="{{ c.valeur }}" class="border border-base-300 rounded-default px-2 py-1">
+            {% else %}
+              <input type="text" name="v_{{ c.spec.nom }}" value="{{ c.valeur }}" class="border border-base-300 rounded-default px-2 py-1 w-64">
+            {% endif %}
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+      <div class="flex gap-3 mt-4">
+        <button type="submit" class="bg-primary-600 text-white font-semibold px-4 py-2 rounded-default">Voir l'aperçu</button>
+        <a href="../" class="border border-base-300 px-4 py-2 rounded-default">Annuler</a>
+      </div>
+    {% endif %}
+  </form>
+</div>
+{% endblock %}

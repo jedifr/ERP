@@ -10,13 +10,16 @@ from django.utils.html import escape, format_html
 from django.utils.safestring import mark_safe
 from django.views.decorators.http import require_http_methods
 from unfold.admin import ModelAdmin, TabularInline
+from unfold.decorators import action as unfold_action
 
 from comptes.colonnes import ColonnesPersonnalisablesMixin
 from comptes.exports import ExportCsvMixin
+from comptes.lots_admin import ModificationParLotsMixin, vue_lot
 from achats.models import ArticleFournisseur
 from comptabilite.models import ArticleCompteAchat, ArticleCompteVente
 
 from .models import Article, FamilleMatiere, Gamme, GammeType, GammeTypeEtape, Matiere, Nomenclature, PosteTravail, RegleCreationTole, TarifPoste
+from . import lots_champs
 from .services import DuplicationError, dupliquer_article, renommer_article
 
 
@@ -110,12 +113,63 @@ def rattacher_matieres(modele_admin, request, matieres):
 
 
 @admin.register(Matiere)
-class MatiereAdmin(ModelAdmin):
+class MatiereAdmin(ModificationParLotsMixin, ModelAdmin):
     list_display = ["nom", "famille", "densite", "usinabilite"]
     list_filter = ["famille"]
     search_fields = ["nom", "famille__nom"]
     autocomplete_fields = ["famille"]
-    actions = ["action_usinabilite_standard", "action_rattacher_famille"]
+    actions = ["action_modifier_par_lots", "action_usinabilite_standard", "action_rattacher_famille"]
+    actions_list = ["action_catalogue"]
+    champs_lot = lots_champs.champs_matiere()
+
+    @unfold_action(description="Base matières rapide", url_path="catalogue", icon="library_add")
+    def action_catalogue(self, request):
+        """Crée d'un coup matières, tôles, paramètres jet d'eau et règles : on coche des nuances et des épaisseurs, on valide."""
+        from decimal import Decimal, InvalidOperation
+
+        from django.core.exceptions import PermissionDenied
+        from django.template.response import TemplateResponse
+
+        from . import catalogue_matieres as cat
+
+        if not (request.user.has_perm("technique.add_matiere") and request.user.has_perm("technique.add_article")):
+            raise PermissionDenied
+        rapport = None
+        post = request.POST if request.method == "POST" else {}
+        if request.method == "POST":
+            selection = []
+            for i, (nom, famille, densite) in enumerate(cat.CATALOGUE):
+                if post.get(f"n_{i}"):
+                    try:
+                        prix = Decimal(post.get(f"p_{i}", "").replace(",", ".")) if post.get(f"p_{i}", "").strip() else None
+                        dens = float(post.get(f"d_{i}", "").replace(",", ".") or densite)
+                    except (InvalidOperation, ValueError):
+                        messages.error(request, f"{nom} : prix ou densité invalide.")
+                        selection = None
+                        break
+                    selection.append({"nom": nom, "famille": famille, "densite": dens, "prix": prix})
+            if selection is not None:
+                selection += [{"nom": n, "famille": "", "densite": d, "prix": p} for n, d, p in cat.lire_tableau(post.get("tableau", ""))]
+                epaisseurs = [v for v in request.POST.getlist("epaisseur")] + [x for x in post.get("autres_epaisseurs", "").replace(";", ",").split(",") if x.strip()]
+                if not selection or not cat._epaisseurs(epaisseurs):
+                    messages.error(request, "Cochez au moins une nuance et une épaisseur.")
+                else:
+                    try:
+                        rapport = cat.creer_base(
+                            selection, epaisseurs, request.user, unite_cout=post.get("unite_cout", "poids"),
+                            modele_reference=post.get("modele_reference") or "TOLE-{matiere}-{epaisseur}",
+                            modele_libelle=post.get("modele_libelle", "Tôle {matiere} {epaisseur} mm"), creer_regle=bool(post.get("creer_regle")),
+                            jet_eau=bool(post.get("jet_eau")),
+                        )
+                    except (KeyError, IndexError, ValueError):
+                        messages.error(request, "Modèle de référence ou de libellé invalide (variables : {matiere}, {epaisseur}, {famille}).")
+        return TemplateResponse(request, "admin/technique/catalogue_matieres.html", {
+            **self.admin_site.each_context(request), "title": "Base matières rapide", "opts": self.model._meta, "rapport": rapport,
+            "catalogue": [{"i": i, "nom": n, "famille": f, "densite": d, "coche": bool(post.get(f"n_{i}")), "prix": post.get(f"p_{i}", ""),
+                           "existe": Matiere.objects.filter(pk=n).exists()} for i, (n, f, d) in enumerate(cat.CATALOGUE)],
+            "epaisseurs": [{"valeur": e, "coche": str(e) in post.getlist("epaisseur") if post else e in cat.PRESETS["courantes"]} for e in cat.EPAISSEURS],
+            "presets": cat.PRESETS, "post": post,
+        })
 
     @admin.action(description="Rattacher à une famille (d'après le nom : S235 → Acier, 5754 → Aluminium…)")
     def action_rattacher_famille(self, request, queryset):
@@ -202,7 +256,7 @@ def renommer_article_view(request, reference):
 
 
 @admin.register(Article)
-class ArticleAdmin(ColonnesPersonnalisablesMixin, ExportCsvMixin, ModelAdmin):
+class ArticleAdmin(ModificationParLotsMixin, ColonnesPersonnalisablesMixin, ExportCsvMixin, ModelAdmin):
     list_display = [
         "reference",
         "libelle",
@@ -214,6 +268,8 @@ class ArticleAdmin(ColonnesPersonnalisablesMixin, ExportCsvMixin, ModelAdmin):
         "stock_mini",
     ]
     list_filter = ["nature", "unite_cout", "type_profil", "gere_en_stock"]
+    actions = ["action_modifier_par_lots", "action_ajouter_gamme_type", "action_affecter_compte"]
+    champs_lot = lots_champs.champs_article()
     search_fields = ["reference", "libelle"]
     autocomplete_fields = ["matiere"]
     inlines = [
@@ -349,6 +405,86 @@ class ArticleAdmin(ColonnesPersonnalisablesMixin, ExportCsvMixin, ModelAdmin):
         filtres = super().get_list_filter(request)
         return filtres if settings.STOCK_ACTIF else [f for f in filtres if f not in self._CHAMPS_STOCK]
 
+    @admin.action(description="Ajouter une gamme type…", permissions=["change"])
+    def action_ajouter_gamme_type(self, request, queryset):
+        """Ajoute les étapes d'une gamme type à la gamme de chaque article fabriqué sélectionné."""
+        from django.template.response import TemplateResponse
+
+        from comptes import lots
+        from . import gamme_editeur
+
+        types = GammeType.objects.order_by("nom")
+        if "confirmer" in request.POST:
+            gamme_type = GammeType.objects.filter(pk=request.POST.get("gamme_type")).first()
+            if gamme_type is None:
+                messages.error(request, "Choisissez une gamme type.")
+            else:
+                crees, ignores = [], []
+                for article in queryset.order_by("reference"):
+                    avant = set(Gamme.objects.filter(article=article).values_list("pk", flat=True))
+                    try:
+                        gamme_editeur.ajouter_gamme_type(article, gamme_type)
+                    except gamme_editeur.ErreurGamme as exc:
+                        ignores.append(f"{article.reference} : {exc}")
+                        continue
+                    crees += [("technique.Gamme", str(pk)) for pk in Gamme.objects.filter(article=article).values_list("pk", flat=True) if pk not in avant]
+                if crees:
+                    lots._enregistrer_lot(request.user, Gamme, f"Gamme type « {gamme_type} » ajoutée à {len(set(c[1] for c in crees))} étape(s)", [], crees)
+                    self.message_user(request, f"Gamme type « {gamme_type} » ajoutée ({len(crees)} étape(s) créée(s)).", level=messages.SUCCESS)
+                for texte in ignores[:10]:
+                    self.message_user(request, texte, level=messages.WARNING)
+                return None
+        return TemplateResponse(request, "admin/comptes/lot_choix.html", {
+            **self.admin_site.each_context(request), "title": "Ajouter une gamme type", "opts": self.model._meta, "action": "action_ajouter_gamme_type",
+            "ids": request.POST.getlist("_selected_action"), "nombre": queryset.count(), "bouton": "Ajouter à la gamme",
+            "intro": "Les étapes de la gamme type sont copiées à la fin de la gamme de chaque article fabriqué (les autres natures sont ignorées).",
+            "champs": [{"nom": "gamme_type", "libelle": "Gamme type", "options": [(t.pk, f"{t.nom} ({t.etapes.count()} étapes)") for t in types], "valeur": request.POST.get("gamme_type", "")}],
+        })
+
+    @admin.action(description="Affecter un compte de vente ou d'achat…", permissions=["change"])
+    def action_affecter_compte(self, request, queryset):
+        """Crée ou met à jour le compte de vente (ou d'achat) et le code analytique des articles sélectionnés."""
+        from django.template.response import TemplateResponse
+
+        from comptabilite.models import CodeAnalytique, CompteComptable
+        from comptes import lots
+
+        if "confirmer" in request.POST:
+            vente = request.POST.get("sens") != "achat"
+            modele, champ = (ArticleCompteVente, "compte_vente") if vente else (ArticleCompteAchat, "compte_achat")
+            nature_compte = "de vente" if vente else "d'achat"
+            compte = CompteComptable.objects.filter(pk=request.POST.get("compte")).first()
+            code = CodeAnalytique.objects.filter(pk=request.POST.get("code_analytique")).first() if request.POST.get("code_analytique") else None
+            if compte is None:
+                messages.error(request, "Choisissez un compte.")
+            else:
+                crees, modifications = [], []
+                for article in queryset:
+                    existant = modele.objects.filter(article=article).first()
+                    if existant is None:
+                        objet = modele.objects.create(article=article, code_analytique=code, **{champ: compte})
+                        crees.append((modele._meta.label, str(objet.pk)))
+                    else:
+                        avant = {champ: existant.pk and getattr(existant, champ + "_id"), "code_analytique": existant.code_analytique_id}
+                        setattr(existant, champ, compte)
+                        existant.code_analytique = code
+                        existant.save()
+                        modifications.append({"pk": str(existant.pk), "avant": avant, "apres": {champ: compte.pk, "code_analytique": code.pk if code else None}})
+                lots._enregistrer_lot(request.user, modele, f"Compte {nature_compte} {compte} affecté à {queryset.count()} article(s)", modifications, crees)
+                self.message_user(request, f"Compte {compte} affecté à {queryset.count()} article(s) ({len(crees)} créé(s), {len(modifications)} mis à jour).", level=messages.SUCCESS)
+                return None
+        comptes = CompteComptable.objects.order_by("code")
+        return TemplateResponse(request, "admin/comptes/lot_choix.html", {
+            **self.admin_site.each_context(request), "title": "Affecter un compte", "opts": self.model._meta, "action": "action_affecter_compte",
+            "ids": request.POST.getlist("_selected_action"), "nombre": queryset.count(), "bouton": "Affecter",
+            "intro": "Pour ces articles, le compte remplace celui déjà affecté ; les articles qui n'en avaient pas en reçoivent un.",
+            "champs": [
+                {"nom": "sens", "libelle": "Compte de", "options": [("vente", "Vente"), ("achat", "Achat")], "valeur": request.POST.get("sens", "vente")},
+                {"nom": "compte", "libelle": "Compte comptable", "options": [(c.pk, f"{c.pk} — {c.libelle}") for c in comptes], "valeur": request.POST.get("compte", "")},
+                {"nom": "code_analytique", "libelle": "Code analytique (facultatif)", "vide": True, "options": [(c.pk, f"{c.pk} — {c.libelle}") for c in CodeAnalytique.objects.order_by("code")], "valeur": request.POST.get("code_analytique", "")},
+            ],
+        })
+
     def get_urls(self):
         urls = [
             path(
@@ -377,11 +513,19 @@ class TarifPosteInline(TabularInline):
 
 
 @admin.register(PosteTravail)
-class PosteTravailAdmin(ModelAdmin):
+class PosteTravailAdmin(ModificationParLotsMixin, ModelAdmin):
     list_display = ["nom", "type_operation", "mode_calcul", "nombre_machines", "cout_horaire_actuel", "taux_marge_defaut"]
     list_filter = ["mode_calcul"]
     search_fields = ["nom"]
     inlines = [TarifPosteInline]
+    actions = ["action_modifier_par_lots", "action_hausse_tarifs"]
+    champs_lot = lots_champs.champs_poste()
+
+    @admin.action(description="Modifier le coût horaire avec effet à une date (hausse)…", permissions=["change"])
+    def action_hausse_tarifs(self, request, queryset):
+        tarifs = TarifPoste.objects.filter(poste__in=queryset)
+        return vue_lot(self, request, tarifs, lots_champs.champs_tarif_poste(), "action_hausse_tarifs", "Coût horaire des postes sélectionnés",
+                       periode=True, description_lot="Coût horaire", modele=TarifPoste)
 
     @admin.display(description="Coût horaire actuel")
     def cout_horaire_actuel(self, obj):
@@ -393,8 +537,10 @@ class PosteTravailAdmin(ModelAdmin):
 
 
 @admin.register(TarifPoste)
-class TarifPosteAdmin(ModelAdmin):
+class TarifPosteAdmin(ModificationParLotsMixin, ModelAdmin):
     list_display = ["poste", "cout_horaire", "date_debut", "date_fin"]
+    actions = ["action_modifier_periode"]
+    champs_periode = lots_champs.champs_tarif_poste()
     list_filter = ["poste"]
     autocomplete_fields = ["poste"]
 
@@ -407,8 +553,10 @@ class NomenclatureAdmin(ModelAdmin):
 
 
 @admin.register(Gamme)
-class GammeAdmin(ModelAdmin):
+class GammeAdmin(ModificationParLotsMixin, ModelAdmin):
     list_display = ["article", "ordre", "poste", "date_debut", "date_fin", "origine"]
+    actions = ["action_modifier_periode"]
+    champs_periode = lots_champs.champs_gamme()
     readonly_fields = ["origine"]
 
     def save_model(self, request, obj, form, change):

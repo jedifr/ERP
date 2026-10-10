@@ -11,6 +11,10 @@ from comptes.pastilles import EN_COURS, PROBLEME, TERMINE, PastillesMixin
 from unfold.admin import ModelAdmin, TabularInline
 from unfold.decorators import action as unfold_action
 
+from comptes.lots import ChampLot
+from comptes.lots_admin import ModificationParLotsMixin
+from technique.models import FamilleMatiere, Matiere
+
 from .admin_views import analyser_fichier_view, previsualiser_imbrication_view
 from .models import (
     ReglageImbrication,
@@ -771,10 +775,17 @@ class ReglageProcedeAdmin(ModelAdmin):
 
 
 @admin.register(FormatTole)
-class FormatToleAdmin(ModelAdmin):
+class FormatToleAdmin(ModificationParLotsMixin, ModelAdmin):
     """Formats de tôle proposés à la simulation d'imbrication (3000 × 1500, 2500 × 1250…)."""
 
     list_display = ["libelle", "longueur_mm", "largeur_mm", "priorite", "restriction_matieres", "actif"]
+    actions = ["action_modifier_par_lots"]
+    champs_lot = [
+        ChampLot("priorite", "Priorité d'utilisation", genre="choix", choix=lambda: FormatTole.Priorite.choices),
+        ChampLot("actif", "Proposé dans les simulations", genre="choix", choix=[("1", "Oui"), ("0", "Non")]),
+        ChampLot("familles", "Familles de matière", genre="m2m", queryset=lambda: FamilleMatiere.objects.all()),
+        ChampLot("matieres", "Nuances de matière", genre="m2m", queryset=lambda: Matiere.objects.order_by("nom")),
+    ]
     list_filter = ["priorite", "actif"]
     search_fields = ["libelle"]
     filter_horizontal = ["familles", "matieres"]

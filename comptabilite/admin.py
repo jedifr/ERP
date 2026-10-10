@@ -6,6 +6,8 @@ from django.http import HttpResponse
 from django.shortcuts import redirect
 from django.template.response import TemplateResponse
 from django.urls import reverse
+from comptes.lots import ChampLot
+from comptes.lots_admin import ModificationParLotsMixin
 from unfold.admin import ModelAdmin, TabularInline
 from unfold.decorators import action
 
@@ -116,22 +118,39 @@ class PosteGestionAdmin(ModelAdmin):
 
 
 @admin.register(ArticleCompteVente)
-class ArticleCompteVenteAdmin(ModelAdmin):
+class ArticleCompteVenteAdmin(ModificationParLotsMixin, ModelAdmin):
     list_display = ["article", "poste_gestion", "compte_vente", "code_analytique"]
+    actions = ["action_modifier_par_lots"]
+    champs_lot = [
+        ChampLot("compte_vente", "Compte de vente", genre="fk", queryset=lambda: CompteComptable.objects.order_by("code"), vide_permis=True),
+        ChampLot("poste_gestion", "Poste de gestion", genre="fk", queryset=lambda: PosteGestion.objects.order_by("code"), vide_permis=True),
+        ChampLot("code_analytique", "Code analytique", genre="fk", queryset=lambda: CodeAnalytique.objects.order_by("code"), vide_permis=True),
+    ]
     search_fields = ["article__reference", "article__libelle", "compte_vente__code", "poste_gestion__code"]
     autocomplete_fields = ["article", "poste_gestion", "compte_vente", "code_analytique"]
 
 
 @admin.register(ArticleCompteAchat)
-class ArticleCompteAchatAdmin(ModelAdmin):
+class ArticleCompteAchatAdmin(ModificationParLotsMixin, ModelAdmin):
     list_display = ["article", "poste_gestion", "compte_achat", "code_analytique"]
+    actions = ["action_modifier_par_lots"]
+    champs_lot = [
+        ChampLot("compte_achat", "Compte d'achat", genre="fk", queryset=lambda: CompteComptable.objects.order_by("code"), vide_permis=True),
+        ChampLot("poste_gestion", "Poste de gestion", genre="fk", queryset=lambda: PosteGestion.objects.order_by("code"), vide_permis=True),
+        ChampLot("code_analytique", "Code analytique", genre="fk", queryset=lambda: CodeAnalytique.objects.order_by("code"), vide_permis=True),
+    ]
     search_fields = ["article__reference", "article__libelle", "compte_achat__code", "poste_gestion__code"]
     autocomplete_fields = ["article", "poste_gestion", "compte_achat", "code_analytique"]
 
 
 @admin.register(TiersCompteComptable)
-class TiersCompteComptableAdmin(ModelAdmin):
+class TiersCompteComptableAdmin(ModificationParLotsMixin, ModelAdmin):
     list_display = ["tiers", "compte_client", "compte_fournisseur"]
+    actions = ["action_modifier_par_lots"]
+    champs_lot = [
+        ChampLot("compte_client", "Compte client", genre="fk", queryset=lambda: CompteComptable.objects.order_by("code"), vide_permis=True),
+        ChampLot("compte_fournisseur", "Compte fournisseur", genre="fk", queryset=lambda: CompteComptable.objects.order_by("code"), vide_permis=True),
+    ]
     search_fields = ["tiers__code", "tiers__raison_sociale", "compte_client__code", "compte_fournisseur__code"]
     autocomplete_fields = ["tiers", "compte_client", "compte_fournisseur"]
 

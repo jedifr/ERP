@@ -11,7 +11,7 @@ from django.template.response import TemplateResponse
 from django.urls import path
 
 from . import audit_droits, connexions
-from .models import EvenementConnexion, Societe
+from .models import EvenementConnexion, LotModification, Societe
 
 
 class UserCreationForm(UnfoldUserCreationForm):
@@ -160,3 +160,40 @@ class SocieteAdmin(ModelAdmin):
 
             return redirect(reverse("admin:comptes_societe_change", args=[fiche.pk]))
         return super().changelist_view(request, extra_context)
+
+
+@admin.register(LotModification)
+class LotModificationAdmin(ModelAdmin):
+    """Journal des modifications et créations par lots : consultation, et annulation d'un lot tant que les valeurs n'ont pas changé depuis."""
+
+    list_display = ["date", "utilisateur", "description", "modele", "nombre", "etat"]
+    list_filter = ["modele"]
+    search_fields = ["description"]
+    date_hierarchy = "date"
+    actions = ["action_annuler"]
+    readonly_fields = ["utilisateur", "date", "modele", "description", "modifications", "crees", "annule_le"]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    @admin.display(description="État")
+    def etat(self, obj):
+        return f"annulé le {obj.annule_le:%d/%m/%Y %H:%M}" if obj.annule_le else "appliqué"
+
+    @admin.action(description="Annuler les lots sélectionnés", permissions=["annuler"])
+    def action_annuler(self, request, queryset):
+        from . import lots
+
+        for lot in queryset.order_by("-date"):  # le plus récent d'abord : un lot récent peut dépendre d'un plus ancien
+            faits, refus = lots.annuler(lot)
+            niveau = messages.SUCCESS if faits and not refus else messages.WARNING
+            self.message_user(request, f"« {lot.description} » : {faits} objet(s) rétabli(s)." + (" Non rétablis : " + " ; ".join(refus[:5]) if refus else ""), level=niveau)
+
+    def has_annuler_permission(self, request):
+        return request.user.has_perm("comptes.change_lotmodification")

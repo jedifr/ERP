@@ -6,6 +6,8 @@ from django.shortcuts import get_object_or_404
 from django.urls import reverse
 from django.utils.html import escape, format_html
 from django.utils.safestring import mark_safe
+from comptes.lots import ChampLot
+from comptes.lots_admin import ModificationParLotsMixin
 from unfold.admin import ModelAdmin, TabularInline
 from unfold.decorators import action as unfold_action
 
@@ -57,8 +59,14 @@ class ArticleFournisseurAdmin(ModelAdmin):
 
 
 @admin.register(TarifAchatArticle)
-class TarifAchatArticleAdmin(ModelAdmin):
+class TarifAchatArticleAdmin(ModificationParLotsMixin, ModelAdmin):
     list_display = ["article_fournisseur", "prix_unitaire", "frais_port", "date_debut", "date_fin"]
+    actions = ["action_modifier_periode", "action_modifier_par_lots"]
+    champs_periode = [
+        ChampLot("prix_unitaire", "Prix unitaire d'achat", aide="Hausse d'un fournisseur : « augmenter de x % » à la date d'effet."),
+        ChampLot("frais_port", "Frais de port"),
+    ]
+    champs_lot = [ChampLot("date_fin", "Date de fin (clôture du tarif)", genre="date")]
     list_filter = ["article_fournisseur__fournisseur"]
     search_fields = ["article_fournisseur__article__reference", "article_fournisseur__fournisseur__raison_sociale"]
     autocomplete_fields = ["article_fournisseur"]

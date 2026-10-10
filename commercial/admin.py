@@ -7,9 +7,12 @@ from django.http import JsonResponse
 from django.urls import path
 from django.views.decorators.http import require_http_methods
 from unfold.admin import ModelAdmin, TabularInline
+from unfold.decorators import action as unfold_action
 from unfold.widgets import UnfoldAdminSelectWidget
 
 from codification.mixins import CodificationInitialeMixin
+from comptes.lots import ChampLot
+from comptes.lots_admin import ModificationParLotsMixin
 from codification.models import RegleCodification
 from comptes.exports import ExportCsvMixin
 from comptabilite.models import CompteComptable, TiersCompteComptable
@@ -137,8 +140,36 @@ def apercu_compte_comptable_view(request):
 
 
 @admin.register(Tiers)
-class TiersAdmin(ExportCsvMixin, CodificationInitialeMixin, ModelAdmin):
+class TiersAdmin(ModificationParLotsMixin, ExportCsvMixin, CodificationInitialeMixin, ModelAdmin):
     codification_entite = RegleCodification.Entite.TIERS
+    actions = ["action_modifier_par_lots"]
+    actions_list = ["action_importer"]
+
+    @unfold_action(description="Importer des tiers (tableau)", url_path="importer", icon="upload_file")
+    def action_importer(self, request):
+        """Création en masse de tiers depuis un tableau collé ou un fichier CSV."""
+        from django.core.exceptions import PermissionDenied
+        from django.template.response import TemplateResponse
+
+        from . import import_tiers
+
+        if not self.has_add_permission(request):
+            raise PermissionDenied
+        rapport, texte = None, request.POST.get("tableau", "")
+        if request.method == "POST":
+            fichier = request.FILES.get("fichier")
+            if fichier is not None:
+                texte = fichier.read().decode("utf-8-sig", errors="replace")
+            rapport = import_tiers.importer(texte, request.user)
+        return TemplateResponse(request, "admin/commercial/importer_tiers.html", {
+            **self.admin_site.each_context(request), "title": "Importer des tiers", "opts": self.model._meta, "rapport": rapport, "tableau": texte,
+        })
+
+    champs_lot = [
+        ChampLot("conditions_paiement", "Conditions de paiement", genre="fk", queryset=lambda: ConditionPaiement.objects.order_by("nombre_jours"), vide_permis=True),
+        ChampLot("devise", "Devise", genre="fk", queryset=lambda: Devise.objects.order_by("code"), vide_permis=True),
+        ChampLot("regime_fiscal", "Régime fiscal", genre="choix", choix=lambda: Tiers.RegimeFiscal.choices),
+    ]
 
     list_display = ["code", "raison_sociale", "type_tiers", "regime_fiscal", "devise", "siret"]
     list_filter = ["type_tiers", "regime_fiscal"]

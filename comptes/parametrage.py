@@ -23,7 +23,7 @@ CARTES = [
         ("Postes de travail et tarifs", "technique", "postetravail"), ("Gammes", "technique", "gamme"), ("Gammes types", "technique", "gammetype"),
     ], "atelier"),
     ("articles", "Articles et matières", "category", "Matières, familles, nomenclatures, fournisseurs et tarifs d'achat", [
-        ("Matières", "technique", "matiere"), ("Familles de matière", "technique", "famillematiere"), ("Règles de création de tôle", "technique", "reglecreationtole"), ("Nomenclatures", "technique", "nomenclature"),
+        ("Matières", "technique", "matiere"), ("Lots de modifications", "comptes", "lotmodification"), ("Familles de matière", "technique", "famillematiere"), ("Règles de création de tôle", "technique", "reglecreationtole"), ("Nomenclatures", "technique", "nomenclature"),
         ("Fournisseurs d'article", "achats", "articlefournisseur"), ("Tarifs d'achat", "achats", "tarifachatarticle"),
     ], "articles"),
     ("stock", "Stock", "warehouse", "Emplacements, mouvements, transferts", [

@@ -99,3 +99,28 @@ class PreferenceColonnes(models.Model):
 
     def __str__(self):
         return f"{self.utilisateur} — {self.ecran}"
+
+
+class LotModification(models.Model):
+    """Journal d'une modification ou d'une création par lots : qui, quand, sur quoi, et les anciennes valeurs (pour annuler le lot
+    tant que les valeurs n'ont pas été changées depuis). Voir comptes/lots.py."""
+
+    utilisateur = models.ForeignKey("auth.User", verbose_name="utilisateur", on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    date = models.DateTimeField("date", auto_now_add=True)
+    modele = models.CharField("modèle", max_length=80, help_text="Étiquette Django du modèle modifié (app.Modele)")
+    description = models.CharField("description", max_length=255)
+    modifications = models.JSONField("modifications", default=list, help_text="[{pk, avant: {champ: valeur}, apres: {champ: valeur}}]")
+    crees = models.JSONField("objets créés", default=list, help_text="[[étiquette du modèle, clé]]")
+    annule_le = models.DateTimeField("annulé le", null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Lot de modifications"
+        verbose_name_plural = "Lots de modifications"
+        ordering = ["-date"]
+
+    def __str__(self):
+        return f"{self.date:%d/%m/%Y %H:%M} — {self.description}"
+
+    @property
+    def nombre(self):
+        return len(self.modifications) + len(self.crees)

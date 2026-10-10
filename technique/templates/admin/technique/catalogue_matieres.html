@@ -1,0 +1,68 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<div class="max-w-5xl">
+  <p class="mb-4">Cochez des nuances et des épaisseurs, puis validez : <strong>tout se crée à la suite</strong> (matière, tôle, paramètre de coupe jet d'eau estimé, règle de création). Ce qui existe déjà n'est jamais écrasé ; le tout est tracé dans « Lots de modifications » et annulable.</p>
+
+  {% if rapport %}
+  <div class="mb-6 p-4 rounded-default border border-base-200">
+    <p class="font-semibold mb-2">{{ rapport.crees|length }} élément(s) créé(s), {{ rapport.ignores|length }} ignoré(s).
+      {% if rapport.lot %}<a class="underline" href="/admin/comptes/lotmodification/{{ rapport.lot.pk }}/change/">Voir le lot (annulable)</a>{% endif %}</p>
+    {% if rapport.crees %}<ul class="text-sm mb-2">{% for type, libelle in rapport.crees %}<li><span class="opacity-60">{{ type }}</span> — {{ libelle }}</li>{% endfor %}</ul>{% endif %}
+    {% if rapport.ignores %}<details><summary class="cursor-pointer text-sm">Ignorés</summary><ul class="text-sm">{% for libelle, motif in rapport.ignores %}<li>{{ libelle }} : {{ motif }}</li>{% endfor %}</ul></details>{% endif %}
+  </div>
+  {% endif %}
+
+  <form method="post">
+    {% csrf_token %}
+    <h2 class="font-semibold mb-2">1 · Nuances</h2>
+    <div class="overflow-x-auto mb-4">
+      <table class="text-sm w-full"><thead><tr class="text-left"><th></th><th>Nuance</th><th>Famille</th><th>Densité</th><th>Prix d'achat</th><th></th></tr></thead><tbody>
+      {% for c in catalogue %}
+        <tr class="border-t border-base-200">
+          <td class="py-1"><input type="checkbox" name="n_{{ c.i }}" value="1" {% if c.coche %}checked{% endif %}></td>
+          <td>{{ c.nom }}</td><td>{{ c.famille }}</td>
+          <td><input type="text" name="d_{{ c.i }}" value="{{ c.densite }}" class="border border-base-300 rounded-default px-2 py-1 w-20"></td>
+          <td><input type="text" inputmode="decimal" name="p_{{ c.i }}" value="{{ c.prix }}" placeholder="vide = sans prix" class="border border-base-300 rounded-default px-2 py-1 w-36"></td>
+          <td>{% if c.existe %}<span class="text-sm opacity-60">matière déjà en base</span>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody></table>
+    </div>
+    <label class="block mb-6"><span class="font-semibold">Autres nuances</span> <span class="text-sm opacity-60">(une par ligne : nuance ; densité ; prix facultatif)</span><br>
+      <textarea name="tableau" rows="3" class="border border-base-300 rounded-default px-2 py-1 w-full max-w-xl" placeholder="316L ; 8,0 ; 5,2">{{ post.tableau }}</textarea></label>
+
+    <h2 class="font-semibold mb-2">2 · Épaisseurs (mm)</h2>
+    <div class="flex flex-wrap gap-3 mb-2" id="epaisseurs">
+      {% for e in epaisseurs %}<label class="flex items-center gap-1"><input type="checkbox" name="epaisseur" value="{{ e.valeur }}" {% if e.coche %}checked{% endif %}> {{ e.valeur }}</label>{% endfor %}
+    </div>
+    <div class="flex flex-wrap gap-2 mb-2">
+      <button type="button" class="border border-base-300 px-3 py-1 rounded-default" data-valeurs="{{ presets.courantes|join:',' }}">Courantes</button>
+      <button type="button" class="border border-base-300 px-3 py-1 rounded-default" data-valeurs="{{ presets.fines|join:',' }}">Fines</button>
+      <button type="button" class="border border-base-300 px-3 py-1 rounded-default" data-valeurs="{{ presets.fortes|join:',' }}">Fortes</button>
+      <button type="button" class="border border-base-300 px-3 py-1 rounded-default" data-valeurs="">Tout effacer</button>
+    </div>
+    <label class="block mb-6"><span class="text-sm">Autres épaisseurs (séparées par des virgules)</span><br>
+      <input type="text" name="autres_epaisseurs" value="{{ post.autres_epaisseurs }}" placeholder="ex. 7, 35" class="border border-base-300 rounded-default px-2 py-1 w-64"></label>
+
+    <h2 class="font-semibold mb-2">3 · Ce qui se crée</h2>
+    <div class="grid gap-3 mb-6 max-w-xl">
+      <label>Modèle de référence<br><input type="text" name="modele_reference" value="{{ post.modele_reference|default:'TOLE-{matiere}-{epaisseur}' }}" class="border border-base-300 rounded-default px-2 py-1 w-full"></label>
+      <label>Modèle de libellé<br><input type="text" name="modele_libelle" value="{{ post.modele_libelle|default:'Tôle {matiere} {epaisseur} mm' }}" class="border border-base-300 rounded-default px-2 py-1 w-full"></label>
+      <label>Unité du prix d'achat<br><select name="unite_cout" class="border border-base-300 rounded-default px-2 py-1"><option value="poids">Au kilo (€/kg)</option><option value="surface" {% if post.unite_cout == "surface" %}selected{% endif %}>Au m² (€/m²)</option></select></label>
+      <label class="flex items-center gap-2"><input type="checkbox" name="jet_eau" value="1" {% if not post or post.jet_eau %}checked{% endif %}> Créer les paramètres de coupe jet d'eau manquants (vitesses estimées d'après l'usinabilité de la famille)</label>
+      <label class="flex items-center gap-2"><input type="checkbox" name="creer_regle" value="1" {% if not post or post.creer_regle %}checked{% endif %}> Enregistrer une règle de création de tôle pour chaque nuance (prochaines épaisseurs en un clic)</label>
+      <p class="text-sm opacity-60">Laser : les épaisseurs absentes du tableau du constructeur ne sont pas réalisables, aucun paramètre n'est créé.</p>
+    </div>
+    <div class="flex gap-3">
+      <button type="submit" class="bg-primary-600 text-white font-semibold px-4 py-2 rounded-default">Créer</button>
+      <a href="../" class="border border-base-300 px-4 py-2 rounded-default">Retour aux matières</a>
+    </div>
+  </form>
+</div>
+<script>
+document.querySelectorAll("[data-valeurs]").forEach((b) => b.addEventListener("click", () => {
+  const v = b.dataset.valeurs.split(",").filter(Boolean).map(Number);
+  document.querySelectorAll("#epaisseurs input").forEach((i) => { i.checked = v.includes(Number(i.value)); });
+}));
+</script>
+{% endblock %}
