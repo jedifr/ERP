@@ -111,10 +111,10 @@ class Article(models.Model):
         COMPOSANT = "composant", "Composant"
 
     class UniteCout(models.TextChoices):
-        SURFACE = "surface", "Surface"
-        LONGUEUR = "longueur", "Longueur"
-        POIDS = "poids", "Poids"
-        PIECE = "piece", "Pièce"
+        SURFACE = "surface", "Au m² (€/m²)"
+        LONGUEUR = "longueur", "Au mètre (€/m)"
+        POIDS = "poids", "Au kilo (€/kg)"
+        PIECE = "piece", "À l'unité (€/pièce)"
 
     class TypeProfil(models.TextChoices):
         TUBE_CARRE = "tube_carre", "Tube carré"
@@ -141,7 +141,8 @@ class Article(models.Model):
         help_text="Pertinent pour tôles/profilés",
     )
     unite_cout = models.CharField(
-        "unité de coût", max_length=20, choices=UniteCout.choices, null=True, blank=True
+        "unité de coût", max_length=20, choices=UniteCout.choices, null=True, blank=True,
+        help_text="Comment le prix d'achat est exprimé. À l'unité, pour une tôle : prix de la feuille entière.",
     )
     epaisseur = models.FloatField("épaisseur", null=True, blank=True, help_text="Tôle")
     type_profil = models.CharField(

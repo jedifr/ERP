@@ -56,6 +56,25 @@
                 .catch(() => callback(null));
         }
 
+        // Le libellé du coût suit l'unité choisie : « Coût unitaire (€/kg) », « (€/m²) », « (€/pièce) »…
+        const SUFFIXES = { poids: "€/kg", surface: "€/m²", longueur: "€/m", piece: "€/pièce" };
+        const AIDES = {
+            poids: "Prix d'achat au kilo.",
+            surface: "Prix d'achat au mètre carré.",
+            longueur: "Prix d'achat au mètre.",
+            piece: "Prix d'achat d'une pièce ; pour une tôle : prix de la feuille entière, réparti sur sa surface.",
+        };
+        const coutLabel = document.querySelector('label[for="id_cout_unitaire"]');
+        const coutAide = coutUnitaireField.closest(".field-row, .form-row, div")?.querySelector(".help, p");
+        const libelleCout = coutLabel ? coutLabel.textContent.replace(/\s*\(€.*\)\s*$/, "").replace(/\*$/, "").trim() : "";
+        function majLibelleCout() {
+            const suffixe = SUFFIXES[uniteCoutField.value];
+            if (coutLabel && libelleCout) coutLabel.textContent = suffixe ? `${libelleCout} (${suffixe})` : libelleCout;
+            if (coutAide && AIDES[uniteCoutField.value]) coutAide.textContent = AIDES[uniteCoutField.value];
+        }
+        uniteCoutField.addEventListener("change", majLibelleCout);
+        majLibelleCout();
+
         let syncing = false;
 
         function refresh() {
