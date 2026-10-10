@@ -380,3 +380,121 @@ class TotauxEtArrondiTests(_Base):
         client = next(l for l in ecriture.lignes.all() if l.debit)
         self.assertEqual(client.debit, Decimal("0.14"))  # TTC par taux, pas 0,15
         self.assertEqual(sum(l.debit for l in ecriture.lignes.all()), sum(l.credit for l in ecriture.lignes.all()))
+
+
+@lecture_pdf
+class FacturXScenariosTests(_Base):
+    """Factur-X sur des cas plus variés (plusieurs taux, avoir partiel, arrondis) : schéma XSD officiel + règles arithmétiques EN 16931
+    (BR-CO-10, 13, 14, 15, 16, 17, BR-S-08) vérifiées indépendamment du code qui produit le XML."""
+
+    NS = {
+        "rsm": "urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100",
+        "ram": "urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100",
+    }
+
+    def setUp(self):
+        super().setUp()
+        FacturXTests.preparer(self)
+
+    def lignes_multi_taux(self, facture, quantites=(7, 3, 11, 2, 5)):
+        # (prix unitaire, taux) : 20 %, 10 %, 5,5 %, 20 % à prix fractionnaire, 0 % (exonéré)
+        for i, ((prix, taux), quantite) in enumerate(zip([("13.37", 20), ("8.05", 10), ("3.333", "5.5"), ("0.07", 20), ("19.99", 0)], quantites)):
+            tva = TauxTVA.objects.get_or_create(nom=f"T-{taux}", defaults={"taux": taux})[0]
+            article = Article.objects.get_or_create(reference=f"MT-{i}", defaults={"libelle": f"Article taux {taux}", "nature": Article.Nature.FABRIQUE})[0]
+            cl = CommandeLigne.objects.get_or_create(
+                commande=self.commande, article=article, defaults={"quantite_commandee": 50, "prix_vente_unitaire": Decimal(prix), "taux_tva": tva},
+            )[0]
+            FactureLigne.objects.create(facture=facture, commande_ligne=cl, quantite=quantite)
+
+    def facture_multi_taux(self, numero="FAC-MT-1"):
+        facture = Facture.objects.create(numero=numero, commande=self.commande, date_facturation=datetime.date(2026, 2, 1))
+        self.lignes_multi_taux(facture)
+        return facture
+
+    def xml(self, facture):
+        from facturx import get_xml_from_pdf
+        from lxml import etree
+
+        from .facturx import generer_facturx
+
+        _, contenu = get_xml_from_pdf(__import__("io").BytesIO(bytes(generer_facturx(facture))), check_xsd=True)  # lève si le XML n'est pas conforme au XSD
+        return etree.fromstring(contenu)
+
+    def controler_en16931(self, racine):
+        from facturation.facturx import arrondir
+
+        def montant(noeud, chemin):
+            return Decimal(noeud.findtext(chemin, namespaces=self.NS))
+
+        reglement = racine.find(".//ram:ApplicableHeaderTradeSettlement", self.NS)
+        somme = reglement.find("ram:SpecifiedTradeSettlementHeaderMonetarySummation", self.NS)
+        lignes = racine.findall(".//ram:IncludedSupplyChainTradeLineItem", self.NS)
+        self.assertTrue(lignes)
+        total_lignes, bases_lignes = Decimal("0"), {}
+        for l in lignes:
+            prix = montant(l, ".//ram:NetPriceProductTradePrice/ram:ChargeAmount")
+            quantite = montant(l, ".//ram:BilledQuantity")
+            total = montant(l, ".//ram:SpecifiedTradeSettlementLineMonetarySummation/ram:LineTotalAmount")
+            self.assertEqual(total, arrondir(prix * quantite), "total de ligne = prix × quantité")
+            total_lignes += total
+            cle = (l.findtext(".//ram:ApplicableTradeTax/ram:CategoryCode", namespaces=self.NS), montant(l, ".//ram:ApplicableTradeTax/ram:RateApplicablePercent"))
+            bases_lignes[cle] = bases_lignes.get(cle, Decimal("0")) + total
+        self.assertEqual(total_lignes, montant(somme, "ram:LineTotalAmount"), "BR-CO-10")
+        self.assertEqual(montant(somme, "ram:TaxBasisTotalAmount"), montant(somme, "ram:LineTotalAmount"), "BR-CO-13")
+        ventilation = reglement.findall("ram:ApplicableTradeTax", self.NS)
+        tva_totale = Decimal("0")
+        self.assertEqual(len(ventilation), len(bases_lignes), "une ventilation par (catégorie, taux)")
+        for v in ventilation:
+            cle = (v.findtext("ram:CategoryCode", namespaces=self.NS), montant(v, "ram:RateApplicablePercent"))
+            base, tva = montant(v, "ram:BasisAmount"), montant(v, "ram:CalculatedAmount")
+            self.assertEqual(base, arrondir(bases_lignes[cle]), f"BR-S-08 {cle}")
+            self.assertEqual(tva, arrondir(base * cle[1] / 100), f"BR-CO-17 {cle}")
+            tva_totale += tva
+        self.assertEqual(montant(somme, "ram:TaxTotalAmount"), tva_totale, "BR-CO-14")
+        self.assertEqual(montant(somme, "ram:GrandTotalAmount"), montant(somme, "ram:TaxBasisTotalAmount") + tva_totale, "BR-CO-15")
+        self.assertEqual(montant(somme, "ram:DuePayableAmount"), montant(somme, "ram:GrandTotalAmount"), "BR-CO-16")
+        return somme
+
+    def test_facture_plusieurs_taux(self):
+        facture = self.facture_multi_taux()
+        racine = self.xml(facture)
+        somme = self.controler_en16931(racine)
+        self.assertEqual(len(racine.findall(".//ram:ApplicableHeaderTradeSettlement/ram:ApplicableTradeTax", self.NS)), 4)  # 20 %, 10 %, 5,5 %, 0 %
+        # le TTC du XML est celui de la facture dans l'ERP (même règle que le PDF et l'écriture comptable)
+        self.assertEqual(Decimal(somme.findtext("ram:GrandTotalAmount", namespaces=self.NS)), facture.montant_ttc_calcule)
+
+    def test_avoir_partiel_plusieurs_taux(self):
+        origine = self.facture_multi_taux("FAC-MT-2")
+        avoir = Facture.objects.create(
+            numero="AV-MT-1", commande=self.commande, date_facturation=datetime.date(2026, 2, 5), type_document=Facture.TypeDocument.AVOIR,
+            facture_origine=origine, motif="Retour partiel",
+        )
+        self.lignes_multi_taux(avoir, quantites=(1, 2, 3, 1, 1))
+        racine = self.xml(avoir)
+        somme = self.controler_en16931(racine)
+        self.assertEqual(racine.findtext(".//rsm:ExchangedDocument/ram:TypeCode", namespaces=self.NS), "381")
+        self.assertEqual(Decimal(somme.findtext("ram:GrandTotalAmount", namespaces=self.NS)), abs(avoir.montant_ttc_calcule))  # positif dans le XML, signé dans l'ERP
+        self.assertGreater(Decimal(somme.findtext("ram:GrandTotalAmount", namespaces=self.NS)), 0)
+        self.assertEqual(racine.findtext(".//ram:InvoiceReferencedDocument/ram:IssuerAssignedID", namespaces=self.NS), "FAC-MT-2")
+
+    def test_avoir_total_d_une_facture_multi_taux_annule_les_montants(self):
+        origine = self.facture_multi_taux("FAC-MT-3")
+        avoir = Facture.objects.create(
+            numero="AV-MT-2", commande=self.commande, date_facturation=datetime.date(2026, 2, 5), type_document=Facture.TypeDocument.AVOIR,
+            facture_origine=origine, motif="Annulation",
+        )
+        self.lignes_multi_taux(avoir)
+        a, b = self.controler_en16931(self.xml(origine)), self.controler_en16931(self.xml(avoir))
+        for champ in ("LineTotalAmount", "TaxTotalAmount", "GrandTotalAmount"):
+            self.assertEqual(a.findtext(f"ram:{champ}", namespaces=self.NS), b.findtext(f"ram:{champ}", namespaces=self.NS), champ)
+
+    def test_beaucoup_de_petites_lignes_arrondis(self):
+        facture = Facture.objects.create(numero="FAC-MT-4", commande=self.commande, date_facturation=datetime.date(2026, 2, 1))
+        for i in range(25):
+            taux = (20, 10, "5.5")[i % 3]
+            tva = TauxTVA.objects.get_or_create(nom=f"T-{taux}", defaults={"taux": taux})[0]
+            article = Article.objects.create(reference=f"PL-{i}", nature=Article.Nature.FABRIQUE)
+            cl = CommandeLigne.objects.create(commande=self.commande, article=article, quantite_commandee=1, prix_vente_unitaire=Decimal("0.01") * (i + 3), taux_tva=tva)
+            FactureLigne.objects.create(facture=facture, commande_ligne=cl, quantite=1)
+        somme = self.controler_en16931(self.xml(facture))
+        self.assertEqual(Decimal(somme.findtext("ram:GrandTotalAmount", namespaces=self.NS)), facture.montant_ttc_calcule)
