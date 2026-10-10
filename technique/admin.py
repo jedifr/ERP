@@ -17,7 +17,7 @@ from achats.models import ArticleFournisseur
 from comptabilite.models import ArticleCompteAchat, ArticleCompteVente
 
 from .models import Article, FamilleMatiere, Gamme, GammeType, GammeTypeEtape, Matiere, Nomenclature, PosteTravail, RegleCreationTole, TarifPoste
-from .services import DuplicationError, dupliquer_article
+from .services import DuplicationError, dupliquer_article, renommer_article
 
 
 class NomenclatureInline(TabularInline):
@@ -185,6 +185,22 @@ def dupliquer_article_view(request, reference):
     return redirect("admin:technique_article_change", copie.pk)
 
 
+@staff_member_required
+@require_http_methods(["POST"])
+def renommer_article_view(request, reference):
+    article = get_object_or_404(Article, pk=reference)
+    if not request.user.has_perm("technique.change_article"):
+        messages.error(request, "Vous n'avez pas le droit de modifier les articles.")
+        return redirect("admin:technique_article_change", reference)
+    try:
+        nouveau = renommer_article(article, request.POST.get("nouvelle_reference"))
+    except DuplicationError as exc:
+        messages.error(request, f"Renommage impossible : {exc}")
+        return redirect("admin:technique_article_change", reference)
+    messages.success(request, f"« {reference} » renommé en « {nouveau.reference} » (devis, commandes, nomenclatures et stock suivent).")
+    return redirect("admin:technique_article_change", nouveau.pk)
+
+
 @admin.register(Article)
 class ArticleAdmin(ColonnesPersonnalisablesMixin, ExportCsvMixin, ModelAdmin):
     list_display = [
@@ -227,6 +243,10 @@ class ArticleAdmin(ColonnesPersonnalisablesMixin, ExportCsvMixin, ModelAdmin):
         "composition_recap", "achat_recap", "stock_recap", "utilise_dans_recap", "activite_recap",
     ]
     readonly_fields = CHAMPS_RECAPITULATIF
+
+    def get_readonly_fields(self, request, obj=None):
+        # La référence est la clé de l'article : la modifier dans le formulaire créerait un second article. On la change par « Renommer ».
+        return [*self.readonly_fields, "reference"] if obj is not None and obj.pk else self.readonly_fields
 
     def get_fieldsets(self, request, obj=None):
         recap = [c for c in self.CHAMPS_RECAPITULATIF if settings.STOCK_ACTIF or c != "stock_recap"]
@@ -335,6 +355,11 @@ class ArticleAdmin(ColonnesPersonnalisablesMixin, ExportCsvMixin, ModelAdmin):
                 "<str:reference>/dupliquer/",
                 self.admin_site.admin_view(dupliquer_article_view),
                 name="technique_article_dupliquer",
+            ),
+            path(
+                "<str:reference>/renommer/",
+                self.admin_site.admin_view(renommer_article_view),
+                name="technique_article_renommer",
             ),
         ]
         return urls + super().get_urls()

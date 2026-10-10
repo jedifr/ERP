@@ -5,7 +5,7 @@ from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings
 
 from .models import Article, Gamme, Matiere, Nomenclature, PosteTravail, TarifPoste
-from .services import DuplicationError, dupliquer_article
+from .services import DuplicationError, dupliquer_article, renommer_article
 
 
 class ArticleTests(TestCase):
@@ -352,3 +352,52 @@ class FicheArticleDeuxColonnesTests(TestCase):
         self.assertEqual(reponse.status_code, 302)
         self.tole.refresh_from_db()
         self.assertEqual(self.tole.libelle, "Tôle modifiée")
+
+
+class RenommerArticleTests(TestCase):
+    """Renommer un article change sa clé : tout ce qui s'y rattache (et l'historique) suit ; la référence n'est plus modifiable dans le formulaire."""
+
+    def setUp(self):
+        import datetime
+
+        from django.contrib.auth import get_user_model
+
+        from chiffrage.models import Devis, DevisLigne
+        from commercial.models import Tiers
+
+        self.user = get_user_model().objects.create_superuser("renom", "r@example.com", "pass-mot-de-passe-41")
+        self.client.force_login(self.user)
+        self.matiere = Matiere.objects.create(nom="S235-R", densite=7.85)
+        self.tole = Article.objects.create(reference="TOLE-A", libelle="Tôle", nature=Article.Nature.MATIERE_PREMIERE, matiere=self.matiere, epaisseur=3, unite_cout="poids", cout_unitaire=1)
+        self.parent = Article.objects.create(reference="PIECE-R", nature=Article.Nature.FABRIQUE)
+        Nomenclature.objects.create(article_parent=self.parent, article_composant=self.tole, longueur_mm=100, largeur_mm=50, quantite=1)
+        tiers = Tiers.objects.create(code="CLI-R", raison_sociale="Client", type_tiers=Tiers.TypeTiers.CLIENT)
+        devis = Devis.objects.create(numero="DEV-R", client=tiers, date_creation=datetime.date(2026, 1, 1))
+        self.ligne = DevisLigne.objects.create(devis=devis, article=self.tole, quantite=2)
+
+    def test_les_liens_et_l_historique_suivent(self):
+        from chiffrage.models import DevisLigne
+
+        nouveau = renommer_article(self.tole, "TOLE-B")
+        self.assertEqual((nouveau.pk, nouveau.libelle, nouveau.epaisseur, nouveau.cout_unitaire), ("TOLE-B", "Tôle", 3, 1))
+        self.assertFalse(Article.objects.filter(pk="TOLE-A").exists())
+        self.assertEqual(Nomenclature.objects.get(article_parent=self.parent).article_composant_id, "TOLE-B")
+        self.assertEqual(DevisLigne.objects.get(pk=self.ligne.pk).article_id, "TOLE-B")
+        self.assertFalse(DevisLigne.history.filter(article_id="TOLE-A").exists())
+        self.assertTrue(DevisLigne.history.filter(article_id="TOLE-B").exists())
+
+    def test_refus_reference_vide_identique_ou_existante(self):
+        for valeur, message in (("  ", "Indiquez"), ("TOLE-A", "identique"), ("PIECE-R", "existe déjà"), ("X" * 150, "caractères")):
+            with self.assertRaisesMessage(DuplicationError, message):
+                renommer_article(self.tole, valeur)
+        self.assertTrue(Article.objects.filter(pk="TOLE-A").exists())
+
+    def test_vue_et_formulaire(self):
+        page = self.client.get("/admin/technique/article/TOLE-A/change/")
+        self.assertContains(page, "Renommer")
+        self.assertNotContains(page, 'name="reference"')  # référence en lecture seule : plus de second article par erreur
+        r = self.client.post("/admin/technique/article/TOLE-A/renommer/", {"nouvelle_reference": "TOLE-C"})
+        self.assertRedirects(r, "/admin/technique/article/TOLE-C/change/", fetch_redirect_response=False)
+        r = self.client.post("/admin/technique/article/TOLE-C/renommer/", {"nouvelle_reference": "PIECE-R"}, follow=True)
+        self.assertContains(r, "existe déjà")
+        self.assertTrue(Article.objects.filter(pk="TOLE-C").exists())

@@ -3190,3 +3190,7 @@ Sans option, elle ne fait que **lister** : `docker compose exec web python manag
 ## Coût d'achat d'une matière première : au kilo, au m² ou à l'unité
 
 L'unité de coût d'un article acheté se choisit en clair : **Au kilo (€/kg)**, **Au m² (€/m²)**, **Au mètre (€/m)** ou **À l'unité (€/pièce)**. Le libellé du champ « Coût unitaire » suit le choix (« Coût unitaire (€/kg) »…). Pour une tôle : au kilo, elle est valorisée d'après sa densité et son épaisseur ; au m², directement ; à l'unité, c'est le prix de la feuille entière, réparti sur sa surface. Le calcul de l'équivalent (prix au m² ↔ au kg) reste affiché sous le coût. Les règles de création de tôle utilisent les mêmes unités. Aucune donnée n'est modifiée : seuls les libellés changent.
+
+## Renommer un article
+
+Sur la fiche d'un article, le bouton **« Renommer »** change sa référence. La référence est la clé de l'article : la modifier directement dans le formulaire créerait un second article, elle est donc **en lecture seule** une fois l'article créé. Le renommage recrée l'article sous la nouvelle référence, repointe tout ce qui s'y rattache (nomenclatures, gammes, lignes de devis et de commande, ordres de fabrication, stock, fournisseurs, comptes d'article, pièces à découper, profilés) ainsi que l'historique de ces objets, puis supprime l'ancien. Refus si la référence est vide, identique, trop longue ou déjà prise. Un article « -COPIE » (créé par « Dupliquer et modifier ») se renomme ainsi.
