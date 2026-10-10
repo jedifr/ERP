@@ -172,6 +172,19 @@ function demarrer() {
                 planifierImbrication();
                 return;
             }
+            const creerTole = e.target.closest(".dp-creer-tole");
+            if (creerTole) {
+                creerTole.disabled = true;
+                try {
+                    const json = await envoyer(zoneImb.dataset.urlCreerTole, JSON.stringify({ cle: creerTole.dataset.cle }), true);
+                    message("Tôle " + json.reference + " créée" + (json.sans_cout ? " : renseignez son coût d'achat pour chiffrer la matière." : "."), !!json.sans_cout);
+                    planifierImbrication();
+                } catch (err) {
+                    creerTole.disabled = false;
+                    message(err.message, true);
+                }
+                return;
+            }
             const ajouter = e.target.closest(".dp-ajouter");
             if (ajouter) { ajouterAuDevis(ajouter); return; }
             const retenirProfil = e.target.closest(".dp-retenir-profil");

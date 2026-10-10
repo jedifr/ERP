@@ -220,6 +220,117 @@ class Article(models.Model):
         super().save(*args, **kwargs)
 
 
+class RegleCreationTole(models.Model):
+    """Règle de création d'une tôle (article matière première) : quand l'imbrication d'un devis ne trouve aucune tôle pour une matière
+    et une épaisseur, un clic crée l'article d'après la règle (référence et libellé construits, unité et coût d'achat, TVA, stock).
+    La règle la plus précise l'emporte : nuance, puis famille, puis toutes les matières ; à précision égale, la plage d'épaisseurs la
+    plus étroite. Une règle sans coût crée la tôle sans prix : le coût matière reste à renseigner."""
+
+    nom = models.CharField("nom", max_length=100, help_text="Ex. « Inox au kilo », « Acier standard »")
+    famille = models.ForeignKey(
+        FamilleMatiere, verbose_name="famille de matière", on_delete=models.CASCADE, null=True, blank=True, related_name="regles_tole",
+        help_text="Vide et sans nuance : toutes les matières.",
+    )
+    matiere = models.ForeignKey(
+        Matiere, verbose_name="nuance précise", on_delete=models.CASCADE, null=True, blank=True, related_name="regles_tole",
+        help_text="Ex. 1.4307 : prime sur la règle de sa famille.",
+    )
+    epaisseur_min = models.FloatField("épaisseur min (mm)", null=True, blank=True, help_text="Vide : sans minimum.")
+    epaisseur_max = models.FloatField("épaisseur max (mm)", null=True, blank=True, help_text="Vide : sans maximum.")
+    modele_reference = models.CharField(
+        "modèle de référence", max_length=80, default="TOLE-{matiere}-{epaisseur}",
+        help_text="Variables : {matiere}, {famille}, {epaisseur} (3, 2.5…). Une référence déjà prise reçoit un suffixe -2, -3…",
+    )
+    modele_libelle = models.CharField(
+        "modèle de libellé", max_length=120, default="Tôle {matiere} {epaisseur} mm", blank=True,
+        help_text="Mêmes variables ; l'épaisseur s'écrit avec une virgule (2,5).",
+    )
+    unite_cout = models.CharField(
+        "unité de coût", max_length=20, choices=Article.UniteCout.choices, default=Article.UniteCout.POIDS,
+        help_text="Poids : €/kg (la tôle est valorisée d'après sa densité et son épaisseur). Surface : €/m². Pièce : prix de la feuille entière.",
+    )
+    cout_unitaire = ChampDecimal(
+        "coût unitaire d'achat", null=True, blank=True, help_text="Dans l'unité ci-dessus. Vide : à renseigner sur chaque tôle créée.", **PRIX,
+    )
+    taux_tva = models.ForeignKey(
+        "commercial.TauxTVA", verbose_name="taux de TVA", on_delete=models.PROTECT, null=True, blank=True, related_name="+",
+    )
+    gere_en_stock = models.BooleanField("géré en stock", null=True, blank=True, help_text="Vide : défaut d'une matière première.")
+    stock_mini = models.FloatField("stock minimum", null=True, blank=True)
+    quantite_reappro = models.FloatField("quantité de réapprovisionnement", null=True, blank=True)
+    actif = models.BooleanField("active", default=True)
+
+    class Meta:
+        verbose_name = "Règle de création de tôle"
+        verbose_name_plural = "Règles de création de tôle"
+        ordering = ["nom"]
+
+    def __str__(self):
+        return self.nom
+
+    def clean(self):
+        super().clean()
+        if self.matiere_id and self.famille_id and self.matiere.famille_id != self.famille_id:
+            raise ValidationError({"matiere": f"« {self.matiere} » n'appartient pas à la famille « {self.famille} »."})
+        if self.epaisseur_min is not None and self.epaisseur_max is not None and self.epaisseur_max < self.epaisseur_min:
+            raise ValidationError({"epaisseur_max": "L'épaisseur maximale est inférieure à la minimale."})
+        for champ in ("modele_reference", "modele_libelle"):
+            try:
+                self._remplir(getattr(self, champ), "S235", 3.0, "Acier")
+            except (KeyError, IndexError, ValueError):
+                raise ValidationError({champ: "Variables autorisées : {matiere}, {famille}, {epaisseur}."})
+
+    @staticmethod
+    def _remplir(modele, matiere, epaisseur, famille, virgule=False):
+        texte = f"{epaisseur:g}"
+        return modele.format(matiere=matiere, famille=famille or "", epaisseur=texte.replace(".", ",") if virgule else texte).strip()
+
+    def convient_a(self, matiere, epaisseur):
+        if not self.actif:
+            return False
+        if self.matiere_id and self.matiere_id != matiere.pk:
+            return False
+        if self.famille_id and self.famille_id != matiere.famille_id:
+            return False
+        if self.epaisseur_min is not None and epaisseur < self.epaisseur_min - 1e-9:
+            return False
+        return self.epaisseur_max is None or epaisseur <= self.epaisseur_max + 1e-9
+
+    @classmethod
+    def pour(cls, matiere, epaisseur):
+        """Règle applicable (la plus précise) ou None."""
+        candidates = [r for r in cls.objects.filter(actif=True).select_related("famille", "matiere") if r.convient_a(matiere, epaisseur)]
+        if not candidates:
+            return None
+
+        def precision(r):
+            largeur = (r.epaisseur_max if r.epaisseur_max is not None else 1e9) - (r.epaisseur_min if r.epaisseur_min is not None else 0)
+            return (0 if r.matiere_id else 1 if r.famille_id else 2, largeur, r.pk)
+
+        return min(candidates, key=precision)
+
+    def reference_pour(self, matiere, epaisseur):
+        """Référence demandée par le modèle, rendue unique (suffixe -2, -3…) parmi les articles existants."""
+        base = self._remplir(self.modele_reference, matiere.nom, epaisseur, matiere.famille.nom if matiere.famille_id else "")[:90].strip()
+        reference, n = base, 1
+        while Article.objects.filter(pk=reference).exists():
+            n += 1
+            reference = f"{base}-{n}"
+        return reference
+
+    def libelle_pour(self, matiere, epaisseur):
+        return self._remplir(self.modele_libelle, matiere.nom, epaisseur, matiere.famille.nom if matiere.famille_id else "", virgule=True)[:200]
+
+    def creer_tole(self, matiere, epaisseur):
+        """Crée et renvoie l'article tôle (matière première) de cette matière et de cette épaisseur."""
+        return Article.objects.create(
+            reference=self.reference_pour(matiere, epaisseur), libelle=self.libelle_pour(matiere, epaisseur),
+            nature=Article.Nature.MATIERE_PREMIERE, matiere=matiere, epaisseur=float(epaisseur), unite_cout=self.unite_cout,
+            cout_unitaire=self.cout_unitaire, taux_tva=self.taux_tva, gere_en_stock=self.gere_en_stock,
+            stock_mini=self.stock_mini, quantite_reappro=self.quantite_reappro,
+        )
+
+
 class PosteTravail(models.Model):
     """Un centre de charge logique (ex. "Mazak"), même si plusieurs machines identiques le composent."""
 

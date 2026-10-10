@@ -19,7 +19,7 @@ from decoupe.services import imbrication_devis as imb
 from decoupe.services.apercu_svg import generer_svg_feuille_a_plat, generer_svg_piece
 from decoupe.services.matiere import ErreurMatiere, bord_tole_piece_mm, prix_au_mm2
 from decoupe.services.parametres import reglage
-from technique.models import Matiere
+from technique.models import Article, Matiere
 
 from . import pieces_devis
 from .moteur import ChiffrageError
@@ -75,6 +75,18 @@ def _bloc_groupe(groupe, choix, formats):
         "lien_creer_tole": "" if toles else reverse("admin:technique_article_add") + f"?nature=matiere_premiere&matiere={groupe.matiere.pk}&epaisseur={groupe.epaisseur:g}&unite_cout=surface", "sens": sens, "coin": coin, "sens_choix": PieceDecoupe.SensImbrication.choices,
         "coin_choix": PieceDecoupe.CoinDepart.choices,
     }
+    if not toles:
+        from technique.models import RegleCreationTole
+
+        regle = RegleCreationTole.pour(groupe.matiere, groupe.epaisseur)
+        if regle is not None:
+            cout = f"{regle.cout_unitaire:g} €/{dict(Article.UniteCout.choices).get(regle.unite_cout, '').lower()}".replace(".", ",") if regle.cout_unitaire is not None else "sans coût (à renseigner)"
+            bloc["regle"] = {
+                "nom": regle.nom, "reference": regle.reference_pour(groupe.matiere, groupe.epaisseur),
+                "libelle": regle.libelle_pour(groupe.matiere, groupe.epaisseur), "cout": cout,
+            }
+        else:
+            bloc["lien_creer_regle"] = reverse("admin:technique_reglecreationtole_add") + f"?matiere={groupe.matiere.pk}"
     if not pieces:
         bloc["erreur"] = "Aucune pièce réalisable dans ce groupe."
         return bloc
@@ -256,6 +268,7 @@ class PiecesDevisMixin:
             path("<str:numero>/pieces/imbrication/", vue(self.piece_imbrication_view), name="chiffrage_devis_pieces_imbrication"),
             path("<str:numero>/pieces/imbrication/retenir/", vue(self.piece_retenir_view), name="chiffrage_devis_pieces_retenir"),
             path("<str:numero>/pieces/ajouter-au-devis/", vue(self.piece_ajouter_view), name="chiffrage_devis_pieces_ajouter"),
+            path("<str:numero>/pieces/imbrication/creer-tole/", vue(self.piece_creer_tole_view), name="chiffrage_devis_pieces_creer_tole"),
         ]
 
     # --- contexte de la fiche -------------------------------------------------------------------------------------
@@ -278,6 +291,7 @@ class PiecesDevisMixin:
             "url_importer": reverse("admin:chiffrage_devis_pieces_importer", args=[devis.pk]),
             "url_imbrication": reverse("admin:chiffrage_devis_pieces_imbrication", args=[devis.pk]),
             "url_retenir": reverse("admin:chiffrage_devis_pieces_retenir", args=[devis.pk]),
+            "url_creer_tole": reverse("admin:chiffrage_devis_pieces_creer_tole", args=[devis.pk]),
             "url_ajouter": reverse("admin:chiffrage_devis_pieces_ajouter", args=[devis.pk]),
             "url_forme_apercu": reverse("admin:chiffrage_devis_formes_apercu", args=[devis.pk]),
             "url_forme_ajouter": reverse("admin:chiffrage_devis_formes_ajouter", args=[devis.pk]),
@@ -571,6 +585,32 @@ class PiecesDevisMixin:
                 article.taux_marge_defaut = tole.taux_marge_defaut  # l'article fabriqué reprend la marge de sa tôle
                 article.save(update_fields=["taux_marge_defaut"])
         return JsonResponse({"ok": True})
+
+    @method_decorator(require_POST)
+    def piece_creer_tole_view(self, request, numero):
+        """Crée la tôle manquante d'un groupe (matière, épaisseur) d'après la règle de création qui s'y applique."""
+        devis, refus = self._devis_modifiable(request, numero)
+        if refus:
+            return refus
+        if not request.user.has_perm("technique.add_article"):
+            return JsonResponse({"detail": "Vous n'avez pas le droit de créer un article."}, status=403)
+        try:
+            donnees = json.loads(request.body or "{}")
+        except json.JSONDecodeError:
+            return JsonResponse({"detail": "Requête invalide."}, status=400)
+        groupes, _ = imb.grouper(devis_pieces.pieces_du_devis(devis))
+        groupe = next((g for g in groupes if g.cle == donnees.get("cle")), None)
+        if groupe is None:
+            return JsonResponse({"detail": "Groupe introuvable : rafraîchissez le panneau."}, status=404)
+        if imb.toles_possibles(groupe):
+            return JsonResponse({"detail": "Une tôle existe déjà pour ce groupe : rafraîchissez le panneau."}, status=409)
+        from technique.models import RegleCreationTole
+
+        regle = RegleCreationTole.pour(groupe.matiere, groupe.epaisseur)
+        if regle is None:
+            return JsonResponse({"detail": "Aucune règle de création de tôle ne s'applique à cette matière et cette épaisseur."}, status=404)
+        tole = regle.creer_tole(groupe.matiere, groupe.epaisseur)
+        return JsonResponse({"ok": True, "reference": tole.pk, "sans_cout": tole.cout_unitaire is None})
 
     @method_decorator(require_POST)
     def piece_ajouter_view(self, request, numero):

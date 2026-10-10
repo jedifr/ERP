@@ -55,7 +55,7 @@
     <span>Imbrications par ligne</span>
     {% for n in "1234" %}<button type="button" data-colonnes="{{ n }}" aria-pressed="false" title="{{ n }} imbrication{{ n|pluralize }} sur la largeur de l'écran">{{ n }}</button>{% endfor %}
   </div>
-  <div id="dp-imbrication" class="dp-imbrication" data-colonnes="1" data-url-imbrication="{{ p.url_imbrication }}" data-url-retenir="{{ p.url_retenir }}"></div>
+  <div id="dp-imbrication" class="dp-imbrication" data-colonnes="1" data-url-imbrication="{{ p.url_imbrication }}" data-url-retenir="{{ p.url_retenir }}" data-url-creer-tole="{{ p.url_creer_tole }}"></div>
   <div id="dp-messages" class="dp-messages" role="status"></div>
 </section>
 {% elif p.nouveau %}

@@ -2041,3 +2041,32 @@ class ImbricationSelonLaFormeTests(TestCase):
         items = [self.item(1, self.L(), 6, pas=None)]
         resultat = imbriquer_forme(items, 1500, 3000, 5, 10)
         self.assertEqual({p.rotation_deg for p in resultat.placements}, {0})
+
+    def test_ronds_en_quinconce_pour_un_lot_d_un_seul_modele(self):
+        """20 brides Ø165 sur 2500 × 1250 (bord 10, écart 10) : rangées de 7, 6, 7 décalées d'une demi-pièce, plus courtes qu'une grille."""
+        from .services.imbrication import etendue_derniere_feuille_mm
+        from .services.imbrication_forme import _controler, imbriquer_forme
+
+        def cercle(r, n=72):
+            return [(r + r * math.cos(2 * math.pi * k / n), r + r * math.sin(2 * math.pi * k / n)) for k in range(n)]
+
+        item = self.item(1, cercle(82.5), 20, pas=None)
+        resultat = imbriquer_forme([item], 1250, 2500, 10, 10)
+        self.assertEqual((resultat.nb_feuilles, len(resultat.placements)), (1, 20))
+        rangees = {}
+        for p in resultat.placements:
+            rangees.setdefault(round(p.y_mm), []).append(p.x_mm)
+        self.assertEqual(sorted(len(v) for v in rangees.values()), [6, 7, 7])
+        self.assertLess(etendue_derniere_feuille_mm(resultat, 10), 500)  # une grille carrée demande environ 530 mm
+        from shapely.geometry import Polygon
+
+        _controler(resultat.placements, {1: Polygon(cercle(82.5))}, 1250, 2500, 10, 10)  # écart de 10 mm respecté avec les vrais contours
+
+    def test_reseau_deborde_sur_une_seconde_feuille(self):
+        from .services.imbrication_forme import imbriquer_forme
+
+        items = [self.item(1, [(0, 0), (300, 0), (300, 300), (0, 300)], 30, pas=None)]
+        resultat = imbriquer_forme(items, 1000, 1000, 5, 10)
+        self.assertEqual(len(resultat.placements), 30)
+        self.assertEqual(resultat.nb_feuilles, 4)  # 9 carrés de 300 par feuille de 1000 × 1000 (3 × 3)
+        self.assertEqual(resultat.pieces_non_placees, [])

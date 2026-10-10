@@ -1129,3 +1129,95 @@ class NomenclatureDevisTests(TestCase):
         self.assertEqual([(l.article_composant, l.longueur_mm, l.largeur_mm, l.quantite) for l in ligne], [(achat, 1450.0, None, 1)])
         self.client.post(f"{self.url.replace('/pieces/', '/')}profils/{debit.pk}/enregistrer/", {"longueur": "2000"})
         self.assertEqual([l.longueur_mm for l in self.lignes(debit.article)], [2000.0])
+
+
+class RegleCreationToleTests(TestCase):
+    """Une règle de création crée la tôle manquante en un clic (référence, libellé, unité, coût, TVA) ; la plus précise l'emporte."""
+
+    setUp = ImbricationDevisTests.setUp
+    piece = ImbricationDevisTests.piece
+    imbriquer = ImbricationDevisTests.imbriquer
+
+    def sans_tole(self):
+        Article.objects.filter(pk="TOLE-S235-10").delete()
+        self.piece("a", 4)
+
+    def groupe_cle(self):
+        return "S235|10|laser"
+
+    def test_priorite_nuance_puis_famille_puis_tout_et_plage_la_plus_etroite(self):
+        from technique.models import FamilleMatiere, RegleCreationTole
+
+        acier = FamilleMatiere.objects.get_or_create(nom="Acier")[0]
+        self.matiere.famille = acier
+        self.matiere.save()
+        generale = RegleCreationTole.objects.create(nom="Toutes")
+        famille = RegleCreationTole.objects.create(nom="Acier", famille=acier)
+        fine = RegleCreationTole.objects.create(nom="Acier fin", famille=acier, epaisseur_max=12)
+        self.assertEqual(RegleCreationTole.pour(self.matiere, 10), fine)  # plage plus étroite que « toutes épaisseurs »
+        self.assertEqual(RegleCreationTole.pour(self.matiere, 20), famille)
+        nuance = RegleCreationTole.objects.create(nom="S235", matiere=self.matiere)
+        self.assertEqual(RegleCreationTole.pour(self.matiere, 10), nuance)
+        autre = Matiere.objects.create(nom="Cuivre test", densite=8.9)
+        self.assertEqual(RegleCreationTole.pour(autre, 3), generale)
+        generale.actif = False
+        generale.save()
+        self.assertIsNone(RegleCreationTole.pour(autre, 3))
+
+    def test_modeles_reference_libelle_et_unicite(self):
+        from technique.models import RegleCreationTole
+
+        regle = RegleCreationTole.objects.create(nom="R", modele_reference="TOLE-{matiere}-{epaisseur}", modele_libelle="Tôle {matiere} {epaisseur} mm")
+        self.assertEqual(regle.reference_pour(self.matiere, 2.5), "TOLE-S235-2.5")
+        self.assertEqual(regle.libelle_pour(self.matiere, 2.5), "Tôle S235 2,5 mm")
+        self.assertEqual(regle.reference_pour(self.matiere, 10), "TOLE-S235-10-2")  # TOLE-S235-10 existe déjà
+        regle.modele_reference = "{inconnu}"
+        from django.core.exceptions import ValidationError
+
+        with self.assertRaises(ValidationError):
+            regle.full_clean()
+
+    def test_message_propose_la_creation_ou_la_regle(self):
+        from technique.models import RegleCreationTole
+
+        self.sans_tole()
+        html = self.imbriquer().json()["html"]
+        self.assertIn("définissez une règle de création", html)
+        self.assertNotIn("dp-creer-tole", html)
+        RegleCreationTole.objects.create(nom="Acier au kilo", cout_unitaire=Decimal("1.2"), unite_cout="poids")
+        html = self.imbriquer().json()["html"]
+        self.assertIn("La règle « Acier au kilo » créerait", html)
+        self.assertIn("TOLE-S235-10", html)
+        self.assertIn('class="dp-creer-tole"', html)
+
+    def test_creation_en_un_clic(self):
+        from technique.models import RegleCreationTole
+
+        self.sans_tole()
+        RegleCreationTole.objects.create(nom="Acier au kilo", cout_unitaire=Decimal("1.2"), unite_cout="poids")
+        r = self.client.post(self.url + "imbrication/creer-tole/", data=json.dumps({"cle": self.groupe_cle()}), content_type="application/json")
+        self.assertEqual(r.status_code, 200, r.content)
+        tole = Article.objects.get(pk="TOLE-S235-10")
+        self.assertEqual((tole.nature, tole.matiere_id, tole.epaisseur, tole.unite_cout, tole.cout_unitaire), ("matiere_premiere", "S235", 10.0, "poids", Decimal("1.2")))
+        self.assertFalse(r.json()["sans_cout"])
+        html = self.imbriquer().json()["html"]
+        self.assertNotIn("Aucune tôle S235", html)
+        self.assertIn("Coût matière du lot", html)  # la matière est chiffrée avec la tôle créée
+        again = self.client.post(self.url + "imbrication/creer-tole/", data=json.dumps({"cle": self.groupe_cle()}), content_type="application/json")
+        self.assertEqual(again.status_code, 409)  # déjà créée : pas de doublon
+
+    def test_creation_refusee_sans_regle_ou_sans_droit(self):
+        from technique.models import RegleCreationTole
+
+        self.sans_tole()
+        r = self.client.post(self.url + "imbrication/creer-tole/", data=json.dumps({"cle": self.groupe_cle()}), content_type="application/json")
+        self.assertEqual(r.status_code, 404)
+        RegleCreationTole.objects.create(nom="R")
+        simple = get_user_model().objects.create_user("sans-droit", "s@example.com", "pass-mot-de-passe-23", is_staff=True)
+        from django.contrib.auth.models import Permission
+
+        simple.user_permissions.add(*Permission.objects.filter(codename__in=["view_devis", "change_devis", "view_piecedecoupe", "add_piecedecoupe"]))
+        self.client.force_login(simple)
+        r = self.client.post(self.url + "imbrication/creer-tole/", data=json.dumps({"cle": self.groupe_cle()}), content_type="application/json")
+        self.assertEqual(r.status_code, 403)
+        self.assertFalse(Article.objects.filter(pk="TOLE-S235-10").exists())

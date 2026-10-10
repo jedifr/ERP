@@ -16,7 +16,7 @@ from comptes.exports import ExportCsvMixin
 from achats.models import ArticleFournisseur
 from comptabilite.models import ArticleCompteAchat, ArticleCompteVente
 
-from .models import Article, FamilleMatiere, Gamme, GammeType, GammeTypeEtape, Matiere, Nomenclature, PosteTravail, TarifPoste
+from .models import Article, FamilleMatiere, Gamme, GammeType, GammeTypeEtape, Matiere, Nomenclature, PosteTravail, RegleCreationTole, TarifPoste
 from .services import DuplicationError, dupliquer_article
 
 
@@ -139,6 +139,36 @@ class MatiereAdmin(ModelAdmin):
         self.message_user(request, f"Usinabilité renseignée pour {faites} matière(s) (celles déjà renseignées sont inchangées).", level=messages.SUCCESS)
         if inconnues:
             self.message_user(request, "Matière non reconnue, à saisir à la main : " + ", ".join(inconnues), level=messages.WARNING)
+
+
+@admin.register(RegleCreationTole)
+class RegleCreationToleAdmin(ModelAdmin):
+    """Règles qui créent une tôle en un clic depuis l'imbrication d'un devis (référence, libellé, unité et coût d'achat, TVA, stock)."""
+
+    list_display = ["nom", "perimetre", "epaisseurs", "unite_cout", "cout_unitaire", "exemple", "actif"]
+    list_filter = ["actif", "famille"]
+    search_fields = ["nom", "famille__nom", "matiere__nom"]
+    autocomplete_fields = ["famille", "matiere"]
+    fieldsets = [
+        (None, {"fields": ["nom", "actif"]}),
+        ("Quand l'appliquer", {"fields": ["famille", "matiere", "epaisseur_min", "epaisseur_max"]}),
+        ("Article créé", {"fields": ["modele_reference", "modele_libelle", "unite_cout", "cout_unitaire", "taux_tva", "gere_en_stock", "stock_mini", "quantite_reappro"]}),
+    ]
+
+    @admin.display(description="S'applique à")
+    def perimetre(self, obj):
+        return obj.matiere.nom if obj.matiere_id else obj.famille.nom if obj.famille_id else "Toutes les matières"
+
+    @admin.display(description="Épaisseurs")
+    def epaisseurs(self, obj):
+        if obj.epaisseur_min is None and obj.epaisseur_max is None:
+            return "toutes"
+        return f"{'' if obj.epaisseur_min is None else format(obj.epaisseur_min, 'g')} → {'' if obj.epaisseur_max is None else format(obj.epaisseur_max, 'g')} mm"
+
+    @admin.display(description="Exemple (3 mm)")
+    def exemple(self, obj):
+        matiere = obj.matiere or Matiere(nom="S235", famille=obj.famille)
+        return obj._remplir(obj.modele_reference, matiere.nom, 3.0, obj.famille.nom if obj.famille_id else "")
 
 
 @staff_member_required

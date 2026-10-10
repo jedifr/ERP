@@ -90,6 +90,13 @@ def imbriquer_forme(items, largeur_feuille_mm, longueur_feuille_mm, marge_bord_m
     from .imbrication import etendue_derniere_feuille_mm
 
     resultats, erreur = [], None
+    if len(items) == 1 and items[0].quantite >= 3:  # un seul modèle en série : un réseau en quinconce peut battre le placement pièce à pièce
+        try:
+            reseau = _reseau(items[0], largeur_feuille_mm, longueur_feuille_mm, marge_bord_mm, espacement_pieces_mm)
+        except ImbricationFormeImpossible:
+            reseau = None
+        if reseau is not None:
+            resultats.append(reseau)
     for critere in ("bord", "coin"):
         try:
             resultats.append(_imbriquer(items, largeur_feuille_mm, longueur_feuille_mm, marge_bord_mm, espacement_pieces_mm, critere))
@@ -170,6 +177,79 @@ def _imbriquer(items, largeur_feuille_mm, longueur_feuille_mm, marge_bord_mm, es
         ))
     _controler(placements, base, largeur_feuille_mm, longueur_feuille_mm, marge_bord_mm, espacement_pieces_mm)
     return _resultat(placements, len(feuilles), surface, largeur_feuille_mm, longueur_feuille_mm, non_placees)
+
+
+def _pas_minimum(simplifie, minimum, direction, borne, depart=(0.0, 0.0)):
+    """Plus petit coefficient t dans [0, borne] tel que la pièce, décalée de `depart` + t × `direction`, reste à plus de `minimum` de la
+    pièce d'origine (dichotomie ; `borne` est connu valide). Les cas non monotones sont rattrapés par le contrôle exact du résultat."""
+    bas, haut = 0.0, borne
+    for _ in range(18):
+        milieu = (bas + haut) / 2
+        decalee = translate(simplifie, xoff=depart[0] + direction[0] * milieu, yoff=depart[1] + direction[1] * milieu)
+        if simplifie.distance(decalee) >= minimum:
+            haut = milieu
+        else:
+            bas = milieu
+    return haut
+
+
+def _reseau(item, largeur_feuille_mm, longueur_feuille_mm, marge, espacement):
+    """Réseau régulier pour un lot d'un seul modèle de pièce : rangées le long de la largeur de la feuille au pas minimal, chaque
+    rangée décalée d'une fraction de pas par rapport à la précédente (une demi-pièce : le quinconce des ronds), rangées rapprochées
+    au maximum. Plusieurs orientations et plusieurs décalages sont essayés ; le meilleur réseau (moins de feuilles, puis moins de bande
+    entamée) est contrôlé avec les vrais contours. Lève ImbricationFormeImpossible si aucun réseau ne passe."""
+    from .imbrication import etendue_derniere_feuille_mm
+
+    base = _polygone(item)
+    minimum = espacement + 2 * TOLERANCE_SIMPLIFICATION_MM
+    largeur_utile, hauteur_utile = largeur_feuille_mm - 2 * marge, longueur_feuille_mm - 2 * marge
+    meilleur = None
+    for angle in _angles(item.pas_rotation_deg):
+        g = rotate(base, angle, origin=(0, 0)) if angle else base
+        minx, miny, maxx, maxy = g.bounds
+        g = translate(g, xoff=-minx, yoff=-miny)
+        simplifie = g.simplify(TOLERANCE_SIMPLIFICATION_MM, preserve_topology=True)
+        largeur, hauteur = maxx - minx, maxy - miny
+        if largeur > largeur_utile + 1e-9 or hauteur > hauteur_utile + 1e-9:
+            continue
+        pas = _pas_minimum(simplifie, minimum, (1.0, 0.0), largeur + minimum)
+        for fraction in (0.5, 0.45, 0.55, 0.4, 0.6, 0.0):
+            decalage = pas * fraction
+            h = _pas_minimum(simplifie, minimum, (0.0, 1.0), hauteur + minimum, (decalage, 0.0))
+            if decalage:  # l'autre voisine de la rangée du dessous
+                h = max(h, _pas_minimum(simplifie, minimum, (0.0, 1.0), hauteur + minimum, (decalage - pas, 0.0)))
+            placements, feuille, k, restant = [], 1, 0, int(item.quantite)
+            while restant > 0:
+                y = marge + k * h
+                if y + hauteur > marge + hauteur_utile + 1e-9:
+                    feuille, k = feuille + 1, 0
+                    continue
+                x0 = marge + (decalage if k % 2 else 0.0)
+                place = 0
+                while restant > 0 and x0 + place * pas + largeur <= marge + largeur_utile + 1e-9:
+                    placements.append(Placement(
+                        piece_id=item.piece_id, numero_feuille=feuille, x_mm=x0 + place * pas, y_mm=y,
+                        largeur_placee_mm=largeur, hauteur_placee_mm=hauteur, rotation_deg=angle,
+                    ))
+                    place, restant = place + 1, restant - 1
+                if place == 0:  # une rangée décalée qui ne tient pas : on saute pour ne pas boucler
+                    if k % 2:
+                        k += 1
+                        continue
+                    raise ImbricationFormeImpossible("réseau impossible")
+                k += 1
+            resultat = _resultat(placements, feuille, item.surface_mm2 * item.quantite, largeur_feuille_mm, longueur_feuille_mm, [])
+            cle = (resultat.nb_feuilles, etendue_derniere_feuille_mm(resultat, marge))
+            if meilleur is not None and cle >= meilleur[0]:
+                continue
+            try:
+                _controler(placements, {item.piece_id: base}, largeur_feuille_mm, longueur_feuille_mm, marge, espacement)
+            except ImbricationFormeImpossible:
+                continue
+            meilleur = (cle, resultat)
+    if meilleur is None:
+        raise ImbricationFormeImpossible("aucun réseau valide")
+    return meilleur[1]
 
 
 def _meilleure_position(feuille, trames_piece, numero, piece_id, bloque, lignes, colonnes, c, b, largeur_utile, hauteur_utile, critere):
