@@ -3,6 +3,7 @@ Django settings for the ERP maison project.
 """
 
 import os
+import sys
 from pathlib import Path
 
 from django.templatetags.static import static
@@ -22,6 +23,10 @@ def _env_bool(name, default=False):
 # pour la désactiver entièrement (menu, tableau de bord, réceptions et livraisons sans lots).
 # Même activée, elle reste facultative article par article (case « géré en stock »).
 STOCK_ACTIF = _env_bool("DJANGO_STOCK_ACTIF", True)
+
+# Calcul parallèle des imbrications (voir decoupe/services/parallele.py) : nombre de processus ; 0 = automatique (cœurs − 1, plafonné à 6) ;
+# 1 = séquentiel. Les tests tournent en séquentiel (transaction de test partagée), sauf ceux qui testent le parallélisme.
+IMBRICATION_PROCESSUS = 1 if "test" in sys.argv else int(os.environ.get("ERP_IMBRICATION_PROCESSUS", "0") or 0)
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "django-insecure-change-me-in-production")

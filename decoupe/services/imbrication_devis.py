@@ -167,17 +167,9 @@ def _rect_coin(rect, coin, largeur_x, hauteur_y):
     return (x, y, w, h)
 
 
-def imbriquer_groupe(groupe, format_tole, marge_mm, taux_chute, tole=None, quantites=None, forme=True, sens="longueur", coin="bas_gauche"):
-    """Imbrication du groupe dans `format_tole` ; ErreurMatiere si une pièce ne tient pas. Sans tôle, pas de coût (surfaces seules).
-    `quantites` : {id de pièce: quantité} pour calculer avec d'autres quantités que celles des pièces (ligne de devis modifiée).
-    `sens` : « longueur » (la tôle se remplit dans le sens de sa longueur, chute de bout à l'extrémité) ou « largeur ».
-    `coin` : coin de la tôle où l'imbrication commence (bas_gauche par défaut)."""
+def _preparer(groupe, format_tole, marge_mm, quantites, forme, sens):
+    """Données du calcul d'imbrication d'un groupe dans un format : (pièces à placer, repère à plat, axe, écart, clé de cache)."""
     quantites = quantites or {}
-    if not groupe.pieces:
-        raise ErreurMatiere("Aucune pièce réalisable dans ce groupe.")
-    compatible, motif = format_compatible(format_tole, groupe.procede)
-    if not compatible:
-        raise ErreurMatiere(motif)
     espacement = max(espacement_pieces_mm(p) for p in groupe.pieces)
     items = [
         ItemANester(
@@ -191,11 +183,49 @@ def imbriquer_groupe(groupe, format_tole, marge_mm, taux_chute, tole=None, quant
     largeur_x = max(format_tole.largeur_mm, format_tole.longueur_mm)
     hauteur_y = min(format_tole.largeur_mm, format_tole.longueur_mm)
     axe = "x" if sens != "largeur" else "y"
-    cle = _empreinte(items, largeur_x, hauteur_y, marge_mm, espacement, forme, axe)
+    return items, largeur_x, hauteur_y, axe, espacement, _empreinte(items, largeur_x, hauteur_y, marge_mm, espacement, forme, axe)
+
+
+def _ranger(cle, resultat):
+    if len(_CACHE) >= _CACHE_MAX:
+        _CACHE.pop(next(iter(_CACHE)))
+    _CACHE[cle] = resultat
+
+
+def prechauffer(groupe, formats, marge_mm, quantites=None, forme=True, sens="longueur"):
+    """Calcule en parallèle (plusieurs cœurs, voir parallele.py) les imbrications des formats pas encore en cache : les appels suivants à
+    `imbriquer_groupe` les trouvent prêtes. Sans effet (calcul séquentiel ensuite) s'il y a peu à calculer ou un seul processus."""
+    from . import parallele
+
+    if not groupe.pieces or parallele.processus() < 2:
+        return
+    a_calculer = {}
+    for f in formats:
+        if not format_compatible(f, groupe.procede)[0]:
+            continue
+        items, largeur_x, hauteur_y, axe, espacement, cle = _preparer(groupe, f, marge_mm, quantites, forme, sens)
+        if cle not in _CACHE and cle not in a_calculer:
+            a_calculer[cle] = (items, largeur_x, hauteur_y, marge_mm, espacement, forme, axe)
+    if len(a_calculer) < 2:
+        return
+    for cle, resultat in parallele.calculer(a_calculer).items():
+        _ranger(cle, resultat)
+
+
+def imbriquer_groupe(groupe, format_tole, marge_mm, taux_chute, tole=None, quantites=None, forme=True, sens="longueur", coin="bas_gauche"):
+    """Imbrication du groupe dans `format_tole` ; ErreurMatiere si une pièce ne tient pas. Sans tôle, pas de coût (surfaces seules).
+    `quantites` : {id de pièce: quantité} pour calculer avec d'autres quantités que celles des pièces (ligne de devis modifiée).
+    `sens` : « longueur » (la tôle se remplit dans le sens de sa longueur, chute de bout à l'extrémité) ou « largeur ».
+    `coin` : coin de la tôle où l'imbrication commence (bas_gauche par défaut)."""
+    quantites = quantites or {}
+    if not groupe.pieces:
+        raise ErreurMatiere("Aucune pièce réalisable dans ce groupe.")
+    compatible, motif = format_compatible(format_tole, groupe.procede)
+    if not compatible:
+        raise ErreurMatiere(motif)
+    items, largeur_x, hauteur_y, axe, espacement, cle = _preparer(groupe, format_tole, marge_mm, quantites, forme, sens)
     if cle not in _CACHE:
-        if len(_CACHE) >= _CACHE_MAX:
-            _CACHE.pop(next(iter(_CACHE)))
-        _CACHE[cle] = imbriquer_meilleur(items, largeur_x, hauteur_y, marge_bord_mm=marge_mm, espacement_pieces_mm=espacement, forme=forme, axe=axe)
+        _ranger(cle, imbriquer_meilleur(items, largeur_x, hauteur_y, marge_bord_mm=marge_mm, espacement_pieces_mm=espacement, forme=forme, axe=axe))
     resultat = _CACHE[cle]
     if resultat.pieces_non_placees:
         noms = ", ".join(sorted({p.nom for p in groupe.pieces if p.pk in set(resultat.pieces_non_placees)})) or "une pièce"
@@ -246,6 +276,7 @@ def comparer_formats(groupe, formats, marge_mm, taux_chute, tole=None, forme=Tru
     """[(format, ResultatGroupe | None, message d'erreur)] pour chaque format ; le moins cher (à défaut le moins consommateur) est
     marqué en tête par `meilleur`. Retourne (lignes, format_meilleur)."""
     lignes = []
+    prechauffer(groupe, formats, marge_mm, forme=forme, sens=sens)  # les formats se calculent ensemble, sur plusieurs cœurs
     for f in formats:
         try:
             lignes.append((f, imbriquer_groupe(groupe, f, marge_mm, taux_chute, tole, forme=forme, sens=sens, coin=coin), ""))
