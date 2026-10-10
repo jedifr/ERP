@@ -65,9 +65,13 @@ Ce que je sais et ce que je n'ai **pas pu vérifier** (je n'ai pas accès à ce 
 - **Copie hors site / cloud** : pas de Hyper Backup sur UGOS ; utilisez `COPIE_EXTERNE` (disque USB, dossier réseau, rsync vers un autre serveur), ou l'outil de sauvegarde cloud d'UGOS s'il existe, sur le dossier `erp_sauvegardes`.
 - **Installation** : `update-nas.sh` utilise `curl`, `tar` et `docker compose`, présents sur une base Debian. Vérifiez `rsync` (`which rsync`) si vous choisissez une copie vers une autre machine.
 
-### Où mettre quoi sur ce matériel (recommandations)
-- **Système sur le SSD 128 Go, données sur disque rapide** : créez un volume sur les **SSD NVMe M.2** (miroir si possible) pour les données Docker (base PostgreSQL) : c'est ce qui rend les listes et les recalculs de devis réactifs. Gardez les **disques durs** (RAID 1, 5 ou 6 selon le nombre de baies utilisées) pour `erp_sauvegardes` et les archives.
-- **Mémoire** : 8 Go suffisent pour l'ERP (base + application), mais le NAS fait aussi d'autres choses : passer à 16 Go (DDR5 SO-DIMM, extensible) est un confort peu coûteux. Sur ce processeur (10 cœurs), `GUNICORN_WORKERS=4` dans `.env` est un bon réglage.
-- **Alimentation** : un **onduleur** évite la corruption de la base lors d'une coupure.
-- **Instantanés** : si le volume est en Btrfs, activez les instantanés quotidiens du dossier des sauvegardes (protège d'une suppression ou d'un ransomware), en plus de la copie externe.
-- **Performances** : ce processeur est nettement plus rapide que l'Atom d'un ancien NAS ; l'imbrication à plat des tôles, aujourd'hui le calcul le plus lent, sera sensiblement plus rapide.
+### Où mettre quoi sur ce matériel (configuration prévue)
+Matériel : UGREEN DXP8800 Plus (i5-1235U) + **2 × Samsung 990 Pro 1 To** (NVMe) + **2 × Seagate IronWolf Pro 8 To** + **8 Go + 16 Go de DDR5** (24 Go).
+- **Système (UGOS)** : sur le SSD interne de 128 Go, ne rien y mettre d'autre.
+- **Volume « rapide » = les 2 NVMe en RAID 1 (miroir), ≈ 1 To utiles** : dossier du projet, données Docker (base PostgreSQL), fichiers déposés. L'ERP pèse quelques Go au plus : c'est largement suffisant et c'est ce qui rend les listes et les recalculs réactifs. Le miroir protège d'une panne d'un SSD.
+- **Volume « données » = les 2 IronWolf en RAID 1 (miroir), ≈ 8 To utiles** : dossier `erp_sauvegardes`, archives de transfert, documents. Il reste 6 baies libres pour plus tard (ajout de disques, passage en RAID 5/6).
+- **Un miroir n'est pas une sauvegarde** : il protège d'une panne de disque, pas d'une erreur, d'une suppression ou d'un virus. Gardez la **copie externe chiffrée** (`COPIE_EXTERNE`) en plus, et idéalement une copie hors site.
+- **Système de fichiers** : si UGOS propose Btrfs, il apporte les instantanés (utiles sur le volume des sauvegardes). Pour le dossier de la base PostgreSQL sur Btrfs, désactivez la copie sur écriture (`chattr +C` sur un dossier vide avant d'y créer la base) ou choisissez ext4 pour le volume NVMe : c'est la recommandation habituelle pour les bases de données.
+- **Mémoire** : 24 Go sont très largement suffisants (l'ERP en utilise 2 à 3). Un module de 8 Go + un de 16 Go fonctionne ; la mémoire tourne à la vitesse supportée par le processeur (DDR5-4800 environ, quel que soit le 5600 annoncé) et seule la zone commune aux deux modules est en double canal : sans conséquence pour l'ERP. Si vous voulez le double canal complet, remplacez le 8 Go par un 16 Go (32 Go).
+- **Réglages** : `GUNICORN_WORKERS=4` dans `.env`. Les NVMe (7 450 Mo/s) et le 10 GbE dépassent de loin les besoins de l'ERP ; prévoyez un **onduleur**.
+- **À vérifier avant de ranger l'ancien NAS** : que UGOS reconnaît bien les 2 NVMe pour un volume, que les disques IronWolf Pro sont acceptés (c'est le cas général des disques NAS), puis une sauvegarde + restauration d'essai (`verifier-sauvegarde.sh`) sur le nouveau matériel.
