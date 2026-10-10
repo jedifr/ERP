@@ -870,6 +870,9 @@ class ProfileSectionAdmin(ModelAdmin):
     autocomplete_fields = ["article"]
     actions = ["creer_articles", "marquer_verifie"]
 
+    class Media:
+        js = ["decoupe/section_admin.js"]
+
     @admin.action(description="Créer les articles d'achat manquants (coût à renseigner)")
     def creer_articles(self, request, queryset):
         from technique.models import Article

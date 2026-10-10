@@ -2070,3 +2070,19 @@ class ImbricationSelonLaFormeTests(TestCase):
         self.assertEqual(len(resultat.placements), 30)
         self.assertEqual(resultat.nb_feuilles, 4)  # 9 carrés de 300 par feuille de 1000 × 1000 (3 × 3)
         self.assertEqual(resultat.pieces_non_placees, [])
+
+
+class SchemaCotesSectionTests(TestCase):
+    """La fiche d'une section de profilé affiche un schéma des cotes (script chargé pour toutes les familles)."""
+
+    def test_page_charge_le_schema_et_chaque_famille_a_son_dessin(self):
+        from pathlib import Path
+
+        self.client.force_login(get_user_model().objects.create_superuser("schema", "s@example.com", "pass-mot-de-passe-61"))
+        page = self.client.get("/admin/decoupe/profilesection/add/")
+        self.assertContains(page, "decoupe/section_admin")
+        from decoupe.models import ProfileSection
+
+        source = (Path(__file__).parent / "static" / "decoupe" / "section_admin.js").read_text(encoding="utf-8")
+        for famille in ProfileSection.Famille.values:
+            self.assertIn(famille + ":", source, famille)

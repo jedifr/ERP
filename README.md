@@ -3210,3 +3210,7 @@ Sur la fiche d'un article, le bouton **« Renommer »** change sa référence. L
 ## Grille des paramètres de coupe : créer sans ouvrir la fiche
 
 Au **jet d'eau**, cliquer sur un **＋** de la grille crée tout de suite le paramètre, sans ouvrir sa fiche : copie du paramètre le plus proche en épaisseur de la même matière (mêmes réglages, perçage proportionnel à l'épaisseur), **vitesses estimées d'après l'usinabilité**, et le **poste choisi dans « Affecter un poste à… → »** (à défaut, celui du modèle). Maj + clic ouvre la fiche comme avant. Le bouton **« Créer les manquants »** de la barre d'affectation fait la même chose pour une ligne, une colonne ou toute la grille. Les cases impossibles (matière sans usinabilité, par exemple) sont signalées avec leur motif et le reste est créé ; chaque création est tracée dans *Lots de modifications* (annulable). **Laser** : les épaisseurs absentes du tableau du constructeur ne sont pas réalisables, le ＋ ouvre donc toujours la fiche.
+
+## Schéma des cotes d'une section de profilé
+
+Sur la fiche d'une **section de profilé** (Chiffrage découpe → Sections de profilés), un schéma des cotes suit la famille choisie : cornière (a, b, e), UPN (h, b, tw, tf), tube carré (c, e), tube rectangulaire (h, b, e), tube rond (d, e), avec la légende des cotes à saisir et un exemple (`{"a": 20, "b": 20, "e": 3}`).
