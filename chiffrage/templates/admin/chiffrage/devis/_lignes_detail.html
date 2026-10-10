@@ -5,6 +5,15 @@
   {% for l in lignes_detail %}
   <details>
     <summary>{{ l.article_id }}{% if l.article.libelle %} — {{ l.article.libelle }}{% endif %} × {{ l.quantite|floatformat:"-2" }}</summary>
+    {% with m=l.matiere_piece %}{% if m %}
+    <p class="ge-matiere" title="Pour contrôle : prix et poids de la matière rapportés à une pièce.">
+      <strong>Matière par pièce</strong>
+      {% if m.prix is not None %}· prix <b>{{ m.prix|floatformat:4 }} €</b>{% endif %}
+      {% if m.poids_net_kg is not None %}· poids net <b>{{ m.poids_net_kg|floatformat:3 }} kg</b>{% endif %}
+      {% if m.poids_consomme_kg is not None %}· poids consommé <b>{{ m.poids_consomme_kg|floatformat:3 }} kg</b>{% if m.perte_pct is not None %} (chutes {{ m.perte_pct|floatformat:0 }} %){% endif %}{% endif %}
+      <span class="ge-aide">{% if m.source == "imbrication" %}tôle consommée par l'imbrication, chutes comprises{% elif m.source == "nomenclature" %}d'après la nomenclature (sans imbrication){% endif %}</span>
+    </p>
+    {% endif %}{% endwith %}
     <div class="ge-cols">
       <div class="nomenclature-editeur" data-url="{% url 'nomenclature_editeur' l.article_id %}" data-editable="{{ editable_detail|yesno:'1,0' }}" data-libelle="{{ l.article_id }}"></div>
       <div class="gamme-editeur" data-url="{% url 'gamme_editeur' l.article_id %}" data-quantite="{{ l.quantite|floatformat:'0' }}" data-editable="{{ editable_detail|yesno:'1,0' }}" data-libelle="{{ l.article_id }}"></div>

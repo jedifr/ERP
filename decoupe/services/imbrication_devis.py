@@ -348,10 +348,9 @@ def formats_actifs():
     return list(FormatTole.objects.filter(actif=True).prefetch_related("familles", "matieres"))
 
 
-def cout_matiere_piece_devis(piece, quantite):
-    """Coût matière (Decimal) de `quantite` exemplaires de `piece` dans l'imbrication retenue de son groupe, les autres pièces du
-    groupe gardant leur quantité : la ligne de devis d'une pièce n'est donc pas chiffrée comme si elle était seule sur la tôle.
-    Lève ErreurMatiere si la pièce n'est pas dans un groupe réalisable ou si tôle et format ne sont pas retenus."""
+def imbrication_piece_devis(piece, quantite):
+    """(résultat du groupe, ligne de `piece` dans ce résultat) : imbrication retenue du groupe de la pièce, les autres pièces gardant
+    leur quantité. Lève ErreurMatiere si la pièce n'est pas dans un groupe réalisable ou si tôle et format ne sont pas retenus."""
     from .devis_pieces import pieces_du_devis
 
     if piece.devis_id is None:
@@ -369,4 +368,10 @@ def cout_matiere_piece_devis(piece, quantite):
         groupe, piece.format_tole, piece.marge_bord_mm, float(piece.taux_chute_recuperable), piece.tole, quantites={piece.pk: int(quantite)},
         forme=piece.imbrication_forme, sens=piece.sens_imbrication, coin=piece.coin_depart,
     )
-    return next(r["total"] for r in resultat.par_piece if r["piece"].pk == piece.pk)
+    return resultat, next(r for r in resultat.par_piece if r["piece"].pk == piece.pk)
+
+
+def cout_matiere_piece_devis(piece, quantite):
+    """Coût matière (Decimal) de `quantite` exemplaires de `piece` dans l'imbrication retenue de son groupe, les autres pièces du
+    groupe gardant leur quantité : la ligne de devis d'une pièce n'est donc pas chiffrée comme si elle était seule sur la tôle."""
+    return imbrication_piece_devis(piece, quantite)[1]["total"]

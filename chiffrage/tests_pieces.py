@@ -1221,3 +1221,38 @@ class RegleCreationToleTests(TestCase):
         r = self.client.post(self.url + "imbrication/creer-tole/", data=json.dumps({"cle": self.groupe_cle()}), content_type="application/json")
         self.assertEqual(r.status_code, 403)
         self.assertFalse(Article.objects.filter(pk="TOLE-S235-10").exists())
+
+
+class MatierePieceTests(ChiffrageDevisTests):
+    """Prix et poids de matière par pièce (net et consommé) d'une ligne de devis fabriquée, pour contrôle."""
+
+    def test_prix_poids_net_et_consomme(self):
+        from chiffrage.matiere_piece import matiere_par_piece
+
+        piece = self.piece("a", 4)
+        self.retenir()
+        self.assertEqual(self.ajouter().status_code, 200)
+        ligne = DevisLigne.objects.get(devis=self.devis, article=piece.article)
+        m = matiere_par_piece(self.devis, ligne)
+        self.assertEqual(m.source, "imbrication")
+        self.assertAlmostEqual(float(m.prix), float(ligne.cout_matiere_calcule) / 4, places=4)
+        attendu_net = piece.surface_mm2 * 10 * 7.85 / 1_000_000  # surface (mm²) × épaisseur (mm) × densité (kg/dm³) / 10⁶
+        self.assertAlmostEqual(m.poids_net_kg, attendu_net, places=6)
+        self.assertGreaterEqual(m.poids_consomme_kg, m.poids_net_kg)  # la tôle consommée contient la pièce et ses chutes
+        self.assertIsNotNone(m.perte_pct)
+        page = self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/change/")
+        self.assertContains(page, "Matière par pièce")
+        self.assertContains(page, "poids net")
+        self.assertContains(page, "poids consommé")
+
+    def test_poids_depuis_la_nomenclature_sans_imbrication(self):
+        from chiffrage.matiere_piece import matiere_par_piece
+        from technique.models import Nomenclature
+
+        fabrique = Article.objects.create(reference="FAB-POIDS", nature=Article.Nature.FABRIQUE)
+        Nomenclature.objects.create(article_parent=fabrique, article_composant=self.tole, longueur_mm=200, largeur_mm=100, quantite=2)
+        ligne = DevisLigne.objects.create(devis=self.devis, article=fabrique, quantite=3)
+        m = matiere_par_piece(self.devis, ligne)
+        self.assertEqual(m.source, "nomenclature")
+        self.assertAlmostEqual(m.poids_net_kg, 200 * 100 * 10 * 7.85 / 1_000_000 * 2, places=6)  # 2 × 1,57 kg
+        self.assertIsNone(m.poids_consomme_kg)

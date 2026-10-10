@@ -323,6 +323,10 @@ class PiecesDevisMixin:
         lignes = list(devis.lignes.filter(article__nature=Article.Nature.FABRIQUE).select_related("article").order_by("pk"))
         editable = (not devis_verrouille(devis) and all(u.has_perm(f"technique.{a}_{m}") for m in ("gamme", "nomenclature") for a in ("add", "change"))
                     and u.has_perm("technique.delete_nomenclature"))
+        from .matiere_piece import matiere_par_piece
+
+        for ligne in lignes:  # prix et poids de matière par pièce, pour contrôle
+            ligne.matiere_piece = matiere_par_piece(devis, ligne)
         return {"lignes_detail": lignes, "editable_detail": editable}
 
     # --- vues AJAX ------------------------------------------------------------------------------------------------
