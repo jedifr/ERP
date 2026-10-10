@@ -335,6 +335,7 @@ NAVIGATION = [
         "separator": True,
         "items": [
             _menu("Articles", "category", "technique", "article"),
+            _menu("Sections de profilés", "straighten", "technique", "profilesection"),
             _menu("Nomenclatures", "account_tree", "technique", "nomenclature"),
             _menu("Écritures comptables", "list_alt", "comptabilite", "ecriturecomptable"),
         ],

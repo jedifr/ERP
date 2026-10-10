@@ -24,7 +24,6 @@ from .models import (
     ImbricationPlacement,
     NormeCote,
     ParametreCoupe,
-    ProfileSection,
     ReglageProcede,
     PieceDecoupe,
     ProfilImportDecoupe,
@@ -860,40 +859,3 @@ class NormeCoteAdmin(ModelAdmin):
         self.message_user(request, f"{n} ligne(s) marquée(s) comme vérifiée(s).", messages.SUCCESS)
 
 
-@admin.register(ProfileSection)
-class ProfileSectionAdmin(ModelAdmin):
-    """Catalogue des profilés (cornières, UPN, tubes) de la bibliothèque de formes du devis, avec leur article d'achat."""
-
-    list_display = ["designation", "famille", "masse_lineique", "longueur_barre_mm", "article", "verifie"]
-    list_filter = ["famille", "verifie"]
-    search_fields = ["designation"]
-    autocomplete_fields = ["article"]
-    actions = ["creer_articles", "marquer_verifie"]
-
-    class Media:
-        js = ["decoupe/section_admin.js"]
-
-    @admin.action(description="Créer les articles d'achat manquants (coût à renseigner)")
-    def creer_articles(self, request, queryset):
-        from technique.models import Article
-
-        crees = 0
-        for section in queryset.filter(article__isnull=True):
-            reference = f"PROF-{section.designation}"[:100]
-            article, cree = Article.objects.get_or_create(
-                reference=reference,
-                defaults={
-                    "libelle": f"{section.get_famille_display()} {section.designation}", "nature": Article.Nature.MATIERE_PREMIERE,
-                    "unite_cout": Article.UniteCout.LONGUEUR, "poids_lineique": section.masse_lineique,
-                },
-            )
-            section.article = article
-            section.save(update_fields=["article"])
-            crees += cree
-        self.message_user(
-            request, f"{crees} article(s) créé(s) en « longueur » avec le poids linéique : saisissez leur coût (€/kg).", messages.SUCCESS,
-        )
-
-    @admin.action(description="Marquer comme vérifié")
-    def marquer_verifie(self, request, queryset):
-        self.message_user(request, f"{queryset.update(verifie=True)} section(s) marquée(s) comme vérifiée(s).", messages.SUCCESS)

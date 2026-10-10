@@ -866,7 +866,7 @@ class ProfilesDevisTests(TestCase):
         page = self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/change/")
         self.assertContains(page, "tube_rond")
         self.assertContains(page, 'id="dp-profils"')
-        self.assertContains(self.client.get("/admin/decoupe/profilesection/"), "UPN 100")
+        self.assertContains(self.client.get("/admin/technique/profilesection/"), "UPN 100")
 
 
 class VuesImbricationTests(TestCase):
@@ -1026,7 +1026,7 @@ class LiensElementsManquantsTests(TestCase):
         r = self.client.post(self.url.replace("/pieces/", "/") + "profils/ajouter/", data=json.dumps({"section": section.pk, "longueur": 1000, "quantite": 2}), content_type="application/json")
         self.assertEqual(r.status_code, 200)
         html = self.imbriquer().json()["html"]
-        self.assertIn(f"/admin/decoupe/profilesection/{section.pk}/change/", html)
+        self.assertIn(f"/admin/technique/profilesection/{section.pk}/change/", html)
         self.assertIn("Rattacher l&#x27;article d&#x27;achat", html)
         self.assertIn('id="dp-profil-', html)
 

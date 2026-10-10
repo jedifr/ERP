@@ -18,7 +18,7 @@ from comptes.lots_admin import ModificationParLotsMixin, vue_lot
 from achats.models import ArticleFournisseur
 from comptabilite.models import ArticleCompteAchat, ArticleCompteVente
 
-from .models import Article, FamilleMatiere, Gamme, GammeType, GammeTypeEtape, Matiere, Nomenclature, PosteTravail, RegleCreationTole, TarifPoste
+from .models import Article, FamilleMatiere, Gamme, GammeType, GammeTypeEtape, Matiere, Nomenclature, PosteTravail, ProfileSection, RegleCreationTole, TarifPoste
 from . import lots_champs
 from .services import DuplicationError, dupliquer_article, renommer_article
 
@@ -510,6 +510,44 @@ class TarifPosteInline(TabularInline):
     ordering = ["-date_debut"]
     verbose_name = "tarif"
     verbose_name_plural = "Tarifs (coût horaire, du plus récent au plus ancien — laissez la date de fin vide pour le tarif en cours)"
+
+
+@admin.register(ProfileSection)
+class ProfileSectionAdmin(ModelAdmin):
+    """Sections de profilés (cornières, UPN, tubes) : une forme particulière de matière première, avec son article d'achat. Elles alimentent
+    la bibliothèque de formes du devis (débits de profilés)."""
+
+    list_display = ["designation", "famille", "masse_lineique", "longueur_barre_mm", "article", "verifie"]
+    list_filter = ["famille", "verifie"]
+    search_fields = ["designation"]
+    autocomplete_fields = ["article"]
+    actions = ["creer_articles", "marquer_verifie"]
+
+    class Media:
+        js = ["technique/section_admin.js"]
+
+    @admin.action(description="Créer les articles d'achat manquants (coût à renseigner)")
+    def creer_articles(self, request, queryset):
+        crees = 0
+        for section in queryset.filter(article__isnull=True):
+            reference = f"PROF-{section.designation}"[:100]
+            article, cree = Article.objects.get_or_create(
+                reference=reference,
+                defaults={
+                    "libelle": f"{section.get_famille_display()} {section.designation}", "nature": Article.Nature.MATIERE_PREMIERE,
+                    "unite_cout": Article.UniteCout.LONGUEUR, "poids_lineique": section.masse_lineique,
+                },
+            )
+            section.article = article
+            section.save(update_fields=["article"])
+            crees += cree
+        self.message_user(
+            request, f"{crees} article(s) créé(s) en « longueur » avec le poids linéique : saisissez leur coût (€/kg).", messages.SUCCESS,
+        )
+
+    @admin.action(description="Marquer comme vérifié")
+    def marquer_verifie(self, request, queryset):
+        self.message_user(request, f"{queryset.update(verifie=True)} section(s) marquée(s) comme vérifiée(s).", messages.SUCCESS)
 
 
 @admin.register(PosteTravail)

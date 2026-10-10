@@ -2,7 +2,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
 from comptes.champs import ChampDecimal
-from comptes.montants import PRIX, TAUX
+from comptes.montants import PRIX, TAUX, D
 
 
 class FamilleMatiere(models.Model):
@@ -330,6 +330,69 @@ class RegleCreationTole(models.Model):
             cout_unitaire=self.cout_unitaire, taux_tva=self.taux_tva, gere_en_stock=self.gere_en_stock,
             stock_mini=self.stock_mini, quantite_reappro=self.quantite_reappro,
         )
+
+
+class ProfileSection(models.Model):
+    """Forme particulière de matière première : section de profilé du catalogue (cornière, UPN, tube) avec ses cotes, sa masse linéique,
+    sa longueur de barre et l'article d'achat dont le coût sert au prix des débits."""
+
+    class Famille(models.TextChoices):
+        CORNIERE = "corniere", "Cornière"
+        UPN = "upn", "UPN"
+        TUBE_CARRE = "tube_carre", "Tube carré"
+        TUBE_RECTANGULAIRE = "tube_rectangulaire", "Tube rectangulaire"
+        TUBE_ROND = "tube_rond", "Tube rond"
+
+    famille = models.CharField("famille", max_length=20, choices=Famille.choices)
+    designation = models.CharField("désignation", max_length=60, unique=True, help_text="« L 50×50×5 », « UPN 100 », « Tube 40×40×3 »…")
+    dimensions = models.JSONField(
+        "cotes (mm)", default=dict,
+        help_text="Cornière : a, b, e. UPN : h, b, tw, tf. Tube carré : c, e. Tube rectangulaire : h, b, e. Tube rond : d, e.",
+    )
+    masse_lineique = models.FloatField("masse linéique (kg/m)")
+    longueur_barre_mm = models.FloatField("longueur de barre (mm)", default=6000, help_text="Longueur de barre achetée, dont sont tirés les débits.")
+    article = models.ForeignKey(
+        Article, verbose_name="article d'achat", on_delete=models.SET_NULL, null=True, blank=True, related_name="sections_profile",
+        limit_choices_to={"nature": Article.Nature.MATIERE_PREMIERE},
+        help_text="Matière première dont le coût sert au prix des débits : coût au mètre, au kilo (avec la masse linéique) ou à la barre.",
+    )
+    verifie = models.BooleanField("vérifié", default=False, help_text="Masses et cotes contrôlées avec le catalogue du fournisseur ou la norme.")
+    source = models.CharField("source", max_length=200, blank=True)
+    ordre = models.PositiveIntegerField("ordre", default=0)
+
+    class Meta:
+        verbose_name = "Section de profilé"
+        verbose_name_plural = "Sections de profilés"
+        ordering = ["famille", "ordre", "designation"]
+
+    def __str__(self):
+        return self.designation
+
+    @property
+    def hauteur_mm(self):
+        """Hauteur de la section vue de côté (dimension portée sur le dessin d'un débit)."""
+        d = self.dimensions
+        return float(d.get("h") or d.get("a") or d.get("c") or d.get("d") or 0)
+
+    def prix_au_metre(self):
+        """Prix d'un mètre de barre (Decimal) selon l'unité de coût de l'article d'achat ; ErreurPrixProfile si impossible."""
+        from decoupe.services.profiles import ErreurPrixProfile
+
+        a = self.article
+        if a is None:
+            raise ErreurPrixProfile(f"Aucun article d'achat n'est rattaché à « {self.designation} » (menu Sections de profilés).")
+        if a.cout_unitaire is None:
+            raise ErreurPrixProfile(f"L'article « {a} » n'a pas de coût unitaire renseigné.")
+        cout = D(a.cout_unitaire)
+        if a.unite_cout == Article.UniteCout.LONGUEUR:
+            return cout * D(a.poids_lineique) if a.poids_lineique else cout  # €/kg avec un poids linéique, sinon €/m
+        if a.unite_cout == Article.UniteCout.POIDS:
+            return cout * D(self.masse_lineique)
+        if a.unite_cout == Article.UniteCout.PIECE:
+            return cout / (D(self.longueur_barre_mm) / D(1000))  # prix de la barre entière
+        raise ErreurPrixProfile(f"Unité de coût de « {a} » non adaptée à un profilé (longueur, poids ou pièce).")
+
+
 
 
 class PosteTravail(models.Model):

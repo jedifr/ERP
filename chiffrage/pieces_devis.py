@@ -100,7 +100,7 @@ def apercu(devis, avec_gamme=False):
 def lien_prix_profil(section):
     """Lien vers ce qui manque pour chiffrer un profilé : l'article d'achat de la section, ou son coût."""
     if section.article_id is None:
-        return reverse("admin:decoupe_profilesection_change", args=[section.pk]), "Rattacher l'article d'achat", True
+        return reverse("admin:technique_profilesection_change", args=[section.pk]), "Rattacher l'article d'achat", True
     if section.article.cout_unitaire is None:
         return reverse("admin:technique_article_change", args=[section.article_id]), "Renseigner le coût de l'article", True
     return None

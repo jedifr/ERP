@@ -2079,10 +2079,10 @@ class SchemaCotesSectionTests(TestCase):
         from pathlib import Path
 
         self.client.force_login(get_user_model().objects.create_superuser("schema", "s@example.com", "pass-mot-de-passe-61"))
-        page = self.client.get("/admin/decoupe/profilesection/add/")
-        self.assertContains(page, "decoupe/section_admin")
+        page = self.client.get("/admin/technique/profilesection/add/")
+        self.assertContains(page, "technique/section_admin")
         from decoupe.models import ProfileSection
 
-        source = (Path(__file__).parent / "static" / "decoupe" / "section_admin.js").read_text(encoding="utf-8")
+        source = (Path(__file__).parent.parent / "technique" / "static" / "technique" / "section_admin.js").read_text(encoding="utf-8")
         for famille in ProfileSection.Famille.values:
             self.assertIn(famille + ":", source, famille)

@@ -15,15 +15,15 @@ CARTES = [
         ("Paramètres de coupe", "decoupe", "parametrecoupe"), ("Paramètres de coupe en grille", "decoupe", "parametrecoupe", "admin:decoupe_parametrecoupe_action_grille"), ("Réglages de coupe", "decoupe", "reglageprocede"),
         ("Formats de tôle", "decoupe", "formattole"), ("Imbrication : seuil de chutes", "decoupe", "reglageimbrication"), ("Imbrications (historique)", "decoupe", "imbricationjob"),
     ], "decoupe"),
-    ("formes", "Formes et profilés", "straighten", "Cotes normalisées, sections de profilés, profils d'import DXF", [
-        ("Cotes normalisées", "decoupe", "normecote"), ("Sections de profilés", "decoupe", "profilesection"),
+    ("formes", "Formes et profilés", "straighten", "Cotes normalisées, profils d'import DXF", [
+        ("Cotes normalisées", "decoupe", "normecote"),
         ("Profils d'import DXF", "decoupe", "profilimportdecoupe"),
     ], "formes"),
     ("atelier", "Atelier", "precision_manufacturing", "Postes de travail, tarifs de poste, gammes et gammes types", [
         ("Postes de travail et tarifs", "technique", "postetravail"), ("Gammes", "technique", "gamme"), ("Gammes types", "technique", "gammetype"),
     ], "atelier"),
-    ("articles", "Articles et matières", "category", "Matières, familles, nomenclatures, fournisseurs et tarifs d'achat", [
-        ("Matières", "technique", "matiere"), ("Lots de modifications", "comptes", "lotmodification"), ("Familles de matière", "technique", "famillematiere"), ("Règles de création de tôle", "technique", "reglecreationtole"), ("Nomenclatures", "technique", "nomenclature"),
+    ("articles", "Articles et matières", "category", "Matières, familles, sections de profilés, nomenclatures, fournisseurs et tarifs d'achat", [
+        ("Matières", "technique", "matiere"), ("Lots de modifications", "comptes", "lotmodification"), ("Familles de matière", "technique", "famillematiere"), ("Sections de profilés", "technique", "profilesection"), ("Règles de création de tôle", "technique", "reglecreationtole"), ("Nomenclatures", "technique", "nomenclature"),
         ("Fournisseurs d'article", "achats", "articlefournisseur"), ("Tarifs d'achat", "achats", "tarifachatarticle"),
     ], "articles"),
     ("stock", "Stock", "warehouse", "Emplacements, mouvements, transferts", [

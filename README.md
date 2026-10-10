@@ -3213,4 +3213,8 @@ Au **jet d'eau**, cliquer sur un **＋** de la grille crée tout de suite le par
 
 ## Schéma des cotes d'une section de profilé
 
-Sur la fiche d'une **section de profilé** (Chiffrage découpe → Sections de profilés), un schéma des cotes suit la famille choisie : cornière (a, b, e), UPN (h, b, tw, tf), tube carré (c, e), tube rectangulaire (h, b, e), tube rond (d, e), avec la légende des cotes à saisir et un exemple (`{"a": 20, "b": 20, "e": 3}`).
+Sur la fiche d'une **section de profilé** (Socle technique → Sections de profilés), un schéma des cotes suit la famille choisie : cornière (a, b, e), UPN (h, b, tw, tf), tube carré (c, e), tube rectangulaire (h, b, e), tube rond (d, e), avec la légende des cotes à saisir et un exemple (`{"a": 20, "b": 20, "e": 3}`).
+
+## Sections de profilés : dans le socle technique
+
+Les **sections de profilés** (cornières, UPN, tubes) sont une forme particulière de matière première : elles ont quitté l'administration « Chiffrage découpe » pour le **Socle technique**, à côté des articles (menu *Gestion → Sections de profilés*, et Paramétrage → Articles et matières). Les données (cotes, masses, articles d'achat rattachés) et les droits déjà donnés aux groupes sont conservés : la table est renommée et le type de contenu d'administration suit (migrations `technique 0019-0020`, `decoupe 0034`). L'ancienne adresse `/admin/decoupe/profilesection/` n'existe plus : c'est `/admin/technique/profilesection/`.
