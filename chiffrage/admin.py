@@ -152,17 +152,25 @@ class DevisLigneInline(TabularInline):
         "prix_vente_matiere",
         "prix_vente_operations",
         "reglage_machine",
+        "reglage_operations",
         "prix_vente_total",
         "prix_vente_unitaire",
         "prix_vente_ttc",
     ]
 
-    @admin.display(description="dont réglage machine (HT)")
+    @admin.display(description="dont réglage de tôle (HT)")
     def reglage_machine(self, obj):
-        """Information : part du réglage des tôles déjà comprise dans le prix des opérations (voir chiffrage/reglage.py)."""
+        """Information : part du réglage des tôles (découpe) déjà comprise dans le prix des opérations (voir chiffrage/reglage.py)."""
         if obj is None or obj.pk is None or obj.prix_vente_reglage is None:
             return "—"
         return format_html('<span title="{}">{} €</span>', obj.note_reglage, obj.prix_vente_reglage)
+
+    @admin.display(description="dont réglages d'opérations (HT)")
+    def reglage_operations(self, obj):
+        """Information : part des temps de réglage par lot des opérations de la gamme, déjà comprise dans le prix des opérations."""
+        if obj is None or obj.pk is None or obj.prix_vente_reglage_operations is None:
+            return "—"
+        return format_html('<span title="Temps de réglage par lot des opérations (colonne Réglage de la gamme), déjà inclus">{} €</span>', obj.prix_vente_reglage_operations)
 
     def has_add_permission(self, request, obj=None):
         # Les lignes s'ajoutent par l'assistant « Ajouter une ligne » (onglet Lignes du devis) ou depuis les pièces à découper : ce tableau

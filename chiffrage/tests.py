@@ -173,6 +173,18 @@ class CalculerDevisTests(TestCase):
         )
         self.ligne = DevisLigne.objects.create(devis=self.devis, article=self.article, quantite=3)
 
+    def test_reglages_d_operations_affiches_a_part_du_reglage_de_tole(self):
+        # 10 min de réglage par lot à 50 €/h = 8,33 € de coût, majoré de 15 % : 9,58 €, déjà compris dans le prix des opérations
+        calculer_devis(self.devis)
+        self.ligne.refresh_from_db()
+        self.assertEqual(self.ligne.prix_vente_reglage_operations, Decimal("9.58"))
+        self.assertIsNone(self.ligne.prix_vente_reglage)  # pas d'étape de découpe : pas de réglage de tôle
+        self.assertLess(self.ligne.prix_vente_reglage_operations, self.ligne.prix_vente_operations)
+        Gamme.objects.filter(article=self.article).update(temps_fixe=0)
+        calculer_devis(self.devis)
+        self.ligne.refresh_from_db()
+        self.assertIsNone(self.ligne.prix_vente_reglage_operations)
+
     def test_calcul_matiere_et_marge_defaut(self):
         calculer_devis(self.devis)
         self.ligne.refresh_from_db()

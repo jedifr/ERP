@@ -193,7 +193,9 @@ def _synchroniser_operations_ligne(devis, ligne):
     if ordre_decoupe is None:
         reglage = type(reglage)()
     ligne.prix_vente_reglage = None
+    ligne.prix_vente_reglage_operations = None
     ligne.note_reglage = ""
+    reglages_operations = ZERO
     ordres_actifs = {etape.ordre for etape in etapes}
 
     existantes = {op.ordre: op for op in ligne.operations.all()}
@@ -215,10 +217,15 @@ def _synchroniser_operations_ligne(devis, ligne):
         operation.taux_marge_applique = taux
         operation.prix_vente = _vendu(cout, taux)
         operation.save()
+        if etape.ordre != ordre_decoupe and etape.poste.mode_calcul == PosteTravail.ModeCalcul.HORAIRE and etape.temps_fixe:
+            # temps de réglage par lot de l'opération (déjà dans son coût) : somme informative des prix de vente de ces réglages
+            tarif = tarif_poste_valide(etape.poste, devis.date_creation)
+            reglages_operations += _vendu(arrondir_prix(D(etape.temps_fixe) / 60 * D(tarif.cout_horaire)), taux)
         if etape.ordre == ordre_decoupe and (reglage.cout or reglage.note):
             ligne.prix_vente_reglage = _vendu(reglage.cout, taux)
             ligne.note_reglage = (reglage.note + (" — " + " ; ".join(reglage.avertissements) if reglage.avertissements else ""))[:250]
-    ligne.save(update_fields=["prix_vente_reglage", "note_reglage"])
+    ligne.prix_vente_reglage_operations = reglages_operations or None
+    ligne.save(update_fields=["prix_vente_reglage", "prix_vente_reglage_operations", "note_reglage"])
 
 
 def calculer_ligne(devis, ligne):

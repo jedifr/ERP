@@ -270,8 +270,13 @@ class DevisLigne(models.Model):
         ), **PRIX,
     )
     prix_vente_reglage = ChampDecimal(
-        "dont réglage machine (HT)", null=True, blank=True, editable=False,
-        help_text="Part de la mise en place des tôles (réglage machine) comprise dans le prix des opérations : information, déjà incluse.",
+        "dont réglage de tôle (HT)", null=True, blank=True, editable=False,
+        help_text="Part de la mise en place des tôles sur la machine de découpe (une fois par tôle, d'après l'imbrication) comprise dans le prix des opérations : information, déjà incluse.",
+        **MONTANT,
+    )
+    prix_vente_reglage_operations = ChampDecimal(
+        "dont réglages d'opérations (HT)", null=True, blank=True, editable=False,
+        help_text="Part des temps de réglage par lot des opérations de la gamme (colonne « Réglage (min) ») comprise dans le prix des opérations : information, déjà incluse.",
         **MONTANT,
     )
     note_reglage = models.CharField("détail du réglage machine", max_length=250, blank=True, editable=False)
