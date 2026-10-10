@@ -69,7 +69,7 @@
             const horaire = l.mode === "horaire";
             const poste = el("select", { disabled: decoupe || !editable }, etat.postes.map((p) => el("option", { value: p.id, selected: p.id === l.poste }, p.nom)));
             poste.addEventListener("change", () => {
-                l.poste = Number(poste.value);
+                l.poste = poste.value; // la clé d'un poste est son nom (texte), pas un nombre
                 l.mode = (etat.postes.find((p) => p.id === l.poste) || {}).mode || "horaire";
                 modifie = true; dessiner();
             });
