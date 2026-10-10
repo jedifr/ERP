@@ -11,7 +11,7 @@ Aucune tâche en attente.
 - Changement de NAS prévu.
 
 ## À prévoir : phase de migration vers la production
-Reprendre les données de référence (clients et fournisseurs, articles, matières, postes et tarifs, gammes, paramètres de coupe, formats de tôle, plan comptable, société…), vider les documents commerciaux de test et leurs compteurs de codification, remettre à zéro l'historique et les journaux. Idée : commande de gestion `preparer_production` (liste ce qui sera supprimé, demande confirmation, sauvegarde avant). Revoir aussi la sécurité signalée sur l'accueil (clé secrète, mot de passe de base, cookies sécurisés).
+Reprendre les données de référence (clients et fournisseurs, articles, matières, postes et tarifs, gammes, paramètres de coupe, formats de tôle, plan comptable, société…), vider les documents commerciaux de test et leurs compteurs de codification, remettre à zéro l'historique et les journaux. Fait : commande de gestion `preparer_production` (liste ce qui sera supprimé, sauvegarde attestée et confirmation exigées) ; voir `docs/RELECTURE_PRODUCTION.md`, section 5. Revoir aussi la sécurité signalée sur l'accueil (clé secrète, mot de passe de base, cookies sécurisés).
 
 ## Sauvegarde et transfert vers le nouveau NAS — fait, à valider sur le vrai NAS
 Scripts et mode d'emploi : `docs/SAUVEGARDE.md` (copie externe chiffrée, vérification par restauration d'essai, alerte, export/import de transfert). Reste à faire par le client : un premier passage sur le NAS, le choix de la destination externe et de la phrase secrète, la planification dans DSM, un essai de restauration.
