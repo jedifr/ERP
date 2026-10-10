@@ -18,6 +18,25 @@ class GenerationEcritureError(Exception):
     """Donnée manquante ou incohérente empêchant la génération de l'écriture."""
 
 
+def _ttc_par_taux(groupes):
+    """TVA calculée **par taux sur la base HT totale** puis arrondie (règle EN 16931, celle du PDF et de Factur-X) et non ligne à ligne : le
+    total TTC de l'écriture est celui de la facture. Quand plusieurs comptes de vente partagent un taux, l'éventuel centime d'arrondi va au
+    groupe le plus important. Les montants négatifs d'un avoir gardent leur signe."""
+    par_taux = {}
+    for g in groupes.values():
+        if g["taux"] is not None:
+            par_taux.setdefault(g["taux"], []).append(g)
+    for taux, liste in par_taux.items():
+        signe = -1 if sum((g["ht"] for g in liste), ZERO) < 0 else 1
+        tva_totale = arrondir(abs(sum((g["ht"] for g in liste), ZERO)) * taux / 100)
+        tvas = [arrondir(abs(g["ht"]) * taux / 100) for g in liste]
+        plus_gros = max(range(len(liste)), key=lambda i: abs(liste[i]["ht"]))
+        tvas[plus_gros] += tva_totale - sum(tvas, ZERO)
+        for g, tva in zip(liste, tvas):
+            g["ttc"] = signe * (abs(g["ht"]) + tva)
+    return groupes
+
+
 def _repartition_lignes(facture, parametres):
     """Regroupe les lignes de la commande facturée par (taux de TVA, compte
     de vente, code analytique), en sommant leurs montants HT/TTC courants
@@ -80,7 +99,7 @@ def _repartition_lignes(facture, parametres):
         groupe["ttc"] += montant_ttc
 
     if groupes:
-        return groupes
+        return _ttc_par_taux(groupes)
 
     if facture.montant_ht is None or facture.montant_ttc is None:
         raise GenerationEcritureError(

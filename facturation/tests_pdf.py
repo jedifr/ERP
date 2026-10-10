@@ -322,3 +322,61 @@ class FacturXTests(_Base):
         avant = pdfmetrics.getFont("Helvetica")
         generer_facturx(self.facture())
         self.assertIs(pdfmetrics.getFont("Helvetica"), avant)
+
+
+class TotauxEtArrondiTests(_Base):
+    """Le TTC d'une facture se calcule par taux sur la base HT totale (EN 16931) : plus d'écart d'un centime avec le PDF et Factur-X."""
+
+    def facture_a_arrondi(self, numero="FAC-ARR-1"):
+        # 3 lignes de 0,04 € HT : TVA 20 % ligne à ligne = 3 × 0,05 = 0,15 ; par taux sur la base 0,12 = 0,144 → 0,14.
+        facture = Facture.objects.create(numero=numero, commande=self.commande, date_facturation=datetime.date(2026, 2, 1))
+        for i in range(3):
+            article = Article.objects.create(reference=f"ARR-{numero}-{i}", nature=Article.Nature.FABRIQUE)
+            cl = CommandeLigne.objects.create(commande=self.commande, article=article, quantite_commandee=1, prix_vente_unitaire=Decimal("0.04"), taux_tva=self.tva)
+            FactureLigne.objects.create(facture=facture, commande_ligne=cl, quantite=1)
+        return facture
+
+    def test_ttc_par_taux_et_non_ligne_a_ligne(self):
+        from .documents import calculer_facture
+
+        facture = self.facture_a_arrondi()
+        self.assertEqual(sum(l.montant_ttc for l in facture.lignes.all()), Decimal("0.15"))  # la somme des lignes arrondies diffère
+        self.assertEqual(facture.montant_ht_calcule, Decimal("0.12"))
+        self.assertEqual(facture.montant_ttc_calcule, Decimal("0.14"))
+        self.assertEqual(facture.montant_ttc_calcule, calculer_facture(facture)["total_ttc"])  # identique au PDF / Factur-X
+
+    def test_avoir_signe(self):
+        origine = self.facture_a_arrondi("FAC-ARR-2")
+        avoir = Facture.objects.create(numero="AV-ARR", commande=self.commande, date_facturation=datetime.date(2026, 2, 5), type_document=Facture.TypeDocument.AVOIR, facture_origine=origine, motif="x")
+        for l in origine.lignes.all():
+            FactureLigne.objects.create(facture=avoir, commande_ligne=l.commande_ligne, quantite=1)
+        self.assertEqual(avoir.montant_ttc_calcule, Decimal("-0.14"))
+
+    def test_action_recalculer_corrige_un_ancien_ecart(self):
+        facture = self.facture_a_arrondi("FAC-ARR-3")
+        Facture.objects.filter(pk=facture.pk).update(montant_ht=Decimal("0.12"), montant_ttc=Decimal("0.15"))  # ancien calcul ligne à ligne
+        from django.urls import reverse
+
+        r = self.client.post(reverse("admin:facturation_facture_changelist"), {"action": "action_recalculer_montants", "_selected_action": [facture.pk]}, follow=True)
+        self.assertContains(r, "1 facture(s) recalculée(s)")
+        facture.refresh_from_db()
+        self.assertEqual((facture.montant_ht, facture.montant_ttc), (Decimal("0.12"), Decimal("0.14")))
+
+    def test_prefill_de_la_fiche_facture_par_taux(self):
+        self.facture_a_arrondi("FAC-ARR-4")
+        donnees = self.client.get(f"/admin/facturation/facture/{self.commande.pk}/montants-calcules/").json()
+        self.assertEqual(donnees["montant_ht"], 1000.12)
+        self.assertEqual(donnees["montant_ttc"], 1200.14)  # et non 1200,15 (somme des lignes arrondies une à une)
+
+    def test_ecriture_comptable_au_meme_total_que_le_pdf(self):
+        from comptabilite.generation import generer_ecriture_facture
+        from comptabilite.models import ParametresComptables
+
+        from comptabilite.management.commands.importer_pcg import importer_pcg
+
+        importer_pcg()  # plan comptable usuel : comptes 411, 706, 44571 et journal des ventes
+        ParametresComptables.charger()
+        ecriture, _ = generer_ecriture_facture(self.facture_a_arrondi("FAC-ARR-5"))
+        client = next(l for l in ecriture.lignes.all() if l.debit)
+        self.assertEqual(client.debit, Decimal("0.14"))  # TTC par taux, pas 0,15
+        self.assertEqual(sum(l.debit for l in ecriture.lignes.all()), sum(l.credit for l in ecriture.lignes.all()))

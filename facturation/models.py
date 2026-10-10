@@ -245,9 +245,18 @@ class Facture(models.Model):
 
     @property
     def montant_ttc_calcule(self):
+        """Total TTC indicatif. La TVA se calcule **par taux sur la base HT totale** puis s'arrondit (règle de la norme EN 16931, celle du PDF
+        et du fichier Factur-X) — pas ligne à ligne : sinon un écart d'un centime apparaît entre les lignes et le total. Signé pour un avoir."""
         lignes = self._lignes_pour_montants()
         if lignes:
-            return arrondir(somme(ligne.montant_ttc for ligne in lignes))
+            bases = {}
+            for ligne in lignes:
+                taux = D0(ligne._taux())
+                bases[taux] = bases.get(taux, ZERO) + abs(ligne.montant_ht)
+            total_ht = arrondir(sum((arrondir(base) for base in bases.values()), ZERO))
+            total_tva = arrondir(sum((arrondir(base * taux / 100) for taux, base in bases.items()), ZERO))
+            ttc = arrondir(total_ht + total_tva)
+            return -ttc if self.est_avoir else ttc
         montants = [l.montant_ttc for l in self.commande.lignes.all() if l.montant_ttc is not None]
         return arrondir(somme(montants)) if montants else None
 

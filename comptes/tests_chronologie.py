@@ -73,3 +73,21 @@ class ChronologieFichesTests(_Base):
             reponse = self.client.get(reverse(nom, args=[objet.pk]))
             self.assertContains(reponse, "Chronologie de l'affaire", msg_prefix=nom)
             self.assertContains(reponse, "vous êtes ici", msg_prefix=nom)
+
+
+class ChronologieDroitsTests(_Base):
+    def test_un_devis_ne_revele_pas_les_factures_sans_le_droit(self):
+        from django.contrib.auth import get_user_model
+        from django.contrib.auth.models import Permission
+
+        facture = self.facture("FAC-DR-1")
+        devis = self.commande.devis
+        lecteur = get_user_model().objects.create_user("lecteur-chrono", password="pass-mot-de-passe-20", is_staff=True)
+        lecteur.user_permissions.set(Permission.objects.filter(content_type__app_label="chiffrage", codename__in=["view_devis", "view_commande"]))
+        titres = [e.titre for e in evenements(devis, lecteur)]
+        self.assertIn("Commande CDE-PDF", titres)
+        self.assertFalse(any("FAC-DR-1" in t for t in titres))  # pas de droit sur les factures
+        self.assertTrue(any("FAC-DR-1" in t for t in [e.titre for e in evenements(devis, self.user)]))  # l'administrateur voit tout
+        lecteur.user_permissions.add(Permission.objects.get(content_type__app_label="facturation", codename="view_facture"))
+        lecteur = get_user_model().objects.get(pk=lecteur.pk)  # recharge le cache des droits
+        self.assertTrue(any("FAC-DR-1" in e.titre for e in evenements(devis, lecteur)))

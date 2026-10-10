@@ -8,7 +8,6 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from comptes.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect
-from django.template.response import TemplateResponse
 from django.urls import reverse
 from django.views.decorators.http import require_http_methods
 
@@ -56,6 +55,12 @@ def convertir_en_commande_view(request, numero):
 
 
 def _traiter_ajout_ligne(request, devis):
+    # Droits : modifier le devis et ajouter une ligne ; créer un nouvel article exige en plus d'ajouter article, nomenclature et gamme.
+    u = request.user
+    if not (u.has_perm("chiffrage.change_devis") and u.has_perm("chiffrage.add_devisligne")):
+        return JsonResponse({"detail": "Vous n'avez pas la permission d'ajouter une ligne à ce devis."}, status=403)
+    if devis.statut != Devis.Statut.BROUILLON:
+        return JsonResponse({"detail": "Devis validé, donc verrouillé : repassez-le en brouillon pour ajouter une ligne."}, status=409)
     try:
         payload = json.loads(request.body)
     except json.JSONDecodeError:
@@ -77,6 +82,8 @@ def _traiter_ajout_ligne(request, devis):
     try:
         with transaction.atomic():
             if payload.get("nouvel_article"):
+                if not all(u.has_perm(f"technique.add_{m}") for m in ("article", "nomenclature", "gamme")):
+                    return JsonResponse({"detail": "Vous n'avez pas la permission de créer un article fabriqué (article, nomenclature, gamme)."}, status=403)
                 article = _creer_article_depuis_payload(payload["nouvel_article"])
             else:
                 reference = payload.get("article_existant")

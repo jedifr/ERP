@@ -8,7 +8,6 @@ les données concernées ; l'ajout d'un contrôle = une fonction + une ligne dan
 from dataclasses import dataclass
 from typing import Callable
 
-from django.conf import settings
 from django.contrib import admin
 from django.shortcuts import render
 from django.urls import reverse

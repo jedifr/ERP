@@ -5459,3 +5459,43 @@ class MesColonnesTests(_FixtureOrdresCommande, TestCase):
         self.assertEqual(fiche.status_code, 200)
         formset = fiche.context["inline_admin_formsets"][0].formset
         self.assertNotIn("designation", formset.empty_form.fields)
+
+
+class ConstructeurDroitsTests(TestCase):
+    """L'assistant « Ajouter une ligne » exige les droits de modification du devis et de création d'articles."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        self.tiers = Tiers.objects.create(code="CLI-DRT", raison_sociale="Client Droits", type_tiers=Tiers.TypeTiers.CLIENT)
+        self.devis = Devis.objects.create(numero="DEV-DRT", client=self.tiers, date_creation=datetime.date(2026, 1, 1))
+        self.url = f"/admin/chiffrage/devis/{self.devis.pk}/constructeur/"
+        self.User = get_user_model()
+
+    def utilisateur(self, nom, codes):
+        from django.contrib.auth.models import Permission
+
+        u = self.User.objects.create_user(nom, password="pass-mot-de-passe-20", is_staff=True)
+        u.user_permissions.set(Permission.objects.filter(codename__in=codes))
+        self.client.force_login(u)
+        return u
+
+    def poster(self, **extra):
+        return self.client.post(self.url, data={"quantite": 1, "nouvel_article": {"reference": "ART-DRT", "composants": [], "etapes": []}, **extra}, content_type="application/json")
+
+    def test_staff_sans_droit_refuse(self):
+        self.utilisateur("sans-droit", [])
+        self.assertEqual(self.poster().status_code, 403)
+        self.assertFalse(Article.objects.filter(pk="ART-DRT").exists())
+
+    def test_modifier_le_devis_ne_suffit_pas_pour_creer_un_article(self):
+        self.utilisateur("devis-seul", ["change_devis", "add_devisligne"])
+        reponse = self.poster()
+        self.assertEqual(reponse.status_code, 403)
+        self.assertIn("article fabriqué", reponse.json()["detail"])
+        self.assertFalse(Article.objects.filter(pk="ART-DRT").exists())
+
+    def test_devis_valide_refuse(self):
+        self.utilisateur("tout-droit", ["change_devis", "add_devisligne", "add_article", "add_nomenclature", "add_gamme"])
+        Devis.objects.filter(pk=self.devis.pk).update(statut=Devis.Statut.VALIDE)
+        self.assertEqual(self.poster().status_code, 409)

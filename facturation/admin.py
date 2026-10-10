@@ -41,8 +41,14 @@ def montants_calcules_commande_view(request, numero):
     dès qu'une commande est choisie sur le formulaire d'ajout, sans jamais
     écraser une valeur déjà saisie (voir facture_admin.js)."""
     commande = get_object_or_404(Commande, pk=numero)
-    montants = [l.montant_ht for l in commande.lignes.all() if l.montant_ht is not None]
-    montants_ttc = [l.montant_ttc for l in commande.lignes.all() if l.montant_ttc is not None]
+    lignes = [l for l in commande.lignes.all() if l.montant_ht is not None and l.montant_ttc is not None]
+    # TTC : la TVA se calcule par taux sur la base HT totale (règle de la norme EN 16931, comme le PDF et Factur-X), pas ligne à ligne.
+    bases = {}
+    for l in lignes:
+        taux = l.taux_tva.taux if l.taux_tva_id else 0
+        bases[taux] = bases.get(taux, 0) + l.montant_ht
+    montants = [l.montant_ht for l in lignes]
+    montants_ttc = [arrondir(arrondir(base) + arrondir(base * taux / 100)) for taux, base in bases.items()]
     return JsonResponse(
         {
             "montant_ht": float(arrondir(somme(montants))) if montants else None,
@@ -149,7 +155,7 @@ class FactureAdmin(ProchaineActionMixin, DateDuJourMixin, ChronologieMixin, Puce
     list_filter = ["type_document", "mode_creation", "statut_paiement", RetardFilter]
     search_fields = ["numero", "reference_tiime", "commande__numero"]
     autocomplete_fields = ["commande"]
-    actions = ["action_generer_ecriture", "action_relancer"]
+    actions = ["action_generer_ecriture", "action_relancer", "action_recalculer_montants"]
     actions_list = ["action_preparer_facture"]
     actions_detail = ["action_pdf", "action_facturx_pdf", "action_relance_pdf", "action_creer_avoir"]
     readonly_fields = [
@@ -294,6 +300,21 @@ class FactureAdmin(ProchaineActionMixin, DateDuJourMixin, ChronologieMixin, Puce
         if ht is None:
             return "—"
         return f"HT : {pourcent(ht)} € — TTC : {pourcent(obj.montant_ttc_calcule)} €"
+
+    @admin.action(description="Recalculer les montants depuis les lignes", permissions=["change"])
+    def action_recalculer_montants(self, request, queryset):
+        """Remet montant HT et TTC égaux au total des lignes (TVA par taux sur la base HT, règle EN 16931) : corrige un écart d'arrondi.
+        Les factures émises ou comptabilisées (verrouillées) ne sont pas touchées."""
+        faites = ignorees = 0
+        for facture in queryset:
+            if facture_verrouillee(facture) or not facture.lignes.exists():
+                ignorees += 1
+                continue
+            facture.montant_ht, facture.montant_ttc = facture.montant_ht_calcule, facture.montant_ttc_calcule
+            facture.save()
+            faites += 1
+        self.message_user(request, f"{faites} facture(s) recalculée(s)." + (f" {ignorees} ignorée(s) (verrouillée ou sans ligne)." if ignorees else ""),
+                          level=messages.SUCCESS if faites else messages.WARNING)
 
     @admin.action(description="Générer l'écriture comptable", permissions=["ecrire"])
     def action_generer_ecriture(self, request, queryset):

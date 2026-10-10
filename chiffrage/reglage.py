@@ -6,7 +6,6 @@ Le nombre de tôles vient de l'imbrication retenue de chaque groupe du devis ; t
 calculée (avertissement). Le coût du réglage d'un groupe est réparti entre ses pièces au prorata de leur temps de coupe et reste
 inclus dans le prix des opérations de la ligne de devis de chaque pièce (colonne informative « dont réglage machine »)."""
 
-import datetime
 from dataclasses import dataclass, field
 from decimal import Decimal
 

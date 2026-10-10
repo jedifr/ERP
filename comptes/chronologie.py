@@ -23,6 +23,7 @@ class Evenement:
     ton: str = "normal"  # normal | ok | attention | ko
     courant: bool = False
     futur: bool = False
+    droit: str = ""  # permission nécessaire pour voir l'événement (un devis ne révèle pas les factures à qui n'y a pas droit)
 
 
 def _en_date(valeur):
@@ -68,7 +69,7 @@ def _racine(objet):
     return None, None
 
 
-def evenements(objet):
+def evenements(objet, utilisateur=None):
     from chiffrage.models import Commande, Devis
     from facturation.models import Facture
 
@@ -76,10 +77,14 @@ def evenements(objet):
     devis_racine, commande_courante = _racine(objet)
     evts = []
 
+    droit_en_cours = {"droit": ""}
+
     def ajouter(date, ordre, icone, titre, detail="", url="", ton="normal", courant=False, futur=None):
         if date is None:
             return
-        evts.append(Evenement(date, ordre, icone, titre, detail, url, ton, courant, date > aujourdhui if futur is None else futur))
+        if utilisateur is not None and droit_en_cours["droit"] and not utilisateur.has_perm(droit_en_cours["droit"]):
+            return
+        evts.append(Evenement(date, ordre, icone, titre, detail, url, ton, courant, date > aujourdhui if futur is None else futur, droit_en_cours["droit"]))
 
     if devis_racine is not None:
         versions = devis_racine.versions()
@@ -90,6 +95,7 @@ def evenements(objet):
         return []
 
     for devis in versions:
+        droit_en_cours["droit"] = "chiffrage.view_devis"
         est_courant = isinstance(objet, Devis) and devis.pk == objet.pk
         lien = _url("chiffrage_devis_change", devis.pk)
         indice = f" (indice {devis.indice})" if len(versions) > 1 else ""
@@ -112,6 +118,7 @@ def evenements(objet):
                     lien, ton, est_courant, futur=devis.date_validite >= aujourdhui)
 
     for commande in commandes:
+        droit_en_cours["droit"] = "chiffrage.view_commande"
         est_courante = isinstance(objet, Commande) and commande.pk == objet.pk
         lien = _url("chiffrage_commande_change", commande.pk)
         ajouter(commande.date_commande, 20, "shopping_cart", f"Commande {commande.numero}", commande.reference_client and f"Réf. client {commande.reference_client}", lien, "ok", est_courante)
@@ -120,24 +127,28 @@ def evenements(objet):
                 ajouter(date, 29, "check_circle", f"Commande {commande.numero} soldée", "", lien, "ok", est_courante)
             elif apres == Commande.Statut.ANNULEE:
                 ajouter(date, 29, "block", f"Commande {commande.numero} annulée", "", lien, "ko", est_courante)
+        droit_en_cours["droit"] = "chiffrage.view_ordrefabrication"
         for of in commande.ordres_fabrication.select_related("article"):
             lien_of = _url("chiffrage_ordrefabrication_change", of.pk)
             courant_of = isinstance(objet, type(of)) and objet.pk == of.pk
             ajouter(of.date_lancement, 30, "build", f"OF {of.numero} lancé", f"{of.article_id} × {of.quantite:g}", lien_of, courant=courant_of)
             if of.statut_synchro == of.StatutSynchro.ECHEC_PERSISTANT:
                 ajouter(of.date_derniere_tentative or of.date_lancement, 31, "sync_problem", f"OF {of.numero} non transmis au planning", of.derniere_erreur, lien_of, "ko", courant_of)
+        droit_en_cours["droit"] = "chiffrage.view_livraison"
         for livraison in commande.livraisons.all():
             lien_bl = _url("chiffrage_livraison_change", livraison.pk)
             courant_bl = isinstance(objet, type(livraison)) and objet.pk == livraison.pk
             ajouter(livraison.date_livraison, 40, "local_shipping", f"Livraison {livraison.numero}", "", lien_bl, "ok", courant_bl)
             if livraison.date_annulation:
                 ajouter(livraison.date_annulation, 41, "undo", f"Livraison {livraison.numero} annulée", livraison.motif_annulation, lien_bl, "ko", courant_bl)
+        droit_en_cours["droit"] = "chiffrage.view_commande"
         livrees = {d for d in commande.livraisons.values_list("date_livraison", flat=True)}
         prevues = {of.date_livraison_prevue for of in commande.ordres_fabrication.all() if of.date_livraison_prevue}
         if commande.statut == Commande.Statut.EN_COURS and not livrees:
             for date in sorted(prevues):
                 ajouter(date, 39, "event", "Livraison prévue", f"Commande {commande.numero}", lien, "attention" if date < aujourdhui else "normal", est_courante, futur=date >= aujourdhui)
 
+        droit_en_cours["droit"] = "facturation.view_facture"
         for facture in commande.factures.prefetch_related("relances"):
             lien_f = _url("facturation_facture_change", facture.pk)
             courante_f = isinstance(objet, Facture) and objet.pk == facture.pk
@@ -154,9 +165,9 @@ def evenements(objet):
     return evts
 
 
-def chronologie(objet):
+def chronologie(objet, utilisateur=None):
     """{"passes": [...], "a_venir": [...], "aujourdhui": date, "titre": …} prêt à afficher ; None si l'objet n'a pas d'affaire."""
-    liste = evenements(objet)
+    liste = evenements(objet, utilisateur)
     if not liste:
         return None
     return {
