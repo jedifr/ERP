@@ -517,11 +517,18 @@ class ProfileSectionAdmin(ModelAdmin):
     """Sections de profilés (cornières, UPN, tubes) : une forme particulière de matière première, avec son article d'achat. Elles alimentent
     la bibliothèque de formes du devis (débits de profilés)."""
 
-    list_display = ["designation", "famille", "masse_lineique", "longueur_barre_mm", "article", "verifie"]
+    list_display = ["designation", "famille", "masse_lineique", "masses_autres", "longueur_barre_mm", "article", "verifie"]
     list_filter = ["famille", "verifie"]
     search_fields = ["designation"]
     autocomplete_fields = ["article"]
     actions = ["creer_articles", "marquer_verifie"]
+    readonly_fields = ["masses_autres"]
+
+    @admin.display(description="Alu / inox (kg/m)")
+    def masses_autres(self, obj):
+        if obj is None or not obj.pk:
+            return "—"
+        return f"alu {obj.masse_pour(2.70):.3f} · inox {obj.masse_pour(7.90):.3f}".replace(".", ",")
 
     class Media:
         js = ["technique/section_admin.js"]

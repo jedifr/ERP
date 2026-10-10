@@ -332,24 +332,46 @@ class RegleCreationTole(models.Model):
         )
 
 
+def _positif(valeur):
+    try:
+        return float(valeur) > 0
+    except (TypeError, ValueError):
+        return False
+
+
 class ProfileSection(models.Model):
     """Forme particulière de matière première : section de profilé du catalogue (cornière, UPN, tube) avec ses cotes, sa masse linéique,
     sa longueur de barre et l'article d'achat dont le coût sert au prix des débits."""
 
     class Famille(models.TextChoices):
-        CORNIERE = "corniere", "Cornière"
+        CORNIERE = "corniere", "Cornière à ailes égales"
+        CORNIERE_INEGALE = "corniere_inegale", "Cornière à ailes inégales"
         UPN = "upn", "UPN"
+        IPE = "ipe", "IPE"
+        HEA = "hea", "HEA"
+        HEB = "heb", "HEB"
         TUBE_CARRE = "tube_carre", "Tube carré"
         TUBE_RECTANGULAIRE = "tube_rectangulaire", "Tube rectangulaire"
         TUBE_ROND = "tube_rond", "Tube rond"
+        PLAT = "plat", "Plat"
+        ROND_PLEIN = "rond_plein", "Rond plein"
+        CARRE_PLEIN = "carre_plein", "Carré plein"
+
+    # Cotes obligatoires de chaque famille (mm), voir le schéma de la fiche.
+    COTES = {
+        "corniere": ("a", "b", "e"), "corniere_inegale": ("a", "b", "e"), "upn": ("h", "b", "tw", "tf"), "ipe": ("h", "b", "tw", "tf"),
+        "hea": ("h", "b", "tw", "tf"), "heb": ("h", "b", "tw", "tf"), "tube_carre": ("c", "e"), "tube_rectangulaire": ("h", "b", "e"),
+        "tube_rond": ("d", "e"), "plat": ("l", "e"), "rond_plein": ("d",), "carre_plein": ("c",),
+    }
+    DENSITE_REFERENCE = 7.85  # la masse linéique saisie est celle de l'acier (kg/dm³)
 
     famille = models.CharField("famille", max_length=20, choices=Famille.choices)
     designation = models.CharField("désignation", max_length=60, unique=True, help_text="« L 50×50×5 », « UPN 100 », « Tube 40×40×3 »…")
     dimensions = models.JSONField(
         "cotes (mm)", default=dict,
-        help_text="Cornière : a, b, e. UPN : h, b, tw, tf. Tube carré : c, e. Tube rectangulaire : h, b, e. Tube rond : d, e.",
+        help_text="Cornière : a, b, e. UPN, IPE, HEA, HEB : h, b, tw, tf. Tube carré : c, e. Tube rectangulaire : h, b, e. Tube rond : d, e. Plat : l, e. Rond plein : d. Carré plein : c.",
     )
-    masse_lineique = models.FloatField("masse linéique (kg/m)")
+    masse_lineique = models.FloatField("masse linéique, acier (kg/m)", help_text="Masse d'un mètre en acier (7,85 kg/dm³) ; l'aluminium et l'inox s'en déduisent par la densité de la matière.")
     longueur_barre_mm = models.FloatField("longueur de barre (mm)", default=6000, help_text="Longueur de barre achetée, dont sont tirés les débits.")
     article = models.ForeignKey(
         Article, verbose_name="article d'achat", on_delete=models.SET_NULL, null=True, blank=True, related_name="sections_profile",
@@ -368,11 +390,21 @@ class ProfileSection(models.Model):
     def __str__(self):
         return self.designation
 
+    def clean(self):
+        super().clean()
+        manquantes = [c for c in self.COTES.get(self.famille, ()) if not isinstance(self.dimensions, dict) or not _positif(self.dimensions.get(c))]
+        if manquantes:
+            raise ValidationError({"dimensions": f"Cotes à renseigner (nombres positifs, en mm) : {', '.join(manquantes)}."})
+
+    def masse_pour(self, densite):
+        """Masse linéique (kg/m) de la même section dans une matière de densité `densite` (kg/dm³) : aluminium ≈ 2,70, inox ≈ 7,90."""
+        return self.masse_lineique * float(densite) / self.DENSITE_REFERENCE
+
     @property
     def hauteur_mm(self):
         """Hauteur de la section vue de côté (dimension portée sur le dessin d'un débit)."""
         d = self.dimensions
-        return float(d.get("h") or d.get("a") or d.get("c") or d.get("d") or 0)
+        return float(d.get("h") or d.get("a") or d.get("c") or d.get("l") or d.get("d") or 0)
 
     def prix_au_metre(self):
         """Prix d'un mètre de barre (Decimal) selon l'unité de coût de l'article d'achat ; ErreurPrixProfile si impossible."""
@@ -387,7 +419,8 @@ class ProfileSection(models.Model):
         if a.unite_cout == Article.UniteCout.LONGUEUR:
             return cout * D(a.poids_lineique) if a.poids_lineique else cout  # €/kg avec un poids linéique, sinon €/m
         if a.unite_cout == Article.UniteCout.POIDS:
-            return cout * D(self.masse_lineique)
+            masse = self.masse_pour(a.matiere.densite) if a.matiere_id else self.masse_lineique  # alu, inox… : masse selon la matière de l'article
+            return cout * D(masse)
         if a.unite_cout == Article.UniteCout.PIECE:
             return cout / (D(self.longueur_barre_mm) / D(1000))  # prix de la barre entière
         raise ErreurPrixProfile(f"Unité de coût de « {a} » non adaptée à un profilé (longueur, poids ou pièce).")

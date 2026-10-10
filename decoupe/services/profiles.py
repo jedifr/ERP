@@ -165,7 +165,25 @@ def svg_section(section, taille=120):
         ox, oy = (taille - b * k) / 2, (taille - h * k) / 2
         chemin = " ".join(f"M {ox + x * k:.2f},{oy + y * k:.2f} h {w * k:.2f} v {hh * k:.2f} h {-w * k:.2f} Z" for x, y, w, hh in pts)
         return f'<svg viewBox="0 0 {taille} {taille}" width="{taille}" height="{taille}" xmlns="http://www.w3.org/2000/svg"><path d="{chemin}" {style}/></svg>'
-    if f == "corniere":
+    if f in ("plat", "carre_plein", "rond_plein"):
+        largeur = float(d.get("l") or d.get("c") or d["d"]); epaisseur = float(d.get("e") or d.get("c") or d["d"])
+        k = (taille - 12) / max(largeur, epaisseur)
+        ox, oy = (taille - largeur * k) / 2, (taille - epaisseur * k) / 2
+        if f == "rond_plein":
+            r = largeur * k / 2
+            corps = f'<circle cx="{taille / 2}" cy="{taille / 2}" r="{r:.2f}" {style}/>'
+        else:
+            corps = f'<rect x="{ox:.2f}" y="{oy:.2f}" width="{largeur * k:.2f}" height="{epaisseur * k:.2f}" {style}/>'
+        return f'<svg viewBox="0 0 {taille} {taille}" width="{taille}" height="{taille}" xmlns="http://www.w3.org/2000/svg">{corps}</svg>'
+    if f in ("ipe", "hea", "heb"):
+        h, b, tw, tf = float(d["h"]), float(d["b"]), float(d["tw"]), float(d["tf"])
+        x0, x1 = (b - tw) / 2, (b + tw) / 2
+        pts = [(0, 0), (b, 0), (b, tf), (x1, tf), (x1, h - tf), (b, h - tf), (b, h), (0, h), (0, h - tf), (x0, h - tf), (x0, tf), (0, tf)]
+        k = (taille - 12) / max(h, b)
+        ox, oy = (taille - b * k) / 2, (taille - h * k) / 2
+        pts_svg = " ".join(f"{ox + x * k:.2f},{oy + (h - y) * k:.2f}" for x, y in pts)
+        return f'<svg viewBox="0 0 {taille} {taille}" width="{taille}" height="{taille}" xmlns="http://www.w3.org/2000/svg"><polygon points="{pts_svg}" {style}/></svg>'
+    if f in ("corniere", "corniere_inegale"):
         a, b, e = float(d["a"]), float(d["b"]), float(d["e"])
         pts = [(0, 0), (b, 0), (b, e), (e, e), (e, a), (0, a)]
         k = (taille - 12) / max(a, b)

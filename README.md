@@ -3218,3 +3218,10 @@ Sur la fiche d'une **section de profilé** (Socle technique → Sections de prof
 ## Sections de profilés : dans le socle technique
 
 Les **sections de profilés** (cornières, UPN, tubes) sont une forme particulière de matière première : elles ont quitté l'administration « Chiffrage découpe » pour le **Socle technique**, à côté des articles (menu *Gestion → Sections de profilés*, et Paramétrage → Articles et matières). Les données (cotes, masses, articles d'achat rattachés) et les droits déjà donnés aux groupes sont conservés : la table est renommée et le type de contenu d'administration suit (migrations `technique 0019-0020`, `decoupe 0034`). L'ancienne adresse `/admin/decoupe/profilesection/` n'existe plus : c'est `/admin/technique/profilesection/`.
+
+## Catalogue de profilés d'un petit atelier (acier, alu, inox)
+
+Le catalogue des **sections de profilés** (Socle technique → Sections de profilés) couvre maintenant : cornières à ailes égales et inégales, UPN, IPE, HEA, HEB, tubes carrés, rectangulaires et ronds, **plats**, **ronds pleins** et **carrés pleins** (276 sections au départ, toutes « non vérifiées »).
+- **Masse de référence en acier** (7,85 kg/dm³) ; **l'aluminium et l'inox s'en déduisent par la densité** (fiche : colonne « Alu / inox » ; le prix au mètre d'un débit utilise la densité de la matière de l'article d'achat : un plat alu acheté au kilo est valorisé avec la masse de l'alu).
+- **Origine des masses** : tableaux usuels des fabricants pour les cornières égales, UPN, IPE, HEA, HEB ; **calcul** pour les autres : tubes carrés et rectangulaires avec les angles arrondis de la norme EN 10219 (contrôles : 40×40×3 = 3,41 kg/m, 100×100×5 = 14,7 kg/m), tubes ronds EN 10220, plats et pleins par l'aire exacte, cornières inégales par l'aire sans congé (environ 1 % sous le catalogue). La colonne « Source » de chaque ligne l'indique.
+- La migration complète le catalogue sans toucher à ce qui est **vérifié** ou saisi à la main, et corrige seulement les masses de tubes livrées « angles vifs ». Chaque fiche exige désormais ses cotes (schéma et liste affichés selon la famille).

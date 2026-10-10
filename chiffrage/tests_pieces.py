@@ -759,7 +759,7 @@ class ProfilesDevisTests(TestCase):
         from decoupe.models import ProfileSection
 
         familles = set(ProfileSection.objects.values_list("famille", flat=True))
-        self.assertEqual(familles, {"corniere", "upn", "tube_carre", "tube_rectangulaire", "tube_rond"})
+        self.assertEqual(familles, {"corniere", "corniere_inegale", "upn", "ipe", "hea", "heb", "tube_carre", "tube_rectangulaire", "tube_rond", "plat", "rond_plein", "carre_plein"})
         self.assertFalse(ProfileSection.objects.filter(verifie=True).exists())
         self.assertAlmostEqual(ProfileSection.objects.get(designation="Tube Ø60.3×3.6").masse_lineique, 5.03, places=2)
         self.assertEqual(ProfileSection.objects.get(designation="UPN 100").masse_lineique, 10.6)
@@ -866,7 +866,7 @@ class ProfilesDevisTests(TestCase):
         page = self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/change/")
         self.assertContains(page, "tube_rond")
         self.assertContains(page, 'id="dp-profils"')
-        self.assertContains(self.client.get("/admin/technique/profilesection/"), "UPN 100")
+        self.assertContains(self.client.get("/admin/technique/profilesection/?q=UPN+100"), "UPN 100")
 
 
 class VuesImbricationTests(TestCase):

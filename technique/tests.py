@@ -401,3 +401,82 @@ class RenommerArticleTests(TestCase):
         r = self.client.post("/admin/technique/article/TOLE-C/renommer/", {"nouvelle_reference": "PIECE-R"}, follow=True)
         self.assertContains(r, "existe déjà")
         self.assertTrue(Article.objects.filter(pk="TOLE-C").exists())
+
+
+class CatalogueProfilesTests(TestCase):
+    """Catalogue de profilés d'un petit atelier : masses de référence (acier), alu et inox par la densité, cotes obligatoires, dessins."""
+
+    def section(self, designation):
+        from .models import ProfileSection
+
+        return ProfileSection.objects.get(designation=designation)
+
+    def test_masses_de_reference(self):
+        import math
+
+        self.assertAlmostEqual(self.section("Tube 40×40×3").masse_lineique, 3.41, places=2)  # EN 10219 : angles arrondis
+        self.assertAlmostEqual(self.section("Tube 100×100×5").masse_lineique, 14.70, places=2)
+        self.assertAlmostEqual(self.section("Plat 40×5").masse_lineique, 40 * 5 * 7.85 / 1000, places=3)
+        self.assertAlmostEqual(self.section("Rond Ø20").masse_lineique, math.pi * 100 * 7.85 / 1000, places=3)
+        self.assertAlmostEqual(self.section("Carré 20").masse_lineique, 400 * 7.85 / 1000, places=3)
+        self.assertEqual(self.section("IPE 200").masse_lineique, 22.4)
+        self.assertEqual(self.section("HEB 200").masse_lineique, 61.3)
+        self.assertAlmostEqual(self.section("L 100×50×6").masse_lineique, 6 * 144 * 7.85 / 1000, places=3)
+
+    def test_toutes_les_familles_sont_presentes_et_non_verifiees(self):
+        from .models import ProfileSection
+
+        presentes = set(ProfileSection.objects.values_list("famille", flat=True))
+        self.assertEqual(presentes, set(ProfileSection.Famille.values))
+        self.assertFalse(ProfileSection.objects.filter(verifie=True).exists())
+        for section in ProfileSection.objects.all():
+            section.full_clean()  # chaque ligne livrée a toutes ses cotes
+
+    def test_masse_alu_et_inox_par_la_densite(self):
+        s = self.section("Plat 40×5")
+        self.assertAlmostEqual(s.masse_pour(2.70), 1.57 * 2.70 / 7.85, places=3)
+        self.assertAlmostEqual(s.masse_pour(7.90), 1.57 * 7.90 / 7.85, places=3)
+
+    def test_prix_au_metre_suit_la_matiere_de_l_article(self):
+        s = self.section("Plat 40×5")
+        alu = Matiere.objects.create(nom="5754-CAT", densite=2.66)
+        acier = Matiere.objects.create(nom="S235-CAT", densite=7.85)
+        s.article = Article.objects.create(reference="PLAT-ALU", nature=Article.Nature.MATIERE_PREMIERE, matiere=alu, unite_cout="poids", cout_unitaire=4)
+        self.assertAlmostEqual(float(s.prix_au_metre()), 4 * 1.57 * 2.66 / 7.85, places=3)
+        s.article = Article.objects.create(reference="PLAT-ACIER", nature=Article.Nature.MATIERE_PREMIERE, matiere=acier, unite_cout="poids", cout_unitaire=1)
+        self.assertAlmostEqual(float(s.prix_au_metre()), 1.57, places=3)
+
+    def test_cotes_obligatoires(self):
+        from django.core.exceptions import ValidationError
+
+        from .models import ProfileSection
+
+        with self.assertRaises(ValidationError) as cm:
+            ProfileSection(famille="plat", designation="Plat X", dimensions={"l": 40}, masse_lineique=1).full_clean()
+        self.assertIn("e", str(cm.exception))
+
+    def test_dessin_de_chaque_famille(self):
+        from decoupe.services.profiles import svg_section
+
+        from .models import ProfileSection
+
+        for famille in ProfileSection.Famille.values:
+            section = ProfileSection.objects.filter(famille=famille).first()
+            svg = svg_section(section)
+            self.assertIn("<svg", svg, famille)
+            self.assertGreater(section.hauteur_mm, 0, famille)
+
+    def test_migration_de_donnees_ne_touche_pas_au_verifie_ni_au_saisi(self):
+        from importlib import import_module
+
+        from django.apps import apps
+
+        from .models import ProfileSection
+
+        etendre = import_module("technique.migrations.0022_sections_catalogue_etendu").etendre
+        s = self.section("Tube 40×40×3")
+        ProfileSection.objects.filter(pk=s.pk).update(verifie=True, masse_lineique=9.99)
+        nb = ProfileSection.objects.count()
+        etendre(apps, None)
+        self.assertEqual(ProfileSection.objects.count(), nb)  # idempotent
+        self.assertEqual(ProfileSection.objects.get(pk=s.pk).masse_lineique, 9.99)  # vérifié : jamais recalculé
