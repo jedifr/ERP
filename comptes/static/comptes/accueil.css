@@ -125,3 +125,9 @@ div[data-onglet-actif="lignes"] > #lignes-constructeur { display: block !importa
 .lignes-detail .ge-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1.2rem; margin-top: .7rem; }
 @media (max-width: 1100px) { .lignes-detail .ge-cols { grid-template-columns: 1fr; } }
 .lignes-detail .ge { border-top: none; margin-top: 0; padding-top: 0; }
+/* Colonne « Prochaine action » des listes */
+.pa { display: inline-block; font-size: .78rem; padding: .1rem .55rem; border-radius: .4rem; white-space: normal; }
+.pa-ko { background: #fee2e2; color: #991b1b; font-weight: 600; }
+.pa-attention { background: #fef3c7; color: #92400e; font-weight: 600; }
+.pa-normal { background: #e0f2fe; color: #075985; }
+.pa-calme { opacity: .45; }

@@ -21,6 +21,7 @@ from comptes.exports import ExportCsvMixin
 from comptes.pastilles import A_FAIRE, EN_COURS, NEUTRE, TERMINE, PastillesMixin
 from comptes.chronologie_admin import ChronologieMixin
 from comptes.date_du_jour import DateDuJourMixin
+from comptes.prochaine_action import ProchaineActionMixin, action_facture
 from comptes.puces import PucesMixin
 from comptes.montants import arrondir, pourcent, somme
 from comptes.concurrence import VerrouOptimisteMixin
@@ -119,7 +120,8 @@ class RetardFilter(admin.SimpleListFilter):
 
 
 @admin.register(Facture)
-class FactureAdmin(DateDuJourMixin, ChronologieMixin, PucesMixin, ColonnesPersonnalisablesMixin, PastillesMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
+class FactureAdmin(ProchaineActionMixin, DateDuJourMixin, ChronologieMixin, PucesMixin, ColonnesPersonnalisablesMixin, PastillesMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
+    fonction_prochaine_action = staticmethod(action_facture)
     champs_date_du_jour = ("date_facturation",)
     change_form_template = "admin/chronologie_change_form.html"
     puces = [('Toutes', ''), ('À payer', '?statut_paiement__exact=a_payer'), ('En retard', '?retard=en_retard'), ('Payées', '?statut_paiement__exact=paye'), ('Avoirs', '?type_document__exact=avoir')]
@@ -140,6 +142,7 @@ class FactureAdmin(DateDuJourMixin, ChronologieMixin, PucesMixin, ColonnesPerson
         "relances_display",
         "type_document",
         "statut_paiement",
+        "prochaine_action",
         "date_paiement",
         "mode_creation",
     ]

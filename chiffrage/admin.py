@@ -22,6 +22,7 @@ from comptes.pastilles import A_FAIRE, EN_COURS, NEUTRE, PROBLEME, TERMINE, Past
 from comptes.chronologie_admin import ChronologieMixin
 from comptes.date_du_jour import DateDuJourMixin
 from comptes.date_du_jour import DateDuJourMixin
+from comptes.prochaine_action import ProchaineActionMixin, action_commande, action_devis, action_livraison
 from comptes.puces import PucesMixin
 from comptes.montants import arrondir, pourcent, somme
 from comptes.concurrence import VerrouOptimisteMixin
@@ -378,7 +379,8 @@ class ExpireFilter(admin.SimpleListFilter):
 
 
 @admin.register(Devis)
-class DevisAdmin(DateDuJourMixin, ChronologieMixin, PucesMixin, PiecesDevisMixin, ColonnesPersonnalisablesMixin, PastillesMixin, EnregistrerEtValiderMixin, EtapeSuivanteMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
+class DevisAdmin(ProchaineActionMixin, DateDuJourMixin, ChronologieMixin, PucesMixin, PiecesDevisMixin, ColonnesPersonnalisablesMixin, PastillesMixin, EnregistrerEtValiderMixin, EtapeSuivanteMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
+    fonction_prochaine_action = staticmethod(action_devis)
     champs_date_du_jour = ("date_creation",)
     puces = [('Tous', ''), ('Brouillons', '?statut__exact=brouillon'), ('Envoyés', '?statut__exact=valide&issue__exact=en_attente'), ('À relancer', '?validite=bientot'), ('Acceptés', '?issue__exact=accepte')]
     codification_entite = RegleCodification.Entite.DEVIS
@@ -395,6 +397,7 @@ class DevisAdmin(DateDuJourMixin, ChronologieMixin, PucesMixin, PiecesDevisMixin
         "date_creation",
         "statut",
         "issue",
+        "prochaine_action",
         "date_validite",
         "delai",
         "taux_marge_globale",
@@ -856,13 +859,14 @@ class CommandeLigneInline(ColonnesPersonnalisablesMixin, TabularInline):
 
 
 @admin.register(Commande)
-class CommandeAdmin(DateDuJourMixin, ChronologieMixin, PucesMixin, ColonnesPersonnalisablesMixin, PastillesMixin, EnregistrerEtValiderMixin, EtapeSuivanteMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
+class CommandeAdmin(ProchaineActionMixin, DateDuJourMixin, ChronologieMixin, PucesMixin, ColonnesPersonnalisablesMixin, PastillesMixin, EnregistrerEtValiderMixin, EtapeSuivanteMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
+    fonction_prochaine_action = staticmethod(action_commande)
     champs_date_du_jour = ("date_commande",)
     change_form_template = "admin/chronologie_change_form.html"
     puces = [('Toutes', ''), ('En cours', '?statut__exact=en_cours'), ('Soldées', '?statut__exact=soldee')]
     codification_entite = RegleCodification.Entite.COMMANDE
 
-    list_display = ["numero", "client", "reference_client", "devis", "date_commande", "statut", "devise"]
+    list_display = ["numero", "client", "reference_client", "devis", "date_commande", "statut", "prochaine_action", "devise"]
     pastilles = {"statut": {"en_cours": EN_COURS, "soldee": TERMINE, "annulee": PROBLEME}}
     list_filter = ["statut"]
     search_fields = ["numero", "reference_client", "client__raison_sociale", "devis__numero"]
@@ -1213,10 +1217,11 @@ class LivraisonLigneInline(TabularInline):
 
 
 @admin.register(Livraison)
-class LivraisonAdmin(ColonnesPersonnalisablesMixin, PastillesMixin, EnregistrerEtValiderMixin, EtapeSuivanteMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
+class LivraisonAdmin(ProchaineActionMixin, ColonnesPersonnalisablesMixin, PastillesMixin, EnregistrerEtValiderMixin, EtapeSuivanteMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
+    fonction_prochaine_action = staticmethod(action_livraison)
     codification_entite = RegleCodification.Entite.LIVRAISON
 
-    list_display = ["numero", "commande", "date_livraison", "statut"]
+    list_display = ["numero", "commande", "date_livraison", "statut", "prochaine_action"]
     pastilles = {"statut": {"validee": TERMINE, "annulee": PROBLEME}}
     list_filter = ["statut"]
     search_fields = ["numero", "commande__numero"]
