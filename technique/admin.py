@@ -130,6 +130,8 @@ class MatiereAdmin(ModificationParLotsMixin, ModelAdmin):
         from django.core.exceptions import PermissionDenied
         from django.template.response import TemplateResponse
 
+        from decoupe.models import FormatTole
+
         from . import catalogue_matieres as cat
 
         if not (request.user.has_perm("technique.add_matiere") and request.user.has_perm("technique.add_article")):
@@ -157,9 +159,9 @@ class MatiereAdmin(ModificationParLotsMixin, ModelAdmin):
                     try:
                         rapport = cat.creer_base(
                             selection, epaisseurs, request.user, unite_cout=post.get("unite_cout", "poids"),
-                            modele_reference=post.get("modele_reference") or "TOLE-{matiere}-{epaisseur}",
-                            modele_libelle=post.get("modele_libelle", "Tôle {matiere} {epaisseur} mm"), creer_regle=bool(post.get("creer_regle")),
-                            jet_eau=bool(post.get("jet_eau")),
+                            modele_reference=post.get("modele_reference") or "{matiere} - {largeur} x {longueur} x {epaisseur}",
+                            modele_libelle=post.get("modele_libelle", "Tôle {matiere} - {largeur} x {longueur} x {epaisseur} mm"), creer_regle=bool(post.get("creer_regle")),
+                            jet_eau=bool(post.get("jet_eau")), formats=list(FormatTole.objects.filter(pk__in=request.POST.getlist("format"), actif=True)),
                         )
                     except (KeyError, IndexError, ValueError):
                         messages.error(request, "Modèle de référence ou de libellé invalide (variables : {matiere}, {epaisseur}, {famille}).")
@@ -169,6 +171,8 @@ class MatiereAdmin(ModificationParLotsMixin, ModelAdmin):
                            "existe": Matiere.objects.filter(pk=n).exists()} for i, (n, f, d) in enumerate(cat.CATALOGUE)],
             "epaisseurs": [{"valeur": e, "coche": str(e) in post.getlist("epaisseur") if post else e in cat.PRESETS["courantes"]} for e in cat.EPAISSEURS],
             "presets": cat.PRESETS, "post": post,
+            "formats": [{"pk": f.pk, "libelle": f"{f.largeur_mm:g} x {f.longueur_mm:g}", "priorite": f.priorite,
+                         "coche": (str(f.pk) in post.getlist("format")) if post else f.priorite == 1} for f in FormatTole.objects.filter(actif=True).order_by("priorite", "-longueur_mm")],
         })
 
     @admin.action(description="Rattacher à une famille (d'après le nom : S235 → Acier, 5754 → Aluminium…)")
@@ -200,6 +204,13 @@ class RegleCreationToleAdmin(ModelAdmin):
     """Règles qui créent une tôle en un clic depuis l'imbrication d'un devis (référence, libellé, unité et coût d'achat, TVA, stock)."""
 
     list_display = ["nom", "perimetre", "epaisseurs", "unite_cout", "cout_unitaire", "exemple", "actif"]
+    actions_list = ["action_base_matieres"]
+
+    @unfold_action(description="Créer plusieurs tôles (Base matières rapide)", url_path="base-matieres", icon="library_add")
+    def action_base_matieres(self, request):
+        """Raccourci vers la création de plusieurs tôles à la fois (nuances × épaisseurs × formats)."""
+        return redirect("admin:technique_matiere_action_catalogue")
+
     list_filter = ["actif", "famille"]
     search_fields = ["nom", "famille__nom", "matiere__nom"]
     autocomplete_fields = ["famille", "matiere"]
@@ -219,10 +230,10 @@ class RegleCreationToleAdmin(ModelAdmin):
             return "toutes"
         return f"{'' if obj.epaisseur_min is None else format(obj.epaisseur_min, 'g')} → {'' if obj.epaisseur_max is None else format(obj.epaisseur_max, 'g')} mm"
 
-    @admin.display(description="Exemple (3 mm)")
+    @admin.display(description="Exemple (3 mm, 1500 × 3000)")
     def exemple(self, obj):
         matiere = obj.matiere or Matiere(nom="S235", famille=obj.famille)
-        return obj._remplir(obj.modele_reference, matiere.nom, 3.0, obj.famille.nom if obj.famille_id else "")
+        return obj._remplir(obj.modele_reference, matiere.nom, 3.0, obj.famille.nom if obj.famille_id else "", format=(1500, 3000))
 
 
 @staff_member_required

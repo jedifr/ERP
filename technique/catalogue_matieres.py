@@ -47,9 +47,10 @@ def _epaisseurs(valeurs):
 
 
 @transaction.atomic
-def creer_base(selection, epaisseurs, utilisateur, unite_cout="poids", modele_reference="TOLE-{matiere}-{epaisseur}", modele_libelle="Tôle {matiere} {epaisseur} mm",
-               creer_regle=True, jet_eau=True):
+def creer_base(selection, epaisseurs, utilisateur, unite_cout="poids", modele_reference="{matiere} - {largeur} x {longueur} x {epaisseur}",
+               modele_libelle="Tôle {matiere} - {largeur} x {longueur} x {epaisseur} mm", creer_regle=True, jet_eau=True, formats=None):
     """Crée matières, tôles, paramètres jet d'eau et règles. `selection` : [{nom, densite, famille (nom, facultatif), prix (Decimal ou None)}].
+    `formats` : FormatTole dont on crée une tôle par nuance et par épaisseur (« S235 - 1500 x 3000 x 3 ») ; à défaut, le format usuel de chaque matière.
     Retourne un rapport {crees: [(type, libellé)], ignores: [(libellé, motif)], lot}."""
     from comptes import lots
     from decoupe.models import ParametreCoupe, ProcedeCoupe
@@ -73,11 +74,13 @@ def creer_base(selection, epaisseurs, utilisateur, unite_cout="poids", modele_re
             nom=f"Tôle {nom}", matiere=matiere, modele_reference=modele_reference, modele_libelle=modele_libelle, unite_cout=unite_cout,
             cout_unitaire=ligne.get("prix"),
         )
+        formats_matiere = [f for f in (formats or []) if f.convient_a(matiere)] or [regle.format_par_defaut(matiere)]
         for e in epaisseurs:
-            if Article.objects.filter(nature=Article.Nature.MATIERE_PREMIERE, matiere=matiere, epaisseur=e).exists():
-                rapport["ignores"].append((f"Tôle {nom} {e:g} mm", "existe déjà"))
-            else:
-                tole = regle.creer_tole(matiere, e)
+            for format_tole in formats_matiere:
+                if Article.objects.filter(pk=regle.reference_de_base(matiere, e, format_tole)).exists():
+                    rapport["ignores"].append((f"Tôle {regle.reference_de_base(matiere, e, format_tole)}", "existe déjà"))
+                    continue
+                tole = regle.creer_tole(matiere, e, format_tole)
                 crees.append(("technique.Article", tole.pk))
                 rapport["crees"].append(("Tôle", f"{tole.pk}" + ("" if tole.cout_unitaire is not None else " (sans prix)")))
             if not jet_eau:

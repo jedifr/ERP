@@ -151,3 +151,12 @@ div[data-onglet-actif="lignes"] > #lignes-constructeur { display: block !importa
 .gc-attention { background: #fef3c7; color: #92400e; } .gc-ko { background: #fee2e2; color: #991b1b; font-weight: 600; }
 .gc-vide { border: 1px dashed rgb(0 0 0 / .25); opacity: .6; }
 a.gc:hover { filter: brightness(.95); outline: 1px solid rgb(0 0 0 / .25); }
+
+/* Mode d'emploi en tête des listes de paramétrage */
+.aide-liste { margin: 0 0 1rem; padding: .6rem .9rem; border: 1px solid rgb(217 98 43 / .35); border-radius: .5rem; background: rgb(217 98 43 / .06); font-size: .875rem; }
+.aide-liste > summary { cursor: pointer; font-weight: 600; display: flex; align-items: center; gap: .4rem; }
+.aide-liste .material-symbols-outlined { font-size: 1.1rem; }
+.aide-liste .aide-resume { margin: .5rem 0 .25rem; }
+.aide-liste .aide-etapes { margin: .25rem 0 .25rem 1.25rem; list-style: decimal; }
+.aide-liste .aide-etapes li { margin: .2rem 0; }
+.aide-liste .aide-savoir { margin: .35rem 0 0 1.25rem; list-style: disc; opacity: .85; }

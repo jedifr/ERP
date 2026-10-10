@@ -239,11 +239,12 @@ class RegleCreationTole(models.Model):
     epaisseur_min = models.FloatField("épaisseur min (mm)", null=True, blank=True, help_text="Vide : sans minimum.")
     epaisseur_max = models.FloatField("épaisseur max (mm)", null=True, blank=True, help_text="Vide : sans maximum.")
     modele_reference = models.CharField(
-        "modèle de référence", max_length=80, default="TOLE-{matiere}-{epaisseur}",
-        help_text="Variables : {matiere}, {famille}, {epaisseur} (3, 2.5…). Une référence déjà prise reçoit un suffixe -2, -3…",
+        "modèle de référence", max_length=80, default="{matiere} - {largeur} x {longueur} x {epaisseur}",
+        help_text="Variables : {matiere}, {famille}, {largeur}, {longueur} (format de tôle, en mm), {epaisseur} (3, 2.5…). Par défaut, la convention "
+                  "« Nuance - largeur x longueur x épaisseur » (S235 - 1500 x 3000 x 3). Une référence déjà prise reçoit un suffixe -2, -3…",
     )
     modele_libelle = models.CharField(
-        "modèle de libellé", max_length=120, default="Tôle {matiere} {epaisseur} mm", blank=True,
+        "modèle de libellé", max_length=120, default="Tôle {matiere} - {largeur} x {longueur} x {epaisseur} mm", blank=True,
         help_text="Mêmes variables ; l'épaisseur s'écrit avec une virgule (2,5).",
     )
     unite_cout = models.CharField(
@@ -277,14 +278,27 @@ class RegleCreationTole(models.Model):
             raise ValidationError({"epaisseur_max": "L'épaisseur maximale est inférieure à la minimale."})
         for champ in ("modele_reference", "modele_libelle"):
             try:
-                self._remplir(getattr(self, champ), "S235", 3.0, "Acier")
+                self._remplir(getattr(self, champ), "S235", 3.0, "Acier", format=(1500, 3000))
             except (KeyError, IndexError, ValueError):
-                raise ValidationError({champ: "Variables autorisées : {matiere}, {famille}, {epaisseur}."})
+                raise ValidationError({champ: "Variables autorisées : {matiere}, {famille}, {largeur}, {longueur}, {epaisseur}."})
 
     @staticmethod
-    def _remplir(modele, matiere, epaisseur, famille, virgule=False):
+    def _remplir(modele, matiere, epaisseur, famille, virgule=False, format=None):
+        """Texte du modèle ; `format` : (largeur, longueur) en mm ou un FormatTole. Sans format, {largeur} et {longueur} restent vides."""
+        largeur, longueur = (format.largeur_mm, format.longueur_mm) if hasattr(format, "largeur_mm") else (format or ("", ""))
         texte = f"{epaisseur:g}"
-        return modele.format(matiere=matiere, famille=famille or "", epaisseur=texte.replace(".", ",") if virgule else texte).strip()
+        return modele.format(
+            matiere=matiere, famille=famille or "", epaisseur=texte.replace(".", ",") if virgule else texte,
+            largeur=f"{largeur:g}" if largeur != "" else "", longueur=f"{longueur:g}" if longueur != "" else "",
+        ).strip()
+
+    def format_par_defaut(self, matiere):
+        """Format de tôle utilisé dans le nom quand aucun n'est précisé : le plus usuel (priorité 1) puis le plus grand parmi les formats actifs
+        de la matière ; None s'il n'y en a pas."""
+        from decoupe.models import FormatTole
+
+        formats = [f for f in FormatTole.objects.filter(actif=True).prefetch_related("familles", "matieres") if f.convient_a(matiere)]
+        return min(formats, key=lambda f: (f.priorite, -f.largeur_mm * f.longueur_mm), default=None)
 
     def convient_a(self, matiere, epaisseur):
         if not self.actif:
@@ -310,22 +324,29 @@ class RegleCreationTole(models.Model):
 
         return min(candidates, key=precision)
 
-    def reference_pour(self, matiere, epaisseur):
-        """Référence demandée par le modèle, rendue unique (suffixe -2, -3…) parmi les articles existants."""
-        base = self._remplir(self.modele_reference, matiere.nom, epaisseur, matiere.famille.nom if matiere.famille_id else "")[:90].strip()
+    def reference_de_base(self, matiere, epaisseur, format=None):
+        """Référence du modèle avant tout suffixe d'unicité."""
+        format = format or self.format_par_defaut(matiere)
+        return self._remplir(self.modele_reference, matiere.nom, epaisseur, matiere.famille.nom if matiere.famille_id else "", format=format)[:90].strip()
+
+    def reference_pour(self, matiere, epaisseur, format=None):
+        """Référence demandée par le modèle (pour `format` ou le format par défaut), rendue unique (suffixe -2, -3…) parmi les articles existants."""
+        base = self.reference_de_base(matiere, epaisseur, format)
         reference, n = base, 1
         while Article.objects.filter(pk=reference).exists():
             n += 1
             reference = f"{base}-{n}"
         return reference
 
-    def libelle_pour(self, matiere, epaisseur):
-        return self._remplir(self.modele_libelle, matiere.nom, epaisseur, matiere.famille.nom if matiere.famille_id else "", virgule=True)[:200]
+    def libelle_pour(self, matiere, epaisseur, format=None):
+        format = format or self.format_par_defaut(matiere)
+        return self._remplir(self.modele_libelle, matiere.nom, epaisseur, matiere.famille.nom if matiere.famille_id else "", virgule=True, format=format)[:200]
 
-    def creer_tole(self, matiere, epaisseur):
-        """Crée et renvoie l'article tôle (matière première) de cette matière et de cette épaisseur."""
+    def creer_tole(self, matiere, epaisseur, format=None):
+        """Crée et renvoie l'article tôle (matière première) de cette matière, de cette épaisseur et de ce format (à défaut, le format par défaut)."""
+        format = format or self.format_par_defaut(matiere)
         return Article.objects.create(
-            reference=self.reference_pour(matiere, epaisseur), libelle=self.libelle_pour(matiere, epaisseur),
+            reference=self.reference_pour(matiere, epaisseur, format), libelle=self.libelle_pour(matiere, epaisseur, format),
             nature=Article.Nature.MATIERE_PREMIERE, matiere=matiere, epaisseur=float(epaisseur), unite_cout=self.unite_cout,
             cout_unitaire=self.cout_unitaire, taux_tva=self.taux_tva, gere_en_stock=self.gere_en_stock,
             stock_mini=self.stock_mini, quantite_reappro=self.quantite_reappro,

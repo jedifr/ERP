@@ -176,7 +176,7 @@ function demarrer() {
             if (creerTole) {
                 creerTole.disabled = true;
                 try {
-                    const json = await envoyer(zoneImb.dataset.urlCreerTole, JSON.stringify({ cle: creerTole.dataset.cle }), true);
+                    const json = await envoyer(zoneImb.dataset.urlCreerTole, JSON.stringify({ cle: creerTole.dataset.cle, format: creerTole.dataset.format }), true);
                     message("Tôle " + json.reference + " créée" + (json.sans_cout ? " : renseignez son coût d'achat pour chiffrer la matière." : "."), !!json.sans_cout);
                     planifierImbrication();
                 } catch (err) {

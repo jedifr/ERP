@@ -75,18 +75,6 @@ def _bloc_groupe(groupe, choix, formats):
         "lien_creer_tole": "" if toles else reverse("admin:technique_article_add") + f"?nature=matiere_premiere&matiere={groupe.matiere.pk}&epaisseur={groupe.epaisseur:g}&unite_cout=surface", "sens": sens, "coin": coin, "sens_choix": PieceDecoupe.SensImbrication.choices,
         "coin_choix": PieceDecoupe.CoinDepart.choices,
     }
-    if not toles:
-        from technique.models import RegleCreationTole
-
-        regle = RegleCreationTole.pour(groupe.matiere, groupe.epaisseur)
-        if regle is not None:
-            cout = f"{regle.cout_unitaire:g} €/{dict(Article.UniteCout.choices).get(regle.unite_cout, '').lower()}".replace(".", ",") if regle.cout_unitaire is not None else "sans coût (à renseigner)"
-            bloc["regle"] = {
-                "nom": regle.nom, "reference": regle.reference_pour(groupe.matiere, groupe.epaisseur),
-                "libelle": regle.libelle_pour(groupe.matiere, groupe.epaisseur), "cout": cout,
-            }
-        else:
-            bloc["lien_creer_regle"] = reverse("admin:technique_reglecreationtole_add") + f"?matiere={groupe.matiere.pk}"
     if not pieces:
         bloc["erreur"] = "Aucune pièce réalisable dans ce groupe."
         return bloc
@@ -156,6 +144,18 @@ def _bloc_groupe(groupe, choix, formats):
                        and retenues.marge_bord_mm == marge and float(retenues.taux_chute_recuperable) == taux
                        and retenues.imbrication_forme == forme and retenues.sens_imbrication == sens and retenues.coin_depart == resultat.coin_depart),
     })
+    if not toles:
+        from technique.models import RegleCreationTole
+
+        regle = RegleCreationTole.pour(groupe.matiere, groupe.epaisseur)
+        if regle is not None:  # la tôle proposée est celle du format affiché : « Nuance - largeur x longueur x épaisseur »
+            cout = f"{regle.cout_unitaire:g} €/{dict(Article.UniteCout.choices).get(regle.unite_cout, '').lower()}".replace(".", ",") if regle.cout_unitaire is not None else "sans coût (à renseigner)"
+            bloc["regle"] = {
+                "nom": regle.nom, "reference": regle.reference_pour(groupe.matiere, groupe.epaisseur, format_choisi),
+                "libelle": regle.libelle_pour(groupe.matiere, groupe.epaisseur, format_choisi), "cout": cout, "format": format_choisi.pk,
+            }
+        else:
+            bloc["lien_creer_regle"] = reverse("admin:technique_reglecreationtole_add") + f"?matiere={groupe.matiere.pk}"
     return bloc
 
 
@@ -613,7 +613,10 @@ class PiecesDevisMixin:
         regle = RegleCreationTole.pour(groupe.matiere, groupe.epaisseur)
         if regle is None:
             return JsonResponse({"detail": "Aucune règle de création de tôle ne s'applique à cette matière et cette épaisseur."}, status=404)
-        tole = regle.creer_tole(groupe.matiere, groupe.epaisseur)
+        from decoupe.models import FormatTole
+
+        format_tole = FormatTole.objects.filter(pk=donnees.get("format"), actif=True).first() if donnees.get("format") else None
+        tole = regle.creer_tole(groupe.matiere, groupe.epaisseur, format_tole)
         return JsonResponse({"ok": True, "reference": tole.pk, "sans_cout": tole.cout_unitaire is None})
 
     @method_decorator(require_POST)

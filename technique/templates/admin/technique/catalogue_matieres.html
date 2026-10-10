@@ -1,7 +1,7 @@
 {% extends "admin/base_site.html" %}
 {% block content %}
 <div class="max-w-5xl">
-  <p class="mb-4">Cochez des nuances et des épaisseurs, puis validez : <strong>tout se crée à la suite</strong> (matière, tôle, paramètre de coupe jet d'eau estimé, règle de création). Ce qui existe déjà n'est jamais écrasé ; le tout est tracé dans « Lots de modifications » et annulable.</p>
+  <p class="mb-4">Cochez des nuances et des épaisseurs, puis validez : <strong>tout se crée à la suite</strong> (matière, tôles (une par format), paramètre de coupe jet d'eau estimé, règle de création). Ce qui existe déjà n'est jamais écrasé ; le tout est tracé dans « Lots de modifications » et annulable.</p>
 
   {% if rapport %}
   <div class="mb-6 p-4 rounded-default border border-base-200">
@@ -44,10 +44,16 @@
     <label class="block mb-6"><span class="text-sm">Autres épaisseurs (séparées par des virgules)</span><br>
       <input type="text" name="autres_epaisseurs" value="{{ post.autres_epaisseurs }}" placeholder="ex. 7, 35" class="border border-base-300 rounded-default px-2 py-1 w-64"></label>
 
-    <h2 class="font-semibold mb-2">3 · Ce qui se crée</h2>
+    <h2 class="font-semibold mb-2">3 · Formats de tôle</h2>
+    <p class="text-sm opacity-60 mb-2">Une tôle est créée par nuance, par épaisseur <strong>et par format</strong>, nommée « Nuance - largeur x longueur x épaisseur » (ex. S235 - 1500 x 3000 x 3). Les formats viennent du menu <em>Formats de tôle</em> ; ceux de priorité 1 sont cochés.</p>
+    <div class="flex flex-wrap gap-3 mb-6">
+      {% for f in formats %}<label class="flex items-center gap-1"><input type="checkbox" name="format" value="{{ f.pk }}" {% if f.coche %}checked{% endif %}> {{ f.libelle }}{% if f.priorite > 1 %} <span class="opacity-60 text-sm">(priorité {{ f.priorite }})</span>{% endif %}</label>{% empty %}<span class="text-sm opacity-60">Aucun format actif : créez-en dans « Formats de tôle ».</span>{% endfor %}
+    </div>
+
+    <h2 class="font-semibold mb-2">4 · Ce qui se crée</h2>
     <div class="grid gap-3 mb-6 max-w-xl">
-      <label>Modèle de référence<br><input type="text" name="modele_reference" value="{{ post.modele_reference|default:'TOLE-{matiere}-{epaisseur}' }}" class="border border-base-300 rounded-default px-2 py-1 w-full"></label>
-      <label>Modèle de libellé<br><input type="text" name="modele_libelle" value="{{ post.modele_libelle|default:'Tôle {matiere} {epaisseur} mm' }}" class="border border-base-300 rounded-default px-2 py-1 w-full"></label>
+      <label>Modèle de référence<br><input type="text" name="modele_reference" value="{{ post.modele_reference|default:'{matiere} - {largeur} x {longueur} x {epaisseur}' }}" class="border border-base-300 rounded-default px-2 py-1 w-full"></label>
+      <label>Modèle de libellé<br><input type="text" name="modele_libelle" value="{{ post.modele_libelle|default:'Tôle {matiere} - {largeur} x {longueur} x {epaisseur} mm' }}" class="border border-base-300 rounded-default px-2 py-1 w-full"></label>
       <label>Unité du prix d'achat<br><select name="unite_cout" class="border border-base-300 rounded-default px-2 py-1"><option value="poids">Au kilo (€/kg)</option><option value="surface" {% if post.unite_cout == "surface" %}selected{% endif %}>Au m² (€/m²)</option></select></label>
       <label class="flex items-center gap-2"><input type="checkbox" name="jet_eau" value="1" {% if not post or post.jet_eau %}checked{% endif %}> Créer les paramètres de coupe jet d'eau manquants (vitesses estimées d'après l'usinabilité de la famille)</label>
       <label class="flex items-center gap-2"><input type="checkbox" name="creer_regle" value="1" {% if not post or post.creer_regle %}checked{% endif %}> Enregistrer une règle de création de tôle pour chaque nuance (prochaines épaisseurs en un clic)</label>

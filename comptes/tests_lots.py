@@ -156,6 +156,7 @@ class FormatsEtCreationsTests(LotsBase):
         rapport = creer_base(
             [{"nom": "I-NEW", "famille": "Inox-L", "densite": 7.9, "prix": Decimal("4.1")}, {"nom": "S235-L", "famille": "", "densite": 7.85, "prix": None}],
             [3, 4], self.user, unite_cout="poids", creer_regle=True, jet_eau=True,
+            modele_reference="TOLE-{matiere}-{epaisseur}", modele_libelle="Tôle {matiere} {epaisseur} mm",
         )
         self.assertTrue(Matiere.objects.filter(pk="I-NEW", famille=inox).exists())
         tole = Article.objects.get(reference="TOLE-I-NEW-4")
@@ -168,6 +169,22 @@ class FormatsEtCreationsTests(LotsBase):
         self.assertFalse(Matiere.objects.filter(pk="I-NEW").exists())
         self.assertFalse(Article.objects.filter(reference="TOLE-I-NEW-4").exists())
         self.assertTrue(Matiere.objects.filter(pk="S235-L").exists())
+
+    def test_une_tole_par_format_nommee_nuance_largeur_longueur_epaisseur(self):
+        from decoupe.models import FormatTole
+        from technique.catalogue_matieres import creer_base
+
+        FormatTole.objects.all().delete()
+        grand = FormatTole.objects.create(largeur_mm=1500, longueur_mm=3000, priorite=1)
+        petit = FormatTole.objects.create(largeur_mm=1250, longueur_mm=2500, priorite=2)
+        rapport = creer_base([{"nom": "1.4307", "famille": "", "densite": 7.9, "prix": Decimal("4.1")}], [3, 5], self.user, creer_regle=False, jet_eau=False, formats=[grand, petit])
+        refs = sorted(Article.objects.filter(matiere_id="1.4307").values_list("reference", flat=True))
+        self.assertEqual(refs, ["1.4307 - 1250 x 2500 x 3", "1.4307 - 1250 x 2500 x 5", "1.4307 - 1500 x 3000 x 3", "1.4307 - 1500 x 3000 x 5"])
+        self.assertEqual(Article.objects.get(pk="1.4307 - 1500 x 3000 x 3").libelle, "Tôle 1.4307 - 1500 x 3000 x 3 mm")
+        again = creer_base([{"nom": "1.4307", "famille": "", "densite": 7.9, "prix": None}], [3], self.user, creer_regle=False, jet_eau=False, formats=[grand])
+        self.assertEqual(again["crees"], [])  # déjà créées : jamais en double
+        sans_format = creer_base([{"nom": "1.4404", "famille": "", "densite": 8.0, "prix": None}], [2], self.user, creer_regle=False, jet_eau=False)
+        self.assertTrue(Article.objects.filter(pk="1.4404 - 1500 x 3000 x 2").exists())  # sans choix : format usuel (priorité 1)
 
     def test_ecran_catalogue(self):
         page = self.client.get("/admin/technique/matiere/catalogue/")
