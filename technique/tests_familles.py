@@ -40,6 +40,23 @@ class FamillesArticlesTests(TestCase):
         self.assertContains(rep, "Aperçu de la pièce")
         self.assertContains(rep, "rect.dxf")
 
+    def test_apercus_a_la_taille_du_parametrage(self):
+        from comptes.models import ReglageAffichage
+
+        # Pièce de 200 × 100 mm (+ marges du SVG) : la largeur limite, la hauteur suit les proportions.
+        self.assertContains(self.liste("?nature__exact=fabrique"), 'width="80" height="')
+        self.assertContains(self.client.get("/admin/technique/article/F1/change/"), 'width="240" height="')
+        reglage = ReglageAffichage.charger()
+        reglage.apercu_liste_largeur_px, reglage.apercu_liste_hauteur_px = 300, 30
+        reglage.save()
+        rep = self.liste("?nature__exact=fabrique")
+        self.assertContains(rep, 'height="30"')
+        self.assertNotContains(rep, "max-width: 420px")
+
+    def test_reglage_affichage_ouvre_la_fiche_unique(self):
+        rep = self.client.get("/admin/comptes/reglageaffichage/")
+        self.assertRedirects(rep, "/admin/comptes/reglageaffichage/1/change/")
+
     def test_creation_depuis_une_famille_preselectionne_la_nature(self):
         rep = self.client.get("/admin/technique/article/add/?_changelist_filters=nature__exact%3Dfabrique")
         self.assertEqual(rep.context["adminform"].form.initial.get("nature"), "fabrique")

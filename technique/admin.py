@@ -266,6 +266,25 @@ def renommer_article_view(request, reference):
     return redirect("admin:technique_article_change", nouveau.pk)
 
 
+def dimensionner_svg(svg, largeur_max, hauteur_max):
+    """Fixe la taille en pixels d'un aperçu SVG pour qu'il tienne dans largeur_max × hauteur_max en gardant ses proportions
+    (d'après son viewBox). Les attributs width/height/style de la balise <svg> sont remplacés."""
+    import re
+
+    balise = re.match(r"<svg\b[^>]*>", svg)
+    if balise is None:
+        return svg
+    ouverture = balise.group(0)
+    vue = re.search(r'viewBox="\s*[-\d.]+[\s,]+[-\d.]+[\s,]+([\d.]+)[\s,]+([\d.]+)\s*"', ouverture)
+    largeur, hauteur = float(largeur_max), float(hauteur_max)
+    if vue and float(vue.group(1)) > 0 and float(vue.group(2)) > 0:
+        echelle = min(largeur_max / float(vue.group(1)), hauteur_max / float(vue.group(2)))
+        largeur, hauteur = float(vue.group(1)) * echelle, float(vue.group(2)) * echelle
+    ouverture = re.sub(r'\s(?:width|height|style)="[^"]*"', "", ouverture)
+    ouverture = ouverture[:-1] + f' width="{largeur:.0f}" height="{hauteur:.0f}" style="display:block;background:#f5f5f5">'
+    return ouverture + svg[balise.end():]
+
+
 @admin.register(Article)
 class ArticleAdmin(ModificationParLotsMixin, ColonnesPersonnalisablesMixin, ExportCsvMixin, ModelAdmin):
     # Union de toutes les colonnes ; chaque famille d'articles n'en affiche qu'une partie (voir get_list_display).
@@ -458,7 +477,6 @@ class ArticleAdmin(ModificationParLotsMixin, ColonnesPersonnalisablesMixin, Expo
     @staticmethod
     def _svg_article(obj, miniature=False):
         """Aperçu de la forme de l'article fabriqué : la pièce à découper ou le débit de profilé dont il est issu."""
-        import re
         from decoupe.services import profiles
         from decoupe.services.apercu_svg import generer_svg_piece
 
@@ -476,8 +494,14 @@ class ArticleAdmin(ModificationParLotsMixin, ColonnesPersonnalisablesMixin, Expo
                 svg = profiles.svg_debit(debit.longueur_mm, debit.section.hauteur_mm, debit.coupe_a_deg, debit.coupe_b_deg)
         if not svg:
             return None
-        style = "max-width:72px;max-height:48px;width:auto;height:auto" if miniature else "max-width:100%;height:auto"
-        return re.sub(r'width="[^"]*mm" height="[^"]*mm"', f'style="{style}"', svg, count=1)
+        from comptes.models import ReglageAffichage
+
+        reglage = ReglageAffichage.charger()
+        if miniature:
+            largeur, hauteur = reglage.apercu_liste_largeur_px, reglage.apercu_liste_hauteur_px
+        else:
+            largeur, hauteur = reglage.apercu_fiche_largeur_px, reglage.apercu_fiche_hauteur_px
+        return dimensionner_svg(svg, largeur, hauteur)
 
     @admin.display(description="Aperçu")
     def miniature(self, obj):
@@ -491,7 +515,7 @@ class ArticleAdmin(ModificationParLotsMixin, ColonnesPersonnalisablesMixin, Expo
         svg = self._svg_article(obj)
         lignes = []
         if svg:
-            lignes.append(format_html('<div style="max-width:320px">{}</div>', mark_safe(svg)))
+            lignes.append(mark_safe(svg))
         piece = next(iter(obj.pieces_decoupe.all()), None)
         if piece is not None:
             lien = reverse("admin:decoupe_piecedecoupe_change", args=[piece.pk])

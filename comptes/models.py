@@ -1,3 +1,4 @@
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
 
@@ -124,3 +125,43 @@ class LotModification(models.Model):
     @property
     def nombre(self):
         return len(self.modifications) + len(self.crees)
+
+
+class ReglageAffichage(models.Model):
+    """Réglages d'affichage de l'application (fiche unique, voir `charger`) : taille des aperçus de pièces."""
+
+    apercu_liste_largeur_px = models.PositiveSmallIntegerField(
+        "largeur maximale de l'aperçu dans les listes (px)", default=80,
+        validators=[MinValueValidator(16), MaxValueValidator(600)],
+        help_text="Miniature de la colonne « Aperçu » des listes d'articles. 80 px par défaut.",
+    )
+    apercu_liste_hauteur_px = models.PositiveSmallIntegerField(
+        "hauteur maximale de l'aperçu dans les listes (px)", default=50,
+        validators=[MinValueValidator(16), MaxValueValidator(600)],
+        help_text="Limite aussi la hauteur des lignes de la liste. 50 px par défaut.",
+    )
+    apercu_fiche_largeur_px = models.PositiveSmallIntegerField(
+        "largeur maximale de l'aperçu sur la fiche article (px)", default=240,
+        validators=[MinValueValidator(40), MaxValueValidator(1200)],
+        help_text="Aperçu de la pièce sur la fiche d'un article fabriqué. 240 px par défaut.",
+    )
+    apercu_fiche_hauteur_px = models.PositiveSmallIntegerField(
+        "hauteur maximale de l'aperçu sur la fiche article (px)", default=240,
+        validators=[MinValueValidator(40), MaxValueValidator(1200)],
+        help_text="240 px par défaut.",
+    )
+
+    class Meta:
+        verbose_name = "Réglages d'affichage"
+        verbose_name_plural = "Réglages d'affichage"
+
+    def __str__(self):
+        return "Réglages d'affichage"
+
+    @classmethod
+    def charger(cls):
+        return cls.objects.get_or_create(pk=1)[0]
+
+    def save(self, *args, **kwargs):
+        self.pk = 1  # une seule fiche
+        super().save(*args, **kwargs)
