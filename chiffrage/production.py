@@ -234,6 +234,7 @@ def _creer_commande_et_ordres(devis):
             article=ligne.article,
             quantite_commandee=ligne.quantite,
             devis_ligne=ligne,
+            designation=ligne.designation,
             prix_vente_unitaire=ligne.prix_vente_unitaire,
             taux_tva=ligne.taux_tva,
         )
@@ -285,6 +286,7 @@ def synchroniser_lignes_commande(commande):
                 article=ligne.article,
                 quantite_commandee=ligne.quantite,
                 devis_ligne=ligne,
+                designation=ligne.designation,
                 prix_vente_unitaire=ligne.prix_vente_unitaire,
                 taux_tva=ligne.taux_tva,
             )
@@ -339,6 +341,7 @@ def reviser_devis(devis, motif=""):
                 devis=nouveau,
                 article=ligne.article,
                 ordre=ligne.ordre,
+                designation=ligne.designation,
                 quantite=ligne.quantite,
                 taux_marge_matiere_applique=ligne.taux_marge_matiere_applique,
                 prix_vente_unitaire_force=ligne.prix_vente_unitaire_force,

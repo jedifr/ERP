@@ -130,6 +130,27 @@ class CoutMatiereTests(TestCase):
         with self.assertRaises(ChiffrageError):
             cout_matiere_article(parent, 1)
 
+    def test_sous_ensemble_fabrique_compte_a_son_cout_de_revient(self):
+        # Régression : un article fabriqué pris comme composant d'un autre levait « n'a pas de coût unitaire renseigné ».
+        vis = Article.objects.create(reference="VIS-SE", nature=Article.Nature.MATIERE_PREMIERE, unite_cout=Article.UniteCout.PIECE, cout_unitaire=2)
+        poste = PosteTravail.objects.create(nom="Ajustage-SE", mode_calcul=PosteTravail.ModeCalcul.HORAIRE, taux_marge_defaut=50)
+        TarifPoste.objects.create(poste=poste, cout_horaire=60, date_debut=datetime.date(2020, 1, 1))
+        sous = Article.objects.create(reference="SOUS-ENS", nature=Article.Nature.FABRIQUE, taux_marge_defaut=30)
+        Nomenclature.objects.create(article_parent=sous, article_composant=vis, quantite=3)
+        Gamme.objects.create(article=sous, poste=poste, ordre=1, temps_fixe=10, temps_variable=1, date_debut=datetime.date(2020, 1, 1))
+        ensemble = Article.objects.create(reference="ENSEMBLE", nature=Article.Nature.FABRIQUE)
+        Nomenclature.objects.create(article_parent=ensemble, article_composant=sous, quantite=2)
+        # 5 ensembles = 10 sous-ensembles : matière 10 × 3 × 2 € = 60 € ; opérations au coût (10 + 10 × 1) min à 60 €/h = 20 € ; sans marge
+        self.assertAlmostEqual(float(cout_matiere_article(ensemble, 5, date_reference=datetime.date(2026, 1, 1))), 80.0)
+
+    def test_nomenclature_en_boucle_leve_erreur(self):
+        a = Article.objects.create(reference="BOUCLE-A", nature=Article.Nature.FABRIQUE)
+        b = Article.objects.create(reference="BOUCLE-B", nature=Article.Nature.FABRIQUE)
+        Nomenclature.objects.create(article_parent=a, article_composant=b, quantite=1)
+        Nomenclature.objects.create(article_parent=b, article_composant=a, quantite=1)
+        with self.assertRaisesMessage(ChiffrageError, "en boucle"):
+            cout_matiere_article(a, 1)
+
     def test_cout_natures_achetees_directes(self):
         # Service acheté, consommable, composant : achetés tels quels (comme
         # une matière première), pas décomposés via une nomenclature.
@@ -180,10 +201,15 @@ class CalculerDevisTests(TestCase):
         self.assertEqual(self.ligne.prix_vente_reglage_operations, Decimal("9.58"))
         self.assertIsNone(self.ligne.prix_vente_reglage)  # pas d'étape de découpe : pas de réglage de tôle
         self.assertLess(self.ligne.prix_vente_reglage_operations, self.ligne.prix_vente_operations)
+        from django.contrib.admin.sites import site
+        from .admin import DevisLigneInline
+
+        self.assertIn("9.58 €", str(DevisLigneInline(Devis, site).reglages(self.ligne)))  # une seule colonne « dont réglages »
         Gamme.objects.filter(article=self.article).update(temps_fixe=0)
         calculer_devis(self.devis)
         self.ligne.refresh_from_db()
         self.assertIsNone(self.ligne.prix_vente_reglage_operations)
+        self.assertEqual(DevisLigneInline(Devis, site).reglages(self.ligne), "—")
 
     def test_calcul_matiere_et_marge_defaut(self):
         calculer_devis(self.devis)
@@ -1257,6 +1283,10 @@ class DevisBuilderViewTests(TestCase):
         # date_creation du devis exposée au JS (devis_builder.js) : les nouvelles étapes de gamme sont datées de la date de création du
         # DEVIS, pas du jour — sinon une étape plus récente que le devis serait exclue du calcul (prix d'opérations à 0).
         self.assertContains(response, '"date_creation": "2026-01-01"')
+        # Régression : l'éditeur d'opérations partagé lit la date de début des étapes sur data-date-debut — vide, elles
+        # étaient datées du jour et l'aperçu affichait « Opérations 0,00 € » sur un devis plus ancien.
+        self.assertContains(response, 'data-date-debut="2026-01-01"')
+        self.assertContains(response, 'id="ligne-designation"')
         self.devis.statut = Devis.Statut.VALIDE
         self.devis.save()
         self.assertNotContains(self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/change/"), 'id="lignes-constructeur"')
@@ -1335,6 +1365,29 @@ class DevisBuilderViewTests(TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         data = response.json()
         self.assertEqual(data["prix_vente_operations"], 0)
+
+    def test_etape_sans_date_prend_la_date_du_devis(self):
+        payload = {
+            "quantite": 3, "apercu": True,
+            "nouvel_article": {
+                "reference": "PIECE-SANS-DATE",
+                "composants": [{"article_composant": "VIS-VIEW", "quantite": 5}],
+                "etapes": [{"poste": "Poste-View", "ordre": 1, "cout_forfaitaire": 50, "date_debut": None}],
+            },
+        }
+        reponse = self.client.post(f"/admin/chiffrage/devis/{self.devis.pk}/constructeur/", data=payload, content_type="application/json")
+        self.assertEqual(reponse.status_code, 200, reponse.content)
+        self.assertAlmostEqual(float(reponse.json()["prix_vente_operations"]), 150)
+
+    def test_libelle_facultatif_de_la_ligne(self):
+        Article.objects.create(reference="PIECE-LIB", libelle="Libellé article", nature=Article.Nature.MATIERE_PREMIERE,
+                               unite_cout=Article.UniteCout.PIECE, cout_unitaire=4)
+        url = f"/admin/chiffrage/devis/{self.devis.pk}/constructeur/"
+        reponse = self.client.post(url, data={"quantite": 1, "article_existant": "PIECE-LIB", "designation": "  Cloche côté moteur "}, content_type="application/json")
+        self.assertEqual(reponse.status_code, 200, reponse.content)
+        self.assertEqual(self.devis.lignes.get().designation, "Cloche côté moteur")
+        self.client.post(url, data={"quantite": 2, "article_existant": "PIECE-LIB"}, content_type="application/json")
+        self.assertEqual(self.devis.lignes.order_by("id").last().designation, "")
 
     def test_post_article_existant(self):
         article = Article.objects.create(
@@ -4262,7 +4315,9 @@ class CycleDeVieDevisTests(_FixtureModuleA, TestCase):
         from .production import reviser_devis
 
         self._valider()
+        self.devis.lignes.update(designation="Libellé propre au devis")
         revision = reviser_devis(self.devis, "Quantité portée à 3")
+        self.assertEqual(revision.lignes.get().designation, "Libellé propre au devis")
         self.assertEqual((revision.numero, revision.revision, revision.statut), ("DEV-REC-A-B", 2, "brouillon"))
         self.assertEqual((revision.indice, self.devis.indice), ("B", "A"))
         self.assertEqual(revision.motif_revision, "Quantité portée à 3")

@@ -248,6 +248,12 @@ class DevisLigne(models.Model):
         default=0,
         help_text="Ordre d'affichage (glisser-déposer sur la fiche devis) — repris tel quel sur la commande.",
     )
+    designation = models.CharField(
+        "libellé",
+        max_length=255,
+        blank=True,
+        help_text="Facultatif : libellé propre à cette ligne, imprimé sur le devis à la place de celui de l'article.",
+    )
     quantite = models.FloatField("quantité", validators=[_strictement_positif])
     cout_matiere_calcule = ChampDecimal(
         "coût matière calculé", null=True, blank=True, editable=False, **PRIX,

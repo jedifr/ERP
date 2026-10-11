@@ -214,6 +214,23 @@ class Article(models.Model):
                 }
             )
 
+    def prix_au_kg(self):
+        """Coût d'achat en €/kg (Decimal), ou None s'il ne se calcule pas : au kilo, c'est le coût unitaire ; au m², il est
+        divisé par le poids d'un m² de tôle (épaisseur × densité) ; à la longueur, le coût est déjà en €/kg dès qu'un poids
+        linéique est renseigné (voir chiffrage.moteur.cout_composant)."""
+        from decimal import Decimal
+
+        if self.cout_unitaire is None:
+            return None
+        cout = Decimal(str(self.cout_unitaire))
+        if self.unite_cout == self.UniteCout.POIDS:
+            return cout
+        if self.unite_cout == self.UniteCout.SURFACE and self.epaisseur and self.matiere_id and self.matiere.densite:
+            return cout / (Decimal(str(self.epaisseur)) * Decimal(str(self.matiere.densite)))
+        if self.unite_cout == self.UniteCout.LONGUEUR and self.poids_lineique:
+            return cout
+        return None
+
     def save(self, *args, **kwargs):
         if self.gere_en_stock is None:
             # Par défaut seule une matière première se gère en stock — et jamais si la société n'a pas de stock.

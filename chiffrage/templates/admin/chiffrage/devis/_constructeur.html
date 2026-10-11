@@ -19,9 +19,15 @@
         </label>
     </div>
 
-    <div class="mb-4">
-        <label class="block font-medium mb-1">Quantité (ligne de devis)<span class="text-red-600">*</span></label>
-        <input type="number" step="any" id="ligne-quantite" class="border border-base-200 dark:border-base-700 dark:bg-base-800 rounded-default px-3 py-2 w-48" required>
+    <div class="flex flex-wrap gap-4 mb-4">
+        <div>
+            <label class="block font-medium mb-1">Quantité (ligne de devis)<span class="text-red-600">*</span></label>
+            <input type="number" step="any" id="ligne-quantite" class="border border-base-200 dark:border-base-700 dark:bg-base-800 rounded-default px-3 py-2 w-48" required>
+        </div>
+        <div class="grow">
+            <label class="block font-medium mb-1">Libellé de la ligne <span class="font-normal opacity-70">(facultatif)</span></label>
+            <input type="text" id="ligne-designation" maxlength="255" placeholder="Imprimé sur le devis à la place du libellé de l'article" class="border border-base-200 dark:border-base-700 dark:bg-base-800 rounded-default px-3 py-2 w-full">
+        </div>
     </div>
 
     <!-- Bloc article existant -->
@@ -60,7 +66,7 @@
         <button type="button" id="add-nomenclature-row" class="text-primary-600 dark:text-primary-500 text-sm mb-6">+ Ajouter un composant</button>
 
         <h3 class="font-medium mb-2">Opérations de fabrication (gamme)</h3>
-        <div class="gamme-editeur mb-6" id="gamme-editeur" data-brouillon="1" data-url-options="{% url 'gamme_editeur_options' %}" data-date-debut="{{ devis.date_creation|date:'Y-m-d' }}"></div>
+        <div class="gamme-editeur mb-6" id="gamme-editeur" data-brouillon="1" data-url-options="{% url 'gamme_editeur_options' %}" data-date-debut="{{ original.date_creation|date:'Y-m-d' }}"></div>
     </div>
 
     <div id="lc-apercu" class="lc-apercu" hidden></div>

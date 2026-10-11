@@ -296,13 +296,14 @@ class ArticleAdmin(ModificationParLotsMixin, ColonnesPersonnalisablesMixin, Expo
         "matiere",
         "unite_cout",
         "cout_unitaire",
+        "prix_au_kg",
         "gere_en_stock",
         "stock_mini",
     ]
     COLONNES_FAMILLE = {
         "fabrique": ["reference", "miniature", "libelle", "taux_marge_defaut", "gere_en_stock", "stock_mini"],
-        "achete": ["reference", "libelle", "nature", "unite_cout", "cout_unitaire", "gere_en_stock", "stock_mini"],
-        "matiere": ["reference", "libelle", "matiere", "unite_cout", "cout_unitaire", "gere_en_stock", "stock_mini"],
+        "achete": ["reference", "libelle", "nature", "unite_cout", "cout_unitaire", "prix_au_kg", "gere_en_stock", "stock_mini"],
+        "matiere": ["reference", "libelle", "matiere", "unite_cout", "cout_unitaire", "prix_au_kg", "gere_en_stock", "stock_mini"],
     }
     list_filter = ["nature", "unite_cout", "type_profil", "gere_en_stock"]
     actions = ["action_modifier_par_lots", "action_ajouter_gamme_type", "action_affecter_compte"]
@@ -451,7 +452,13 @@ class ArticleAdmin(ModificationParLotsMixin, ColonnesPersonnalisablesMixin, Expo
         return colonnes if settings.STOCK_ACTIF else [c for c in colonnes if c not in self._CHAMPS_STOCK]
 
     def get_queryset(self, request):
-        return super().get_queryset(request).prefetch_related("pieces_decoupe", "pieces_profile__section")
+        return super().get_queryset(request).select_related("matiere").prefetch_related("pieces_decoupe", "pieces_profile__section")
+
+    @admin.display(description="Prix au kg")
+    def prix_au_kg(self, obj):
+        """Coût d'achat ramené au kilo, quelle que soit l'unité de l'article (voir Article.prix_au_kg) ; « — » s'il ne se calcule pas."""
+        prix = obj.prix_au_kg()
+        return "—" if prix is None else f"{prix:.4f} €/kg".replace(".", ",")
 
     def changelist_view(self, request, extra_context=None):
         from config.settings import FAMILLES_ARTICLES

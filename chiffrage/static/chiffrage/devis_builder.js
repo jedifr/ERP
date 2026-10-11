@@ -205,6 +205,9 @@ function demarrerConstructeur() {
             } else {
                 infoEl.textContent = "⚠ Matière ou épaisseur manquante sur cet article : poids non calculable.";
             }
+        } else if (article.nature === "fabrique") {
+            infoEl.textContent = "Sous-ensemble fabriqué : compté à son coût de revient (matière + opérations).";
+            champsDimension.classList.add("hidden");
         } else {
             infoEl.textContent = "⚠ Unité de coût non définie sur cet article.";
             champsDimension.classList.add("hidden");
@@ -292,7 +295,7 @@ function demarrerConstructeur() {
             return null;
         }
         const nouveau = document.querySelector("input[name=mode-article]:checked").value === "nouveau";
-        const payload = { quantite: quantite };
+        const payload = { quantite: quantite, designation: document.getElementById("ligne-designation").value.trim() };
         if (nouveau) {
             const reference = document.getElementById("na-reference").value.trim();
             if (!reference) {
