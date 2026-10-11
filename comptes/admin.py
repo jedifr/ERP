@@ -11,7 +11,7 @@ from django.template.response import TemplateResponse
 from django.urls import path
 
 from . import audit_droits, connexions
-from .models import EvenementConnexion, LotModification, Societe
+from .models import EvenementConnexion, LotModification, ReglageAffichage, Societe
 
 
 class UserCreationForm(UnfoldUserCreationForm):
@@ -161,6 +161,30 @@ class SocieteAdmin(ModelAdmin):
             return redirect(reverse("admin:comptes_societe_change", args=[fiche.pk]))
         return super().changelist_view(request, extra_context)
 
+
+
+@admin.register(ReglageAffichage)
+class ReglageAffichageAdmin(ModelAdmin):
+    """Fiche unique : taille des aperçus de pièces (listes et fiche article)."""
+
+    fieldsets = [
+        ("Aperçu dans les listes", {"fields": ["apercu_liste_largeur_px", "apercu_liste_hauteur_px"]}),
+        ("Aperçu sur la fiche article", {"fields": ["apercu_fiche_largeur_px", "apercu_fiche_hauteur_px"]}),
+    ]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def changelist_view(self, request, extra_context=None):
+        # Une seule fiche : on y va directement.
+        from django.shortcuts import redirect
+        from django.urls import reverse
+
+        fiche = ReglageAffichage.charger()
+        return redirect(reverse("admin:comptes_reglageaffichage_change", args=[fiche.pk]))
 
 @admin.register(LotModification)
 class LotModificationAdmin(ModelAdmin):

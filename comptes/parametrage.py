@@ -43,6 +43,7 @@ CARTES = [
     ("societe", "Société et documents", "business", "En-tête, SIRET, IBAN, mentions, modèles PDF, codification", [
         ("Société (en-tête des documents)", "comptes", "societe"), ("Modèles de documents (PDF)", "documents", "modeledocument"),
         ("Règles de codification", "codification", "reglecodification"),
+        ("Affichage (taille des aperçus)", "comptes", "reglageaffichage"),
     ], "societe"),
     ("utilisateurs", "Utilisateurs et droits", "admin_panel_settings", "Comptes, groupes, audit des droits, journal des connexions", [
         ("Utilisateurs", "auth", "user"), ("Groupes", "auth", "group"), ("Audit des droits", "auth", "user", "admin:auth_user_audit_droits"),

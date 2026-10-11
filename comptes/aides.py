@@ -231,6 +231,11 @@ AIDES = {
         "etapes": ["Ouvrez l'unique fiche et complétez raison sociale, adresse, SIRET, TVA intracommunautaire, IBAN.", "Elle doit être complète avant d'émettre de vraies factures."],
         "bon_a_savoir": ["Un SIRET ou une TVA invalide bloque la facture électronique."],
     },
+    "comptes.reglageaffichage": {
+        "resume": "La taille des aperçus de pièces : miniature des listes d'articles et aperçu de la fiche d'un article fabriqué.",
+        "etapes": ["Ouvrez l'unique fiche et réglez largeur et hauteur maximales, en pixels.", "Rechargez la liste ou la fiche pour voir le résultat."],
+        "bon_a_savoir": ["L'aperçu garde ses proportions : il tient dans le cadre largeur × hauteur."],
+    },
     "documents.modeledocument": {
         "resume": "Les modèles de documents PDF (devis, commande, facture…) que l'on peut personnaliser.",
         "etapes": ["Ouvrez un modèle pour l'éditer visuellement ; les champs entre accolades sont remplis par l'ERP."],

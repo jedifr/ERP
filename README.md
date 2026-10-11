@@ -3246,3 +3246,7 @@ L'**aperçu de la pièce** (configurateur, import DXF/DWG, débit de profilé) e
 ## Traduction de l'interface
 
 Les textes d'Unfold (recherche, filtres, boutons…) sont traduits dans `locale/fr/LC_MESSAGES/django.po`, compilé en `.mo` par `python manage.py compiler_traductions` (sans outil gettext). Après toute modification du `.po`, relancer cette commande ; un test vérifie que le `.mo` est à jour. Les noms de droits (« Peut voir… ») sont traduits à chaque `migrate`.
+
+## Taille des aperçus réglable
+
+Les aperçus de pièces des articles fabriqués étaient affichés à 420 px de large dans la liste (la taille fixée par le SVG n'était pas remplacée), ce qui rendait la liste illisible. Ils tiennent désormais dans un cadre réglable : **Paramétrage → Société et documents → Affichage (taille des aperçus)**. Par défaut, 80 × 50 px dans les listes et 240 × 240 px sur la fiche article. L'aperçu garde ses proportions : sa taille en pixels est calculée d'après le viewBox du SVG (`technique/admin.py`, `dimensionner_svg`). Réglage : `comptes.ReglageAffichage` (fiche unique, migration `comptes 0007`).
