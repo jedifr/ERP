@@ -12,3 +12,6 @@ class ComptesConfig(AppConfig):
         from .groupes import creer_groupes_par_defaut
 
         post_migrate.connect(creer_groupes_par_defaut, dispatch_uid="comptes_groupes_par_defaut")
+        from .droits_fr import traduire_droits
+
+        post_migrate.connect(traduire_droits, dispatch_uid="comptes_droits_en_francais")

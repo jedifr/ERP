@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from django.templatetags.static import static
-from django.urls import reverse_lazy
+from django.urls import reverse, reverse_lazy
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -190,6 +190,7 @@ LANGUAGE_CODE = "fr-fr"
 TIME_ZONE = "Europe/Paris"
 
 USE_I18N = True
+LOCALE_PATHS = [BASE_DIR / "locale"]  # traductions des textes d'Unfold et du projet (voir comptes/i18n.py)
 
 USE_TZ = True
 
@@ -274,6 +275,35 @@ def _menu(titre, icone, app, modele, droit=None, url=None):
     }
 
 
+# Les articles sont rangés en trois familles dans le menu : ce qu'on fabrique, ce qu'on achète tout fait, la matière.
+FAMILLES_ARTICLES = {
+    "fabrique": ("Articles fabriqués", "precision_manufacturing", ["fabrique"]),
+    "achete": ("Composants achetés", "shopping_cart", ["composant", "consommable", "service_achete"]),
+    "matiere": ("Matière première", "layers", ["matiere_premiere"]),
+}
+
+
+def _famille_articles(request):
+    """Famille d'articles affichée (clé de FAMILLES_ARTICLES) d'après le filtre `nature` de l'adresse, ou None."""
+    natures = request.GET.get("nature__in", request.GET.get("nature__exact", ""))
+    natures = sorted(n for n in natures.split(",") if n)
+    for cle, (_t, _i, liste) in FAMILLES_ARTICLES.items():
+        if natures == sorted(liste):
+            return cle
+    return None
+
+
+def _menu_articles(cle):
+    titre, icone, natures = FAMILLES_ARTICLES[cle]
+    filtre = f"nature__exact={natures[0]}" if len(natures) == 1 else "nature__in=" + ",".join(natures)
+    element = _menu(titre, icone, "technique", "article")
+    element["link"] = lambda request: reverse("admin:technique_article_changelist") + "?" + filtre
+    element["active"] = lambda request, c=cle: (
+        request.path == reverse("admin:technique_article_changelist") and _famille_articles(request) == c
+    )
+    return element
+
+
 def _superutilisateur(request):
     return request.user.is_superuser
 
@@ -334,7 +364,9 @@ NAVIGATION = [
         "title": "Gestion",
         "separator": True,
         "items": [
-            _menu("Articles", "category", "technique", "article"),
+            _menu_articles("fabrique"),
+            _menu_articles("achete"),
+            _menu_articles("matiere"),
             _menu("Sections de profilés", "straighten", "technique", "profilesection"),
             _menu("Nomenclatures", "account_tree", "technique", "nomenclature"),
             _menu("Écritures comptables", "list_alt", "comptabilite", "ecriturecomptable"),

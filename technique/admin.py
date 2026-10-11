@@ -268,8 +268,10 @@ def renommer_article_view(request, reference):
 
 @admin.register(Article)
 class ArticleAdmin(ModificationParLotsMixin, ColonnesPersonnalisablesMixin, ExportCsvMixin, ModelAdmin):
+    # Union de toutes les colonnes ; chaque famille d'articles n'en affiche qu'une partie (voir get_list_display).
     list_display = [
         "reference",
+        "miniature",
         "libelle",
         "nature",
         "matiere",
@@ -278,6 +280,11 @@ class ArticleAdmin(ModificationParLotsMixin, ColonnesPersonnalisablesMixin, Expo
         "gere_en_stock",
         "stock_mini",
     ]
+    COLONNES_FAMILLE = {
+        "fabrique": ["reference", "miniature", "libelle", "taux_marge_defaut", "gere_en_stock", "stock_mini"],
+        "achete": ["reference", "libelle", "nature", "unite_cout", "cout_unitaire", "gere_en_stock", "stock_mini"],
+        "matiere": ["reference", "libelle", "matiere", "unite_cout", "cout_unitaire", "gere_en_stock", "stock_mini"],
+    }
     list_filter = ["nature", "unite_cout", "type_profil", "gere_en_stock"]
     actions = ["action_modifier_par_lots", "action_ajouter_gamme_type", "action_affecter_compte"]
     champs_lot = lots_champs.champs_article()
@@ -307,7 +314,7 @@ class ArticleAdmin(ModificationParLotsMixin, ColonnesPersonnalisablesMixin, Expo
 
     # Fiche en deux colonnes : saisie à gauche, récapitulatif (calculé, en lecture seule) à droite.
     CHAMPS_RECAPITULATIF = [
-        "composition_recap", "achat_recap", "stock_recap", "utilise_dans_recap", "activite_recap",
+        "apercu_recap", "composition_recap", "achat_recap", "stock_recap", "utilise_dans_recap", "activite_recap",
     ]
     readonly_fields = CHAMPS_RECAPITULATIF
 
@@ -408,9 +415,96 @@ class ArticleAdmin(ModificationParLotsMixin, ColonnesPersonnalisablesMixin, Expo
         exclus = list(super().get_exclude(request, obj) or [])
         return exclus + list(self._CHAMPS_STOCK) if not settings.STOCK_ACTIF else exclus or None
 
+    def _famille(self, request):
+        from config.settings import _famille_articles
+
+        return _famille_articles(request)
+
     def get_list_display(self, request):
-        colonnes = super().get_list_display(request)
+        famille = self._famille(request)
+        if famille:
+            # Le mixin des colonnes personnalisables travaille sur la liste complète : on lui donne celle de la famille.
+            colonnes = list(self.COLONNES_FAMILLE[famille])
+            masquees = self._masquees(request, colonnes)
+            colonnes = [c for c in colonnes if c not in masquees]
+        else:
+            colonnes = super().get_list_display(request)
         return colonnes if settings.STOCK_ACTIF else [c for c in colonnes if c not in self._CHAMPS_STOCK]
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).prefetch_related("pieces_decoupe", "pieces_profile__section")
+
+    def changelist_view(self, request, extra_context=None):
+        from config.settings import FAMILLES_ARTICLES
+
+        famille = self._famille(request)
+        contexte = dict(extra_context or {})
+        if famille:
+            contexte["title"] = FAMILLES_ARTICLES[famille][0]
+        return super().changelist_view(request, contexte)
+
+    def get_changeform_initial_data(self, request):
+        initial = super().get_changeform_initial_data(request)
+        # Création depuis une liste filtrée : la nature est celle de la famille (« + Ajouter » depuis Articles fabriqués).
+        from urllib.parse import parse_qs
+        from config.settings import FAMILLES_ARTICLES
+
+        filtres = parse_qs(request.GET.get("_changelist_filters", ""))
+        valeurs = (filtres.get("nature__exact") or filtres.get("nature__in") or [""])[0].split(",")
+        if valeurs[0] and "nature" not in initial and valeurs[0] in Article.Nature.values:
+            initial["nature"] = valeurs[0]
+        return initial
+
+    @staticmethod
+    def _svg_article(obj, miniature=False):
+        """Aperçu de la forme de l'article fabriqué : la pièce à découper ou le débit de profilé dont il est issu."""
+        import re
+        from decoupe.services import profiles
+        from decoupe.services.apercu_svg import generer_svg_piece
+
+        piece = next(iter(obj.pieces_decoupe.all()), None)
+        svg = None
+        if piece is not None and piece.contour_json:
+            svg = generer_svg_piece(
+                piece.largeur_mm or 0, piece.hauteur_mm or 0,
+                (piece.contour_json or {}).get("exterieur") or [], (piece.contour_json or {}).get("trous") or [],
+                (piece.gravure_json or {}).get("traits") or [], (piece.pliage_json or {}).get("traits") or [],
+            )
+        else:
+            debit = next(iter(obj.pieces_profile.all()), None)
+            if debit is not None:
+                svg = profiles.svg_debit(debit.longueur_mm, debit.section.hauteur_mm, debit.coupe_a_deg, debit.coupe_b_deg)
+        if not svg:
+            return None
+        style = "max-width:72px;max-height:48px;width:auto;height:auto" if miniature else "max-width:100%;height:auto"
+        return re.sub(r'width="[^"]*mm" height="[^"]*mm"', f'style="{style}"', svg, count=1)
+
+    @admin.display(description="Aperçu")
+    def miniature(self, obj):
+        svg = self._svg_article(obj, miniature=True)
+        return mark_safe(svg) if svg else "—"
+
+    @admin.display(description="Aperçu de la pièce")
+    def apercu_recap(self, obj):
+        if self._vide(obj) or obj.nature != Article.Nature.FABRIQUE:
+            return "—"
+        svg = self._svg_article(obj)
+        lignes = []
+        if svg:
+            lignes.append(format_html('<div style="max-width:320px">{}</div>', mark_safe(svg)))
+        piece = next(iter(obj.pieces_decoupe.all()), None)
+        if piece is not None:
+            lien = reverse("admin:decoupe_piecedecoupe_change", args=[piece.pk])
+            lignes.append(format_html('Pièce à découper : <a href="{}">{}</a>', lien, piece.nom))
+            if piece.fichier_source:
+                lignes.append(format_html(
+                    'Fichier source ({}) : <a href="{}" target="_blank" rel="noopener">{}</a>',
+                    piece.get_format_source_display() if piece.format_source else "fichier",
+                    piece.fichier_source.url, piece.fichier_source.name.rsplit("/", 1)[-1],
+                ))
+        if not lignes:
+            return "Aucun aperçu (pièce saisie à la main)"
+        return mark_safe("<br>".join(str(l) for l in lignes))
 
     def get_list_filter(self, request):
         filtres = super().get_list_filter(request)

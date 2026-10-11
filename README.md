@@ -3236,3 +3236,13 @@ Dans l'onglet *Lignes du devis*, deux colonnes informatives distinguent ce qui e
 **Nom des tôles** : la convention de Découpe H2O, **« nuance-épaisseur largeur x longueur »** (S235-3 1500x3000), est celle des règles de création et de la Base matières rapide. Les modèles de référence et de libellé acceptent les variables `{matiere}`, `{famille}`, `{largeur}`, `{longueur}` (format de tôle, en mm) et `{epaisseur}`. La Base matières rapide crée **une tôle par nuance, par épaisseur et par format** (formats cochés parmi ceux du menu *Formats de tôle*, priorité 1 par défaut) ; « Créer cette tôle » dans l'imbrication d'un devis nomme la tôle d'après le format affiché. Une tôle déjà créée n'est jamais recréée.
 
 **Mode d'emploi** : chaque liste de la page *Paramétrage* (découpe, formes, atelier, articles et matières, stock, commercial, comptabilité, société, utilisateurs) affiche en haut un encadré repliable « Mode d'emploi » : à quoi sert la section, comment s'en servir en quelques étapes, ce qu'il faut savoir. Les textes sont dans `comptes/aides.py` (un test vérifie que toute section du Paramétrage en a un). Pour créer plusieurs tôles à la volée : liste des *Règles de création de tôle* → « Créer plusieurs tôles (Base matières rapide) », ou liste des *Matières* → « Base matières rapide ».
+
+## Articles : fabriqués, composants achetés, matière première
+
+Le menu « Gestion » sépare les articles en trois entrées : **Articles fabriqués**, **Composants achetés** (composants, consommables, services achetés) et **Matière première**. Chacune a ses colonnes et son bouton « Ajouter » crée directement un article de la bonne nature. La fiche d'un article fabriqué n'affiche plus Type de profil, Poids linéique, Coût unitaire ni Unité de coût (son coût est recalculé à chaque devis) ; celle d'un composant acheté masque épaisseur et profil.
+
+L'**aperçu de la pièce** (configurateur, import DXF/DWG, débit de profilé) est affiché dans le récapitulatif de la fiche, avec le lien vers la pièce et son fichier source, et en miniature dans la liste des articles fabriqués.
+
+## Traduction de l'interface
+
+Les textes d'Unfold (recherche, filtres, boutons…) sont traduits dans `locale/fr/LC_MESSAGES/django.po`, compilé en `.mo` par `python manage.py compiler_traductions` (sans outil gettext). Après toute modification du `.po`, relancer cette commande ; un test vérifie que le `.mo` est à jour. Les noms de droits (« Peut voir… ») sont traduits à chaque `migrate`.
