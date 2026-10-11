@@ -239,12 +239,12 @@ class RegleCreationTole(models.Model):
     epaisseur_min = models.FloatField("épaisseur min (mm)", null=True, blank=True, help_text="Vide : sans minimum.")
     epaisseur_max = models.FloatField("épaisseur max (mm)", null=True, blank=True, help_text="Vide : sans maximum.")
     modele_reference = models.CharField(
-        "modèle de référence", max_length=80, default="{matiere} - {largeur} x {longueur} x {epaisseur}",
+        "modèle de référence", max_length=80, default="{matiere}-{epaisseur} {largeur}x{longueur}",
         help_text="Variables : {matiere}, {famille}, {largeur}, {longueur} (format de tôle, en mm), {epaisseur} (3, 2.5…). Par défaut, la convention "
-                  "« Nuance - largeur x longueur x épaisseur » (S235 - 1500 x 3000 x 3). Une référence déjà prise reçoit un suffixe -2, -3…",
+                  "de l'atelier « nuance-épaisseur largeur x longueur » (S235-3 1500x3000). Une référence déjà prise reçoit un suffixe -2, -3…",
     )
     modele_libelle = models.CharField(
-        "modèle de libellé", max_length=120, default="Tôle {matiere} - {largeur} x {longueur} x {epaisseur} mm", blank=True,
+        "modèle de libellé", max_length=120, default="Tôle {matiere} {epaisseur} mm - {largeur}x{longueur}", blank=True,
         help_text="Mêmes variables ; l'épaisseur s'écrit avec une virgule (2,5).",
     )
     unite_cout = models.CharField(

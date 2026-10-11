@@ -1187,7 +1187,7 @@ class RegleCreationToleTests(TestCase):
         RegleCreationTole.objects.create(nom="Acier au kilo", cout_unitaire=Decimal("1.2"), unite_cout="poids")
         html = self.imbriquer().json()["html"]
         self.assertIn("La règle « Acier au kilo » créerait", html)
-        self.assertRegex(html, r"S235 - \d+ x \d+ x 10")  # convention « Nuance - largeur x longueur x épaisseur »
+        self.assertRegex(html, r"S235-10 \d+x\d+")  # convention « nuance-épaisseur largeur x longueur »
         self.assertIn('class="dp-creer-tole"', html)
 
     def test_creation_en_un_clic(self):
@@ -1197,8 +1197,8 @@ class RegleCreationToleTests(TestCase):
         RegleCreationTole.objects.create(nom="Acier au kilo", cout_unitaire=Decimal("1.2"), unite_cout="poids")
         r = self.client.post(self.url + "imbrication/creer-tole/", data=json.dumps({"cle": self.groupe_cle()}), content_type="application/json")
         self.assertEqual(r.status_code, 200, r.content)
-        tole = Article.objects.get(reference__startswith="S235 - ", reference__endswith=" x 10")
-        self.assertRegex(tole.reference, r"^S235 - \d+ x \d+ x 10$")
+        tole = Article.objects.get(reference__startswith="S235-10 ")
+        self.assertRegex(tole.reference, r"^S235-10 \d+x\d+$")
         self.assertEqual((tole.nature, tole.matiere_id, tole.epaisseur, tole.unite_cout, tole.cout_unitaire), ("matiere_premiere", "S235", 10.0, "poids", Decimal("1.2")))
         self.assertFalse(r.json()["sans_cout"])
         html = self.imbriquer().json()["html"]
@@ -1221,7 +1221,7 @@ class RegleCreationToleTests(TestCase):
         self.client.force_login(simple)
         r = self.client.post(self.url + "imbrication/creer-tole/", data=json.dumps({"cle": self.groupe_cle()}), content_type="application/json")
         self.assertEqual(r.status_code, 403)
-        self.assertFalse(Article.objects.filter(reference__startswith="S235 - ").exists())
+        self.assertFalse(Article.objects.filter(reference__startswith="S235-10 ").exists())
 
 
 class MatierePieceTests(ChiffrageDevisTests):

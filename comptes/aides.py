@@ -103,7 +103,7 @@ AIDES = {
             "Pour écrire une règle vous-même : choisissez à qui elle s'applique (toutes les matières, une famille ou une nuance, une plage d'épaisseurs), le modèle de nom, l'unité et le prix.",
         ],
         "bon_a_savoir": [
-            "Le nom suit votre convention « Nuance - largeur x longueur x épaisseur » (S235 - 1500 x 3000 x 3) grâce aux variables {matiere}, {largeur}, {longueur}, {epaisseur}.",
+            "Le nom suit la convention de l'atelier « nuance-épaisseur largeur x longueur » (S235-3 1500x3000) grâce aux variables {matiere}, {largeur}, {longueur}, {epaisseur}.",
             "La règle la plus précise l'emporte : nuance, puis famille, puis toutes les matières. Sans prix dans la règle, la tôle est créée sans prix : il reste à le saisir.",
         ],
     },

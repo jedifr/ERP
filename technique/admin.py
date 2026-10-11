@@ -159,8 +159,8 @@ class MatiereAdmin(ModificationParLotsMixin, ModelAdmin):
                     try:
                         rapport = cat.creer_base(
                             selection, epaisseurs, request.user, unite_cout=post.get("unite_cout", "poids"),
-                            modele_reference=post.get("modele_reference") or "{matiere} - {largeur} x {longueur} x {epaisseur}",
-                            modele_libelle=post.get("modele_libelle", "Tôle {matiere} - {largeur} x {longueur} x {epaisseur} mm"), creer_regle=bool(post.get("creer_regle")),
+                            modele_reference=post.get("modele_reference") or "{matiere}-{epaisseur} {largeur}x{longueur}",
+                            modele_libelle=post.get("modele_libelle", "Tôle {matiere} {epaisseur} mm - {largeur}x{longueur}"), creer_regle=bool(post.get("creer_regle")),
                             jet_eau=bool(post.get("jet_eau")), formats=list(FormatTole.objects.filter(pk__in=request.POST.getlist("format"), actif=True)),
                         )
                     except (KeyError, IndexError, ValueError):

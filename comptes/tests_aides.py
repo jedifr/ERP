@@ -37,5 +37,5 @@ class AidesParametrageTests(TestCase):
     def test_la_regle_de_tole_explique_la_creation_en_lot(self):
         page = self.client.get("/admin/technique/reglecreationtole/")
         self.assertContains(page, "Créer plusieurs tôles d")
-        self.assertContains(page, "largeur x longueur x épaisseur")
+        self.assertContains(page, "nuance-épaisseur largeur x longueur")
         self.assertContains(page, "Créer plusieurs tôles (Base matières rapide)")  # raccourci dans la barre d'actions de la liste

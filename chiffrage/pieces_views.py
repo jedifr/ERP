@@ -148,7 +148,7 @@ def _bloc_groupe(groupe, choix, formats):
         from technique.models import RegleCreationTole
 
         regle = RegleCreationTole.pour(groupe.matiere, groupe.epaisseur)
-        if regle is not None:  # la tôle proposée est celle du format affiché : « Nuance - largeur x longueur x épaisseur »
+        if regle is not None:  # la tôle proposée est celle du format affiché : « nuance-épaisseur largeur x longueur »
             cout = f"{regle.cout_unitaire:g} €/{dict(Article.UniteCout.choices).get(regle.unite_cout, '').lower()}".replace(".", ",") if regle.cout_unitaire is not None else "sans coût (à renseigner)"
             bloc["regle"] = {
                 "nom": regle.nom, "reference": regle.reference_pour(groupe.matiere, groupe.epaisseur, format_choisi),

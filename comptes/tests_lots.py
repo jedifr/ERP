@@ -179,12 +179,12 @@ class FormatsEtCreationsTests(LotsBase):
         petit = FormatTole.objects.create(largeur_mm=1250, longueur_mm=2500, priorite=2)
         rapport = creer_base([{"nom": "1.4307", "famille": "", "densite": 7.9, "prix": Decimal("4.1")}], [3, 5], self.user, creer_regle=False, jet_eau=False, formats=[grand, petit])
         refs = sorted(Article.objects.filter(matiere_id="1.4307").values_list("reference", flat=True))
-        self.assertEqual(refs, ["1.4307 - 1250 x 2500 x 3", "1.4307 - 1250 x 2500 x 5", "1.4307 - 1500 x 3000 x 3", "1.4307 - 1500 x 3000 x 5"])
-        self.assertEqual(Article.objects.get(pk="1.4307 - 1500 x 3000 x 3").libelle, "Tôle 1.4307 - 1500 x 3000 x 3 mm")
+        self.assertEqual(refs, ["1.4307-3 1250x2500", "1.4307-3 1500x3000", "1.4307-5 1250x2500", "1.4307-5 1500x3000"])
+        self.assertEqual(Article.objects.get(pk="1.4307-3 1500x3000").libelle, "Tôle 1.4307 3 mm - 1500x3000")
         again = creer_base([{"nom": "1.4307", "famille": "", "densite": 7.9, "prix": None}], [3], self.user, creer_regle=False, jet_eau=False, formats=[grand])
         self.assertEqual(again["crees"], [])  # déjà créées : jamais en double
         sans_format = creer_base([{"nom": "1.4404", "famille": "", "densite": 8.0, "prix": None}], [2], self.user, creer_regle=False, jet_eau=False)
-        self.assertTrue(Article.objects.filter(pk="1.4404 - 1500 x 3000 x 2").exists())  # sans choix : format usuel (priorité 1)
+        self.assertTrue(Article.objects.filter(pk="1.4404-2 1500x3000").exists())  # sans choix : format usuel (priorité 1)
 
     def test_ecran_catalogue(self):
         page = self.client.get("/admin/technique/matiere/catalogue/")

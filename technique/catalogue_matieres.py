@@ -47,8 +47,8 @@ def _epaisseurs(valeurs):
 
 
 @transaction.atomic
-def creer_base(selection, epaisseurs, utilisateur, unite_cout="poids", modele_reference="{matiere} - {largeur} x {longueur} x {epaisseur}",
-               modele_libelle="Tôle {matiere} - {largeur} x {longueur} x {epaisseur} mm", creer_regle=True, jet_eau=True, formats=None):
+def creer_base(selection, epaisseurs, utilisateur, unite_cout="poids", modele_reference="{matiere}-{epaisseur} {largeur}x{longueur}",
+               modele_libelle="Tôle {matiere} {epaisseur} mm - {largeur}x{longueur}", creer_regle=True, jet_eau=True, formats=None):
     """Crée matières, tôles, paramètres jet d'eau et règles. `selection` : [{nom, densite, famille (nom, facultatif), prix (Decimal ou None)}].
     `formats` : FormatTole dont on crée une tôle par nuance et par épaisseur (« S235 - 1500 x 3000 x 3 ») ; à défaut, le format usuel de chaque matière.
     Retourne un rapport {crees: [(type, libellé)], ignores: [(libellé, motif)], lot}."""
