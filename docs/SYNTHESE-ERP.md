@@ -146,7 +146,7 @@ docs/           cahier des charges, déploiement, sauvegarde, synchro planning, 
 - **Nommage :** français partout (modèles, champs, fonctions, messages, commits), `verbose_name` accentués. Les services métier sont dans `<app>/services*.py` et lèvent des exceptions dédiées (`ChiffrageError`, `ErreurMatiere`, `ErreurTemps`…). Les docstrings de module expliquent les formules.
 - **Tests :** Django `TestCase` dans `<app>/tests*.py`, lancés par `python manage.py test`. Un test vérifie que chaque section du Paramétrage a son aide (`comptes/aides.py`).
 - **Documentation :** chaque évolution ajoute une section au `README.md`, qui sert de journal (3 238 lignes). Le fichier `VERSION` s'incrémente à la main, au format `AAAA.MM.JJ.n`, mais ses valeurs ne suivent pas le calendrier (**À vérifier**).
-- **Branches :** Claude travaille sur des branches `claude/*`. La branche active est `claude/project-construction-k7owwb`, celle que le NAS déploie. `main` a reçu 3 PR (la dernière le 24/09) et reste à 113 commits derrière. Il n'y a pas de CI ni de `CLAUDE.md`.
+- **Branches :** Claude travaille sur des branches `claude/*`. La branche active est `claude/project-construction-k7owwb`, celle que le NAS déploie. Marc a confirmé le 11/10 qu'elle fait foi ; elle a été fusionnée dans `main` le même jour (PR #5). Il n'y a pas de CI ni de `CLAUDE.md`.
 - **Migrations :** une migration Django par changement, parfois avec des données (bases de coupe, catalogue de profilés). La relecture contrôle `makemigrations --check` (`docs/RELECTURE_PRODUCTION.md` §2).
 
 ## 9. Lancer, tester, déployer
@@ -184,7 +184,7 @@ docs/           cahier des charges, déploiement, sauvegarde, synchro planning, 
 
 ## 10. Dette technique, bugs connus, points fragiles
 
-- **Branches divergentes.** `main` est en retard de 113 commits et contient un PDF de 6 Mo (`arcelor-catalogue-2020.pdf`) absent de la branche active. Le STEP est isolé sur une branche.
+- **Branches.** `main` est à jour depuis le 11/10 (PR #5), mais le travail continue sur `claude/project-construction-k7owwb` : il faudra fusionner régulièrement. `main` contient un PDF de 6 Mo (`arcelor-catalogue-2020.pdf`) à la racine. Le STEP est isolé sur une branche.
 - **Planning jamais branché.** Le format envoyé suppose une API que Planning n'a pas. Sans retour d'informations, le pilotage reste vide.
 - **Estimations non recalées :** le coefficient laser de 0,85, les vitesses de jet d'eau calculées, et les tables normalisées (brides, rondelles, profilés hors catalogue) livrées « non vérifiées » (`docs/RELECTURE_PRODUCTION.md` §4).
 - **Sauvegarde jamais exécutée sur le NAS**, et aucun essai sur le UGREEN.
@@ -200,7 +200,7 @@ docs/           cahier des charges, déploiement, sauvegarde, synchro planning, 
 
 ## 11. Prochaines étapes (classées)
 
-1. **Consolider les branches** : fusionner `project-construction` dans `main`, trancher le sort du PDF et de la branche STEP, ajouter un `CLAUDE.md` et une CI qui lance les tests. Effort **S**.
+1. **Consolider les branches** : `project-construction` est fusionnée dans `main` (fait le 11/10). Reste à choisir la branche de travail à venir, à trancher le sort du PDF et de la branche STEP, ajouter un `CLAUDE.md` et une CI qui lance les tests. Effort **S**.
 2. **Fixer le contrat ERP ↔ Planning** : soit l'ERP exporte le fichier de l'import personnalisé, soit Planning reçoit une route `/ordres-fabrication` idempotente. Implémenter ensuite le retour des temps réels et des quantités. Effort **L**.
 3. **Installer et valider sur le UGREEN** : `.env` sécurisé, sauvegarde, restauration d'essai et planification. Effort **M**.
 4. **Recaler les temps de coupe** sur des relevés réels, laser et jet d'eau, puis vérifier les tables normalisées. Effort **S/M**, selon les données à fournir.
@@ -212,7 +212,7 @@ docs/           cahier des charges, déploiement, sauvegarde, synchro planning, 
 
 ## 12. Questions ouvertes (décisions de Marc)
 
-1. Quelle branche fait foi, et faut-il fusionner maintenant dans `main` ?
+1. ~~Quelle branche fait foi ?~~ Tranché le 11/10 : `claude/project-construction-k7owwb`, fusionnée dans `main`. Reste à décider : faut-il désormais travailler directement à partir de `main` ?
 2. Planning : faut-il adapter l'ERP à l'import par fichier existant, ou ajouter une API dans Planning ? L’ERP fait-il bien foi pour les postes et tarifs, comme prévu au cahier des charges ?
 3. Pliage, soudure, fraisage, tournage, électroérosion : faut-il un calcul de temps automatique, ou la saisie de gamme suffit-elle ? Si oui, avec quelles règles ?
 4. Les consommables (gaz, abrasif, électricité) sont-ils inclus dans le taux horaire, ou doivent-ils être chiffrés à part ?
@@ -226,7 +226,7 @@ docs/           cahier des charges, déploiement, sauvegarde, synchro planning, 
 
 ```
 Projet : ERP maison de DÉCOUPE H2O (dépôt jedifr/ERP), Django 5.2 + DRF + PostgreSQL 16, admin django-unfold, Docker sur NAS (cible UGREEN DXP8800 Plus).
-Branche de travail active : claude/project-construction-k7owwb (main a 113 commits de retard) ; lire d'abord docs/SYNTHESE-ERP.md, puis docs/ERP_Specification_Complete_4_Phases.md.
+Branche de travail active : claude/project-construction-k7owwb (fusionnée dans main le 11/10) ; lire d'abord docs/SYNTHESE-ERP.md, puis docs/ERP_Specification_Complete_4_Phases.md.
 Code en français ; règles métier dans Model.clean() et <app>/services ; montants en Decimal (comptes/montants.py) ; chaque évolution ajoute une section au README et incrémente VERSION.
 Chiffrage : chiffrage/moteur.py (matière + opérations + marges), découpe laser/jet d'eau dans decoupe/services (temps, imbrication, matière).
 Tests : python manage.py collectstatic --noinput && python manage.py test. Déploiement : ./update-nas.sh <branche>.
