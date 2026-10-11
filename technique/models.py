@@ -1,12 +1,83 @@
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
+from comptes.champs import ChampDecimal
+from comptes.montants import PRIX, TAUX, D
+
+
+class FamilleMatiere(models.Model):
+    """Matière « générique » (acier, inox, aluminium…) à laquelle se rattachent les nuances précises (S235, 5754…).
+
+    C'est à ce niveau que vivent les données communes : usinabilité standard, paramètres de coupe (vitesses, temps de
+    perçage… de la base du logiciel de la machine). Une nuance hérite de sa famille ; elle peut surcharger un paramètre
+    si besoin. `mots_cles` sert à rattacher automatiquement une nuance d'après son nom."""
+
+    nom = models.CharField("nom", max_length=100, unique=True)
+    nom_igems = models.CharField(
+        "nom dans le logiciel de la machine", max_length=100, blank=True,
+        help_text="Nom de la matière dans materials.lua (Steel, Stainless Steel, Aluminium…) : sert à l'import de la base de coupe.",
+    )
+    usinabilite = models.FloatField("usinabilité standard", null=True, blank=True, help_text="Indice d'usinabilité au jet d'eau")
+    mots_cles = models.TextField(
+        "mots-clés des nuances", blank=True,
+        help_text="Un par ligne ou séparés par des virgules (ex. s235, s355, acier, steel). Une nuance dont le nom commence par l'un d'eux "
+                  "est rattachée à cette famille. Les expressions à plusieurs mots (« en aw ») se cherchent dans le nom entier.",
+    )
+    gaz_laser_prefere = models.CharField(
+        "gaz de coupe laser usuel", max_length=4, blank=True,
+        choices=[("O2", "Oxygène"), ("N2", "Azote"), ("Air", "Air comprimé")],
+        help_text="Gaz retenu au laser quand la pièce n'en précise pas (oxygène pour l'acier, azote pour l'inox et l'alu…).",
+    )
+    ordre = models.PositiveSmallIntegerField(
+        "priorité", default=50, help_text="Les familles de priorité faible sont essayées d'abord (« inox » avant « acier »)."
+    )
+
+    class Meta:
+        verbose_name = "Famille de matière"
+        verbose_name_plural = "Familles de matière"
+        ordering = ["ordre", "nom"]
+
+    def __str__(self):
+        return self.nom
+
+    def liste_mots_cles(self):
+        brut = (self.mots_cles or "").replace("\n", ",").split(",")
+        return [m.strip().lower() for m in brut if m.strip()]
+
+    @classmethod
+    def pour_nom(cls, nom_matiere):
+        """Famille dont un mot-clé correspond au nom d'une nuance (la plus prioritaire), ou None."""
+        import re
+        import unicodedata
+
+        nom = "".join(c for c in unicodedata.normalize("NFD", (nom_matiere or "").lower()) if unicodedata.category(c) != "Mn")
+        jetons = re.findall(r"[a-z0-9]+(?:\.[0-9]+)*", nom)
+        for famille in cls.objects.all():
+            for mot in famille.liste_mots_cles():
+                mot = "".join(c for c in unicodedata.normalize("NFD", mot) if unicodedata.category(c) != "Mn")
+                if " " in mot or "-" in mot:
+                    if mot in nom:
+                        return famille
+                elif any(j.startswith(mot) for j in jetons):
+                    return famille
+        return None
 
 
 class Matiere(models.Model):
-    """Référentiel des matières (acier, aluminium, inox...)."""
+    """Référentiel des matières : les nuances précises (S235, 5754…) ou les matières courantes (acier, aluminium…)."""
 
     nom = models.CharField("nom", max_length=100, primary_key=True)
     densite = models.FloatField("densité", help_text="kg/dm³, utilisée pour le calcul au poids")
+    usinabilite = models.FloatField(
+        "usinabilité", null=True, blank=True,
+        help_text="Indice d'usinabilité au jet d'eau (acier 87,6 ; inox 81,9 ; cuivre/laiton 110 ; aluminium 213…) : sert à calculer "
+                  "les vitesses de coupe quand elles n'ont pas été relevées sur la machine. Vide : celle de la famille.",
+    )
+    famille = models.ForeignKey(
+        FamilleMatiere, verbose_name="famille de matière", on_delete=models.SET_NULL, null=True, blank=True, related_name="nuances",
+        help_text="Matière générique dont cette nuance hérite les paramètres de coupe (S235 → Acier, 5754 → Aluminium…). "
+                  "Rattachée automatiquement d'après le nom à la création si elle est laissée vide.",
+    )
 
     class Meta:
         verbose_name = "Matière"
@@ -15,6 +86,18 @@ class Matiere(models.Model):
 
     def __str__(self):
         return self.nom
+
+    def save(self, *args, **kwargs):
+        if self._state.adding and self.famille_id is None:
+            self.famille = FamilleMatiere.pour_nom(self.nom)  # S235 → Acier, 5754 → Aluminium…
+        super().save(*args, **kwargs)
+
+    @property
+    def usinabilite_effective(self):
+        """Usinabilité de la nuance, à défaut celle de sa famille."""
+        if self.usinabilite:
+            return self.usinabilite
+        return self.famille.usinabilite if self.famille_id else None
 
 
 class Article(models.Model):
@@ -28,10 +111,10 @@ class Article(models.Model):
         COMPOSANT = "composant", "Composant"
 
     class UniteCout(models.TextChoices):
-        SURFACE = "surface", "Surface"
-        LONGUEUR = "longueur", "Longueur"
-        POIDS = "poids", "Poids"
-        PIECE = "piece", "Pièce"
+        SURFACE = "surface", "Au m² (€/m²)"
+        LONGUEUR = "longueur", "Au mètre (€/m)"
+        POIDS = "poids", "Au kilo (€/kg)"
+        PIECE = "piece", "À l'unité (€/pièce)"
 
     class TypeProfil(models.TextChoices):
         TUBE_CARRE = "tube_carre", "Tube carré"
@@ -58,7 +141,8 @@ class Article(models.Model):
         help_text="Pertinent pour tôles/profilés",
     )
     unite_cout = models.CharField(
-        "unité de coût", max_length=20, choices=UniteCout.choices, null=True, blank=True
+        "unité de coût", max_length=20, choices=UniteCout.choices, null=True, blank=True,
+        help_text="Comment le prix d'achat est exprimé. À l'unité, pour une tôle : prix de la feuille entière.",
     )
     epaisseur = models.FloatField("épaisseur", null=True, blank=True, help_text="Tôle")
     type_profil = models.CharField(
@@ -67,14 +151,14 @@ class Article(models.Model):
     poids_lineique = models.FloatField(
         "poids linéique", null=True, blank=True, help_text="kg/mètre (profilés vendus au poids)"
     )
-    cout_unitaire = models.FloatField(
-        "coût unitaire", null=True, blank=True, help_text="Coût d'achat (matière première)"
+    cout_unitaire = ChampDecimal(
+        "coût unitaire", null=True, blank=True, help_text="Coût d'achat (matière première)", **PRIX,
     )
-    taux_marge_defaut = models.FloatField(
-        "taux de marge par défaut",
+    taux_marge_defaut = ChampDecimal(
+        "taux de marge par défaut (%)",
         null=True,
         blank=True,
-        help_text="Marge par défaut sur le coût matière (articles fabriqués)",
+        help_text="En pourcentage du coût : 20 = prix de vente × 1,20. Marge par défaut sur le coût matière (articles fabriqués)", **TAUX,
     )
     taux_tva = models.ForeignKey(
         "commercial.TauxTVA",
@@ -132,8 +216,237 @@ class Article(models.Model):
 
     def save(self, *args, **kwargs):
         if self.gere_en_stock is None:
-            self.gere_en_stock = self.nature == self.Nature.MATIERE_PREMIERE
+            # Par défaut seule une matière première se gère en stock — et jamais si la société n'a pas de stock.
+            self.gere_en_stock = bool(settings.STOCK_ACTIF and self.nature == self.Nature.MATIERE_PREMIERE)
         super().save(*args, **kwargs)
+
+
+class RegleCreationTole(models.Model):
+    """Règle de création d'une tôle (article matière première) : quand l'imbrication d'un devis ne trouve aucune tôle pour une matière
+    et une épaisseur, un clic crée l'article d'après la règle (référence et libellé construits, unité et coût d'achat, TVA, stock).
+    La règle la plus précise l'emporte : nuance, puis famille, puis toutes les matières ; à précision égale, la plage d'épaisseurs la
+    plus étroite. Une règle sans coût crée la tôle sans prix : le coût matière reste à renseigner."""
+
+    nom = models.CharField("nom", max_length=100, help_text="Ex. « Inox au kilo », « Acier standard »")
+    famille = models.ForeignKey(
+        FamilleMatiere, verbose_name="famille de matière", on_delete=models.CASCADE, null=True, blank=True, related_name="regles_tole",
+        help_text="Vide et sans nuance : toutes les matières.",
+    )
+    matiere = models.ForeignKey(
+        Matiere, verbose_name="nuance précise", on_delete=models.CASCADE, null=True, blank=True, related_name="regles_tole",
+        help_text="Ex. 1.4307 : prime sur la règle de sa famille.",
+    )
+    epaisseur_min = models.FloatField("épaisseur min (mm)", null=True, blank=True, help_text="Vide : sans minimum.")
+    epaisseur_max = models.FloatField("épaisseur max (mm)", null=True, blank=True, help_text="Vide : sans maximum.")
+    modele_reference = models.CharField(
+        "modèle de référence", max_length=80, default="{matiere}-{epaisseur} {largeur}x{longueur}",
+        help_text="Variables : {matiere}, {famille}, {largeur}, {longueur} (format de tôle, en mm), {epaisseur} (3, 2.5…). Par défaut, la convention "
+                  "de l'atelier « nuance-épaisseur largeur x longueur » (S235-3 1500x3000). Une référence déjà prise reçoit un suffixe -2, -3…",
+    )
+    modele_libelle = models.CharField(
+        "modèle de libellé", max_length=120, default="Tôle {matiere} {epaisseur} mm - {largeur}x{longueur}", blank=True,
+        help_text="Mêmes variables ; l'épaisseur s'écrit avec une virgule (2,5).",
+    )
+    unite_cout = models.CharField(
+        "unité de coût", max_length=20, choices=Article.UniteCout.choices, default=Article.UniteCout.POIDS,
+        help_text="Poids : €/kg (la tôle est valorisée d'après sa densité et son épaisseur). Surface : €/m². Pièce : prix de la feuille entière.",
+    )
+    cout_unitaire = ChampDecimal(
+        "coût unitaire d'achat", null=True, blank=True, help_text="Dans l'unité ci-dessus. Vide : à renseigner sur chaque tôle créée.", **PRIX,
+    )
+    taux_tva = models.ForeignKey(
+        "commercial.TauxTVA", verbose_name="taux de TVA", on_delete=models.PROTECT, null=True, blank=True, related_name="+",
+    )
+    gere_en_stock = models.BooleanField("géré en stock", null=True, blank=True, help_text="Vide : défaut d'une matière première.")
+    stock_mini = models.FloatField("stock minimum", null=True, blank=True)
+    quantite_reappro = models.FloatField("quantité de réapprovisionnement", null=True, blank=True)
+    actif = models.BooleanField("active", default=True)
+
+    class Meta:
+        verbose_name = "Règle de création de tôle"
+        verbose_name_plural = "Règles de création de tôle"
+        ordering = ["nom"]
+
+    def __str__(self):
+        return self.nom
+
+    def clean(self):
+        super().clean()
+        if self.matiere_id and self.famille_id and self.matiere.famille_id != self.famille_id:
+            raise ValidationError({"matiere": f"« {self.matiere} » n'appartient pas à la famille « {self.famille} »."})
+        if self.epaisseur_min is not None and self.epaisseur_max is not None and self.epaisseur_max < self.epaisseur_min:
+            raise ValidationError({"epaisseur_max": "L'épaisseur maximale est inférieure à la minimale."})
+        for champ in ("modele_reference", "modele_libelle"):
+            try:
+                self._remplir(getattr(self, champ), "S235", 3.0, "Acier", format=(1500, 3000))
+            except (KeyError, IndexError, ValueError):
+                raise ValidationError({champ: "Variables autorisées : {matiere}, {famille}, {largeur}, {longueur}, {epaisseur}."})
+
+    @staticmethod
+    def _remplir(modele, matiere, epaisseur, famille, virgule=False, format=None):
+        """Texte du modèle ; `format` : (largeur, longueur) en mm ou un FormatTole. Sans format, {largeur} et {longueur} restent vides."""
+        largeur, longueur = (format.largeur_mm, format.longueur_mm) if hasattr(format, "largeur_mm") else (format or ("", ""))
+        texte = f"{epaisseur:g}"
+        return modele.format(
+            matiere=matiere, famille=famille or "", epaisseur=texte.replace(".", ",") if virgule else texte,
+            largeur=f"{largeur:g}" if largeur != "" else "", longueur=f"{longueur:g}" if longueur != "" else "",
+        ).strip()
+
+    def format_par_defaut(self, matiere):
+        """Format de tôle utilisé dans le nom quand aucun n'est précisé : le plus usuel (priorité 1) puis le plus grand parmi les formats actifs
+        de la matière ; None s'il n'y en a pas."""
+        from decoupe.models import FormatTole
+
+        formats = [f for f in FormatTole.objects.filter(actif=True).prefetch_related("familles", "matieres") if f.convient_a(matiere)]
+        return min(formats, key=lambda f: (f.priorite, -f.largeur_mm * f.longueur_mm), default=None)
+
+    def convient_a(self, matiere, epaisseur):
+        if not self.actif:
+            return False
+        if self.matiere_id and self.matiere_id != matiere.pk:
+            return False
+        if self.famille_id and self.famille_id != matiere.famille_id:
+            return False
+        if self.epaisseur_min is not None and epaisseur < self.epaisseur_min - 1e-9:
+            return False
+        return self.epaisseur_max is None or epaisseur <= self.epaisseur_max + 1e-9
+
+    @classmethod
+    def pour(cls, matiere, epaisseur):
+        """Règle applicable (la plus précise) ou None."""
+        candidates = [r for r in cls.objects.filter(actif=True).select_related("famille", "matiere") if r.convient_a(matiere, epaisseur)]
+        if not candidates:
+            return None
+
+        def precision(r):
+            largeur = (r.epaisseur_max if r.epaisseur_max is not None else 1e9) - (r.epaisseur_min if r.epaisseur_min is not None else 0)
+            return (0 if r.matiere_id else 1 if r.famille_id else 2, largeur, r.pk)
+
+        return min(candidates, key=precision)
+
+    def reference_de_base(self, matiere, epaisseur, format=None):
+        """Référence du modèle avant tout suffixe d'unicité."""
+        format = format or self.format_par_defaut(matiere)
+        return self._remplir(self.modele_reference, matiere.nom, epaisseur, matiere.famille.nom if matiere.famille_id else "", format=format)[:90].strip()
+
+    def reference_pour(self, matiere, epaisseur, format=None):
+        """Référence demandée par le modèle (pour `format` ou le format par défaut), rendue unique (suffixe -2, -3…) parmi les articles existants."""
+        base = self.reference_de_base(matiere, epaisseur, format)
+        reference, n = base, 1
+        while Article.objects.filter(pk=reference).exists():
+            n += 1
+            reference = f"{base}-{n}"
+        return reference
+
+    def libelle_pour(self, matiere, epaisseur, format=None):
+        format = format or self.format_par_defaut(matiere)
+        return self._remplir(self.modele_libelle, matiere.nom, epaisseur, matiere.famille.nom if matiere.famille_id else "", virgule=True, format=format)[:200]
+
+    def creer_tole(self, matiere, epaisseur, format=None):
+        """Crée et renvoie l'article tôle (matière première) de cette matière, de cette épaisseur et de ce format (à défaut, le format par défaut)."""
+        format = format or self.format_par_defaut(matiere)
+        return Article.objects.create(
+            reference=self.reference_pour(matiere, epaisseur, format), libelle=self.libelle_pour(matiere, epaisseur, format),
+            nature=Article.Nature.MATIERE_PREMIERE, matiere=matiere, epaisseur=float(epaisseur), unite_cout=self.unite_cout,
+            cout_unitaire=self.cout_unitaire, taux_tva=self.taux_tva, gere_en_stock=self.gere_en_stock,
+            stock_mini=self.stock_mini, quantite_reappro=self.quantite_reappro,
+        )
+
+
+def _positif(valeur):
+    try:
+        return float(valeur) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+class ProfileSection(models.Model):
+    """Forme particulière de matière première : section de profilé du catalogue (cornière, UPN, tube) avec ses cotes, sa masse linéique,
+    sa longueur de barre et l'article d'achat dont le coût sert au prix des débits."""
+
+    class Famille(models.TextChoices):
+        CORNIERE = "corniere", "Cornière à ailes égales"
+        CORNIERE_INEGALE = "corniere_inegale", "Cornière à ailes inégales"
+        UPN = "upn", "UPN"
+        IPE = "ipe", "IPE"
+        HEA = "hea", "HEA"
+        HEB = "heb", "HEB"
+        TUBE_CARRE = "tube_carre", "Tube carré"
+        TUBE_RECTANGULAIRE = "tube_rectangulaire", "Tube rectangulaire"
+        TUBE_ROND = "tube_rond", "Tube rond"
+        PLAT = "plat", "Plat"
+        ROND_PLEIN = "rond_plein", "Rond plein"
+        CARRE_PLEIN = "carre_plein", "Carré plein"
+
+    # Cotes obligatoires de chaque famille (mm), voir le schéma de la fiche.
+    COTES = {
+        "corniere": ("a", "b", "e"), "corniere_inegale": ("a", "b", "e"), "upn": ("h", "b", "tw", "tf"), "ipe": ("h", "b", "tw", "tf"),
+        "hea": ("h", "b", "tw", "tf"), "heb": ("h", "b", "tw", "tf"), "tube_carre": ("c", "e"), "tube_rectangulaire": ("h", "b", "e"),
+        "tube_rond": ("d", "e"), "plat": ("l", "e"), "rond_plein": ("d",), "carre_plein": ("c",),
+    }
+    DENSITE_REFERENCE = 7.85  # la masse linéique saisie est celle de l'acier (kg/dm³)
+
+    famille = models.CharField("famille", max_length=20, choices=Famille.choices)
+    designation = models.CharField("désignation", max_length=60, unique=True, help_text="« L 50×50×5 », « UPN 100 », « Tube 40×40×3 »…")
+    dimensions = models.JSONField(
+        "cotes (mm)", default=dict,
+        help_text="Cornière : a, b, e. UPN, IPE, HEA, HEB : h, b, tw, tf. Tube carré : c, e. Tube rectangulaire : h, b, e. Tube rond : d, e. Plat : l, e. Rond plein : d. Carré plein : c.",
+    )
+    masse_lineique = models.FloatField("masse linéique, acier (kg/m)", help_text="Masse d'un mètre en acier (7,85 kg/dm³) ; l'aluminium et l'inox s'en déduisent par la densité de la matière.")
+    longueur_barre_mm = models.FloatField("longueur de barre (mm)", default=6000, help_text="Longueur de barre achetée, dont sont tirés les débits.")
+    article = models.ForeignKey(
+        Article, verbose_name="article d'achat", on_delete=models.SET_NULL, null=True, blank=True, related_name="sections_profile",
+        limit_choices_to={"nature": Article.Nature.MATIERE_PREMIERE},
+        help_text="Matière première dont le coût sert au prix des débits : coût au mètre, au kilo (avec la masse linéique) ou à la barre.",
+    )
+    verifie = models.BooleanField("vérifié", default=False, help_text="Masses et cotes contrôlées avec le catalogue du fournisseur ou la norme.")
+    source = models.CharField("source", max_length=200, blank=True)
+    ordre = models.PositiveIntegerField("ordre", default=0)
+
+    class Meta:
+        verbose_name = "Section de profilé"
+        verbose_name_plural = "Sections de profilés"
+        ordering = ["famille", "ordre", "designation"]
+
+    def __str__(self):
+        return self.designation
+
+    def clean(self):
+        super().clean()
+        manquantes = [c for c in self.COTES.get(self.famille, ()) if not isinstance(self.dimensions, dict) or not _positif(self.dimensions.get(c))]
+        if manquantes:
+            raise ValidationError({"dimensions": f"Cotes à renseigner (nombres positifs, en mm) : {', '.join(manquantes)}."})
+
+    def masse_pour(self, densite):
+        """Masse linéique (kg/m) de la même section dans une matière de densité `densite` (kg/dm³) : aluminium ≈ 2,70, inox ≈ 7,90."""
+        return self.masse_lineique * float(densite) / self.DENSITE_REFERENCE
+
+    @property
+    def hauteur_mm(self):
+        """Hauteur de la section vue de côté (dimension portée sur le dessin d'un débit)."""
+        d = self.dimensions
+        return float(d.get("h") or d.get("a") or d.get("c") or d.get("l") or d.get("d") or 0)
+
+    def prix_au_metre(self):
+        """Prix d'un mètre de barre (Decimal) selon l'unité de coût de l'article d'achat ; ErreurPrixProfile si impossible."""
+        from decoupe.services.profiles import ErreurPrixProfile
+
+        a = self.article
+        if a is None:
+            raise ErreurPrixProfile(f"Aucun article d'achat n'est rattaché à « {self.designation} » (menu Sections de profilés).")
+        if a.cout_unitaire is None:
+            raise ErreurPrixProfile(f"L'article « {a} » n'a pas de coût unitaire renseigné.")
+        cout = D(a.cout_unitaire)
+        if a.unite_cout == Article.UniteCout.LONGUEUR:
+            return cout * D(a.poids_lineique) if a.poids_lineique else cout  # €/kg avec un poids linéique, sinon €/m
+        if a.unite_cout == Article.UniteCout.POIDS:
+            masse = self.masse_pour(a.matiere.densite) if a.matiere_id else self.masse_lineique  # alu, inox… : masse selon la matière de l'article
+            return cout * D(masse)
+        if a.unite_cout == Article.UniteCout.PIECE:
+            return cout / (D(self.longueur_barre_mm) / D(1000))  # prix de la barre entière
+        raise ErreurPrixProfile(f"Unité de coût de « {a} » non adaptée à un profilé (longueur, poids ou pièce).")
+
+
 
 
 class PosteTravail(models.Model):
@@ -149,11 +462,16 @@ class PosteTravail(models.Model):
     nombre_machines = models.PositiveIntegerField(
         "nombre de machines", default=1, help_text="Capacité agrégée (usage planning)"
     )
-    taux_marge_defaut = models.FloatField(
-        "taux de marge par défaut",
+    temps_mise_en_place_min = models.FloatField(
+        "mise en place d'une tôle (min)", null=True, blank=True,
+        help_text="Machines de découpe (laser, jet d'eau) : temps de réglage appliqué UNE fois par tôle posée sur la machine, quel que soit le "
+                  "nombre de pièces qu'elle contient. Peut être précisé par épaisseur dans les paramètres de coupe.",
+    )
+    taux_marge_defaut = ChampDecimal(
+        "taux de marge par défaut (%)",
         null=True,
         blank=True,
-        help_text="Marge par défaut sur les opérations de ce poste",
+        help_text="En pourcentage du coût : 20 = prix de vente × 1,20. Marge par défaut sur les opérations de ce poste", **TAUX,
     )
 
     class Meta:
@@ -208,7 +526,7 @@ class TarifPoste(DateRangeHistoriqueMixin, models.Model):
     poste = models.ForeignKey(
         PosteTravail, verbose_name="poste", on_delete=models.CASCADE, related_name="tarifs"
     )
-    cout_horaire = models.FloatField("coût horaire", help_text="€/heure")
+    cout_horaire = ChampDecimal("coût horaire", help_text="€/heure", **PRIX)
     date_debut = models.DateField("date de début")
     date_fin = models.DateField("date de fin", null=True, blank=True)
 
@@ -219,6 +537,54 @@ class TarifPoste(DateRangeHistoriqueMixin, models.Model):
 
     def __str__(self):
         return f"{self.poste} : {self.cout_horaire} €/h ({self.date_debut} → {self.date_fin or '…'})"
+
+
+class GammeType(models.Model):
+    """Gamme type (« Pliage + soudure », « Ébavurage + traitement »…) : une suite d'opérations réutilisable, qu'on ajoute
+    en un clic à la gamme d'un article fabriqué. Les étapes sont copiées dans la gamme de l'article : modifier ensuite la
+    gamme type ne change pas les gammes déjà créées."""
+
+    nom = models.CharField("nom", max_length=100, unique=True)
+    description = models.CharField("description", max_length=255, blank=True)
+
+    class Meta:
+        verbose_name = "Gamme type"
+        verbose_name_plural = "Gammes types"
+        ordering = ["nom"]
+
+    def __str__(self):
+        return self.nom
+
+
+class GammeTypeEtape(models.Model):
+    gamme_type = models.ForeignKey(GammeType, verbose_name="gamme type", on_delete=models.CASCADE, related_name="etapes")
+    ordre = models.PositiveIntegerField("ordre")
+    poste = models.ForeignKey(PosteTravail, verbose_name="poste", on_delete=models.PROTECT, related_name="gamme_type_etapes")
+    temps_fixe = models.FloatField("temps fixe (min)", null=True, blank=True, help_text="Réglage (poste horaire)")
+    temps_variable = models.FloatField("temps par pièce (min)", null=True, blank=True, help_text="Poste horaire")
+    cout_forfaitaire = ChampDecimal("coût forfaitaire par pièce", null=True, blank=True, help_text="Poste forfaitaire (sous-traitance)", **PRIX)
+
+    class Meta:
+        verbose_name = "Étape de gamme type"
+        verbose_name_plural = "Étapes de gamme type"
+        ordering = ["gamme_type", "ordre"]
+
+    def __str__(self):
+        return f"{self.gamme_type} — étape {self.ordre} ({self.poste})"
+
+    def clean(self):
+        super().clean()
+        if not self.poste_id:
+            return
+        if self.poste.mode_calcul == PosteTravail.ModeCalcul.HORAIRE:
+            if self.temps_fixe is None or self.temps_variable is None:
+                raise ValidationError("Un poste en mode horaire requiert un temps fixe et un temps par pièce.")
+            if self.cout_forfaitaire is not None:
+                raise ValidationError({"cout_forfaitaire": "Non applicable pour un poste en mode horaire."})
+        elif self.cout_forfaitaire is None:
+            raise ValidationError({"cout_forfaitaire": "Un poste en mode forfaitaire requiert un coût forfaitaire."})
+        elif self.temps_fixe is not None or self.temps_variable is not None:
+            raise ValidationError("Temps fixe/variable non applicables pour un poste en mode forfaitaire.")
 
 
 class Nomenclature(models.Model):
@@ -272,12 +638,16 @@ class Gamme(DateRangeHistoriqueMixin, models.Model):
     temps_variable = models.FloatField(
         "temps variable", null=True, blank=True, help_text="Temps unitaire (mode horaire)"
     )
-    cout_forfaitaire = models.FloatField(
-        "coût forfaitaire", null=True, blank=True, help_text="Mode forfaitaire (sous-traitance)"
+    cout_forfaitaire = ChampDecimal(
+        "coût forfaitaire", null=True, blank=True, help_text="Mode forfaitaire (sous-traitance)", **PRIX,
     )
     date_debut = models.DateField("date de début")
     date_fin = models.DateField(
         "date de fin", null=True, blank=True, help_text="Historisation de la révision"
+    )
+    origine = models.CharField(
+        "origine", max_length=12, default="manuelle", choices=[("manuelle", "Saisie à la main"), ("decoupe", "Calculée depuis la pièce à découper")],
+        help_text="Une étape « calculée » est remise à jour depuis la pièce à découper (temps de coupe) ; la modifier à la main la fait revenir en « saisie à la main ».",
     )
 
     class Meta:

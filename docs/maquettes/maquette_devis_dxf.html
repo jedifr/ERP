@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><title>Maquette — devis avec import DXF/DWG et imbrication</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root{--p:#d9680c;--p7:#b45309;--p-bg:#fdf0e1;--b2:#e5e7eb;--b5:#6b7280;--b7:#374151;--b9:#111827;--ok:#15803d;--okbg:#dcfce7;--ko:#b91c1c;--kobg:#fee2e2;--wa:#b45309;--wabg:#fef3c7;--in:#1d4ed8;--inbg:#dbeafe}
+*{box-sizing:border-box}body{margin:0;font:14px/1.45 Inter,system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--b7);background:#f9fafb}
+.app{display:grid;grid-template-columns:230px 1fr;min-height:100vh}
+aside{background:#fff;border-right:1px solid var(--b2);padding:14px 10px}
+.logo{display:flex;gap:10px;align-items:center;margin-bottom:14px}.logo i{width:34px;height:34px;border-radius:8px;background:var(--p);display:block}
+.logo b{display:block;color:var(--b9)}.logo small{color:var(--b5);font-size:11px}
+.grp{margin:14px 0 6px;padding:6px 10px;font-size:12px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--p7);background:var(--p-bg);border-left:3px solid var(--p);border-radius:0 6px 6px 0}
+.nav a{display:block;padding:7px 12px;border-radius:8px;color:var(--b7);text-decoration:none}.nav a.on{background:#f3f4f6;color:var(--p);font-weight:600}
+header{display:flex;align-items:center;gap:14px;padding:12px 24px;background:#fff;border-bottom:1px solid var(--b2)}
+header .bc{font-weight:600;color:var(--b9)}header .bc span{color:var(--b5);font-weight:400;margin:0 8px}
+.btn{display:inline-block;padding:7px 14px;border:1px solid var(--b2);border-radius:8px;background:#fff;font-weight:600;color:var(--b7);cursor:pointer}
+.btn.p{background:var(--p);border-color:var(--p);color:#fff}.btn.s{font-size:12px;padding:4px 10px}
+.pill{border-radius:999px;padding:2px 10px;font-size:12px;font-weight:600}
+main{padding:20px 24px;max-width:1500px}
+.top{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;background:#fff;border:1px solid var(--b2);border-radius:12px;padding:12px 16px;margin-bottom:18px}
+.top label{font-size:12px;color:var(--b5);display:block}.top b{color:var(--b9)}
+h2.sec{display:flex;align-items:center;gap:10px;margin:22px 0 10px;padding:8px 14px;font-size:13px;letter-spacing:.07em;text-transform:uppercase;color:var(--p7);background:var(--p-bg);border-left:3px solid var(--p);border-radius:0 8px 8px 0}
+h2.sec .new{margin-left:auto;background:var(--p);color:#fff;border-radius:999px;padding:1px 10px;font-size:11px;letter-spacing:.04em}
+.card{background:#fff;border:1px solid var(--b2);border-radius:12px}
+table{width:100%;border-collapse:collapse}th{font-size:12px;color:var(--b9);text-align:left;padding:10px 10px;border-bottom:1px solid var(--b2)}td{padding:9px 10px;border-bottom:1px solid #f3f4f6}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+.tag{font-size:11px;padding:1px 8px;border-radius:999px;font-weight:600;background:var(--inbg);color:var(--in)}
+.steps{display:flex;gap:10px;margin:0 0 12px}.steps div{flex:1;display:flex;gap:10px;align-items:center;background:#fff;border:1px solid var(--b2);border-radius:10px;padding:8px 12px}
+.steps b{width:24px;height:24px;border-radius:50%;background:var(--p);color:#fff;display:grid;place-items:center;font-size:13px;flex:none}
+.work{display:grid;grid-template-columns:minmax(430px,40%) 1fr;gap:16px;align-items:start}
+.drop{border:2px dashed #e0b48a;background:#fffaf4;border-radius:12px;padding:16px;text-align:center;color:var(--b5);margin:14px}
+.drop b{color:var(--p7)}.drop .ic{font-size:26px}
+.piece{display:grid;grid-template-columns:96px 1fr;gap:12px;padding:12px 14px;border-top:1px solid #f3f4f6}
+.piece .th{background:#f9fafb;border:1px solid var(--b2);border-radius:8px;padding:6px}
+.piece h4{margin:0;color:var(--b9);font-size:14px;display:flex;gap:8px;align-items:center}
+.piece .meta{font-size:12px;color:var(--b5);margin:2px 0 8px}
+.f{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.f label{font-size:11px;color:var(--b5);display:block;margin-bottom:2px}
+.f div>span{display:block;border:1px solid var(--b2);border-radius:8px;padding:5px 8px;background:#fff;color:var(--b9);font-size:13px;white-space:nowrap}
+.alert{margin-top:8px;font-size:12px;border-radius:8px;padding:6px 10px;display:flex;gap:8px;align-items:center;justify-content:space-between}
+.alert.ko{background:var(--kobg);color:var(--ko)}.alert.ok{background:var(--okbg);color:var(--ok)}
+.bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:12px 14px;border-bottom:1px solid #f3f4f6}
+.bar .f1{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--b5)}.bar .f1 span{border:1px solid var(--b2);border-radius:8px;padding:4px 10px;color:var(--b9);font-size:13px;background:#fff}
+.chips span.c{border:1px solid var(--b2);border-radius:8px;padding:4px 10px;font-size:13px;color:var(--b9);background:#fff}.chips span.c.on{border-color:var(--p);background:var(--p-bg);color:var(--p7);font-weight:700}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:12px 14px}
+.kpi{border:1px solid var(--b2);border-radius:10px;padding:8px 12px}.kpi small{display:block;font-size:11px;color:var(--b5);text-transform:uppercase;letter-spacing:.05em}.kpi b{font-size:20px;color:var(--b9)}
+.sheet{margin:0 14px 14px;border:1px solid var(--b2);border-radius:10px;overflow:hidden}
+.legend{display:flex;gap:16px;padding:0 14px 12px;font-size:12px;color:var(--b5)}.legend i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:5px;vertical-align:-2px}
+.res td,.res th{padding:8px 12px}.res tfoot td{font-weight:700;color:var(--b9);background:#fafafa}
+.sim td.best{background:var(--okbg);font-weight:700;color:var(--ok)}
+.foot{display:flex;gap:10px;justify-content:space-between;align-items:center;padding:12px 14px;background:#fafafa;border-radius:0 0 12px 12px}
+.note{font-size:12px;color:var(--b5)}
+.ribbon{background:#111827;color:#fff;font-size:12px;padding:6px 24px;text-align:center}
+.grid2{display:grid;grid-template-columns:1fr 330px;gap:16px;align-items:start}
+</style></head><body>
+<div class="ribbon">MAQUETTE — rien n'est calculé ici, chiffres d'illustration</div>
+<div class="app">
+<aside>
+  <div class="logo"><i></i><div><b>ERP maison</b><small>Métallurgie &amp; chaudronnerie</small></div></div>
+  <div class="grp">Ventes</div><div class="nav"><a class="on">Devis</a><a>Commandes clients</a><a>Livraisons (BL)</a><a>Factures</a></div>
+  <div class="grp">Production</div><div class="nav"><a>Ordres de fabrication</a><a>Pièces à découper</a><a>Imbrications</a></div>
+  <div class="grp">Achats</div><div class="nav"><a>Commandes fournisseur</a><a>Réceptions</a></div>
+</aside>
+<div>
+<header><span class="bc">Chiffrage<span>›</span>Devis<span>›</span>DEV-2026-105</span>
+  <span class="btn p">+ Nouveau ▾</span><span class="pill" style="background:var(--inbg);color:var(--in)">v2026.10.07</span>
+  <span style="margin-left:auto;display:flex;gap:8px"><span class="btn">Historique</span><span class="btn">PDF du devis</span><span class="btn p">Étape suivante ›</span></span></header>
+<main>
+ <div class="top">
+  <div><label>Numéro</label><b>DEV-2026-105</b></div><div><label>Client</label><b>CLI-G — Métallerie Durand</b></div>
+  <div><label>Statut</label><span class="pill" style="background:var(--wabg);color:var(--wa)">Brouillon</span></div><div><label>Valable jusqu'au</label><b>—</b></div>
+ </div>
+
+ <div class="grid2"><div>
+ <h2 class="sec">Lignes de devis</h2>
+ <div class="card"><table>
+  <tr><th>Article</th><th class="n">Qté</th><th class="n">Coût matière</th><th class="n">Prix matière HT</th><th class="n">Prix opérations HT</th><th class="n">Prix unitaire HT</th><th class="n">Prix total TTC</th></tr>
+  <tr><td>PL-01 — Platine 520 × 330 <span class="tag">Découpe laser</span></td><td class="n">8</td><td class="n">16,30</td><td class="n">18,75</td><td class="n">6,78</td><td class="n">25,53</td><td class="n">245,09</td></tr>
+  <tr><td>DI-02 — Disque Ø 300 <span class="tag">Découpe laser</span></td><td class="n">9</td><td class="n">6,20</td><td class="n">7,13</td><td class="n">3,17</td><td class="n">10,30</td><td class="n">111,24</td></tr>
+  <tr><td>CO-03 — Cornière en L <span class="tag">Découpe laser</span></td><td class="n">6</td><td class="n">7,80</td><td class="n">8,97</td><td class="n">4,03</td><td class="n">13,00</td><td class="n">93,60</td></tr>
+  <tr><td style="color:var(--b5)">FLASQUE-G (ligne saisie à la main)</td><td class="n">20</td><td class="n">8,00</td><td class="n">10,00</td><td class="n">0</td><td class="n">10,00</td><td class="n">240,00</td></tr>
+ </table></div>
+ </div>
+ <div><h2 class="sec">Récapitulatif</h2><div class="card" style="padding:6px 16px">
+   <table><tr><td><b>Montant matière HT</b></td><td class="n">386,40</td></tr><tr><td><b>Montant opérations HT</b></td><td class="n">99,40</td></tr><tr><td><b>Montant total HT</b></td><td class="n"><b>485,80</b></td></tr><tr><td><b>Montant total TTC</b></td><td class="n">582,96</td></tr></table>
+   <div class="note" style="padding:8px 0">Se met à jour dès que l'on ajoute au devis.</div></div></div>
+ </div>
+
+ <h2 class="sec">Pièces à découper et imbrication <span class="new">NOUVEAU</span></h2>
+ <div class="steps">
+  <div><b>1</b><span><strong>Importer</strong> les DXF / DWG</span></div>
+  <div><b>2</b><span><strong>Régler</strong> matière, épaisseur, procédé</span></div>
+  <div><b>3</b><span><strong>Imbriquer</strong> et comparer les formats</span></div>
+  <div><b>4</b><span><strong>Ajouter au devis</strong> : prix mis à jour</span></div>
+ </div>
+
+ <div class="work">
+  <!-- colonne gauche : import + réglages par pièce -->
+  <div class="card">
+   <div class="drop"><div class="ic">⬆</div><b>Glissez vos fichiers DXF / DWG ici</b><br>ou <u>parcourir</u> · plusieurs fichiers à la fois · gravure et calques classés d'après le profil d'import</div>
+   <div class="piece"><div class="th"><svg viewBox="0 0 120 80"><rect x="8" y="8" width="104" height="64" rx="3" fill="#fed7aa" stroke="#7c2d12" stroke-width="2"/><circle cx="24" cy="24" r="6" fill="#fff" stroke="#7c2d12"/><circle cx="96" cy="24" r="6" fill="#fff" stroke="#7c2d12"/><circle cx="24" cy="56" r="6" fill="#fff" stroke="#7c2d12"/><circle cx="96" cy="56" r="6" fill="#fff" stroke="#7c2d12"/></svg></div><div>
+     <h4>PL-01 — Platine <span class="pill" style="background:var(--okbg);color:var(--ok)">Importée</span></h4>
+     <div class="meta">platine_520x330.dxf · 520 × 330 mm · 4 trous · 2,4 m de coupe</div>
+     <div class="f"><div><label>Matière</label><span>S355 ▾</span></div><div><label>Épaisseur</label><span>8 mm ▾</span></div><div><label>Procédé</label><span>Laser ▾</span></div><div><label>Quantité</label><span>8</span></div></div>
+     <div class="alert ok"><span>Laser O₂ · 8 mm : réalisable · 1,35 min / pièce</span></div></div></div>
+   <div class="piece"><div class="th"><svg viewBox="0 0 120 80"><circle cx="60" cy="40" r="32" fill="#bfdbfe" stroke="#1e3a8a" stroke-width="2"/><circle cx="60" cy="40" r="11" fill="#fff" stroke="#1e3a8a"/></svg></div><div>
+     <h4>DI-02 — Disque <span class="pill" style="background:var(--okbg);color:var(--ok)">Importée</span></h4>
+     <div class="meta">disque_d300.dwg · Ø 300 mm · 1 trou · 1,3 m de coupe</div>
+     <div class="f"><div><label>Matière</label><span>S355 ▾</span></div><div><label>Épaisseur</label><span>8 mm ▾</span></div><div><label>Procédé</label><span>Laser ▾</span></div><div><label>Quantité</label><span>9</span></div></div>
+     <div class="alert ok"><span>Laser O₂ · 8 mm : réalisable · 0,73 min / pièce</span></div></div></div>
+   <div class="piece"><div class="th"><svg viewBox="0 0 120 80"><polygon points="14,8 106,8 106,28 34,28 34,72 14,72" fill="#bbf7d0" stroke="#14532d" stroke-width="2"/></svg></div><div>
+     <h4>CO-03 — Cornière en L <span class="pill" style="background:var(--okbg);color:var(--ok)">Importée</span></h4>
+     <div class="meta">coin_l.dxf · 440 × 380 mm · 1,6 m de coupe</div>
+     <div class="f"><div><label>Matière</label><span>S355 ▾</span></div><div><label>Épaisseur</label><span>8 mm ▾</span></div><div><label>Procédé</label><span>Laser ▾</span></div><div><label>Quantité</label><span>6</span></div></div>
+     <div class="alert ok"><span>Laser O₂ · 8 mm : réalisable · 0,92 min / pièce</span></div></div></div>
+   <div class="piece"><div class="th"><svg viewBox="0 0 120 80"><rect x="10" y="14" width="100" height="52" rx="3" fill="#fecaca" stroke="#991b1b" stroke-width="2"/></svg></div><div>
+     <h4>SU-04 — Support <span class="pill" style="background:var(--kobg);color:var(--ko)">À régler</span></h4>
+     <div class="meta">support.dxf · 300 × 180 mm · 2 trous</div>
+     <div class="f"><div><label>Matière</label><span>S355 ▾</span></div><div><label>Épaisseur</label><span style="border-color:var(--ko)">7 mm ▾</span></div><div><label>Procédé</label><span>Laser ▾</span></div><div><label>Quantité</label><span>4</span></div></div>
+     <div class="alert ko"><span>Non réalisable au laser : 7 mm n'est pas dans la base (6, 8, 10…).</span><span class="btn s">Passer au jet d'eau</span></div></div></div>
+  </div>
+
+  <!-- colonne droite : imbrication -->
+  <div class="card">
+   <div class="bar">
+     <div class="f1">Groupe <span>S355 · 8 mm · laser</span></div>
+     <div class="f1">Tôle <span>TOLE-S355-8 ▾</span></div>
+     <div class="f1">Écart entre pièces <span>10 mm (laser)</span></div>
+     <div class="f1">Marge de bord <span>5 mm</span></div>
+     <div class="f1">Chute récupérable <span>0 %</span></div>
+     <span class="btn s" style="margin-left:auto">↻ Recalculer</span>
+   </div>
+   <div class="bar chips"><span class="note">Format :</span><span class="c on">3000 × 1500 ✓</span><span class="c">2500 × 1250</span><span class="c">2000 × 1000</span><span class="c">+ personnalisé</span><span class="note" style="margin-left:auto">23 pièces posées · 1 feuille</span></div>
+   <div class="kpis">
+     <div class="kpi"><small>Feuilles</small><b>1</b></div>
+     <div class="kpi"><small>Utilisation</small><b>66 %</b></div>
+     <div class="kpi"><small>Surface consommée</small><b>3,5 m²</b></div>
+     <div class="kpi"><small>Coût matière du lot</small><b>233 €</b></div>
+   </div>
+   <div class="sheet"><svg viewBox="0 0 3080 1580" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto;display:block;background:#fff">
+<rect x="0" y="0" width="3080" height="1580" fill="#e5e7eb"/>
+<rect x="20" y="20" width="3040" height="1540" fill="#fff" stroke="#374151" stroke-width="6"/>
+<rect x="40" y="40" width="3000" height="1500" fill="none" stroke="#9ca3af" stroke-width="3" stroke-dasharray="20 14"/>
+<g><rect x="40" y="40" width="520" height="330" rx="6" fill="#fed7aa" stroke="#7c2d12" stroke-width="5"/><circle cx="130" cy="130" r="28" fill="#fff" stroke="#7c2d12" stroke-width="4"/><circle cx="470" cy="130" r="28" fill="#fff" stroke="#7c2d12" stroke-width="4"/><circle cx="130" cy="280" r="28" fill="#fff" stroke="#7c2d12" stroke-width="4"/><circle cx="470" cy="280" r="28" fill="#fff" stroke="#7c2d12" stroke-width="4"/><text x="300.0" y="223.0" font-size="52" text-anchor="middle" fill="#7c2d12" font-weight="700">PL-01</text></g><g><rect x="580" y="40" width="520" height="330" rx="6" fill="#fed7aa" stroke="#7c2d12" stroke-width="5"/><circle cx="670" cy="130" r="28" fill="#fff" stroke="#7c2d12" stroke-width="4"/><circle cx="1010" cy="130" r="28" fill="#fff" stroke="#7c2d12" stroke-width="4"/><circle cx="670" cy="280" r="28" fill="#fff" stroke="#7c2d12" stroke-width="4"/><circle cx="1010" cy="280" r="28" fill="#fff" stroke="#7c2d12" stroke-width="4"/></g><g><rect x="1120" y="40" width="520" height="330" rx="6" fill="#fed7aa" stroke="#7c2d12" stroke-width="5"/><circle cx="1210" cy="130" r="28" fill="#fff" stroke="#7c2d12" stroke-width="4"/><circle cx="1550" cy="130" r="28" fill="#fff" stroke="#7c2d12" stroke-width="4"/><circle cx="1210" cy="280" r="28" fill="#fff" stroke="#7c2d12" stroke-width="4"/><circle cx="1550" cy="280" r="28" fill="#fff" stroke="#7c2d12" stroke-width="4"/></g><g><rect x="1660" y="40" width="520" height="330" rx="6" fill="#fed7aa" stroke="#7c2d12" stroke-width="5"/><circle cx="1750" cy="130" r="28" fill="#fff" stroke="#7c2d12" stroke-width="4"/><circle cx="2090" cy="130" r="28" fill="#fff" stroke="#7c2d12" stroke-width="4"/><circle cx="1750" cy="280" r="28" fill="#fff" stroke="#7c2d12" stroke-width="4"/><circle cx="2090" cy="280" r="28" fill="#fff" stroke="#7c2d12" stroke-width="4"/></g><g><rect x="2200" y="40" width="520" height="330" rx="6" fill="#fed7aa" stroke="#7c2d12" stroke-width="5"/><circle cx="2290" cy="130" r="28" fill="#fff" stroke="#7c2d12" stroke-width="4"/><circle cx="2630" cy="130" r="28" fill="#fff" stroke="#7c2d12" stroke-width="4"/><circle cx="2290" cy="280" r="28" fill="#fff" stroke="#7c2d12" stroke-width="4"/><circle cx="2630" cy="280" r="28" fill="#fff" stroke="#7c2d12" stroke-width="4"/></g><circle cx="190" cy="540" r="150" fill="#bfdbfe" stroke="#1e3a8a" stroke-width="5"/><circle cx="190" cy="540" r="52.5" fill="#fff" stroke="#1e3a8a" stroke-width="4"/><circle cx="510" cy="540" r="150" fill="#bfdbfe" stroke="#1e3a8a" stroke-width="5"/><circle cx="510" cy="540" r="52.5" fill="#fff" stroke="#1e3a8a" stroke-width="4"/><circle cx="830" cy="540" r="150" fill="#bfdbfe" stroke="#1e3a8a" stroke-width="5"/><circle cx="830" cy="540" r="52.5" fill="#fff" stroke="#1e3a8a" stroke-width="4"/><circle cx="1150" cy="540" r="150" fill="#bfdbfe" stroke="#1e3a8a" stroke-width="5"/><circle cx="1150" cy="540" r="52.5" fill="#fff" stroke="#1e3a8a" stroke-width="4"/><circle cx="1470" cy="540" r="150" fill="#bfdbfe" stroke="#1e3a8a" stroke-width="5"/><circle cx="1470" cy="540" r="52.5" fill="#fff" stroke="#1e3a8a" stroke-width="4"/><circle cx="1790" cy="540" r="150" fill="#bfdbfe" stroke="#1e3a8a" stroke-width="5"/><circle cx="1790" cy="540" r="52.5" fill="#fff" stroke="#1e3a8a" stroke-width="4"/><circle cx="2110" cy="540" r="150" fill="#bfdbfe" stroke="#1e3a8a" stroke-width="5"/><circle cx="2110" cy="540" r="52.5" fill="#fff" stroke="#1e3a8a" stroke-width="4"/><circle cx="2430" cy="540" r="150" fill="#bfdbfe" stroke="#1e3a8a" stroke-width="5"/><circle cx="2430" cy="540" r="52.5" fill="#fff" stroke="#1e3a8a" stroke-width="4"/><circle cx="2750" cy="540" r="150" fill="#bfdbfe" stroke="#1e3a8a" stroke-width="5"/><circle cx="2750" cy="540" r="52.5" fill="#fff" stroke="#1e3a8a" stroke-width="4"/><polygon points="40,710 480,710 480,820 150,820 150,1090 40,1090" fill="#bbf7d0" stroke="#14532d" stroke-width="5"/><polygon points="500,710 940,710 940,820 610,820 610,1090 500,1090" fill="#bbf7d0" stroke="#14532d" stroke-width="5"/><polygon points="960,710 1400,710 1400,820 1070,820 1070,1090 960,1090" fill="#bbf7d0" stroke="#14532d" stroke-width="5"/><polygon points="1420,710 1860,710 1860,820 1530,820 1530,1090 1420,1090" fill="#bbf7d0" stroke="#14532d" stroke-width="5"/><polygon points="1880,710 2320,710 2320,820 1990,820 1990,1090 1880,1090" fill="#bbf7d0" stroke="#14532d" stroke-width="5"/><polygon points="2340,710 2780,710 2780,820 2450,820 2450,1090 2340,1090" fill="#bbf7d0" stroke="#14532d" stroke-width="5"/><g><rect x="40" y="1110" width="520" height="330" rx="6" fill="#fed7aa" stroke="#7c2d12" stroke-width="5"/><circle cx="130" cy="1200" r="28" fill="#fff" stroke="#7c2d12" stroke-width="4"/><circle cx="470" cy="1200" r="28" fill="#fff" stroke="#7c2d12" stroke-width="4"/></g><g><rect x="580" y="1110" width="520" height="330" rx="6" fill="#fed7aa" stroke="#7c2d12" stroke-width="5"/><circle cx="670" cy="1200" r="28" fill="#fff" stroke="#7c2d12" stroke-width="4"/><circle cx="1010" cy="1200" r="28" fill="#fff" stroke="#7c2d12" stroke-width="4"/></g><g><rect x="1120" y="1110" width="520" height="330" rx="6" fill="#fed7aa" stroke="#7c2d12" stroke-width="5"/><circle cx="1210" cy="1200" r="28" fill="#fff" stroke="#7c2d12" stroke-width="4"/><circle cx="1550" cy="1200" r="28" fill="#fff" stroke="#7c2d12" stroke-width="4"/></g>
+<text x="2990" y="1510" font-size="46" fill="#6b7280" text-anchor="end">3000 × 1500 mm</text>
+</svg></div>
+   <div class="legend"><span><i style="background:#fed7aa"></i>PL-01 × 8</span><span><i style="background:#bfdbfe"></i>DI-02 × 9</span><span><i style="background:#bbf7d0"></i>CO-03 × 6</span><span style="margin-left:auto">Glisser une pièce pour la déplacer (éditeur d'imbrication existant)</span></div>
+   <div style="padding:0 14px 14px"><div class="note" style="margin-bottom:6px"><b>Comparaison des formats</b> (coût matière du lot)</div>
+    <table class="sim"><tr><th>Format</th><th class="n">Feuilles</th><th class="n">Utilisation</th><th class="n">Surface consommée</th><th class="n">Coût matière</th></tr>
+     <tr><td class="best">3000 × 1500</td><td class="n best">1</td><td class="n best">66 %</td><td class="n best">3,5 m²</td><td class="n best">233 €</td></tr>
+     <tr><td>2500 × 1250</td><td class="n">1</td><td class="n">59 %</td><td class="n">3,9 m²</td><td class="n">258 €</td></tr>
+     <tr><td>2000 × 1000</td><td class="n">2</td><td class="n">61 %</td><td class="n">3,8 m²</td><td class="n">251 €</td></tr></table></div>
+  </div>
+ </div>
+
+ <h2 class="sec">Résultat du chiffrage</h2>
+ <div class="card"><table class="res">
+   <tr><th>Pièce</th><th class="n">Qté</th><th class="n">Temps de coupe / pièce</th><th class="n">Matière / pièce</th><th class="n">Machine / pièce</th><th class="n">Coût de revient</th><th class="n">Prix de vente unitaire HT</th><th class="n">Total HT</th></tr>
+   <tr><td>PL-01 — Platine</td><td class="n">8</td><td class="n">1,35 min</td><td class="n">16,30 €</td><td class="n">3,26 €</td><td class="n">19,56 €</td><td class="n">25,53 €</td><td class="n">204,24 €</td></tr>
+   <tr><td>DI-02 — Disque</td><td class="n">9</td><td class="n">0,73 min</td><td class="n">6,20 €</td><td class="n">1,74 €</td><td class="n">7,94 €</td><td class="n">10,30 €</td><td class="n">92,70 €</td></tr>
+   <tr><td>CO-03 — Cornière</td><td class="n">6</td><td class="n">0,92 min</td><td class="n">7,80 €</td><td class="n">2,19 €</td><td class="n">9,99 €</td><td class="n">13,00 €</td><td class="n">78,00 €</td></tr>
+   <tr><td style="color:var(--ko)">SU-04 — Support</td><td class="n">4</td><td class="n" colspan="5" style="color:var(--ko)">Non chiffré : épaisseur à régler (laser impossible à 7 mm)</td><td class="n">—</td></tr>
+   <tfoot><tr><td colspan="7">Total des pièces chiffrées</td><td class="n">374,94 €</td></tr></tfoot></table>
+   <div class="foot"><span class="note">La matière est répartie au prorata de la surface consommée (chutes comprises), selon la quantité. Chiffres d'illustration.</span>
+     <span style="display:flex;gap:8px"><span class="btn">Enregistrer les pièces sans ajouter</span><span class="btn p">Ajouter 3 pièces au devis</span></span></div></div>
+</main></div></div>
+</body></html>

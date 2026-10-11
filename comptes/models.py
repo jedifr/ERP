@@ -1,0 +1,126 @@
+from django.db import models
+
+
+class EvenementConnexion(models.Model):
+    """Journal des connexions : succès, échecs, refus pour cause de verrouillage et
+    déblocages manuels. Sert à la fois de piste d'audit et de compteur pour limiter les
+    tentatives (voir comptes.connexions). Jamais modifiable ni supprimable à la main."""
+
+    class Type(models.TextChoices):
+        SUCCES = "succes", "Connexion réussie"
+        ECHEC = "echec", "Échec d'authentification"
+        BLOQUE = "bloque", "Refusée : compte verrouillé"
+        DEBLOCAGE = "deblocage", "Déblocage manuel"
+
+    identifiant = models.CharField("identifiant saisi", max_length=150, db_index=True)
+    type_evenement = models.CharField("événement", max_length=12, choices=Type.choices)
+    adresse_ip = models.GenericIPAddressField(
+        "adresse IP", null=True, blank=True,
+        help_text="Indicative : derrière un reverse proxy, c'est l'adresse transmise par celui-ci.",
+    )
+    date = models.DateTimeField("date", auto_now_add=True, db_index=True)
+
+    class Meta:
+        verbose_name = "Événement de connexion"
+        verbose_name_plural = "Journal des connexions"
+        ordering = ["-date", "-id"]
+        indexes = [models.Index(fields=["identifiant", "date"])]
+        permissions = [("debloquer_compte", "Peut débloquer un compte verrouillé après trop d'échecs")]
+
+    def __str__(self):
+        return f"{self.get_type_evenement_display()} — {self.identifiant}"
+
+
+class Societe(models.Model):
+    """Identité de l'entreprise, reprise en en-tête et pied de page des documents PDF (devis,
+    bons de livraison). Une seule fiche (voir `charger`)."""
+
+    raison_sociale = models.CharField("raison sociale", max_length=200, default="Mon entreprise")
+    forme_juridique = models.CharField("forme juridique", max_length=50, blank=True, help_text="Ex. SAS, SARL, EURL")
+    adresse = models.TextField("adresse", blank=True)
+    code_postal = models.CharField("code postal", max_length=10, blank=True)
+    ville = models.CharField("ville", max_length=100, blank=True)
+    telephone = models.CharField("téléphone", max_length=30, blank=True)
+    email = models.EmailField("e-mail", blank=True)
+    site_web = models.CharField("site web", max_length=100, blank=True)
+    siret = models.CharField("SIRET", max_length=20, blank=True)
+    tva_intracommunautaire = models.CharField("TVA intracommunautaire", max_length=20, blank=True)
+    capital = models.CharField("capital social", max_length=50, blank=True, help_text="Ex. 10 000 €")
+    rcs = models.CharField("RCS", max_length=100, blank=True, help_text="Ex. RCS Lyon 123 456 789")
+    iban = models.CharField("IBAN", max_length=40, blank=True)
+    bic = models.CharField("BIC", max_length=15, blank=True)
+    logo = models.ImageField("logo", upload_to="societe/", blank=True, help_text="Affiché en en-tête des documents (PNG ou JPEG).")
+    mentions_devis = models.TextField(
+        "mentions sur les devis", blank=True,
+        help_text="Conditions de vente, pénalités de retard, etc., imprimées en bas du devis.",
+    )
+    mentions_commande = models.TextField(
+        "mentions sur les accusés de réception de commande", blank=True,
+        help_text="Ex. conditions générales de vente, réserve de propriété.",
+    )
+    mentions_livraison = models.TextField("mentions sur les bons de livraison", blank=True)
+    mentions_facture = models.TextField(
+        "mentions sur les factures", blank=True,
+        help_text="Escompte, pénalités de retard et indemnité forfaitaire de recouvrement (40 €), imprimés en bas des factures. "
+        "Vide : texte légal par défaut (pas d'escompte, pénalités de 3 fois le taux d'intérêt légal, 40 €).",
+    )
+
+    class Meta:
+        verbose_name = "Société"
+        verbose_name_plural = "Société"
+
+    def __str__(self):
+        return self.raison_sociale
+
+    @classmethod
+    def charger(cls):
+        societe, _ = cls.objects.get_or_create(pk=1)
+        return societe
+
+    def save(self, *args, **kwargs):
+        self.pk = 1  # une seule fiche
+        super().save(*args, **kwargs)
+
+
+class PreferenceColonnes(models.Model):
+    """Colonnes que l'utilisateur a choisi de masquer sur un écran (liste d'un document ou tableau de lignes d'une
+    fiche). Réglage personnel : il ne change rien pour les autres utilisateurs. Voir comptes/colonnes.py."""
+
+    utilisateur = models.ForeignKey(
+        "auth.User", verbose_name="utilisateur", on_delete=models.CASCADE, related_name="preferences_colonnes"
+    )
+    ecran = models.CharField("écran", max_length=150)
+    masquees = models.JSONField("colonnes masquées", default=list, blank=True)
+
+    class Meta:
+        verbose_name = "Préférence de colonnes"
+        verbose_name_plural = "Préférences de colonnes"
+        constraints = [models.UniqueConstraint(fields=["utilisateur", "ecran"], name="unique_preference_colonnes")]
+
+    def __str__(self):
+        return f"{self.utilisateur} — {self.ecran}"
+
+
+class LotModification(models.Model):
+    """Journal d'une modification ou d'une création par lots : qui, quand, sur quoi, et les anciennes valeurs (pour annuler le lot
+    tant que les valeurs n'ont pas été changées depuis). Voir comptes/lots.py."""
+
+    utilisateur = models.ForeignKey("auth.User", verbose_name="utilisateur", on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    date = models.DateTimeField("date", auto_now_add=True)
+    modele = models.CharField("modèle", max_length=80, help_text="Étiquette Django du modèle modifié (app.Modele)")
+    description = models.CharField("description", max_length=255)
+    modifications = models.JSONField("modifications", default=list, help_text="[{pk, avant: {champ: valeur}, apres: {champ: valeur}}]")
+    crees = models.JSONField("objets créés", default=list, help_text="[[étiquette du modèle, clé]]")
+    annule_le = models.DateTimeField("annulé le", null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Lot de modifications"
+        verbose_name_plural = "Lots de modifications"
+        ordering = ["-date"]
+
+    def __str__(self):
+        return f"{self.date:%d/%m/%Y %H:%M} — {self.description}"
+
+    @property
+    def nombre(self):
+        return len(self.modifications) + len(self.crees)

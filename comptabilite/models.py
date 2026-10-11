@@ -6,6 +6,8 @@ from django.db import models
 from commercial.models import Tiers
 from facturation.models import Facture
 from technique.models import Article
+from comptes.champs import ChampDecimal
+from comptes.montants import MONTANT, arrondir, somme
 
 
 class CompteComptable(models.Model):
@@ -473,6 +475,25 @@ class ParametresComptables(models.Model):
         help_text="Ex. 44566 — TVA déductible sur autres biens et services",
     )
 
+    compte_tva_autoliquidation_deductible = models.ForeignKey(
+        CompteComptable,
+        verbose_name="compte de TVA déductible sur autoliquidation",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="+",
+        help_text="Ex. 445663. Vide : ce compte est créé au premier achat en autoliquidation.",
+    )
+    compte_tva_autoliquidation_due = models.ForeignKey(
+        CompteComptable,
+        verbose_name="compte de TVA due sur autoliquidation",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="+",
+        help_text="Ex. 445200 (TVA due intracommunautaire). Vide : ce compte est créé au premier achat en autoliquidation.",
+    )
+
     class Meta:
         verbose_name = "Paramètres comptables"
         verbose_name_plural = "Paramètres comptables"
@@ -557,15 +578,15 @@ class EcritureComptable(models.Model):
 
     @property
     def total_debit(self):
-        return sum(ligne.debit for ligne in self.lignes.all())
+        return somme(ligne.debit for ligne in self.lignes.all())
 
     @property
     def total_credit(self):
-        return sum(ligne.credit for ligne in self.lignes.all())
+        return somme(ligne.credit for ligne in self.lignes.all())
 
     @property
     def est_equilibree(self):
-        return round(self.total_debit - self.total_credit, 2) == 0
+        return arrondir(self.total_debit - self.total_credit) == 0
 
 
 class LigneEcriture(models.Model):
@@ -588,8 +609,8 @@ class LigneEcriture(models.Model):
         help_text="Axe complémentaire optionnel — atelier, chantier, centre de coût...",
     )
     libelle = models.CharField("libellé", max_length=255, blank=True)
-    debit = models.FloatField("débit", default=0)
-    credit = models.FloatField("crédit", default=0)
+    debit = ChampDecimal("débit", default=0, **MONTANT)
+    credit = ChampDecimal("crédit", default=0, **MONTANT)
 
     class Meta:
         verbose_name = "Ligne d'écriture"
@@ -607,3 +628,63 @@ class LigneEcriture(models.Model):
             raise ValidationError("Une ligne d'écriture ne peut pas être à la fois au débit et au crédit.")
         if not self.debit and not self.credit:
             raise ValidationError("Une ligne d'écriture doit avoir un montant au débit ou au crédit.")
+
+
+class ParametresExportComptable(models.Model):
+    """Réglages de l'export vers le logiciel du comptable (format ISACOMPTA) : codes de journaux, compte de banque, libellés
+    des écritures et référence de pièce des achats. Une seule ligne."""
+
+    class Element(models.TextChoices):
+        CODE_FACTURE = "code_facture", "Code facture"
+        NOM_TIERS = "nom_tiers", "Nom du tiers"
+        REFERENCE_FOURNISSEUR = "reference_fournisseur", "Référence fournisseur"
+
+    ELEMENTS_VALIDES = {e.value for e in Element}
+
+    code_journal_ventes = models.CharField("code du journal des ventes", max_length=2, default="VT")
+    code_journal_achats = models.CharField("code du journal des achats", max_length=2, default="AC")
+    code_journal_banque = models.CharField("code du journal de banque", max_length=2, default="B2")
+    compte_banque = models.CharField(
+        "compte de banque", max_length=8, default="512100", help_text="Compte débité à l'encaissement d'une facture client, crédité au règlement d'un fournisseur."
+    )
+    libelle_ventes = models.CharField(
+        "libellé des écritures de ventes", max_length=100, default="code_facture,nom_tiers",
+        help_text="Éléments séparés par une virgule parmi : code_facture, nom_tiers, reference_fournisseur (30 caractères au plus au total).",
+    )
+    libelle_achats = models.CharField("libellé des écritures d'achats", max_length=100, default="code_facture,nom_tiers")
+    libelle_banque = models.CharField("libellé des écritures de banque", max_length=100, default="nom_tiers")
+    piece_achats = models.CharField(
+        "référence de pièce des achats", max_length=30, choices=[("code_facture", "Code facture"), ("reference_fournisseur", "Référence fournisseur")], default=Element.CODE_FACTURE,
+        help_text="Ce qui est écrit dans la colonne « pièce » des écritures d'achats ; la référence fournisseur est toujours reprise dans sa propre colonne.",
+    )
+
+    class Meta:
+        verbose_name = "Paramètres de l'export comptable"
+        verbose_name_plural = "Paramètres de l'export comptable"
+
+    def __str__(self):
+        return "Paramètres de l'export comptable"
+
+    def save(self, *args, **kwargs):
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    def clean(self):
+        super().clean()
+        erreurs = {}
+        for champ in ("libelle_ventes", "libelle_achats", "libelle_banque"):
+            elements = self.elements(champ)
+            if not elements or any(e not in self.ELEMENTS_VALIDES for e in elements):
+                erreurs[champ] = "Éléments admis : code_facture, nom_tiers, reference_fournisseur (séparés par des virgules)."
+        for champ in ("code_journal_ventes", "code_journal_achats", "code_journal_banque"):
+            if len(getattr(self, champ).strip()) != 2:
+                erreurs[champ] = "Le code de journal du fichier comporte exactement 2 caractères."
+        if erreurs:
+            raise ValidationError(erreurs)
+
+    def elements(self, champ):
+        return [e.strip() for e in getattr(self, champ).split(",") if e.strip()]
+
+    @classmethod
+    def charger(cls):
+        return cls.objects.get_or_create(pk=1)[0]

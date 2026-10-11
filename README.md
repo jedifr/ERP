@@ -389,6 +389,9 @@ Fonctionnement (`codification/services.py`) :
 Pour reprendre une numérotation existante, ajuster `compteur_actuel`
 directement sur la règle (le prochain code utilisera `compteur + 1`).
 
+
+**Année sur 2 ou 4 chiffres** : avec la réinitialisation « Chaque année », le champ **« Année dans le code »** choisit `2026` (4 chiffres, comportement historique) ou `26` (2 chiffres). Exemples en 4 chiffres de numéro : préfixe `DC` + 2 chiffres → `DC26-0001` (devis), `CF` → `CF26-0001` (commande fournisseur), `BL` → `BL26-0001` (livraison), `C0` → `C026-0001` (commande client). Le compteur repart à 1 chaque 1er janvier. La liste des règles affiche le **prochain code** de chaque règle ; changer le format n'affecte pas les codes déjà attribués (le compteur de l'année en cours continue tant que le code saisi suit le nouveau format).
+
 ## Adresse de livraison, adresse de facturation et contact sur le devis
 
 En plus du client, un devis peut porter une **adresse de facturation**, une
@@ -1854,3 +1857,1392 @@ suggestion de TVA en direct sur une ligne fraîchement ajoutée ; adresses
 pré-remplies dès le choix du client ; date de livraison copiée sur une
 deuxième ligne ; bouton "Créer une commande directement" bien absent du
 formulaire d'ajout d'un devis.
+
+## Fusion du module « Chiffrage découpe laser / jet d'eau »
+
+L'app `decoupe` (voir section dédiée plus haut) avait été développée sur une
+branche séparée (`claude/great-dijkstra-ilhwgi`), déjà réintégrée à cette
+branche-ci en amont — la fusion s'est donc faite en avance rapide, sans
+conflit. `decoupe/admin.py` utilisait encore l'admin Django brut
+(`django.contrib.admin.ModelAdmin`/`TabularInline`) au lieu des classes
+habillées `unfold.admin` employées par le reste du projet — corrigé pour
+rester cohérent visuellement avec les autres fiches (le champ "Fichier
+source" bénéficie maintenant du même composant de dépôt de fichier que le
+reste de l'admin).
+
+**Vérifié** : import d'un fichier DXF d'exemple (`decoupe/exemples/`) via le
+formulaire d'ajout — géométrie extraite automatiquement (surface, périmètre,
+dimensions, contours intérieurs), statut passé à "Importée".
+
+## Numéro de version
+
+Le NAS n'a pas `.git` (le code y arrive par archive tar.gz via
+`update-nas.sh`) : impossible d'y afficher un hash de commit. La version
+suivie ici est donc un simple fichier texte, `VERSION` à la racine du dépôt
+(ex. `2026.09.25.1`), incrémenté par Claude à chaque push notable.
+
+- **Badge dans l'admin** : `UNFOLD["ENVIRONMENT"]` (`comptes/version.py`,
+  `badge_environnement`) affiche `v<VERSION>` en pastille bleue en haut à
+  droite de **toutes** les pages admin (mécanisme Unfold standard — cf.
+  `unfold/helpers/label.html`/`userlinks.html`), et
+  `UNFOLD["ENVIRONMENT_TITLE_PREFIX"]` (`prefixe_titre`) l'ajoute aussi
+  dans l'onglet du navigateur (`[v<VERSION>] Nom de la page`). Deux
+  emplacements pour la même info, visibles sans avoir à ouvrir un menu.
+- **Vérification en terminal** : `update-nas.sh` affiche désormais
+  `Version déployée : <contenu de VERSION>` à la fin de la mise à jour,
+  juste après l'état des conteneurs — pratique pour confirmer par SSH
+  qu'un `git push` a bien été pris en compte, sans passer par le
+  navigateur.
+
+Pour vérifier que la dernière version est bien installée : comparer le
+badge affiché dans l'admin (ou la sortie d'`update-nas.sh`) avec le
+contenu du fichier `VERSION` sur la branche `claude/project-construction-k7owwb`
+sur GitHub.
+
+**Vérifié** : badge `v2026.09.25.1` visible sur le tableau de bord et sur
+une page de liste (ex. Devis) ; préfixe `[v2026.09.25.1]` présent dans le
+titre de l'onglet du navigateur sur les deux pages.
+
+## Analyse en direct et aperçu visuel des pièces à découper
+
+Auparavant, l'extraction de la géométrie (surface, périmètre, contours...)
+n'avait lieu qu'à l'enregistrement de la fiche `PieceDecoupe`, et rien
+n'affichait la silhouette de la pièce. Deux ajouts sur `decoupe/admin.py` :
+
+- **Analyse dès la sélection du fichier, avant tout enregistrement** :
+  `decoupe/static/decoupe/piecedecoupe_admin.js` écoute le `change` du champ
+  "Fichier source" et envoie le fichier en AJAX vers une nouvelle vue
+  (`decoupe/admin_views.py::analyser_fichier_view`,
+  `/admin/decoupe/piecedecoupe/analyser/`) qui appelle directement
+  `extraire_geometrie()` sur un fichier temporaire, **sans rien
+  persister** — l'enregistrement réel (via `PieceDecoupe.importer_geometrie()`)
+  a toujours lieu normalement au clic sur "Enregistrer", cette vue ne fait
+  qu'anticiper le même résultat pour l'affichage. Les champs Statut, Format
+  source, Message erreur, Avertissements, Surface, Périmètre, Largeur,
+  Hauteur et Nb contours se mettent à jour en direct avec le résultat.
+- **Aperçu visuel** : nouveau champ "Aperçu" (méthode `apercu_piece`) qui
+  affiche la silhouette de la pièce (contour extérieur + trous) en SVG,
+  aussi bien en direct sur le formulaire (avant save, à partir de la
+  réponse AJAX) que sur une fiche déjà enregistrée (à partir de
+  `contour_json` persisté). Réutilise le rendu de contour de
+  `decoupe/services/apercu_svg.py` (jusque-là utilisé seulement pour
+  l'aperçu d'une feuille imbriquée) via une nouvelle fonction
+  `generer_svg_piece()`, dédiée à une pièce seule sans feuille englobante.
+
+Point technique notable : Unfold ne pose une classe CSS `field-<nom>` (point
+d'accroche pour du JS ciblant un champ readonly précis) que sur ses tableaux
+inline, pas sur les champs readonly de premier niveau d'un formulaire — même
+contrainte déjà rencontrée sur `DevisAdmin` (montants HT/TTC). Les champs
+concernés sont donc exclus du formulaire (`exclude`) et remplacés par des
+méthodes `readonly_fields` dédiées (`statut_display`, `surface_mm2_display`,
+etc.), chacune enveloppant sa valeur dans un `<span id="decoupe-...">` que le
+JS peut cibler de façon stable.
+
+**Vérifié** : import d'un fichier DXF d'exemple (pièce ronde à trou central) —
+analyse (statut, surface, périmètre, dimensions, contours) et aperçu SVG
+affichés en direct avant tout clic sur "Enregistrer" ; aperçu toujours présent
+après enregistrement sur la fiche de modification.
+
+## Matière/épaisseur à l'import, profils de calques, rotation libre et miroir
+
+Quatre ajouts sur le module découpe, pensés du point de vue devis/méthodes :
+
+### Matière, épaisseur et pas de rotation dès l'import
+
+`PieceDecoupe` gagne trois champs saisissables dès le formulaire d'ajout (avant
+tout enregistrement, comme le reste de l'analyse en direct) :
+
+- **`matière`** et **`épaisseur`** : la pièce n'a plus besoin d'être déjà liée
+  à un article fabriqué pour enregistrer dans quelle tôle elle doit être
+  découpée.
+- **`pas_rotation_deg`** (5° / 45° / 90°, ou vide) remplace l'ancienne case à
+  cocher "rotation autorisée" (oui/non) : on choisit maintenant la finesse de
+  rotation autorisée pour l'imbrication, pas seulement si elle l'est.
+- **`symétrie_autorisée`** (case à cocher, cochée par défaut) : à décocher
+  quand la pièce ne peut pas être retournée (miroir) — gravure, marquage non
+  symétrique...
+
+### Profils d'import (calques DXF/DWG)
+
+Nouveau modèle **Profil d'import** (menu "Chiffrage découpe → Profils
+d'import") : une liste de règles *calque → rôle* (Découpe / Gravure-marquage
+/ Pliage / Ignoré), réutilisable d'un import à l'autre plutôt que de reclasser
+les calques à la main à chaque fois.
+
+Corrige au passage un vrai défaut, pas seulement un confort : **sans profil**,
+`extraire_geometrie()` traitait toutes les entités du fichier comme de la
+découpe, sans distinction de calque — un logo gravé (tracé fermé, mais pas
+destiné à être découpé) dessiné sur un calque séparé était donc détecté à tort
+comme un **trou à découper**. Avec un profil sélectionné à l'import (champ
+`profil_import` sur la fiche PieceDecoupe, appliqué aussi à l'analyse en
+direct avant enregistrement), seuls les calques classés "Découpe" alimentent
+la reconstruction du contour (silhouette + vrais trous) ; les calques
+"Gravure"/"Pliage" sont extraits à part comme de simples tracés (longueur de
+gravure calculée séparément, pas comptée dans le périmètre de découpe) ; les
+calques "Ignoré" sont exclus. Un calque présent dans le fichier mais absent
+du profil reste traité comme découpe, avec un avertissement (plutôt que
+silencieusement ignoré, pour ne jamais faire disparaître de la matière à
+découper sans le signaler).
+
+L'aperçu SVG de la pièce (déjà en place) affiche maintenant la découpe en
+bleu, la gravure en orange et le pliage en vert pointillé — pour vérifier
+d'un coup d'œil que le classement des calques est correct.
+
+Un nouveau champ `a_gravure`, détecté automatiquement (informatif, pas
+modifiable), signale la présence de tracés de gravure. Le JS du formulaire
+d'ajout (`piecedecoupe_admin.js`) décoche automatiquement "symétrie
+autorisée" dès qu'une gravure est détectée en direct — une suggestion, pas
+une contrainte imposée après coup : rien ne revient la recocher/décocher
+silencieusement lors d'un réimport ultérieur, c'est toujours la décision
+explicite de l'utilisateur qui prévaut une fois la fiche enregistrée.
+Changer de profil d'import sur une fiche déjà enregistrée relance
+automatiquement l'analyse (pas besoin de réuploader le fichier).
+
+### Imbrication à angles de rotation libres
+
+Le moteur d'imbrication (`decoupe/services/imbrication.py`) n'essayait
+auparavant que deux orientations par pièce (0° et 90°, sur la seule base de
+sa largeur/hauteur à plat). Il essaie maintenant **toutes les orientations
+autorisées par `pas_rotation_deg`** (jusqu'à 72 angles différents pour un pas
+de 5°), calculées à partir du contour réel de la pièce (pas juste de son
+rectangle englobant à 0°) — les plus compactes en premier. Ça change
+réellement le résultat : une pièce en losange (carré tourné à 45°, par
+exemple) ne tient pas dans une feuille à 0°/90° mais tient une fois ramenée à
+son orientation "carrée" à 45°, une case que l'ancien moteur ne considérait
+tout simplement jamais.
+
+### Miroir : ajouté au moteur, mais sans effet observable pour l'instant — et c'est voulu
+
+`symetrie_autorisee` et un champ `Placement.miroir` existent bien dans le
+moteur. Mais en creusant l'implémentation, un fait géométrique s'est imposé :
+**retourner une pièce (miroir) ne change jamais la largeur ni la hauteur de
+son rectangle englobant**, quelle que soit sa forme — une réflexion est une
+isométrie qui préserve l'étendue de la pièce sur chaque axe. Pour un moteur
+qui compare des pièces par leur rectangle englobant (c'est le cas ici, pas
+une imbrication polygonale exacte), retourner une pièce n'ouvre donc jamais
+une possibilité de placement que la rotation seule n'explorait pas déjà. Le
+moteur n'a par conséquent jamais besoin de retourner une pièce pour la caser,
+et ne le fait jamais — `Placement.miroir` reste toujours `False` aujourd'hui.
+
+La contrainte "pas de symétrie si gravure" est donc toujours respectée, mais
+par construction plutôt que par un choix actif du moteur. Elle n'aura un
+effet observable sur le nombre de feuilles/le placement que le jour où une
+véritable imbrication polygonale (No-Fit-Polygon — les pièces glissées dans
+les concavités les unes des autres) remplacera l'actuelle approche par
+rectangles englobants : c'est un chantier nettement plus lourd, qu'on a
+délibérément laissé de côté ici plutôt que de le lancer à la légère. Les
+champs `symetrie_autorisee`/`miroir` sont conservés, prêts pour ce jour-là.
+
+**Vérifié** : import d'un fichier DXF à 3 calques (découpe / gravure /
+pliage) via un profil dédié — calques détectés et classés correctement,
+aperçu SVG coloré par rôle, gravure non comptée comme trou, case "symétrie
+autorisée" auto-décochée, matière/épaisseur/pas de rotation persistés ; nouvel
+admin "Profils d'import" avec ses règles en inline. Tests : nouvelle suite sur
+la classification par calque, le moteur d'imbrication à angles libres (le cas
+du losange notamment) et le caractère volontairement sans-effet du miroir.
+
+## Aperçu visuel de l'imbrication dans l'admin
+
+`generer_svg_feuille()` (silhouette réelle des pièces placées sur une
+feuille) existait déjà, mais n'était branché que sur un endpoint API brut
+(`/api/v1/imbrications/<id>/apercu/<feuille>/`) — la fiche ImbricationJob de
+l'admin n'affichait que des chiffres (nombre de feuilles, taux
+d'utilisation), sans aucun moyen de voir le plan de découpe. Nouveau champ
+"Aperçu des feuilles" sur la fiche : une image par feuille calculée, avec les
+pièces à leur position, rotation et échelle réelles.
+
+Les SVG générés portent des attributs `width`/`height` en millimètres
+(pensés pour un export imprimable via l'API, à l'échelle 1:1) — beaucoup trop
+grands affichés tels quels sur une page admin (une feuille 1000×1000mm
+s'afficherait à ~3780px de large). L'aperçu admin les contraint à une largeur
+d'écran raisonnable (480px max) sans toucher à la fonction partagée avec
+l'API.
+
+**Vérifié** : imbrication de 15 pièces sur une feuille 1000×1000mm — plan de
+découpe affiché directement sur la fiche, à une taille d'affichage correcte,
+avec le message "Aucune feuille calculée pour l'instant" avant tout calcul.
+
+## Sens d'imbrication et coin de départ
+
+Deux nouveaux réglages sur la fiche Imbrication :
+
+- **Direction** : "Horizontal" (rangées remplies horizontalement, empilées
+  verticalement — comportement historique, reste la valeur par défaut) ou
+  "Vertical" (colonnes remplies verticalement, empilées horizontalement).
+- **Coin départ** : le coin de la feuille où démarre le placement —
+  "Bas gauche" (nouvelle valeur par défaut, convention machine la plus
+  courante), "Bas droite", "Haut gauche" ou "Haut droite".
+
+Techniquement, `decoupe/services/imbrication.py` calcule toujours en interne
+dans un repère canonique (origine en haut à gauche, algorithme d'étagères
+inchangé) ; `direction` présente juste la feuille et chaque pièce à
+l'algorithme avec largeur/hauteur inversées en mode vertical ("une étagère"
+devient alors une colonne), et `coin_depart` réfléchit les coordonnées
+obtenues selon l'axe concerné une fois le placement calculé — deux réglages
+indépendants, combinables librement.
+
+`direction` n'est pas qu'un réétiquetage cosmétique : sur un lot de pièces de
+tailles différentes, le sens de remplissage peut changer le nombre de
+feuilles nécessaires (une pièce qui ne rentre pas à côté d'une autre en mode
+"rangées" peut tenir à côté en mode "colonnes", ou inversement) — démontré
+par un test dédié (deux pièces 120×60 et 60×120 : 2 feuilles en horizontal, 1
+seule en vertical, sur une même feuille 200×150). En revanche, pour un lot
+de pièces **toutes de la même taille**, la direction ne change jamais le
+nombre de feuilles ni le taux d'utilisation (démontrable algébriquement :
+`floor(A/a)×floor(B/b)` est symétrique en échangeant les rôles des deux
+axes) — elle ne change alors que l'ordre/l'emplacement de remplissage.
+
+**Vérifié** : deux pièces de tailles différentes sur une feuille 200×150 —
+tiennent sur 1 seule feuille en mode vertical/bas gauche (visible sur la
+capture, les deux pièces calées en bas de la feuille), contre 2 feuilles
+nécessaires en horizontal/haut gauche pour le même lot.
+
+## Imbrication en direct (sans enregistrer)
+
+Jusqu'ici, voir le résultat d'un changement sur la fiche Imbrication
+(dimensions de feuille, direction, coin de départ, lignes pièce/quantité)
+demandait de cliquer sur "Enregistrer et continuer les modifications" —
+`ImbricationJobAdmin.save_related()` ne recalculait qu'à l'enregistrement.
+
+Nouvelle vue AJAX (`previsualiser_imbrication_view`,
+`/admin/decoupe/imbricationjob/previsualiser/`) : reconstruit l'état courant
+du formulaire (feuille, direction, coin de départ, chaque ligne
+pièce/quantité du formset — y compris une pièce tout juste ajoutée ou une
+ligne supprimée, sans persister quoi que ce soit) et appelle
+`calculer_imbrication()` directement. `imbricationjob_admin.js` déclenche ce
+recalcul (avec un anti-rebond de 400 ms) sur toute modification pertinente —
+y compris sur le **formulaire d'ajout**, avant même la première
+sauvegarde — et met à jour en direct l'aperçu des feuilles ainsi que les
+chiffres (nombre de feuilles, surfaces, taux d'utilisation, coût matière
+estimé, pièces non placées).
+
+Comme pour PieceDecoupeAdmin, chaque chiffre readonly est enveloppé dans un
+`<span id="...">` dédié plutôt qu'affiché tel quel (même contrainte Unfold,
+déjà documentée : pas de classe `field-<nom>` sur les champs readonly de
+premier niveau).
+
+**Vérifié** : sur le formulaire d'ajout (jamais enregistré, aucun
+`ImbricationJob` en base), sélection d'une pièce et saisie d'une quantité —
+aperçu des feuilles et statistiques mis à jour en direct, sans passer par
+"Enregistrer".
+
+## Tableau des calques éditable à l'analyse d'un DXF/DWG
+
+Jusqu'ici, le classement des calques (découpe / gravure / pliage / ignoré)
+ne pouvait se faire qu'en amont, via un `ProfilImportDecoupe` préparé à
+l'avance (voir plus haut). Il manquait un moyen de voir, au cas par cas et
+sans rien préparer, la liste des calques présents dans le fichier qu'on
+vient d'importer, et de corriger leur rôle directement à l'écran.
+
+Nouveau champ `PieceDecoupe.regles_calques_manuelles` (JSON,
+`{calque: rôle}`, prioritaire sur `profil_import` dans
+`importer_geometrie()`) et tableau interactif affiché juste sous l'aperçu,
+dès l'analyse terminée (avant même l'enregistrement) : une ligne par calque
+détecté, avec un menu déroulant Découpe / Gravure marquage / Pliage / Ignoré
+par calque. Choisir un rôle relance aussitôt l'analyse (même mécanisme AJAX
+que le reste de la fiche) et met à jour aperçu, contours, surface et
+détection de gravure en direct.
+
+`ErreurImportGeometrie` porte désormais `calques`/`calques_roles` même en
+cas d'échec (ex. plus aucun calque de découpe après une mauvaise
+correction) : le tableau reste affiché et corrigeable sans devoir
+ré-uploader le fichier. `analyser_fichier_view` accepte aussi un `piece_id`
+en plus de `fichier_source` — nécessaire pour rejouer l'analyse sur une
+pièce déjà enregistrée (changer un rôle de calque sur le formulaire de
+modification ne repasse pas par le champ fichier). Construction du tableau
+côté JS entièrement par API DOM (`textContent`/`dataset`, jamais
+`innerHTML`) : les noms de calques viennent du fichier uploadé, donc non
+fiables.
+
+**Correctif découvert pendant la vérification visuelle** : à l'ouverture de
+la fiche d'une pièce déjà enregistrée, l'initialisation du widget select2
+du champ "Profil import" émettait elle-même un évènement `change` — sans
+aucune action de l'utilisateur — ce qui relançait une analyse par défaut et
+écrasait silencieusement le tableau de calques (et le classement
+enregistré) au prochain "Enregistrer". Corrigé en ne réagissant plus qu'à
+un changement réel de valeur du champ (comparaison à la dernière valeur
+connue) plutôt qu'à tout évènement `change`.
+
+**Vérifié** : import d'un DXF à 3 calques (COUPE/GRAVURE/PLIAGE, un logo
+triangulaire sur GRAVURE pris pour un trou tant que le calque reste classé
+"Découpe" par défaut) — tableau de 3 lignes affiché, correction
+GRAVURE→Gravure et PLIAGE→Pliage : nombre de contours intérieurs passe de 1
+à 0, gravure détectée passe à "Oui", aperçu SVG recoloré en direct.
+Enregistrement puis réouverture de la fiche : classement et statistiques
+bien persistés (confirmé aussi directement en base) — y compris après
+correction du bug de ré-analyse fantôme ci-dessus, qui aurait sinon
+silencieusement réinitialisé le classement à l'ouverture.
+
+## Recette du module A (devis → commande) : priorité 1, intégrité
+
+Issu de l'audit de recette (cahier de tests + analyse d'écart) : les défauts
+« Must have » du module Devis/Commandes, corrigés dans l'ordre de gravité.
+Chaque point est couvert par des tests dédiés (`ValidationDesSaisiesTests`,
+`DevisValideVerrouilleTests`, `LancementEnProductionRobusteTests`,
+`StatutCommandeTests` dans `chiffrage/tests.py`).
+
+- **Saisies absurdes refusées** : quantité d'une ligne de devis strictement
+  positive ; prix forcé, taux de marge (ligne, opération, devis), prix et
+  quantité de ligne de commande jamais négatifs. Les validateurs sont sur les
+  champs du modèle, donc appliqués partout : admin, recalcul AJAX et API.
+- **Devis validé = devis verrouillé** : c'est le prix engagé auprès du client.
+  Sur la fiche admin tous les champs passent en lecture seule (sauf le statut)
+  et les lignes ne peuvent plus être ajoutées, modifiées ni supprimées ; même
+  règle pour l'API (lignes, devis, recalcul) et pour le recalcul en direct
+  (409). Pour modifier, repasser le devis en « Brouillon » — refusé dès
+  qu'une commande en est issue. L'action « Recalculer le chiffrage » ignore
+  les devis validés (sinon un changement de coût matière modifiait un prix
+  déjà engagé).
+- **Lancement en production robuste** : verrou de ligne sur le devis
+  (`select_for_update`) et conversion de toute collision de numéro en erreur
+  métier — un double-clic ne crée plus de commande en double ni d'erreur 500.
+  La synchro planning (appel réseau) reste exécutée après le commit.
+- **Statut de commande structuré** (`Commande.Statut`) : *En cours*, *Soldée*
+  (déduit automatiquement quand toutes les lignes sont entièrement livrées),
+  *Annulée*. Le statut n'est plus saisissable : l'annulation passe par
+  l'action admin « Annuler la commande » ou `POST /api/v1/commandes/<n>/annuler/`,
+  refusée dès qu'une livraison existe (il faudrait alors un retour client et
+  un avoir) ; aucune livraison n'est possible sur une commande annulée. Les
+  OF déjà lancés ne sont pas arrêtés automatiquement : l'action le rappelle.
+  La migration `0015` reprend les anciens statuts texte libre (soldée si tout
+  est livré, sinon en cours).
+
+**Vérifié** (Playwright) : fiche d'un devis validé — seul le statut reste
+éditable, lignes en lecture seule sans bouton d'ajout ; commande annulée
+visible en liste, statut non éditable sur sa fiche.
+
+Bug trouvé en écrivant les tests : après un POST invalide, Django réécrit
+l'instance avec le statut soumis, ce qui désactivait le verrou en plein rendu
+de la page d'erreur (KeyError) — le verrou relit donc le statut en base.
+
+## Recette du module A : priorité 2, traçabilité, arrondis, contrôle à la validation
+
+- **Piste d'audit** (`django-simple-history`) sur les devis, leurs lignes et les
+  commandes : qui, quand, et ancienne → nouvelle valeur de chaque champ, y
+  compris les suppressions de ligne. Consultable via le bouton « Historique »
+  de chaque fiche. Elle est en **lecture seule** : la restauration d'une
+  version précédente est désactivée (elle aurait contourné le verrou du devis
+  validé). Au démarrage, `populate_history --auto` crée le point de départ des
+  enregistrements antérieurs (idempotent). Les lignes de commande gardent en
+  plus leur journal dédié `CommandeLigneModification`.
+- **Arrondis au centime** : prix TTC d'une ligne, montants HT/TTC d'une ligne
+  de commande, totaux d'un devis et montants indicatifs de facture. Le total
+  TTC est la somme des lignes arrondies (comme sur la facture Tiime) et ne
+  laisse plus de résidu flottant (`0.1 + 0.2` s'affiche `0.3`). Les prix
+  unitaires gardent leur précision ; le passage des champs en `Decimal` reste
+  un chantier à part (migration lourde).
+- **Contrôle à la validation d'un devis** (`chiffrage/validation.py`) : le
+  chiffrage est recalculé, puis la validation est refusée — le devis reste en
+  brouillon avec un message par raison — si le devis est vide, si une ligne
+  n'est pas chiffrable, ou si une ligne est **vendue sous son coût** sans la
+  permission dédiée. Même contrôle côté API (transaction annulée en cas de
+  refus).
+- **Permissions métier** : `valider_devis` (sans elle, le champ statut
+  disparaît du formulaire et l'API répond 403), `valider_vente_sous_cout`,
+  `annuler_commande`. À attribuer par groupe dans l'admin (Utilisateurs →
+  Groupes) ; un superutilisateur les a toutes.
+
+**Vérifié** (Playwright) : un utilisateur habilité à valider mais pas à vendre
+sous le coût tente de valider un devis dont la ligne est à 10 € HT pour un coût
+de 50 € — refus affiché, devis resté en brouillon ; page d'historique du devis
+avec auteur et changement de statut.
+
+Bugs trouvés par les tests de cette étape : `FullCleanModelSerializer` applique
+les valeurs soumises sur l'instance avant toute vérification, ce qui rendait la
+validation d'un devis par l'API impossible (verrou déclenché à tort) et
+permettait de déplacer une ligne hors d'un devis validé ; les contrôles lisent
+désormais l'état d'origine en base. Le retour en brouillon après un refus passe
+par `save()` avec motif, pour que l'historique ne mente pas.
+
+## Recette du module A : priorité 3, rôles métier et API sous permissions
+
+- **Quatre groupes prédéfinis**, créés au premier `migrate` (jamais réécrits
+  ensuite : leurs permissions restent ajustables dans Utilisateurs → Groupes) :
+
+  | Groupe | Peut |
+  |---|---|
+  | Commercial | créer et modifier devis, lignes et commandes ; consulter les livraisons. Ne valide pas, n'annule pas, ne supprime pas un devis. |
+  | Responsable commercial | + valider un devis, annuler une commande, supprimer un devis, saisir les livraisons. |
+  | Direction | + valider un devis **vendu sous le coût**. |
+  | Atelier | consulter les commandes ; consulter et modifier les ordres de fabrication. Aucun accès aux devis ni aux prix de revient. |
+
+  Un compte sans groupe n'a accès à rien : à rattacher à un groupe à la
+  création de l'utilisateur.
+- **API du module sous permissions** (`comptes.permissions.ModelPermissionsAvecLecture`) :
+  avant, tout compte connecté lisait et écrivait tout via `/api/v1/` alors que
+  l'admin le lui interdisait. Désormais lecture = permission « voir », écriture =
+  ajout / modification / suppression ; les actions spéciales (valider,
+  recalculer, lancer en production, annuler, resynchroniser) vérifient leur
+  permission propre.
+
+**Reste à faire hors module A** : les autres modules (stock, facturation,
+achats, comptabilité, pilotage) exposent toujours leur API en
+`IsAuthenticated` seul — même correction à y appliquer — et le contrôle
+`DEBUG`/`SECRET_KEY` au démarrage en production.
+
+## Recette du module B (stock) : priorité 1, intégrité du journal
+
+Constats de l'audit corrigés (tests : `SortieSuperieureAuDisponibleTests`,
+`JournalImmuableTests`, `TracabiliteMouvementTests`, `ContrePassationTests`) :
+
+- **Journal immuable** : un mouvement ne se modifie ni ne se supprime (modèle,
+  requêtes groupées, admin, API). Avant, l'édition ou la suppression d'un
+  mouvement laissait le solde du lot inchangé, donc faux. Le solde d'un lot
+  est désormais toujours égal à la somme de ses mouvements.
+- **Correction par contre-passation** : action « Annuler le mouvement » (page
+  de confirmation avec motif obligatoire) ou `POST /api/v1/mouvements-stock/<id>/annuler/`.
+  Crée le mouvement inverse, lié à l'original ; refusé si déjà annulé, si c'est
+  lui-même une annulation, ou si l'inversion rendrait le stock négatif. Une
+  alerte prévient quand le mouvement vient d'un document (réception, livraison) :
+  ce document n'est pas corrigé automatiquement. Permission `annuler_mouvement`.
+- **Plus de sortie au-delà du disponible** : refus à la validation du formulaire
+  et à l'enregistrement, sous verrou de ligne sur le lot (deux sorties
+  simultanées ne passent plus toutes les deux). Une livraison qui dépasserait le
+  stock est annulée en bloc avec un message demandant de régulariser le stock.
+- **Auteur et horodatage** sur chaque mouvement ; **motif obligatoire** pour
+  un mouvement saisi à la main (sans référence d'origine).
+- **Fin des résidus flottants** : quantités conservées à 6 décimales
+  (`0.1 + 0.2 - 0.3` donne exactement 0 et ne fausse plus les seuils d'alerte).
+- Défaut latent corrigé : `date_mouvement` avait pour défaut un *datetime* sur un
+  champ date, ce qui faisait échouer la réponse de l'API pour un mouvement créé
+  sans date.
+
+Correction de l'audit : `Lot.quantite` était déjà en lecture seule (admin et
+API) ; le vrai risque venait de l'édition des mouvements, traitée ci-dessus.
+La saisie d'un mouvement depuis la fiche d'un lot reste possible (ajout
+seulement). Les lignes d'un journal existant n'ont pas d'auteur ni d'heure.
+
+**Vérifié** (Playwright) : journal lisible (colonnes Article/Emplacement),
+page de confirmation d'annulation, annulation d'une entrée de 12 (lot 44 → 32)
+avec le mouvement d'origine conservé et la contre-passation tracée.
+
+## Recette du module B (stock) : priorité 2, fonctions manquantes du flux
+
+Tests : `TransfertTests`, `InventaireTests`, `ValorisationTests`,
+`VerrouLotEtHistoriqueTests` (`stock/tests.py`).
+
+- **Transferts** (menu Stock → Transferts de stock, API `/api/v1/transferts-stock/`) :
+  déplacent une quantité d'un lot vers un autre emplacement en une opération
+  atomique — une sortie et une entrée liées par la même référence
+  `TRANSFERT-n`, lot cible créé au besoin, valorisation conservée. Refusé si
+  le stock source ne suffit pas ou si l'emplacement est identique. Immuables :
+  on défait un transfert par un transfert inverse.
+- **Inventaires** (Stock → Inventaires, API `/api/v1/inventaires/`) : on saisit
+  la quantité comptée par lot (action « Ajouter tous les lots en stock » pour
+  pré-remplir), puis « Valider l'inventaire » (permission `valider_inventaire`)
+  transforme chaque écart en mouvement d'ajustement tracé (`INVENTAIRE-n`,
+  motif « Écart d'inventaire »), jamais en réécriture du solde. Un inventaire
+  validé est figé (lignes, suppression) ; il garde la quantité théorique et
+  l'écart de chaque ligne.
+- **Valorisation au coût moyen pondéré** : chaque entrée peut porter un coût
+  unitaire (les réceptions fournisseur reprennent le prix d'achat de la ligne
+  de commande) ; le lot en déduit son coût moyen et sa valeur (colonnes de la
+  liste des lots). Les sorties ne changent pas le coût moyen.
+  **Attention** : le stock déjà présent *sans* coût compte pour 0 dans la
+  moyenne — valorisez le stock initial (entrée avec coût, ou inventaire) pour
+  des valeurs exactes. Les lots existants démarrent à un coût moyen de 0.
+- **Livraison sur plusieurs lots en FIFO** : la sortie consomme les lots du plus
+  ancien au plus récent (avant : « plusieurs lots » bloquait la livraison).
+  Si le stock total ne suffit pas, toute la ligne est annulée, sans sortie
+  partielle. La **réception** fournisseur reste, elle, limitée à un lot par
+  article (choix du lot de destination : voir module C/achats).
+- **Lot : article et emplacement figés** dès qu'il a un mouvement (formulaire,
+  API et modèle) ; pour déplacer, utiliser un transfert. **Historique** en
+  lecture seule sur les lots et les emplacements.
+
+**Vérifié** (Playwright) : liste des lots avec coût moyen et valeur (52 × 1,25 =
+65 €) ; inventaire brouillon puis validé (compté 49, théorique 52, écart −3,
+sortie d'ajustement créée, formulaire figé).
+
+## Recette du module B (stock) : priorité 3, rôles et API sous permissions
+
+- **Deux nouveaux rôles** : *Magasinier* (consulte, saisit mouvements, lots,
+  transferts et inventaires en brouillon ; ne corrige pas un mouvement ni ne
+  valide un inventaire) et *Responsable stock* (+ annuler un mouvement, valider
+  un inventaire, gérer les emplacements). *Atelier* peut consulter les lots,
+  *Direction* consulter le stock.
+- **API du stock sous permissions** (lecture incluse), comme pour le module A :
+  avant, tout compte connecté lisait et écrivait lots et mouvements.
+- **Les définitions de groupes sont centralisées** dans `comptes/groupes.py`
+  (permissions inter-applications). Un groupe déjà créé n'est jamais réécrit ;
+  pour lui ajouter les permissions apparues depuis dans sa définition par défaut :
+  `python manage.py synchroniser_groupes` (ajoute seulement, ne retire jamais).
+
+**Correction du module A (priorité 3)** : les groupes *Commercial*, *Responsable
+commercial* et *Atelier* n'avaient pas la permission « voir » des modèles liés
+(client, adresse, contact, article, poste…). Or les listes à autocomplétion de
+l'admin répondent 403 sans elle : un commercial ne pouvait pas choisir un
+client sur un devis. C'est corrigé, et un test parcourt désormais les
+autocomplétions de chaque rôle. Si ces groupes existent déjà sur votre
+installation, lancez `python manage.py synchroniser_groupes` après la mise à jour
+(à ajouter à votre routine de mise à jour si vous ajustez souvent les rôles).
+Autre défaut corrigé au passage : `comptes` n'ayant pas de modèle, Django
+n'émettait jamais son signal `post_migrate` ; la création des groupes est
+désormais branchée sur celui d'`auth`.
+
+## Recette du module C (livraison et facturation) : priorité 1, intégrité
+
+Tests : `CommandeDirecteTests`, `VerrouFactureTests`, `ValidationFactureTests`,
+`MigrationStatutPaiementTests` (`facturation/tests.py`), `AnnulationLivraisonTests`
+(`chiffrage/tests.py`).
+
+- **Facture émise = facture verrouillée.** Dès que la référence Tiime est
+  renseignée (ou qu'une écriture comptable existe), montants, date, commande,
+  référence et mode de création ne se modifient plus (admin, API, modèle) et la
+  facture ne se supprime plus ; seul le suivi du paiement reste libre. Une erreur
+  se corrige par un avoir (priorité 2). Avant l'émission, tout reste libre, y
+  compris corriger les montants dans la même saisie que la référence.
+- **Statut de paiement structuré** (*À payer*, *Partiellement payée*, *Payée*)
+  avec date de paiement posée automatiquement au passage à « Payée » ; la
+  migration `0003` ramène les anciens textes libres à ces trois valeurs.
+- **Contrôles de saisie** : facture antérieure à la commande ou datée dans le
+  futur, TTC inférieur au HT, montants négatifs, paiement antérieur à la facture ;
+  montants arrondis au centime ; une facture existante n'est jamais remplacée
+  par un POST d'API de même numéro. Historique en lecture seule.
+- **Défaut corrigé : commande sans devis.** L'échéance d'une facture et la
+  génération d'écriture comptable lisaient `commande.devis.client` et plantaient
+  pour une commande créée directement ; elles utilisent `commande.client`.
+- **Livraison immuable et annulable.** Les lignes d'une livraison ne se modifient
+  ni ne se suppriment plus (avant : modifier une quantité ou supprimer une
+  livraison laissait cumul livré et stock faux). L'action « Annuler la livraison »
+  (motif obligatoire, permission `annuler_livraison`) rétablit le cumul livré,
+  contre-passe les sorties de stock (y compris sur plusieurs lots) et rouvre la
+  commande ; la livraison reste consultable avec auteur, date et motif.
+  Refusée si déjà annulée ou si la commande est déjà facturée (avoir d'abord).
+
+**Vérifié** (Playwright) : fiche d'une facture émise — seul le paiement est
+éditable ; page de confirmation d'annulation d'une livraison.
+
+## Recette du module C : priorité 2, lignes de facture, avoirs, cohérence livraison/facture
+
+Tests : `LignesDeFactureTests`, `AvoirsTests`, `PreparerFactureTests`,
+`EcrituresFactureAvoirTests` (`facturation/tests.py`).
+
+- **Lignes de facture** (`FactureLigne`) : ce qu'une facture facture réellement
+  (quantité d'une ligne de commande, prix et TVA figés au moment de la
+  facturation). Elles donnent, par ligne de commande, le **déjà facturé** (net
+  d'avoirs, brouillons compris) et le **livré non facturé**, désormais affichés sur
+  la commande. On ne peut pas facturer plus que le **livré** (ni deux fois la même
+  quantité d'une facture à l'autre) ; la case « facturation anticipée »
+  (permission `facturer_avant_livraison`) lève cette limite jusqu'au commandé,
+  pour un acompte ou une facturation à la commande. Les lignes se figent avec la
+  facture émise ; les montants HT/TTC de la facture sont repris des lignes quand
+  ils sont laissés vides (jamais écrasés s'ils sont saisis : Tiime fait foi).
+- **Préparer une facture** (bouton sur la liste des factures, ou
+  `POST /api/v1/factures/preparer/`) : crée une facture brouillon avec le livré non
+  encore facturé d'une commande, numérotée par la règle de codification
+  « Facture » (repli `FAC-<commande>`). Reste à renseigner la référence Tiime une
+  fois la facture émise.
+- **Avoirs** : type de document *Avoir*, lié à sa facture d'origine, motif
+  obligatoire, montants négatifs, quantités limitées à ce que la facture portait
+  (net des avoirs déjà faits), pas d'avoir sur un avoir. Bouton « Créer un avoir »
+  sur la fiche d'une facture émise (permission `creer_avoir`, API
+  `POST /api/v1/factures/<n>/avoir/`) : crédite le solde restant ; un avoir
+  partiel se saisit à la main. Un avoir rouvre le « reste à facturer » et permet
+  d'annuler la livraison correspondante.
+- **Écritures comptables fondées sur la facture** : une facture partielle ne
+  comptabilise plus toute la commande, deux factures d'une même commande ont
+  chacune leur écriture juste, et un avoir génère l'écriture inverse (Clients au
+  crédit, Ventes et TVA au débit). Les factures sans lignes gardent l'ancien
+  calcul.
+- **Annulation de livraison** : contrôle précis (facturé net par ligne contre ce
+  qui resterait livré) au lieu du refus global de la priorité 1.
+
+**À savoir à la mise à jour** : les factures *antérieures* n'ont pas de lignes et
+ne comptent donc pas dans le « déjà facturé » — l'écran « Préparer une facture »
+leur proposerait de refacturer le livré. Pour chaque facture existante, ajoutez
+ses lignes dans l'admin (quantités effectivement facturées) avant d'en préparer
+de nouvelles sur la même commande.
+
+**Vérifié** (Playwright) : page « Préparer une facture » (commande livrée 8 sur 20,
+non facturée) ; facture préparée avec sa ligne (8 × 12,50 = 100 € HT, 120 € TTC)
+et les boutons « Créer un avoir » / « Historique ».
+
+## Recette du module C : priorité 3, impayés, écarts, rôles
+
+Tests : `RetardsEtEcartsTests`, `RolesFacturationTests` (`facturation/tests.py`),
+`CodesDesGroupesTests`, `ConnexionDirecteTests` (`comptes/tests.py`).
+
+- **Impayés visibles** : une facture (jamais un avoir) non soldée dont
+  l'échéance calculée est dépassée est « en retard » — mention dans la colonne
+  Échéance, filtre « En retard de paiement » sur la liste, et tuile *Factures en
+  retard* du tableau de bord (nombre et montant TTC à relancer). Le « CA
+  facturé » du mois est désormais net d'avoirs. Les relances automatiques
+  (envoi d'e-mails) ne sont pas incluses : il n'y a pas d'infrastructure d'envoi.
+- **Écart avec les lignes** : colonne de la liste des factures qui signale la
+  différence entre le montant HT saisi (Tiime) et le total des lignes (remise,
+  erreur de recopie).
+- **Rôles** : *Facturation* (prépare et saisit les factures, consulte la
+  comptabilité) et *Responsable facturation* (+ avoirs, facturation anticipée,
+  génération des écritures comptables). *Responsable commercial* peut annuler une
+  livraison. L'action « Générer l'écriture comptable » exige désormais la
+  permission d'ajouter une écriture. API des factures et de leurs lignes soumise
+  aux permissions du modèle.
+- **Après la mise à jour** : `python manage.py synchroniser_groupes` pour ajouter
+  les nouvelles permissions aux groupes déjà créés (ajout seulement). Un test
+  vérifie désormais que chaque code de permission des groupes existe : une faute
+  de frappe serait sinon ignorée en silence (une avait été commise puis détectée
+  ici sur `LigneEcriture`).
+- **Connexion directe** sur `/admin/login/` sans paramètre `next` : retour à
+  l'accueil de l'admin au lieu d'une page 404 (`/accounts/profile/`).
+
+**Vérifié** (Playwright) : liste des factures (échéance « en retard », colonne
+d'écart, bouton « Préparer une facture ») et tableau de bord (1 facture en retard,
+120 € TTC à relancer, CA net d'avoirs).
+
+## Recette du module D (sécurité transverse) : priorité 1
+
+Tests : `ApiSecuriseeParDefautTests`, `MediaProtegeTests`, `DiagnosticSecuriteTests`,
+`LimitationConnexionTests`, `GroupesMetierTests` (`comptes/tests.py`).
+
+- **API sécurisée par défaut.** Toute route d'API exige désormais la permission du modèle
+  (lecture = « voir », écriture = ajout/modification/suppression) : c'est le réglage par
+  défaut de DRF (`ModelPermissionsAvecLecture`), donc un futur ViewSet est protégé sans rien
+  ajouter. Avant, technique, commercial, comptabilité, achats, sous-traitance et découpe
+  n'exigeaient qu'un compte connecté. Un test parcourt **toutes** les routes enregistrées.
+  Les marges réelles et taux de charge (pilotage) exigent la nouvelle permission
+  `voir_marges` (rôle *Direction*).
+- **Nouveaux rôles** pour les modules sans rôle jusque-là : *Méthodes et bureau d'études*
+  (articles, matières, gammes, postes, découpe), *Achats* (achats, sous-traitance),
+  *Comptabilité*. Le rôle *Commercial* peut maintenant créer et modifier ses clients,
+  adresses et contacts (il ne pouvait que les consulter). Un test vérifie que les listes à
+  autocomplétion de chaque rôle répondent.
+- **Fichiers `/media/` protégés.** Les plans DXF/DWG des clients étaient lisibles par
+  quiconque connaissait l'URL, sans connexion. Ils exigent maintenant un compte connecté ayant
+  le droit de voir les pièces à découper (autres fichiers : compte du personnel).
+- **Configuration de production.** `DEBUG` vaut `False` si la variable est absente (avant :
+  `True`). Un diagnostic (`manage.py verifier_securite`, lancé au démarrage du conteneur,
+  et **bandeau rouge sur l'accueil de l'admin, visible des seuls superutilisateurs**) signale :
+  mode DEBUG, clé secrète par défaut ou trop courte, `ALLOWED_HOSTS` ouvert, mot de passe
+  de base par défaut, cookies non sécurisés. Rien ne bloque le démarrage : un réglage douteux
+  est signalé, jamais cause de panne. Nouveaux réglages `.env` : `DJANGO_SESSION_HEURES`
+  (12 par défaut), `DJANGO_COOKIES_SECURISES`, `DJANGO_HSTS_SECONDS` (à activer seulement
+  une fois l'ERP servi en HTTPS). Mots de passe : 10 caractères minimum.
+- **Connexion : anti force brute et journal.** Après 5 échecs en 15 minutes sur un même
+  identifiant, la connexion est refusée — même avec le bon mot de passe — jusqu'à ce que les
+  échecs sortent de la fenêtre ; une connexion réussie remet le compteur à zéro, un
+  administrateur peut débloquer (permission `debloquer_compte`). Le compteur est par
+  identifiant, pas par IP : derrière le reverse proxy du NAS toutes les requêtes ont la même
+  adresse et un blocage par IP verrouillerait tout le monde. S'applique aussi à l'API en
+  authentification de base. Le *Journal des connexions* (Paramétrage) trace réussites,
+  échecs, refus et déblocages, en consultation seule, conservé 180 jours.
+- Corrigé au passage : `LOGIN_URL` n'était pas défini (la redirection vers la connexion
+  pointait sur `/accounts/login/`, inexistant).
+
+**Vérifié** (Playwright) : 5 échecs puis bon mot de passe → refusé avec le message
+« compte verrouillé, réessayez dans 15 minute(s) » ; bandeau de sécurité sur l'accueil ;
+journal des connexions.
+
+## Recette du module D (sécurité transverse) : priorité 2
+
+Tests : `GestionDesAccesTests`, `AuditDesDroitsTests`, `VerrouOptimisteTests`
+(`comptes/tests.py`).
+
+- **Faille corrigée : élévation de privilèges.** Un compte avec la seule permission « modifier
+  les utilisateurs » pouvait se cocher « superutilisateur » ou s'ajouter à n'importe quel
+  groupe. Utilisateurs et groupes sont désormais réservés aux **superutilisateurs** : qui gère
+  les accès a, de fait, tous les accès. À noter : seuls les superutilisateurs créent des
+  comptes et les rattachent à un groupe.
+- **Audit des droits** (Paramétrage → *Audit des droits*, ou `manage.py audit_droits`) : qui
+  a accès à quoi, comptes sans groupe, jamais connectés ou inactifs depuis 90 jours, nombre de
+  superutilisateurs, et **cumuls de droits incompatibles** (séparation des pouvoirs) — par
+  exemple saisir une facture *et* la comptabiliser, ou saisir un mouvement de stock *et*
+  valider l'inventaire. Rien n'est bloqué : une petite structure cumule souvent les rôles, ici
+  le cumul devient visible pour être décidé. Les rôles *Responsable facturation* et
+  *Responsable stock* cumulent ainsi volontairement certains droits et apparaissent comme tels.
+- **Plus d'écrasement silencieux entre deux onglets ou deux personnes.** Les fiches des devis,
+  commandes, livraisons, factures, lots et emplacements portent un numéro de version (dernière
+  entrée de l'historique, champ caché). Si la fiche a changé depuis l'ouverture de la page,
+  l'enregistrement est refusé avec le nom de l'auteur et l'heure, sans rien perdre : la saisie
+  reste affichée pour être recopiée. Limite connue : seule la fiche parente est versionnée,
+  pas ses lignes en tableau (le recalcul en direct des lignes de devis les enregistre au fil de
+  la saisie). Les fiches sans historique (tiers, articles…) ne sont pas encore couvertes.
+- **Double-clic sur « Enregistrer »** : un seul envoi part. Les envois suivants sont bloqués
+  plutôt que de désactiver le bouton (un bouton désactivé n'est pas transmis, et le serveur
+  perdrait la distinction « Enregistrer » / « Enregistrer et continuer »).
+- **Départ d'un collaborateur** : désactiver le compte coupe immédiatement sa session ; changer
+  son mot de passe invalide ses autres sessions ; la désactivation est tracée dans
+  l'historique de l'utilisateur. Les sessions durent 12 h (`DJANGO_SESSION_HEURES`).
+
+**Vérifié** (Playwright) : deux contextes de navigateur sur la même fiche — le second
+enregistrement est refusé avec « modifiée par bruno-d le … » ; un double-clic envoie une seule
+requête POST.
+
+## Recette du module D (sécurité transverse) : priorité 3, sauvegarde et dépendances
+
+- **Dépendances** : `pip-audit` sur `requirements.txt` ne signale aucune vulnérabilité connue.
+- **Sauvegarde et restauration** (les données n'étaient sauvegardées nulle part) :
+  - `./sauvegarder-nas.sh [dossier] [nombre]` : dump compressé de la base + archive des
+    fichiers déposés (plans DXF/DWG), vérifie leur intégrité, refuse une sauvegarde vide,
+    garde les 14 dernières (dossier par défaut : `/volume1/docker/erp_sauvegardes`). À lancer
+    à la main, ou chaque nuit via le Planificateur de tâches de DSM (script défini par
+    l'utilisateur : `cd /volume1/docker/erp && ./sauvegarder-nas.sh`). **Copiez ce dossier hors
+    du NAS** : une sauvegarde qui ne vit que sur le NAS ne protège pas d'une panne du NAS.
+  - `./restaurer-nas.sh fichier_base.sql.gz [fichiers.tar.gz]` : remplace la base par la
+    sauvegarde, après confirmation (taper `RESTAURER`) et sauvegarde de sécurité de l'état
+    actuel dans `erp_sauvegardes/avant_restauration`.
+  - `update-nas.sh` lance désormais la sauvegarde avant chaque mise à jour (effective à partir
+    de la mise à jour *suivante*) ; en cas d'échec il demande confirmation. Passer outre :
+    `ERP_UPDATE_SANS_SAUVEGARDE=1 ./update-nas.sh ...`.
+  - Testé de bout en bout (avec un faux `docker` branché sur une base locale) : sauvegarde,
+    rotation, destruction volontaire de données, restauration. Ce test a révélé un défaut du
+    premier jet (un `ls` final en échec faisait avorter la restauration), corrigé.
+
+**Hors périmètre, à connaître** : pas d'authentification à deux facteurs (django-otp, chantier
+à part) ; le conteneur tourne en root (le passer en utilisateur dédié demande d'adapter les
+droits du volume des fichiers déposés) ; pas de CSP (le thème de l'admin utilise des scripts
+en ligne) ; l'API accepte toujours l'authentification de base (désormais protégée par la
+limitation des tentatives) ; les fiches sans historique (tiers, articles…) ne sont pas
+couvertes par le verrouillage optimiste.
+
+## Gap analysis, lot 1 : cycle de vie du devis
+
+Tests : `CycleDeVieDevisTests` (`chiffrage/tests.py`).
+
+- **Validité de l'offre** : à la validation, le devis reçoit une date « valable jusqu'au » (30
+  jours, réglable par `DEVIS_VALIDITE_JOURS`). Une offre expirée ne peut plus devenir une
+  commande tant que sa validité n'est pas prolongée ; repasser un devis en brouillon efface
+  l'échéance. Les devis existants ne reçoivent aucune date (pas d'expiration inventée).
+- **Réponse du client** : *en attente*, *accepté* (posé par la création de la commande, tracé
+  dans l'historique), *refusé* (motif obligatoire), *remplacé* (par une révision). Elles se
+  renseignent sur la fiche d'un devis validé **sans déverrouiller le prix** : seuls la réponse,
+  le motif et la date de validité y restent modifiables. Un devis refusé ou remplacé ne peut
+  pas devenir une commande. La migration marque « accepté » les devis déjà transformés.
+- **Révision** (bouton *Réviser ce devis* sur la fiche) : crée un brouillon `…-R2` (puis `-R3`…)
+  avec le même en-tête et les mêmes lignes, et marque l'original « remplacé » : le prix déjà
+  envoyé n'est jamais réécrit. Refusée pour un brouillon, un devis déjà commandé ou déjà
+  remplacé.
+- **Pilotage** : colonnes *réponse* et *valable jusqu'au*, filtres *Expirés* et *Expirent sous 7
+  jours*, tuiles d'accueil *Devis sans réponse* (et combien à relancer) et *Taux de
+  transformation* (devis acceptés sur envoyés, 90 jours, hors remplacés).
+
+**Vérifié** (Playwright) : liste (statuts de réponse et dates), fiche d'un devis validé
+(réponse et validité modifiables, reste verrouillé, bouton *Réviser*), révision en un clic
+(`DEV-2026-101-R2`), tuiles d'accueil.
+
+## Gap analysis, lot 2 : documents PDF (devis, bon de livraison) et fiche Société
+
+Tests : `DocumentsPdfTests` (`chiffrage/tests.py`). Nouvelles dépendances : `reportlab`, `pillow`
+(auditées, aucune vulnérabilité connue).
+
+- **Fiche Société** (Paramétrage → *Société*) : raison sociale, adresse, contacts, SIRET, TVA
+  intracommunautaire, capital, RCS, IBAN/BIC, **logo**, et les mentions imprimées sur les devis
+  (conditions de vente, pénalités de retard…) et les bons de livraison. Une seule fiche. **À
+  remplir avant d'imprimer le premier document.**
+- **Devis en PDF** (bouton *PDF du devis* sur la fiche, ou `GET /api/v1/devis/<n>/pdf/`) :
+  en-tête société, client et adresses, lignes avec prix unitaire HT, TVA par taux, totaux HT /
+  TVA / TTC, délai, conditions de règlement du client, date de validité, mention « Annule et
+  remplace » pour une révision, cadre « Bon pour accord » à signer. Un devis non validé est
+  marqué **PROVISOIRE** en filigrane ; un devis vide ou dont une ligne n'est pas chiffrée n'est
+  pas imprimable (message explicite : un prix absent n'est pas un prix de 0).
+- **Bon de livraison en PDF** (bouton *Bon de livraison (PDF)* sur la fiche d'une livraison) :
+  adresses de livraison et de facturation, référence de commande client, quantités livrée /
+  commandée / **reliquat**, colonne *N° de coulée* (alimentée au lot suivant), cadre de
+  signature du destinataire ; filigrane **ANNULÉ** si la livraison l'est.
+- La **facture** n'est pas concernée : la facture légale est émise par Tiime.
+- Les textes saisis par les utilisateurs sont échappés avant d'entrer dans le PDF (pas de
+  balisage injecté). Le téléchargement exige la permission « voir » du devis / de la livraison.
+
+**Vérifié** (rendu des PDF en images) : devis avec logo, en-tête et pied de page légaux, totaux ;
+bon de livraison avec reliquat et cadre de signature.
+
+## Gap analysis, lot 3 : traçabilité matière et réception sur plusieurs lots
+
+Tests : `ReceptionTracabiliteTests`, `TracabiliteLivraisonTests` (`achats/tests.py`),
+`AutocompletionsTracabiliteTests` (`comptes/tests.py`).
+
+- **N° de coulée et certificat 3.1 sur le lot** : deux champs sur chaque lot, recherche par
+  n° de coulée dans la liste des lots. Les certificats sont des fichiers `/media/stock/…`,
+  lisibles seulement avec la permission « voir un lot ».
+- **Réception sur plusieurs lots** (avant : un seul lot par article, sinon la réception était
+  refusée) : chaque ligne de réception peut désigner le lot de destination, ou donner un **n° de
+  coulée** (et un emplacement) — une coulée déjà connue complète son lot, une nouvelle coulée
+  **crée** son lot, et le certificat joint est rattaché au lot. Sans rien préciser, l'ancien
+  comportement subsiste (lot unique de l'article).
+- **Livrer une coulée précise** : champ *Lot livré* sur la ligne de livraison (pour que le
+  certificat remis corresponde à la matière expédiée) ; sans choix, les lots sont toujours
+  consommés du plus ancien au plus récent. Un lot d'un autre article est refusé.
+- **Traçabilité d'un lot** (bouton sur la fiche d'un lot) : d'où il vient (réceptions et
+  fournisseurs) et où il est parti (bons de livraison, clients, commandes, livraisons annulées
+  signalées) — de quoi répondre à un rappel de matière ou à une réclamation. Le **n° de coulée
+  s'imprime sur le bon de livraison**.
+- **Défaut corrigé** : l'enregistrement d'une ligne de réception n'était pas atomique et
+  mettait à jour le cumul reçu avant de chercher le lot. Si aucun lot n'existait (ou s'il y en
+  avait plusieurs), l'erreur était affichée mais la ligne et le cumul restaient enregistrés.
+  Désormais tout ou rien. Le rôle *Responsable commercial* reçoit la consultation des lots
+  (choix du lot livré) : `manage.py synchroniser_groupes` après mise à jour.
+
+**Vérifié** (Playwright) : page de traçabilité du lot C-2026-0455 (réception REC-0099 des Aciers
+du Rhône, livraison BL-0208 chez Métallerie Durand) ; bon de livraison imprimant la coulée.
+
+## Gap analysis, lot 4 : relances de paiement par e-mail et synthèse quotidienne
+
+**Relances de paiement.** Sur la liste des factures, sélectionnez les factures en retard puis l'action « Envoyer une relance de paiement » (droit `relancer_facture`, donné aux groupes Facturation, Responsable facturation et Direction). Le message part au contact du client dont la fonction contient compta/factur/financ, sinon au contact principal, sinon au premier contact avec une adresse. Trois niveaux de ton (courtois, ferme, mise en demeure) selon le nombre de relances déjà envoyées ; l'IBAN et les coordonnées de la fiche Société sont ajoutés. Refus explicites : avoir, facture payée, facture non émise, facture pas encore en retard, relance déjà envoyée il y a moins de `DJANGO_RELANCE_DELAI_MIN_JOURS` jours (7 par défaut), client sans adresse e-mail. Un échec d'envoi est journalisé (`envoyee = non`, motif) et ne compte pas comme une relance. L'historique est visible sur la fiche facture (onglet « Relances de paiement », lecture seule) et la colonne « Relances » de la liste.
+
+**Synthèse quotidienne.** `python manage.py synthese_quotidienne` envoie un e-mail récapitulatif : factures en retard, devis expirés ou expirant sous 7 jours. Options : `--afficher` (affiche sans envoyer), `--destinataires a@x.fr,b@x.fr`, `--si-non-vide` (n'envoie rien s'il n'y a rien à signaler). Destinataires par défaut : `DJANGO_SYNTHESE_DESTINATAIRES`.
+
+**Configuration e-mail** (fichier `.env`) : `DJANGO_EMAIL_HOST`, `DJANGO_EMAIL_PORT`, `DJANGO_EMAIL_USER`, `DJANGO_EMAIL_PASSWORD`, `DJANGO_EMAIL_TLS`, `DJANGO_EMAIL_EXPEDITEUR`. Sans `DJANGO_EMAIL_HOST`, les messages s'affichent seulement dans les logs (mode test, rien n'est envoyé).
+
+Sur le NAS : après mise à jour, lancer `sudo docker compose exec web python manage.py synchroniser_groupes`, puis programmer dans le Planificateur de tâches DSM, chaque matin :
+`cd /volume1/docker/erp && docker compose exec -T web python manage.py synthese_quotidienne --si-non-vide`.
+
+## Gap analysis, lot 5 : fiabilisation de la synchronisation avec le planning atelier
+
+Le planning reste facultatif (tant que `PLANNING_API_URL` est vide, rien n'est envoyé et rien n'est signalé comme anormal). Une fois l'API branchée :
+
+- **Clé d'idempotence liée au contenu** : `Idempotency-Key = <numéro OF>-<empreinte du contenu envoyé>`. Un renvoi après coupure réseau ne crée pas de doublon côté planning ; un OF modifié part avec une nouvelle clé et met donc le planning à jour.
+- **OF modifié après synchronisation** (quantité, date, gamme) : détecté par comparaison d'empreinte et renvoyé automatiquement par la reprise planifiée. Les OF synchronisés avant cette version ne sont pas renvoyés tant qu'ils ne changent pas.
+- **Reprise avec attente croissante** : 5 min, 10, 20… plafonnée à 6 h entre deux tentatives ; après `PLANNING_SYNC_MAX_TENTATIVES` échecs (5 par défaut) l'OF passe en « Échec persistant ».
+- **Dernière erreur conservée** sur chaque OF (colonne « Dernière erreur » de la liste, champ en lecture seule dans la fiche et l'API). Les champs de synchronisation ne sont plus modifiables à la main.
+- **Tuile « Synchro planning »** sur le tableau de bord (rouge s'il y a des échecs persistants, lien direct vers la liste filtrée) et rubrique dédiée dans la synthèse quotidienne.
+- `manage.py retry_sync_ordres_fabrication` : respecte le délai de reprise, renvoie les OF modifiés, verrouille chaque OF (deux exécutions simultanées ne l'envoient pas deux fois). Option `--inclure-echecs` pour retenter les échecs persistants après avoir corrigé la cause.
+
+À planifier dans le Planificateur de tâches DSM, toutes les 15 minutes :
+`cd /volume1/docker/erp && docker compose exec -T web python manage.py retry_sync_ordres_fabrication`.
+
+## Gap analysis, lot 6 : export CSV des listes
+
+Sur les listes principales (devis et lignes, commandes et lignes, livraisons, ordres de fabrication, factures, lots, mouvements et alertes de stock, tiers, contacts, articles, commandes/réceptions/factures fournisseur et lignes, écritures comptables), cochez des lignes (ou « Sélectionner les N éléments » pour toute la liste filtrée) puis l'action **« Exporter la sélection en CSV (colonnes affichées) »**.
+
+- Le fichier contient exactement les colonnes de la liste (un export ne révèle jamais plus que l'écran, les colonnes réservées à certains droits le restent).
+- Droit nécessaire : « voir » le modèle ; chaque export est tracé dans les logs (`docker compose logs web | grep "Export CSV"`).
+- Format prévu pour Excel/LibreOffice en français : UTF-8 avec BOM, séparateur `;`, virgule décimale, dates JJ/MM/AAAA, nombres négatifs (avoirs) conservés comme nombres.
+- Protection contre l'injection de formule : un texte commençant par `=`, `+`, `-` ou `@` est préfixé d'une apostrophe.
+- Limite de 20 000 lignes par export (filtrer la liste au-delà).
+
+Pour ajouter l'export à une autre liste : `from comptes.exports import ExportCsvMixin` puis `class MonAdmin(ExportCsvMixin, ModelAdmin)`.
+
+## Passage des montants en Decimal
+
+Tous les montants, prix, coûts et taux sont désormais des nombres décimaux exacts (`Decimal`, champ `comptes.champs.ChampDecimal`) et non plus des flottants : plus de `0.30000000000000004`, plus d'écart de centimes avec Tiime ou avec les écritures comptables.
+
+**Règles (définies une seule fois dans `comptes/montants.py`)**
+- Montants (HT, TTC, débit, crédit, prix de vente d'une ligne, frais de port) : 2 décimales.
+- Prix et coûts unitaires (achat, coût matière, coût horaire, coût moyen pondéré) : 4 décimales (une vis à 0,0035 € existe).
+- Prix de vente unitaire des lignes de commande et de facture : 6 décimales, pour qu'un total de devis ramené à l'unité redonne exactement le même total une fois remultiplié, même sur de grandes quantités.
+- Taux (TVA, marges) : 2 décimales.
+- Arrondi commercial (0,5 vers le haut : 1,005 → 1,01, alors que le flottant donnait 1,00), appliqué **ligne par ligne** ; les totaux sont la somme des lignes arrondies, ce qui correspond à la facture Tiime. Le prix de vente d'une ligne de devis (matière, chaque opération) est donc arrondi au centime à la source.
+- Les quantités, durées et dimensions (mm, kg, minutes) restent des flottants : ce sont des grandeurs physiques, converties au moment de les multiplier par un prix.
+
+**Ce qui change pour vous**
+- Un montant saisi avec plus de décimales que son champ (ex. 12,345 € sur un montant) est refusé au lieu d'être silencieusement arrondi.
+- Les listes affichent 100,00 au lieu de 100,0 ; l'API et le constructeur de devis renvoient toujours des nombres JSON (pas des chaînes).
+- Les totaux d'un devis peuvent différer d'un centime de l'ancien affichage, car chaque ligne et chaque opération est maintenant arrondie avant d'être additionnée.
+
+**Mise à jour de la base (NAS)** : la migration convertit les colonnes en place (PostgreSQL arrondit les anciennes valeurs au centime, ou à 4/6 décimales pour les prix). Les factures, déjà arrondies à 2 décimales, ne changent pas. **Faites une sauvegarde avant** : `./sauvegarder-nas.sh`, puis `./update-nas.sh claude/project-construction-k7owwb`.
+
+Un test garde-fou (`MontantsDecimalTests.test_aucun_champ_monetaire_en_flottant`) échoue si un champ de montant, prix, coût, taux, débit ou crédit redevient un `FloatField`.
+
+## Gestion de stock optionnelle
+
+Toutes les sociétés ne gèrent pas un stock. Deux niveaux, indépendants :
+
+- **Par article** : la case « Géré en stock » (cochée par défaut pour une matière première, décochée pour un fabriqué). Une réception ou une livraison d'un article non géré enregistre seulement la quantité reçue / livrée, sans lot ni mouvement. Désigner un lot pour un article non géré reste refusé (erreur de saisie).
+- **Pour toute la société** : `DJANGO_STOCK_ACTIF=false` dans `.env` (puis `docker compose up -d`). Disparaissent alors le menu Stock, les écrans Lots / Mouvements / Emplacements / Alertes (accès direct refusé), la tuile « Alertes de stock », la rubrique de la synthèse quotidienne, les champs de stock des articles (géré en stock, stock minimum, quantité de réapprovisionnement) et les champs lot / coulée / certificat des réceptions et des livraisons. Les nouveaux articles ne sont jamais « gérés en stock ». Les données de stock déjà saisies ne sont pas touchées (elles redeviennent visibles si vous réactivez).
+
+Le flux devis → commande → livraison → facture, les achats, la comptabilité et les PDF fonctionnent à l'identique sans stock. Ce que le stock apporte en plus (traçabilité des coulées, coût moyen pondéré, alertes) n'existe évidemment que lorsqu'il est activé.
+
+## Devis : révisions et indices
+
+Un devis validé (envoyé au client) ne se modifie plus. Pour le faire évoluer sans écraser ce qui a été envoyé, on crée un **nouvel indice** :
+
+- Fiche du devis → **« Nouvel indice (réviser) »**. Un **motif** est obligatoire (ce qui change : remise, quantité, délai…).
+- Le nouvel indice (B, puis C… ; AA après Z) est créé en **brouillon**, avec les mêmes lignes, sous le numéro `<devis d'origine>-<indice>` (ex. `DEV-2026-101-B`). Modifiez-le, chiffrez-le, validez-le comme n'importe quel devis (nouvelle date de validité à la validation).
+- L'indice précédent passe à « **remplacé** » : il reste consultable, mais ne peut plus devenir une commande. Il n'est pas compté dans le taux de transformation.
+- Un devis **déjà devenu commande** ne se révise plus : modifiez les lignes de la commande (chaque changement de quantité, prix ou TVA y est tracé).
+- Si vous **supprimez** un indice brouillon abandonné, l'indice précédent redevient valable (retour à « en attente de réponse »).
+- La fiche affiche l'**historique des indices** (numéro, date, statut, réponse du client, motif) et, pour une révision, un **tableau des changements** ligne par ligne par rapport à l'indice précédent (« à chiffrer » tant que le nouvel indice n'est pas recalculé).
+- La liste des devis a une colonne **Indice** et un filtre « Derniers indices seulement ».
+- Le **PDF** d'un indice porte « Indice B », « Annule et remplace DEV-… (indice A) » et « Modification : … ».
+- API : `POST /api/v1/devis/<numéro>/reviser/` avec `{"motif": "..."}` (droit de modifier un devis) ; `indice`, `revision`, `motif_revision` et `devis_origine` sont renvoyés en lecture seule.
+
+Les révisions déjà créées avant cette version gardent leur numéro `-R2` ; leur indice (B) s'affiche normalement.
+
+## Commandes clients : AR, bon de préparation et ordres de fabrication
+
+**Flux** : devis validé → **« Créer la commande »** (le devis ne crée plus que la commande et ses lignes) → sur la fiche de la commande, **« Créer les ordres de fabrication »**.
+
+**Ordres de fabrication (OF)**
+- Un OF par ligne de commande d'**article fabriqué** (les matières achetées et services n'en ont pas). La **quantité commandée** est reprise automatiquement.
+- Une page d'aperçu montre ce qui sera créé avant validation. La case **« Regrouper les lignes du même article »** fusionne les lignes d'un même article en un seul OF (quantités additionnées, date de livraison la plus proche).
+- Chaque OF reprend : la **date de livraison prévue** (la plus proche des lignes couvertes), la **gamme** (opérations, postes, temps prévus calculés sur la quantité) et la **nomenclature** (composants à sortir = quantité par pièce × quantité à fabriquer, avec longueur/largeur). Gamme et nomenclature sont **figées** à la création : modifier ensuite la fiche article ne change pas un OF déjà lancé.
+- Le bouton est **rejouable sans doublon** : seules les lignes sans OF sont traitées (une ligne ajoutée plus tard se lance en recliquant). Chaque OF garde la liste des lignes de commande qu'il couvre.
+- Les OF sont envoyés au planning atelier (date de livraison et composants inclus dans le message ; les OF antérieurs ne sont pas renvoyés pour autant).
+- Droit : « ajouter un ordre de fabrication » (Responsable commercial, Direction, Atelier). Après mise à jour : `docker compose exec web python manage.py synchroniser_groupes`.
+
+**Documents PDF** (fiche de la commande ; API `GET /api/v1/commandes/<n>/ar-pdf/` et `/bon-preparation-pdf/`)
+- **AR de commande** : à envoyer au client — lignes, prix HT/TTC, TVA, **date de livraison prévue par ligne**, adresses de facturation et de livraison, sa référence de commande, l'offre d'origine (avec indice), conditions de règlement et mentions (nouveau champ « mentions sur les accusés de réception » de la fiche Société). Refusé si une ligne n'a pas de prix ; filigrane « ANNULÉE » si la commande l'est.
+- **Bon de préparation** : document interne **sans prix** — quantités commandées et à livrer, date prévue, OF liés (ou « OF à créer »), stock disponible et n° de coulée pour les articles gérés en stock, case « Prêt » et zone de signature. Accessible au Magasinier.
+- **Fiche de fabrication** (fiche de l'OF ; `GET /api/v1/ordres-fabrication/<n>/pdf/`) : quantité, livraison prévue, nomenclature et gamme avec cases « Fait ».
+- **Impression de toutes les fiches en une fois** : après « Créer les ordres de fabrication », le message de confirmation propose le lien **« Imprimer les N fiche(s) de fabrication (PDF) »** (un seul PDF, une fiche par page, uniquement les OF qui viennent d'être créés). Le bouton **« Fiches de fabrication (PDF) »** de la fiche commande imprime ensuite tous les OF de la commande, et l'action de liste **« Imprimer les fiches de fabrication »** (liste des ordres de fabrication) ceux que vous sélectionnez. API : `GET /api/v1/commandes/<n>/fiches-fabrication-pdf/`.
+
+**API** : `POST /api/v1/commandes/<n>/creer-ordres-fabrication/` (`{"regrouper": true}` facultatif) ; `POST /api/v1/devis/<n>/lancer-en-production/` ne crée plus que la commande.
+
+## Documents de vente : facturation et livraison toujours indiquées
+
+Tous les PDF de vente — **devis, AR de commande, bon de préparation, bon de livraison** et **fiche de fabrication** — portent désormais deux blocs côte à côte : **« Facturé à »** (nom de l'entreprise et adresse de facturation) et **« Livré à »** (nom de l'entreprise et adresse de livraison), **même quand les deux adresses sont identiques**. Sur un devis dont aucune adresse n'a été choisie, l'adresse principale du client (facturation / livraison) est utilisée ; si le client n'en a aucune, le bloc reste affiché avec la mention « Adresse non renseignée » plutôt que de disparaître. L'ordre est le même partout (facturation à gauche, livraison à droite).
+
+## Modèles de documents PDF (éditeur visuel GrapesJS)
+
+Les PDF de vente (**devis, AR de commande, bon de préparation, bon de livraison, fiche de fabrication**) peuvent être **mis en page librement** dans un éditeur visuel : menu **Paramétrage → Modèles de documents (PDF)**, réservé aux **superutilisateurs** (un modèle est du HTML rendu côté serveur : c'est un droit d'administration).
+
+**Principe**
+- Chaque document a **un modèle**, créé automatiquement avec la mise en page par défaut (identique aux PDF d'origine). Tant que la case **« Utiliser ce modèle pour les PDF »** n'est pas cochée, le PDF d'origine est utilisé : on peut éditer, tester et ne basculer qu'une fois satisfait.
+- L'éditeur (GrapesJS, embarqué dans l'application, fonctionne hors ligne) permet de glisser-déposer des blocs (colonnes, titres, images, cadres, séparateurs), de styler chaque élément (police, couleurs, marges, bordures, positions…) et de réorganiser la page. Onglet **Blocs et variables** : les éléments du document (en-tête société, titre et références, « Facturé à / Livré à », tableau des lignes, totaux, mentions, signature, pied de page répété, filigrane, saut de page) et les **variables** (`{{ societe.nom }}`, `{{ facturation.adresse_html }}`, `{{ totaux.ttc }}`…) à déposer dans la page.
+- **Aperçu PDF** : avec des données d'exemple, ou avec un **vrai devis / une vraie commande / livraison / OF** choisi dans la liste, sans rien enregistrer.
+- **Enregistrer** (Ctrl+S) : le modèle est d'abord rendu avec des données d'exemple ; s'il ne peut pas l'être, il n'est pas enregistré. Les variables inconnues (faute de frappe) sont signalées. Chaque enregistrement est **historisé** (menu Historique). **« Revenir au modèle par défaut »** recharge la mise en page d'origine (à enregistrer pour la conserver).
+- Repli de sécurité : si un modèle actif échoue au rendu pour une raison technique, **le PDF d'origine est produit** et l'erreur est journalisée ; les refus métier (ligne sans prix, devis vide…) restent identiques.
+
+**Répéter et afficher conditionnellement** (onglet *Propriétés* d'un élément) : `Répéter sur` = `lignes` (une ligne de tableau par ligne de document ; `Nom de l'élément` = `ligne`), `Afficher si` = une variable (ex. `delai`, ou `!delai` pour l'inverse). Variables de ligne : `ligne.designation_html`, `ligne.quantite`, `ligne.pu_ht`, `ligne.total_ht`, `ligne.livraison_prevue`… (liste complète dans l'éditeur). Il n'y a volontairement **aucun langage de programmation** dans les modèles : seulement `{{ variable }}`, « répéter » et « afficher si ». Les scripts, gestionnaires d'événements, formulaires et ressources externes (fichiers locaux, adresses http) sont ignorés ou bloqués ; seules les images intégrées au document (`data:`) sont chargées.
+
+**Limites** : les marges de page (A4, 15 / 18 / 26 mm) et la numérotation « Page x / y » sont fixes ; le texte de pagination se règle donc dans le code, pas dans l'éditeur. La mise en page de l'éditeur approche la page A4 : **le PDF d'aperçu fait foi** (retours à la ligne, sauts de page).
+
+**Technique / déploiement** : rendu HTML → PDF par **WeasyPrint** (`requirements.txt`), qui exige Pango et des polices dans l'image Docker (`Dockerfile` mis à jour : `docker compose up -d --build`, c'est ce que fait `update-nas.sh`). GrapesJS 0.23 (licence BSD-3) est fourni dans `documents/static/documents/vendor/`. Pour mettre à jour cette bibliothèque : remplacer ces deux fichiers **en retirant la ligne `//# sourceMappingURL=…` en fin de `grapes.min.js`**, sinon `collectstatic` échoue.
+
+Envoyez-moi vos modèles papier ou Word : je reproduis leur mise en page comme modèle par défaut.
+
+## Menu latéral
+
+Le menu suit le chemin d'une commande :
+**Ventes** (Devis, Commandes clients, Livraisons (BL), Factures) → **Production** (Ordres de fabrication, Pièces à découper, Imbrications, Profils d'import) → **Achats** (Commandes fournisseur, Réceptions, Factures fournisseur, Envois et retours de sous-traitance, Fournisseurs d'article, Tarifs d'achat) → **Stock** (Lots, Mouvements, Alertes, Transferts, Inventaires, Emplacements) → **Comptabilité** → **Données de base** (Tiers, Adresses, Contacts, Articles, Matières, Nomenclatures, Gammes, Postes de travail, Tarifs de poste, Taux de TVA, Conditions de paiement, Délais proposés, Devises, Pays) → **Administration** (Société, Modèles de documents, Règles de codification, Utilisateurs, Groupes, Audit des droits, Journal des connexions).
+
+- Comptabilité, Données de base et Administration sont **repliés** par défaut (ils s'ouvrent d'eux-mêmes quand on est dans l'un de leurs écrans).
+- Chaque entrée n'apparaît que si l'utilisateur a le droit « voir » l'écran ; un groupe sans entrée visible disparaît. Le groupe Stock disparaît si `DJANGO_STOCK_ACTIF=false`.
+- Pour déplacer ou ajouter un écran : `config/settings.py`, liste `NAVIGATION` (une ligne `_menu("Titre", "icône", "app", "modele")`).
+
+## Adresses et contacts filtrés par client
+
+Sur les fiches **Devis** et **Commande**, les listes « adresse de facturation », « adresse de livraison » et « contact » ne proposent que ce qui appartient au **client choisi** (recherche incluse). Changer de client vide ces champs avant de proposer l'adresse principale et le contact du nouveau client, pour ne pas garder par erreur l'adresse de l'ancien. Tant qu'aucun client n'est choisi, la liste reste complète. (Technique : `comptes/static/comptes/filtre_client.js` ajoute le client aux requêtes d'autocomplétion ; `AdresseAdmin` et `ContactAdmin` filtrent côté serveur.)
+
+## Fiches devis, commande, facture, livraison, commande fournisseur, ordre de fabrication et article en deux colonnes
+
+La fiche d'un devis place la **saisie à gauche** (numéro, client, adresses, contact, dates, statut, réponse du client, marge, délai) et un **récapitulatif à droite** (montants matière, opérations, total HT et TTC, indices et changements entre indices), visible dès l'ouverture sans descendre dans la page. Sous 1100 px de large, le récapitulatif repasse sous la saisie. Le tableau des lignes reste sur toute la largeur. La **fiche commande** suit la même disposition : à droite, le **total HT et TTC**, les **ordres de fabrication** (avec leur date de livraison prévue), les **livraisons** et les **factures** de la commande, chacun avec un lien vers sa fiche. La **fiche facture** place à droite l'**échéance** (avec « en retard »), les **montants calculés** depuis la commande, l'**écart** avec les lignes, les **relances de paiement**, la **facture d'origine / les avoirs** liés (liens) et l'**écriture comptable** (lien, ou « pas encore générée »). La **fiche livraison** place à droite le **client et l'adresse de livraison**, le **contenu** de la livraison, le **reliquat** restant à livrer sur la commande, ce qui est **livré mais pas encore facturé**, et l'**annulation** (date, auteur, motif) le cas échéant. La **fiche commande fournisseur** place à droite le **fournisseur** (nom et adresse), le **total HT et TTC**, le **reste à recevoir** par ligne, les **réceptions** et les **factures fournisseur** (liens, avec le montant facturé comparé au montant commandé). La **fiche ordre de fabrication** place à droite la **commande** d'origine (lien, client, livraison prévue), les **lignes de commande couvertes**, l'**avancement** (temps prévu / temps réel par opération, pièces bonnes et rebuts) et la **synchronisation avec le planning** (statut, tentatives, prochaine relance, dernière erreur) ; la nomenclature et la gamme restent en tableaux pleine largeur sous la fiche. La **fiche article** place à droite la **composition** (nombre de composants et d'étapes de gamme d'un article fabriqué, avec un rappel s'il est incomplet), le **prix d'achat actuel** par fournisseur (tarif en vigueur), le **stock** (quantité, seuil, alerte active — bloc absent si la gestion de stock est désactivée), les articles **dans lesquels il est utilisé** (liens) et son **activité** (lignes de devis, de commande, ordres de fabrication). Pour appliquer cette disposition à une autre fiche : fieldsets avec les classes `fiche-saisie` / `fiche-recap` (voir `DevisAdmin.get_fieldsets` et `CommandeAdmin.get_fieldsets`) ; les règles sont dans `comptes/static/comptes/fiche_deux_colonnes.css`.
+
+## Bandeaux de confirmation cliquables
+
+Quand une action crée ou modifie un document (commande créée depuis un devis, nouvel indice de devis, ordres de fabrication, ordre lancé depuis une ligne de commande, commande ou livraison annulée, mouvement de stock contre-passé, resynchronisation d'un OF), le **bandeau vert** contient un **lien vers le document** : un clic l'ouvre, sans le chercher dans la liste. Quand l'action ouvre déjà la fiche créée (facture préparée, avoir, duplication d'un article), il n'y a rien de plus à faire. Pour ajouter un lien dans un nouveau message : `comptes.liens.lien_admin(objet)` (à passer dans `format_html`).
+
+## Bouton « Étape suivante » (devis → commande → fabrication → livraison → facture)
+
+Sur la **fiche d'un devis, d'une commande et d'une livraison**, un bouton orange en haut propose **la prochaine action du cycle** et dit laquelle (« Étape suivante : Créer la commande »…). Il disparaît quand il n'y a plus rien à faire. Les étapes :
+
+- **Devis validé** (ni refusé ni remplacé) → *Créer la commande* ; une fois créée, le bouton devient *Ouvrir la commande*. Depuis la liste des devis, « Créer la commande » sur **un seul devis** ouvre directement la commande.
+- **Commande** → *Créer les ordres de fabrication* (écran d'aperçu, avec regroupement) tant qu'il reste des lignes fabriquées sans ordre, puis *Créer la livraison* (formulaire ouvert avec **les lignes à livrer pré-remplies** de leur reliquat, à ajuster avant d'enregistrer), puis *Préparer la facture* (écran filtré sur cette commande).
+- **Livraison** → *Préparer la facture* s'il reste du livré non facturé.
+
+Le bouton ne contourne aucun droit : sans la permission de créer l'objet suivant, un message l'indique. La décision de l'étape est dans `chiffrage/etapes.py`, l'exécution dans `EtapeSuivanteMixin` (`chiffrage/admin.py`). Les règles existantes (devis expiré, refusé, commande annulée…) restent appliquées.
+
+## Thème visuel (lot A : pastilles, listes aérées, tuiles)
+
+- **Pastilles de statut** dans les listes (devis : statut et réponse du client ; commandes ; livraisons ; factures : type et paiement ; ordres de fabrication : synchro planning ; inventaires ; alertes de stock ; pièces à découper). Le vocabulaire de couleurs est commun : bleu = en cours/brouillon, orange = à faire/en attente, vert = terminé/validé/payé, rouge = problème/annulé/refusé, ambre = information (avoir, remplacé). Il se déclare dans l'admin avec `pastilles = {"statut": {"valide": TERMINE, …}}` (`comptes/pastilles.py`, mixin `PastillesMixin`). Tri, filtres et export CSV sont inchangés.
+- **Listes plus aérées** : lignes plus hautes, en-têtes en petites capitales grises, montants et quantités alignés à droite avec des chiffres de largeur fixe, numéro du document en gras de la couleur du thème, survol de ligne teinté.
+- **Fiches** : cartes arrondies avec ombre légère, bandeau « Récapitulatif » avec icône et liseré ambre.
+- **Accueil** : tuiles avec pastille d'icône et liseré coloré par thème — ambre (ventes), bleu acier (atelier), vert (trésorerie), rouge (à traiter). La correspondance tuile → thème est dans `comptes/dashboard.py` (`THEMES_TUILES`).
+- Tout le style maison est dans `comptes/static/comptes/theme.css` (variables en tête de fichier : rayon, ombres, teintes) ; le mode sombre est repris du thème Unfold.
+
+## Recherche globale (Ctrl+K) et menu « + Nouveau » (lot B)
+
+- **Recherche globale** : `Ctrl + K` (`⌘ K` sur Mac) ou clic sur la barre en haut du menu latéral. Une seule barre qui cherche, au fil de la frappe, dans les **devis, commandes, livraisons, ordres de fabrication, factures, articles, clients/fournisseurs et commandes fournisseur** (numéro, client, référence… : mêmes champs de recherche que les listes), et propose aussi des **écrans** (« factures en retard », « devis sans réponse », « ordres de fabrication non transmis », « nouveau devis »…) sans tenir compte des accents. 5 résultats par type ; Entrée ouvre le résultat, Ctrl+Entrée l'ouvre dans un nouvel onglet ; l'historique des dernières recherches est conservé. Les résultats **respectent les droits** : un type de document que l'utilisateur n'a pas le droit de voir n'apparaît jamais. Code : `comptes/recherche.py` (types de documents et détails affichés dans `DOCUMENTS`).
+- **Menu « + Nouveau »** en haut de chaque page : nouveau devis, nouvelle commande, nouvelle livraison, préparer une facture, nouvelle commande fournisseur, nouveau client/fournisseur, nouvel article — **seules les entrées autorisées** apparaissent (le menu disparaît s'il n'y en a aucune). Les entrées et les écrans de la recherche sont définis dans une seule liste : `comptes/raccourcis.py` (`CREATIONS`, `ECRANS`).
+
+## Bouton « Enregistrer et valider » (et ouvrir le PDF)
+
+Dans la barre d'enregistrement des fiches **devis, commande, livraison et ordre de fabrication**, un bouton enregistre la fiche **puis ouvre directement son PDF** :
+
+- **Devis** : *Enregistrer, valider et ouvrir le PDF* — le statut passe à « Validé » (avec les mêmes contrôles que d'habitude : au moins une ligne, chiffrage complet, vente sous le coût réservée à qui en a le droit) puis le PDF du devis s'ouvre. Si la validation est refusée, la fiche est enregistrée, les raisons s'affichent et on reste sur la fiche (le devis reste en brouillon). Le bouton n'apparaît que pour qui a la permission « valider un devis ».
+- **Commande** : enregistre et ouvre l'**AR de commande** ; **livraison** : le **bon de livraison** ; **ordre de fabrication** : la **fiche de fabrication**.
+- Les factures (émises dans Tiime) et les commandes fournisseur n'ont pas de PDF dans l'ERP : pas de bouton.
+- Le menu « + Nouveau » s'élargit à son contenu (jamais de retour à la ligne) et s'aligne sur le bord de l'écran s'il ne tient pas.
+- Code : `EnregistrerEtValiderMixin` (`chiffrage/admin.py`) ; un admin déclare `url_pdf`, `libelle_valider` et, s'il se valide, `valeurs_validation` / `pret_pour_pdf`.
+
+## Récapitulatif plus large et « Mes colonnes »
+
+- **Récapitulatif plus large** sur toutes les fiches en deux colonnes (devis, commande, facture, livraison, commande fournisseur, ordre de fabrication, article) : 38 % de la largeur, entre 28 et 46 rem, au lieu de 28 rem fixes — les listes d'ordres de fabrication, de livraisons ou de factures tiennent sur une ligne.
+- **Mes colonnes** (menu du compte en bas à gauche, ou Ctrl+K « colonnes ») : chaque utilisateur coche les colonnes qu'il veut voir. Réglage **personnel**, enregistré par utilisateur (`PreferenceColonnes`) ; « Rétablir les colonnes par défaut » efface ses choix. Écrans concernés : listes des devis, commandes, livraisons, factures, ordres de fabrication et articles ; tableau des lignes d'une commande (désignation, date de livraison possible, statut d'approvisionnement, livré, reliquat, entièrement livrée, facturé, livré non facturé).
+- Jamais masquables : le lien vers la fiche (première colonne d'une liste) et, dans le tableau des lignes, les colonnes indispensables à la saisie et aux calculs en direct (article, quantité, prix, TVA, montants, date de livraison prévue).
+- Pour rendre un écran personnalisable : ajouter `ColonnesPersonnalisablesMixin` (`comptes/colonnes.py`) devant `ModelAdmin` (liste) ou `TabularInline` (lignes, avec `colonnes_optionnelles = [...]`) ; `colonnes_masquees_par_defaut` fixe ce qui est masqué tant que l'utilisateur n'a rien choisi.
+
+## Temps de découpe (jet d'eau) — phase 1
+
+Le temps de découpe d'une pièce est **calculé** depuis sa géométrie (importée du DXF) et les **paramètres de coupe** de la machine, au lieu d'être saisi à la main dans la gamme.
+
+- **Paramètres de coupe** (menu Production) : une fiche par **matière et épaisseur**, reprise du logiciel de la machine (IGEMS) — vitesses élevée/basse par **niveau de qualité** (1,5 extra brut → 5 extra fin) avec paliers, distances d'accélération/décélération et coefficients ; perçage (stationnaire HP/BP, circulaire, diamètre, pointage) et mode retenu ; marquage (vitesse, temporisation) ; percement linéaire, chevauchement ; **intervalle entre pièces** (réservé à l'imbrication, phase suivante) ; poste de travail (son tarif horaire valorise le temps dans la gamme).
+- **Pièce à découper** : champ **Qualité de coupe** (3 « Moyen+ » par défaut) et ligne **Temps de découpe estimé** (minutes par pièce : coupe, perçage, marquage, nombre de coins et de perçages, paramètres utilisés). Si l'épaisseur exacte n'existe pas, la plus proche est utilisée avec un avertissement.
+- **Alimenter la gamme de l'article** (bouton de la fiche pièce) : crée ou met à jour l'étape de découpe de la gamme de l'article fabriqué (temps variable = minutes par pièce, poste de la machine). Une étape déjà calculée est mise à jour sur place le jour même, historisée (date de fin + nouvelle étape) un autre jour ; une étape **saisie à la main n'est jamais écrasée**, et retoucher une étape calculée la fait passer en « saisie à la main » (colonne *Origine* de la gamme). Le réglage machine (temps fixe) reste à saisir.
+- **Modèle de calcul** (`decoupe/services/temps.py`) : chaque contour est coupé à la vitesse élevée sur les droites et les grands arcs, avec une vitesse qui décroît jusqu'à la vitesse basse dans les courbes serrées (rayon de pleine vitesse, paliers) ; chaque coin ralentit sur A + R ; amorce et chevauchement par contour ; perçage par contour ; marquage ; le tout multiplié par un **coefficient d'ajustement** — c'est le réglage qui sert à **caler le calcul sur les temps réellement donnés par le logiciel de la machine** (comparer quelques pièces et ajuster).
+- Pas encore pris en compte : le laser, les déplacements à vide entre contours, l'importation en masse du fichier `materials.lua` d'IGEMS (à venir, avec la matière par imbrication et la simulation de formats).
+
+## Usinabilité : vitesses de coupe calculées pour les matières et épaisseurs non relevées
+
+- **Usinabilité des matières** (fiche Matière, colonne dans la liste) : indice utilisé par le logiciel de la machine. Action de liste **« Renseigner l'usinabilité standard »** : remplit, d'après le nom de la matière, les valeurs standard — acier trempé 80,4 ; inox 81,9 ; acier 87,6 ; cuivre/laiton 110 ; titane 115 ; alliage de zinc 136 ; aluminium 213 ; granit 322 ; marbre 535 ; nylon 538 ; plexiglas 690 ; graphite 879 ; polypropylène 985 (les matières déjà renseignées ne bougent pas ; une matière non reconnue est signalée).
+- **Vitesses calculées** (`decoupe/services/vitesses.py`) : la vitesse élevée suit **V = K × g(qualité) × U^1,173 / e^1,126** (U usinabilité, e épaisseur). Ce modèle retrouve à 0,1 % près les trois tables relevées (acier 10 mm, cuivre 8 mm, aluminium 20 mm ; 15 valeurs) ; les exposants ne reposent que sur ces trois points, à confirmer avec d'autres relevés. La vitesse basse est une approximation (rapport basse/élevée relevé à 8, 10 et 20 mm, interpolé). Paliers et distances d'accélération/décélération suivent les relevés (⌈0,3 e⌉ et 0,3 e).
+- **Dupliquer vers d'autres épaisseurs** (bouton de la fiche *Paramètre de coupe*) : à partir d'un paramètre relevé sur la machine, crée les autres épaisseurs d'une matière (ex. « 3, 4, 5, 6, 8, 12, 15, 20 ») avec perçage, percement et chevauchement proportionnels à l'épaisseur et vitesses calculées. Action de liste **« Calculer les vitesses depuis l'usinabilité »** pour un paramètre sans vitesses.
+- **Garde-fous** : un paramètre porte une *origine* — « relevées sur la machine » ou « calculées (estimation) ». Les vitesses relevées ne sont **jamais écrasées** par un calcul ; l'estimation du temps de découpe d'une pièce affiche un avertissement tant que ses vitesses sont calculées.
+
+## Import de materials.lua et calage sur des temps réels
+
+- **Importer materials.lua (IGEMS)** (bouton en haut de la liste *Paramètres de coupe*) : en trois temps — téléversement du fichier (`IGEMS_R9\shared\Material\materials.lua`), contrôle de la **correspondance des matières** (Steel → Acier, Stainless Steel → Inox, Copper → Cuivre, Brass → Laiton, Titanium → Titane, Glas → Verre, Granite → Granit, Marble → Marbre, Grafite → Graphite, Nilo → Nylon… modifiable ; une matière absente de l'ERP est créée, vide = ignorée), choix du **poste de travail**, puis création d'**un paramètre par matière et épaisseur** (153 pour votre fichier : 12 matières, de 1 à 80 mm). Repris du fichier : usinabilité, perçage stationnaire HP/BP, perçage circulaire, diamètre, pointage, marquage, percement linéaire, chevauchement, intervalle entre pièces, paliers, distances d'accélération/décélération et coefficients de chaque qualité. Les paramètres *relevés sur la machine* ne sont jamais touchés ; un second import met à jour les paramètres calculés.
+- **Vitesses** : le fichier ne contient pas les vitesses du jet d'eau (le logiciel les calcule). Elles sont calculées par notre modèle (`decoupe/services/vitesses.py`) : V = K × g(qualité) × U^1,091 / e^1,099.
+- **Calage sur 9 temps réels** (qualité 3) : une pièce arrondie de 4,5 m de contour (`piece_calibrage.dxf`), une plaque percée de 1101,7 mm de coupe, surtout en lignes droites, et un **plan de découpe de 54 cercles et 20 m de coupe** (`plan_decoupe_inox25.dxf`). Temps réels contre temps calculés : aluminium 30 mm 46,5 → 46,0 min ; aluminium 10 mm 11,75 → 11,85 ; inox 20 mm 78 → 78,6 ; cuivre 15 mm 39 → 39,2 ; acier 5 mm 14,1 → 14,2 ; acier 25 mm 27,75 → 27,75 ; acier 35 mm 43,5 → 43,6 ; aluminium 50 mm 27,75 → 27,5 ; **inox 25 mm (plan) 7 h 10 → 7 h 14**. **Écart maximal 1,2 %, moyen 0,7 %**, vérifié par des tests automatiques (maximum toléré 5 %, moyenne 3 %). Le plan et la plaque donnent aussi la décomposition du logiciel (coupe, perçage, transferts) : le modèle la retrouve à quelques % près pour la coupe et le perçage, un peu moins bien pour les transferts (2,5 min contre 3,35 min : ils dépendent des distances, comptées ici à 2,75 s par contour).
+- **Ce que le calage a appris** : (1) le **rayon à partir duquel un arc se coupe à pleine vitesse est proportionnel à l'épaisseur** (≈ 2,2 × l'épaisseur) ; (2) la machine ne descend pas aussi bas que la vitesse basse affichée dans les courbes : **facteur de vitesse en courbe** 1,24 ; (3) la durée de perçage vaut environ la **moitié** du perçage stationnaire de chaque contour (*facteur de perçage* 0,5) ; (4) un **déplacement à vide** de 2,75 s par contour. Ces réglages sont des champs du paramètre de coupe (*Réglages du calcul*) ; la migration recalcule les paramètres déjà importés (les paramètres relevés sur la machine gardent leurs vitesses).
+- **Plans de découpe (plusieurs pièces dans un même DXF)** : l'import garde toujours la plus grande silhouette comme « pièce » (aperçu, imbrication) mais **mémorise toutes les silhouettes** (`contour_json["autres"]`) : le temps de découpe compte tous les contours du fichier.
+- Pour affiner encore : fournir d'autres temps réels (qualités différentes de 3, pièces à angles vifs en forte épaisseur) ou ajuster le *coefficient d'ajustement* d'une matière. Le temps ne dépend pas du nombre de pièces identiques : pour N pièces, multiplier (le logiciel ne compte pas d'économie d'échelle sur la coupe).
+- Le laser n'est pas traité (une seule matière du fichier, inox, porte l'indicateur laser).
+
+## Matière par imbrication (phase 2) : coût au prorata de la surface consommée, simulation de formats
+
+- **Placement plus dense** (`decoupe/services/imbrication.py`, `imbriquer_meilleur`) : en plus des étagères, des variantes « MaxRects » (la pièce est posée dans le meilleur espace libre de toute la feuille, deux tris, deux règles de placement) ; on garde la meilleure (le moins de feuilles, puis la plus petite bande entamée sur la dernière). **Jamais pire que l'ancien calcul** ; exemple : 3 feuilles → 2 pour un mélange de pièces de 1100 × 430 et 260 × 190 mm. Les pièces restent représentées par leur rectangle englobant (placement sur les contours réels : phase suivante) ; l'**intervalle entre pièces** vient du paramètre de coupe de la matière et de l'épaisseur (4 mm à défaut).
+- **Formats de tôle** (menu Production) : catalogue éditable (3000 × 1500, 2500 × 1250, 2000 × 1000, 4000 × 2000, 6000 × 2000, 3000 × 1250 fournis).
+- **Simuler l'imbrication et le coût matière** (bouton de la fiche *Pièce à découper*) : choix de la **tôle** (article matière première, vendue au m², au kg — avec épaisseur et densité — ou à la feuille), de **quantités** (1 à 6 : 1, 10, 50, 100…) et du **taux de chute récupérable** ; le tableau compare tous les formats : nombre de feuilles, % d'utilisation, **coût total et coût par pièce** (le meilleur par quantité en vert), avec l'aperçu de la feuille 1. **« Retenir »** enregistre la tôle, le format et le taux sur la pièce et active le chiffrage par imbrication.
+- **Calcul du coût matière** (`decoupe/services/matiere.py`) : *surface consommée* = feuilles entières + seulement la **bande entamée de la dernière feuille** (le reste est une chute réutilisable rendue au stock) ; *chutes* = surface consommée − surface des pièces ; *surface facturée* = pièces + chutes × (1 − chute récupérable) ; coût = surface facturée × prix de la tôle. Le coût par pièce **dépend de la quantité** (10 pièces coûtent plus cher l'unité que 500).
+- **Dans le devis** : si la pièce (liée à l'article fabriqué) est en « chiffrer la matière par imbrication », le coût matière de l'article est calculé par imbrication pour la **quantité de la ligne** ; la ligne de nomenclature de cette tôle (rectangle) n'est plus comptée (les autres composants — vis, etc. — restent). Pièce trop grande pour la tôle : le chiffrage est refusé avec un message clair.
+- Limites : l'imbrication travaille sur le rectangle englobant de la silhouette principale de la pièce ; pour les pièces très découpées ou en L le taux d'utilisation est donc prudent. Les résultats sont mis en cache (même pièce, même quantité, même format).
+
+## Familles de matière et base de coupe (temps de perçage de materials.lua)
+
+Une **famille de matière** est une matière « générique » (Acier, Inox, Aluminium, Cuivre, Laiton, Titane, Acier trempé…, menu *Familles de matière*) à laquelle se rattachent les **nuances précises** (S235, S355, 5754, 6082…). La nuance **hérite** de sa famille : usinabilité standard, temps de perçage, vitesses, intervalle entre pièces.
+
+- **Rattachement automatique** : à la création d'une matière, la famille est déduite du nom grâce aux *mots-clés* de chaque famille (S235 / S355 → Acier ; 2017 / 5083 / 5754 / 6082 → Aluminium ; 304L / 316L / 1.4301 → Inox ; Hardox → Acier trempé). Les mots-clés sont modifiables ; la priorité (« inox » avant « acier ») aussi. Pour les matières existantes : liste des matières → action « Rattacher à une famille ». Un choix manuel n'est jamais écrasé.
+- **Base de coupe fournie** : les 153 fiches du `materials.lua` (12 matières, 1 à 80 mm : perçage stationnaire/circulaire, pointage, marquage, percement, chevauchement, intervalle entre pièces, paliers et coefficients par qualité) sont chargées au démarrage (migration) au niveau des familles, avec des vitesses calculées (« estimation »). Les fiches relevées sur la machine ne sont jamais écrasées.
+- **Un paramètre de coupe est soit à une famille (cas général), soit à une nuance (exception)**. À épaisseur égale la nuance prime sur la famille ; sinon c'est l'épaisseur la plus proche qui est retenue (avec avertissement).
+- Le poste de travail n'est pas renseigné par la base fournie : liste des paramètres → sélectionner → « Affecter un poste de travail ».
+- L'import de `materials.lua` associe désormais chaque matière du fichier à une **famille** (créée si absente), plus à une matière.
+- Les paramètres déjà saisis pour une matière portant le nom de sa famille (« Acier »…) ont été repris au niveau de la famille ; les autres restent des exceptions de nuance.
+
+## Découpe laser fibre (tableau du constructeur)
+
+Le classeur du constructeur (BySmart Fiber 6 kW) est intégré comme **second procédé de découpe**, à côté du jet d'eau.
+
+- **Base chargée au démarrage (migration)** : 132 fiches par famille de matière, gaz et épaisseur — Acier (O₂, N₂, air), Acier galvanisé et électrozingué (N₂), Inox (N₂, air), Aluminium (N₂, O₂, air), Laiton (N₂), Cuivre (O₂) — avec la **vitesse de production** (et la vitesse maximale), la consommation de gaz, la puissance absorbée et le **temps de perçage** (colonne 6 kW ; les colonnes 3 et 4 kW sont ignorées). L'inox avec film n'est pas repris. Les valeurs « limite » du constructeur (bavure possible, acier SSAB) sont signalées dans la remarque et dans l'estimation.
+- **Épaisseurs : seules celles de la base sont réalisables.** Une pièce laser dont l'épaisseur est absente (ou dont le gaz n'existe pas à cette épaisseur) est refusée, avec la liste des épaisseurs possibles. Le **0,5 mm**, absent du tableau, est extrapolé depuis 0,8 et 1 mm (vitesse plafonnée à +15 % de celle de 0,8 mm) et marqué « estimation ».
+- **Coefficient de pondération** (menu *Réglages de coupe*) : multiplie les vitesses du constructeur, jugées surestimées. Valeur initiale 0,85 (15 % plus lent) à ajuster sur vos temps réels ; le coefficient d'ajustement de chaque paramètre reste disponible pour un cas particulier.
+- **Temps laser d'une pièce** = longueur coupée ÷ (vitesse de production × pondération) + un perçage par contour + déplacements entre contours (1 s par contour). Le marquage n'est pas compté au laser.
+- **Sur la pièce à découper** : choisir le *procédé de coupe* (jet d'eau ou laser) et, au laser, le *gaz* (vide = gaz usuel de la famille : oxygène pour l'acier et le cuivre, azote pour l'inox, l'alu et le laiton ; modifiable sur chaque famille). Le temps, l'écart entre pièces et la gamme suivent le procédé ; changer de procédé met à jour l'étape de gamme existante (poste compris).
+- **Écart entre pièces à l'imbrication** : jet d'eau 6 mm constant ; laser 10 mm au minimum, et **plus grand quand l'épaisseur augmente** (écart = épaisseur à partir de 10 mm). Plancher réglable dans *Réglages de coupe* ; l'intervalle de chaque paramètre l'emporte s'il est plus grand.
+- Le **poste de travail** (et son tarif horaire) se renseigne comme pour le jet d'eau : Paramètres de coupe → sélectionner → « Affecter un poste de travail ».
+
+## Export vers le comptable (format ISACOMPTA)
+
+L'export mensuel que vous faisiez avec l'ancien logiciel est reproduit : **Écritures comptables → « Exporter vers le comptable (ISACOMPTA) »**. On choisit le mois, un aperçu donne le nombre d'écritures de chaque fichier, puis un ZIP contient les trois fichiers habituels : `vente_MM-AAAA.txt`, `achat_MM-AAAA.txt`, `banque_MM-AAAA.txt`. En ligne de commande : `manage.py export_comptable 2026-01 [dossier]`.
+
+- **Format** : texte à largeur fixe (lignes `VER`, `DOS`, `EXO`, puis par écriture `ECR` / `MVT` / `ECHMVT`), fins de ligne CRLF, ASCII sans accents. Le format a été relevé sur vos trois fichiers d'export et vérifié en les relisant puis en les réécrivant avec notre code : 1 149 lignes sur 1 156 identiques à l'octet, les 7 autres ne différant que par des particularités des données d'origine (une espace en fin de libellé, un caractère de tabulation dans un compte).
+- **Ventes et achats** : les écritures du mois des journaux de nature Ventes / Achats, rangées *Produits / TVA / Tiers* (ventes) et *Charges / TVA / Tiers* (achats). Le mouvement du tiers porte l'échéance (conditions de paiement du client ou du fournisseur ; à défaut la date de la pièce). Un compte général de moins de 6 chiffres est complété à 6 (44571 → 445710) ; un compte de tiers (411DUPON) reste tel quel, 8 caractères au plus.
+- **Banque** : une écriture par règlement du mois, rangée *Banque / Tiers* — encaissement d'une facture client **payée** (banque au débit, client au crédit, avec échéance) ou règlement d'une facture fournisseur (fournisseur au débit, banque au crédit). Une facture client est reprise quand elle est « Payée » avec sa date de paiement ; la facture fournisseur a désormais une **date de règlement**.
+- **Réglages** (menu *Export comptable*) : codes de journaux du fichier (VT, AC, B2), compte de banque (512100), composition des libellés (code facture + nom du tiers pour les ventes et les achats, nom du tiers pour la banque, 30 caractères au plus) et référence de pièce des achats (code facture ou référence fournisseur ; la référence du fournisseur est toujours reprise dans sa propre colonne). Les valeurs initiales sont celles de vos paramètres actuels.
+- **Pièce** : les 8 derniers caractères du numéro de facture (comme `C25-3948` pour `FC25-3948`).
+- Les champs « dossier » et « exercice » restent vides comme dans vos fichiers. Deux dates identiques figurent dans chaque écriture : la date de l'export.
+
+## Autoliquidation de la TVA (achats à l'étranger)
+
+La génération de l'écriture d'une **facture fournisseur** gère l'autoliquidation : quand le fournisseur est étranger et ne facture pas de TVA, l'écriture porte la TVA à la fois **déductible** (débit 445663) et **due** (crédit 445200) du même montant, calculée au taux français ; le fournisseur n'est crédité que du **HT** (comme dans vos exports : achat 436,50 / TVA 87,30 en débit et crédit / fournisseur 436,50).
+
+- **Quand ?** Case « Autoliquidation de la TVA » de la facture fournisseur : vide = automatique selon le régime fiscal du fournisseur (**intracommunautaire ou hors UE : oui**, France : non) ; « Non » pour une importation de marchandises dont la TVA est payée à la douane ; « Oui » pour forcer.
+- **Taux** : celui de la ligne de commande s'il est renseigné (5,5 % par exemple), sinon le taux de TVA par défaut (20 %).
+- **Comptes** : 445663 et 445200, créés au premier usage ; modifiables dans *Paramètres comptables* (section Achats).
+- **Export comptable** : les trois mouvements sont rangés charges, TVA, tiers ; l'échéance et le règlement bancaire portent le **HT** seul, puisque le fournisseur n'a pas facturé de TVA. La liste des factures fournisseur affiche la date de règlement et se filtre sur l'autoliquidation.
+- Si une facture fournisseur a déjà son écriture, elle n'est pas régénérée : pour appliquer l'autoliquidation à une facture déjà comptabilisée, supprimez l'écriture puis régénérez-la.
+
+## Séparateurs du menu « + Nouveau »
+
+Les titres de groupe du menu (Ventes, Achats, Données) sont maintenant des bandeaux explicites : fond teinté, liseré orange à gauche, texte plus grand et en gras, avec un espacement net entre les groupes.
+
+## Menu latéral : titres de groupe explicites
+
+Les titres du menu latéral (Ventes, Production, Achats…) reprennent le style des séparateurs du menu « + Nouveau » : bandeau teinté, liseré orange, majuscules en gras.
+
+## Maquette : import DXF/DWG et imbrication dans le devis
+
+`docs/maquettes/maquette_devis_dxf.html` (et son image `.png`) : proposition d'écran pour importer des DXF/DWG, régler matière / épaisseur / procédé, imbriquer et ajouter les pièces au devis dans la même page. Maquette seule : rien n'est encore câblé.
+
+## Devis : import de DXF/DWG et réglage des pièces dans la page (étape 1)
+
+La fiche d'un devis (enregistré) a un panneau **« Pièces à découper »** sous les lignes :
+
+- **Importer** : glisser un ou plusieurs DXF/DWG (ou parcourir). Chaque fichier crée une **pièce à découper** (géométrie lue, aperçu, nombre de trous, longueur de contour) liée au devis, et un **article fabriqué** : référence « DEV-…-P01 », « -P02 »… ou, si une règle de codification « Article fabriqué créé depuis un devis » est configurée, le code suivant de la règle. Le procédé par défaut (laser ou jet d'eau) et le profil d'import des calques se choisissent avant le dépôt.
+- **Régler** chaque pièce sans quitter la page : nom, matière, épaisseur, procédé, gaz (laser ; vide = gaz usuel de la famille), quantité. Les réglages sont enregistrés à la volée et reportés sur l'article (matière, épaisseur, libellé).
+- **Verdict immédiat** : « Réalisable · x min de coupe par pièce », ou la raison du refus — par exemple « Non réalisable au laser : 7 mm n'est pas dans la base » avec la liste des épaisseurs possibles. Le temps de coupe alimente la **gamme** de l'article dès que le paramètre de coupe a un poste de travail (sinon le panneau le signale). L'affichage de la fiche n'écrit jamais rien.
+- **Retirer** une pièce supprime aussi son article s'il n'est utilisé nulle part (sinon l'article est conservé et le panneau le dit).
+- Un devis **validé** est verrouillé : les pièces s'affichent mais ne se modifient plus. Il faut les droits d'ajout de pièces à découper et d'articles.
+
+
+
+## Devis : imbrication des pièces dans la page (étape 2)
+
+Sous les pièces, le panneau imbrique **ensemble** toutes les pièces d'une même matière, épaisseur et procédé (un bloc « Imbrication — S235 · 10 mm · laser » par groupe) :
+
+- **Tôle** : liste des articles matière première de la matière (ou de sa famille) et de l'épaisseur du groupe ; une seule tôle est choisie d'office. Sans tôle en base, le panneau le dit et ne calcule pas le coût matière.
+- **Formats** : tous les formats actifs (menu *Formats de tôle*) sont calculés et comparés (feuilles, utilisation, surface consommée, coût). Le moins cher est signalé ; un clic sur une ligne affiche ce format.
+- **Réglages** : marge de bord et part de **chute récupérable** (0 % : toutes les chutes sont facturées). L'écart entre pièces suit le procédé : 6 mm au jet d'eau, au moins 10 mm au laser et croissant avec l'épaisseur.
+- **Résultat** : feuilles, utilisation, surface consommée, coût matière du lot, aperçu coloré de la première feuille (une couleur par pièce) et **coût matière réparti entre les pièces** au prorata de leur surface, selon la quantité.
+- Une pièce **non réalisable** (laser hors base) est exclue de l'imbrication avec sa raison ; une pièce sans matière ou épaisseur est listée « à régler ».
+- **Retenir** enregistre tôle, format, marge et chute récupérable sur les pièces du groupe (il sert à l'étape suivante). Le calcul se met à jour tout seul à chaque import, réglage ou retrait de pièce. Sur un devis validé, le calcul reste consultable mais rien ne se retient.
+- Limite connue : l'imbrication place des rectangles englobants (pas les formes réelles) ; l'aperçu dessine les contours.
+
+## Devis : pièces ajoutées aux lignes avec leur prix (étape 3)
+
+Sous l'imbrication, le tableau **« Chiffrage des pièces »** donne, pour chaque pièce réalisable : temps de coupe par pièce, matière HT, opérations HT, prix unitaire et total HT. Le bouton **« Ajouter au devis »** crée (ou met à jour) la ligne de devis de chaque pièce prête, avec sa quantité, et la chiffre ; la page se recharge pour montrer les lignes et le récapitulatif.
+
+- **Matière** : la ligne reprend la part de matière que lui répartit l'imbrication **retenue** de son groupe, les autres pièces du groupe gardant leur quantité (une pièce n'est pas chiffrée comme si elle était seule sur la tôle). Si la quantité de la ligne change, l'imbrication est recalculée avec la nouvelle quantité.
+- **Opérations** : le temps de coupe de la gamme de l'article, au tarif du poste de travail. Une pièce n'est ajoutée que si le **poste** du paramètre de coupe est renseigné (sinon le prix serait faux) ; elle reste listée avec la raison.
+- **Marges** : l'article fabriqué reprend la marge de sa tôle au moment où l'on retient l'imbrication ; les marges du devis (taux global) et des postes s'appliquent comme sur toute ligne.
+- **Prêt = ** pièce réalisable (laser dans la base), tôle et format retenus, gamme alimentée. Une pièce non prête est ignorée avec sa raison ; les autres sont ajoutées.
+- Seul un devis **en brouillon** reçoit des lignes ; il faut le droit d'ajouter des lignes de devis. Ré-appuyer sur le bouton met à jour les lignes existantes sans doublon.
+- La gamme de l'article est datée du devis (si celui-ci est antérieur à aujourd'hui) pour que le devis la retrouve. Les pièces ajoutées sont marquées « matière par imbrication » : les autres chiffrages de l'article (commande…) retrouvent la tôle imbriquée.
+
+## Capacité des machines et affichage de toutes les feuilles
+
+- **Capacité de coupe par machine** (menu *Réglages de coupe*) : jet d'eau **4000 × 2000 mm**, laser **3000 × 1500 mm** (0 = pas de limite). Un format de tôle plus grand que la machine du groupe est **écarté de l'imbrication** : il reste listé dans la comparaison avec « Dépasse la capacité du laser (3000 × 1500 mm) », ne peut pas être retenu et n'est jamais choisi d'office ; la tôle peut se présenter dans un sens ou dans l'autre. Si aucun format actif ne tient dans la machine, le panneau le dit. Un format déjà retenu qui ne convient plus empêche le chiffrage de la ligne avec un message clair. La simulation d'imbrication d'une pièce applique la même règle (formats non proposés signalés).
+- **Toutes les feuilles sont dessinées** (et non plus seulement la première) : « Feuille 3 sur 6 · 10 pièces », en grille, la dernière étant signalée comme entamée (le reste est une chute récupérable). Au-delà de 40 feuilles, les premières sont affichées et le reste est indiqué.
+- **Rotation** : chaque pièce a un réglage « Rotation » (aucune si le sens de laminage ou de grain est imposé, sinon 90°, 45° ou 5°). Les pièces importées depuis un devis démarrent à **90°** : l'imbrication peut les tourner, ce qui réduit le nombre de feuilles et donc le prix ; choisir « Aucune » si le sens de la matière compte.
+
+## Imbrication selon la forme réelle des pièces
+
+L'imbrication des pièces d'un devis ne se limite plus aux rectangles englobants : elle suit le **contour réel** des pièces, **trous compris** (case « Selon la forme » de chaque groupe, cochée par défaut). Exemple : 30 équerres de 440 × 380 mm tiennent sur **1 tôle 3000 × 1500** au lieu de 3 par les rectangles (224 € de matière au lieu de 357 €).
+
+- **Méthode** : la feuille est découpée en cellules de quelques millimètres ; chaque pièce, tournée selon ses rotations autorisées (8 orientations au plus), est placée en bas à gauche à l'endroit libre qui descend le moins loin, les plus grandes d'abord ; elle est ensuite **tassée** vers le bas et la gauche, au dixième de millimètre près, jusqu'à l'écart demandé de ses voisines. Une petite pièce peut se loger dans le trou d'une grande.
+- **Garantie** : chaque résultat est contrôlé avec les vrais contours — pièce dans la zone utile (marge de bord) et au moins l'écart de la machine (6 mm jet d'eau, 10 mm et plus au laser) entre deux pièces. Si le contrôle échoue ou si une pièce n'a pas de contour, le calcul retombe sur l'imbrication par rectangles. La forme n'est retenue que si elle fait mieux (moins de feuilles, puis moins de bande entamée).
+- **Réglage** : décocher « Selon la forme » pour comparer ; « Retenir » mémorise le choix (champ « imbriquer selon la forme » des pièces) et le chiffrage de la ligne l'applique. Les coûts matière des pièces seules (articles chiffrés par imbrication) suivent le même réglage, activé par défaut : ils ne peuvent que baisser.
+- **Limites** : les silhouettes multiples d'un plan de découpe ne sont pas imbriquées individuellement ; la précision de la grille est de quelques millimètres avant tassement ; le calcul prend de l'ordre de la seconde par format (résultats mis en cache tant que les pièces et quantités ne changent pas).
+
+## Bibliothèque de formes paramétriques (devis)
+
+Sous la zone de dépôt du panneau « Pièces à découper » d'un devis, la **Bibliothèque de formes** crée une pièce sans fichier DXF : on choisit une forme, on saisit les cotes, l'aperçu se met à jour en direct (avec le message d'erreur en clair si les cotes sont incohérentes : trou qui sort de la pièce, trous qui se chevauchent…), puis « Ajouter la pièce au devis ». La pièce suit ensuite le même chemin qu'un DXF importé : article fabriqué, matière/épaisseur, verdict, imbrication selon la forme, ajout aux lignes. Le contour calculé est écrit en DXF (polylignes, arcs discrétisés avec une flèche de 0,05 mm) : on peut le récupérer pour la machine.
+
+- **Formes libres** : rectangle (angles vifs, arrondis ou chanfreinés), disque, anneau, oblong, équerre en L, U, trapèze, polygone régulier ; **platine** à perçages en grille ou sur un cercle ; **bride** avec cercle de perçage ; **flasque** (alésage + deux cercles de perçage).
+- **Cotes normalisées** : bride EN 1092-1 (DN × PN, type 01 plate à souder ou 05 pleine) et rondelles ISO 7089 / 7091 / 7093 / 7094. Les valeurs sont dans la table *Production > Cotes normalisées* (modifiable, avec l'action « Marquer comme vérifié avec la norme »).
+- **Les cotes livrées ne sont pas vérifiées** : brides PN10 / PN16 de DN10 à DN300 saisies de mémoire de la norme, rondelles reprises du paquet bd_warehouse (Apache-2.0). Un avertissement jaune reste affiché dans la bibliothèque tant qu'une ligne n'est pas marquée vérifiée : contrôlez-les avec la norme en vigueur avant toute production.
+- **Modifier la forme** : une pièce paramétrique garde sa recette (`PieceDecoupe.parametres_forme`). Le bouton « Modifier la forme » de sa carte recharge les cotes dans la bibliothèque ; la pièce, son article et ses réglages sont conservés, le DXF et la géométrie sont recalculés, et le nom suit la forme tant qu'il n'a pas été personnalisé.
+
+## Imbrication à plat, chute de bout et surface consommée
+
+- Les tôles sont dessinées **à plat** (longueur à l'horizontale), pièces vues comme dans leur fichier, origine en **bas à gauche** comme sur la machine.
+- **Remplissage** : dans le sens de la longueur (chute de bout à l'extrémité, sur toute la largeur) ou de la largeur (chute en haut, sur toute la longueur). **Départ** : bas gauche (défaut), haut gauche, bas droite, haut droite ; les deux coins « retournés » (haut gauche, bas droite) miroitent les pièces et sont refusés, avec un message, si une pièce ne peut pas être retournée (gravure) — le haut droite est un simple demi-tour de la tôle. Sens et départ sont retenus avec la tôle et le format.
+- La **chute de bout** (dernière feuille) est hachurée en rouge, la chute entre les pièces reste en gris. Le bilan à droite détaille : tôles complètes − chute de bout = **surface consommée**, qui sert au prix de la matière (si une part de chute récupérable est réglée, elle se déduit ensuite pour donner la surface facturée).
+
+## Profilés (cornière, UPN, tubes) dans la bibliothèque de formes
+
+- Groupe « Profilés (barres) » de la bibliothèque : choix de la section, longueur hors tout, coupe à chaque extrémité (droite ou biais), quantité. Chaque débit crée son **article fabriqué** et apparaît en carte modifiable sous les pièces.
+- Les débits d'une même section s'**imbriquent dans les barres** (longueur de barre de la section, trait de scie, chute de tête, chute récupérable), dessinées à l'horizontale avec la chute de bout en rouge ; bilan : barres complètes − chute de bout = **longueur consommée**, × prix au mètre. Le coût est réparti entre les débits au prorata de leur longueur et suit la quantité de la ligne du devis. Pas de temps de sciage pour l'instant (matière seule).
+- Catalogue : *Production > Sections de profilés* (cornières à ailes égales, UPN, tubes carrés, rectangulaires et ronds), **livré non vérifié** ; les masses des tubes sont calculées (angles vifs), à remplacer par votre base. Le **prix d'achat** vient de l'article rattaché à la section (au mètre, au kilo avec poids linéique, ou à la barre) ; l'action « Créer les articles d'achat manquants » les génère, il ne reste qu'à saisir le coût.
+
+## Corrections
+
+- **Champs invisibles** : « Délai » des devis (widget sans le style Unfold : vide, le champ disparaissait), listes « Taux de TVA » des lignes et adresse associée des contacts. Un test parcourt toutes les fiches d'ajout et échoue si un champ saisissable n'a pas le style Unfold.
+- **Taux de marge** : libellés « (%) » et aide (20 = prix de vente × 1,20).
+- **Laser** : les vitesses ne sont jamais « calculées depuis l'usinabilité » ; les épaisseurs absentes du tableau du constructeur (0,5 mm) sont désormais « extrapolées du tableau du constructeur » (migration des 12 lignes concernées). La fiche d'un paramètre laser ne montre plus les réglages propres au jet d'eau (usinabilité, modes de perçage…), et inversement.
+- **Chiffrage des pièces** : la gamme est alimentée dès que le paramètre a un poste de travail, au lieu d'afficher « poste de travail à renseigner » pour un poste déjà renseigné ; le message indique la vraie raison.
+
+## Taille des vues d'imbrication
+
+Au-dessus des imbrications, le sélecteur « Imbrications par ligne » (1, 2, 3 ou 4) règle le nombre de feuilles côte à côte sur la largeur de l'écran ; le choix est mémorisé dans le navigateur. À partir de 2 par ligne, le bilan passe sous les feuilles ; sur un écran étroit (moins de 900 px) l'affichage revient à une feuille par ligne.
+
+## Adresses et contact du devis : jamais vidés par un faux changement de client
+
+Le script de la fiche devis (et de la commande) vidait l'adresse de facturation, l'adresse de livraison et le contact à chaque événement « change » du champ Client, puis ne proposait que les adresses « principales » du tiers. Un « change » parasite (initialisation du sélecteur, extension du navigateur, gestionnaire de mots de passe) effaçait donc des adresses choisies à la main. Le script compare maintenant le client au dernier client connu et ne fait rien si le client n'a pas réellement changé.
+
+## Référence de la pièce = nom du DXF, miniatures au PDF
+
+- L'article fabriqué créé avec une pièce porte désormais comme **référence le nom du fichier DXF** (sans l'extension), avec le même nom en libellé. Les pièces de la bibliothèque de formes et les débits de profilés prennent leur nom (« Bride DN50 PN16 type 01 »). Les caractères interdits dans une URL (`/ ? # :`…) sont remplacés par « - » ; si la référence existe déjà, « -2 », « -3 »… est ajouté. La codification « Article » et l'ancien « <devis>-P01 » ne servent plus que si le nom est inutilisable. Les articles déjà créés ne sont pas renommés (menu Articles).
+- Le **PDF du devis** affiche une miniature de chaque pièce (contour et trous ; vue de côté avec coupes pour un profilé) dans une colonne à gauche de la désignation, seulement si le devis contient des pièces.
+- Le message « Aucune tôle correspondante » signifie qu'aucun article **matière première** n'a la matière (ou une nuance de sa famille) **et** l'épaisseur de la pièce ; il liste maintenant ce qu'il faut créer et les épaisseurs déjà en base pour la matière.
+
+## Bord de tôle par procédé et épaisseur, boutons « Enregistrer » / « Enregistrer et fermer », navigation entre documents
+
+- **Bord de tôle** (bande non découpée sur le pourtour) : plancher par procédé dans *Réglages de coupe* (jet d'eau 5 mm constant, laser 10 mm), et champ « Bord de tôle (mm) » sur chaque paramètre de coupe. Au laser le bord grandit avec l'épaisseur (jamais moins que l'épaisseur : 10 mm jusqu'à 10 mm d'épaisseur, 12 mm pour 12 mm…), comme l'écart entre pièces ; le plus grand de la règle et du paramètre est retenu. Dans l'imbrication du devis, « Bord de tôle » est **calculé automatiquement** (pastille « auto ») d'après la matière, l'épaisseur et le procédé ; saisir une valeur l'impose, vider le champ revient à l'automatique, et la valeur retenue avec la tôle est relue telle quelle. (Avant : marge fixe de 5 mm.)
+- **Boutons** de toutes les fiches (gabarit commun `templates/admin/submit_line.html`) : **Enregistrer** (enregistre et reste sur le document, ancien « Enregistrer et continuer les modifications ») et **Enregistrer et fermer** (retour à la liste, ancien « Enregistrer »), à côté de « Enregistrer et ajouter un nouveau » et des actions propres à l'écran.
+- **Navigation** : à droite du fil d'Ariane de chaque fiche, un menu déroulant avec champ de recherche (selon les champs de recherche de l'écran de liste : numéro, tiers…) liste les documents du même type, avec tiers, date et statut ; flèches ‹ › vers le précédent et le suivant ; ↑ ↓ Entrée au clavier ; confirmation si le document a des modifications non enregistrées. Seuls les documents que l'utilisateur peut voir, dans l'ordre de l'écran de liste ; les indices de devis remplacés ne sont pas proposés (méthode `queryset_navigation` d'un écran pour écarter d'autres lignes).
+
+## Liens vers les éléments manquants (panneau « Pièces à découper »)
+
+Chaque message « À compléter » ou d'élément absent renvoie vers l'endroit où le corriger : « retenez la tôle et le format » → lien vers le bloc d'imbrication du groupe (« Aller à l'imbrication ») ; poste de travail manquant → fiche du paramètre de coupe réellement utilisé par la pièce ; aucune tôle de cette matière et de cette épaisseur → « Créer la tôle » (fiche article préremplie : matière première, matière, épaisseur, unité surface) ; tôle sans coût → fiche de la tôle ; profilé sans article d'achat ou sans coût → fiche de la section ou de l'article ; pièces « à régler » ou exclues → lien vers leur carte. Les liens qui quittent la page s'ouvrent dans un nouvel onglet pour ne pas perdre le devis en cours.
+
+## PDF dans un nouvel onglet
+
+Tous les liens et boutons d'action dont l'adresse se termine par `…pdf/` (devis, AR et bon de préparation de commande, fiches de fabrication, bon de livraison, fiche d'ordre…) s'ouvrent dans un **nouvel onglet** : le document reste ouvert. Le bouton **« Enregistrer, valider et ouvrir le PDF »** (et ses équivalents AR, BL, fiche) réserve l'onglet au clic, enregistre et valide le document dans l'onglet courant, qui reste sur la fiche (statut à jour, messages visibles), puis le PDF s'affiche dans l'onglet réservé ; si la validation est refusée, l'onglet réservé se referme et les raisons s'affichent sur la fiche. Si le navigateur bloque l'ouverture d'onglet, l'ancien comportement (PDF dans l'onglet courant) s'applique. Script : `comptes/static/comptes/pdf_nouvel_onglet.js`.
+
+## Factures, avoirs, relances et bons de commande fournisseur en PDF ; liens dans les messages d'erreur
+
+- **Facture et avoir** (fiche de la facture > « PDF de la facture ») : numéro, date d'émission, date de livraison ou d'exécution, échéance (hors avoir), références commande et client, avoir sur la facture d'origine avec son motif, vendeur (en-tête et pied : forme, capital, RCS, SIRET, TVA intracommunautaire, IBAN), client (adresses de facturation et de livraison, SIRET, TVA), lignes (désignation, quantité, PU HT, taux de TVA, total HT), TVA par taux, total HT et TTC, conditions de règlement, mention d'exonération selon le régime fiscal du client (intracommunautaire : art. 262 ter I du CGI ; hors UE : art. 262 I ; exonéré), « facture acquittée le … » si payée, et les mentions de pied (escompte, pénalités de retard, indemnité de 40 €) saisies dans *Société > mentions sur les factures* (texte légal par défaut si vide). Le PDF est **refusé** si la facture n'a pas de ligne ou si son montant HT saisi diffère du total des lignes.
+- **Lettre de relance** (« Lettre de relance (PDF) ») : rappel, relance ou dernière relance (niveau suivant automatique, ou `?niveau=2`), avec le texte des relances par e-mail.
+- **Bon de commande fournisseur** (fiche de la commande fournisseur > « Bon de commande (PDF) ») : fournisseur, adresse de livraison, lignes (article ou désignation, quantité, PU HT, total HT), livraison souhaitée.
+- **À savoir** : ces PDF portent les mentions légales d'une facture, mais **ne remplacent pas la transmission par une plateforme agréée** (réforme de la facturation électronique : facture au format structuré Factur-X/UBL/CII, transmission et e-reporting) ; l'émission, la numérotation chronologique sans trou et le verrouillage de la facture émise restent à brancher. Ces PDF ne sont pas encore personnalisables dans l'éditeur de modèles.
+- **Messages d'erreur avec lien** : une erreur de chiffrage ou de production propose la page où la corriger (ex. « Aucune adresse de facturation principale pour le client… » → « Ajouter l'adresse de facturation du client » vers sa fiche ; offre expirée → la date de validité du devis ; article sans coût → sa fiche).
+
+## Nomenclature (matière première) des pièces et débits du devis
+
+L'article fabriqué créé depuis le devis (DXF, bibliothèque de formes ou profilé) reçoit maintenant sa **nomenclature** en plus de sa gamme : une pièce découpée consomme la **tôle** retenue à l'imbrication (ou l'unique tôle de sa matière et de son épaisseur dès que la matière et l'épaisseur sont choisies), avec son rectangle englobant ; un débit de profilé consomme l'**article d'achat de sa section**, pour sa longueur. Le verdict de la carte l'indique (« Nomenclature : 1 × TOLE-S235-3 (300 × 200 mm) », ou « plusieurs tôles possibles, retenez-en une », ou « aucune tôle… en base »). Les lignes sont créées et mises à jour sans doublon, une tôle changée à l'imbrication remplace l'ancienne, les lignes saisies à la main ne sont jamais touchées, et le chiffrage par imbrication ignore la ligne de la tôle retenue (matière jamais comptée deux fois). Les articles déjà créés reçoivent leur nomenclature au prochain recalcul du panneau.
+
+## Facture électronique Factur-X (profil EN 16931)
+
+- **Bouton** « Facture Factur-X (PDF + XML) » sur la fiche d'une facture ou d'un avoir : un PDF lisible (polices Bitstream Vera incorporées) qui contient, en pièce jointe `factur-x.xml`, la facture structurée au format CII — numéro, dates, vendeur et client (SIREN, TVA intracommunautaire, adresses), lignes (référence, désignation, quantité, prix unitaire HT, taux et catégorie de TVA), TVA par taux, totaux, échéance, IBAN/BIC, avoir de type 381 avec la facture d'origine et son motif. Bibliothèque `factur-x` (dans `requirements.txt`).
+- **Montants** : la TVA est désormais calculée **par taux** sur la base HT totale (règle EN 16931) dans le PDF de la facture comme dans le XML ; la facture est refusée si son montant TTC saisi diffère du total ainsi calculé.
+- **Catégories de TVA** : S (taux normal ou réduit), K (livraison intracommunautaire, avec mention de l'art. 262 ter I du CGI), G (exportation), E (exonéré), Z (taux zéro) d'après le régime fiscal du client.
+- **Contrôles avant génération**, chacun avec un lien vers la page à corriger : raison sociale, adresse, **SIRET** et **TVA** de la société (contrôle de clé), adresse et pays de facturation du client, **SIRET du client français**, TVA du client pour une livraison intracommunautaire, facture d'origine d'un avoir. Le XML est validé contre le **schéma officiel (XSD)** avant d'être incorporé.
+- **PDF/A-3** : polices incorporées, métadonnées XMP (`pdfaid` 3B + extension Factur-X), intention de sortie sRGB, XML en pièce jointe (relation « data »). **À valider avec un outil externe** (veraPDF pour le PDF/A, validateur FNFE-MPE ou Mustang pour les règles métier EN 16931 / Schematron) avant tout usage réel ; non vérifiable dans l'environnement de développement.
+- **Hors périmètre** : transmission par une plateforme agréée et e-reporting, numérotation chronologique sans trou, verrouillage de la facture émise, remises/frais au niveau document, acomptes, autoliquidation en France (catégorie AE), plusieurs adresses de livraison.
+
+## Menu court, page « Paramétrage » et accueil « Aujourd'hui » par profil
+
+- **Menu latéral** ramené à une vingtaine d'entrées (Aujourd'hui · Ventes · Atelier · Achats et stock · Gestion · Paramétrage). Des pastilles rouges signalent ce qui demande une action (devis à relancer, factures en retard, ordres non transmis, alertes de stock, paramétrage à compléter) ; elles disparaissent à zéro.
+- **Paramétrage** (`/admin/parametrage/`) : tout ce qui se règle une fois (découpe, formes et profilés, atelier, articles, stock, commercial, comptabilité, société et documents, utilisateurs) en cartes, chacune avec un état (« 285 sans poste de travail », « à jour »…). Les liens respectent les droits ; tous les écrans de réglage sont aussi trouvables par la recherche globale (Ctrl+K). Code : `comptes/parametrage.py` (les contrôles d'état `ETATS` serviront de base au futur centre « À compléter »).
+- **Accueil « Aujourd'hui »** (`comptes/accueil.py`) : bande de l'avancement d'une affaire (Brouillon · Envoyé · Accepté · En fabrication · Facturé · Payé, chaque étape ouvre la liste filtrée) puis cartes d'action, les plus urgentes d'abord. Le **profil se déduit des groupes de droits** : *commercial* (Commercial, Responsable commercial), *atelier* (Atelier, Méthodes, Magasinier, Responsable stock), *comptabilité* (Facturation, Comptabilité, Achats), *direction* (Direction et administrateurs : tout). Une carte n'apparaît que si l'utilisateur a le droit d'ouvrir l'écran visé. Les anciennes tuiles de chiffres sont dans « Chiffres du mois » (repliées) et la liste des applications dans « Toutes les applications ».
+- **Puces de filtre** au-dessus des listes Devis, Commandes clients et Factures (`comptes/puces.py`, `puces = [...]` sur le ModelAdmin) : un clic = un filtre usuel, avec le nombre de résultats.
+- Si le stock est désactivé (`DJANGO_STOCK_ACTIF=false`), ses entrées de menu et ses cartes disparaissent.
+
+## Fiche devis en onglets
+
+La fiche d'un devis est découpée en trois onglets (un seul formulaire, un seul « Enregistrer ») : **Général** (client, adresses, statut, réponse du client, avec le récapitulatif des montants et des indices à droite), **Pièces et matière** (import DXF, bibliothèque de formes, profilés, imbrication) et **Lignes du devis** (avec leur nombre). L'onglet actif est mémorisé dans l'adresse (`#onglet=pieces`) et un champ en erreur ouvre automatiquement son onglet. Le panneau « Pièces et matière » rappelle les trois étapes : ajouter les pièces, choisir la matière et l'imbrication (« Retenir »), ajouter au devis. Code : `comptes/static/comptes/devis_onglets.js`, styles dans `accueil.css`.
+
+## Centre « À compléter »
+
+Page `/admin/a-completer/` (menu « Réglages », avec pastille) : tout ce qui manque dans les données et fausse un calcul, un document ou une facture électronique, en deux groupes — **à corriger** (société incomplète, paramètres de coupe sans poste de travail, postes sans tarif) et **à vérifier** (matières sans coût, articles fabriqués sans gamme, clients sans adresse de facturation ou sans SIRET, cotes normalisées non vérifiées). Chaque carte donne le nombre et les premiers éléments, reliés à leur fiche ; un contrôle disparaît dès que la donnée est corrigée. L'accueil affiche une carte « Données à compléter » quand il y a des éléments bloquants. Les contrôles ne sont montrés qu'à qui peut voir les données concernées. Pour en ajouter un : une fonction retournant `(total, [(libellé, url)])` et une ligne dans `CONTROLES` (`comptes/a_completer.py`).
+
+Affecter un poste aux paramètres de coupe : sur la liste des paramètres de coupe, le filtre « Sans poste » (lien direct depuis la carte du centre « À compléter ») isole les paramètres chiffrés sans main-d'œuvre machine ; on les sélectionne (case d'en-tête puis « tout sélectionner ») et l'action « Affecter un poste de travail » les rattache en une fois. Cela change le temps machine chiffré dans les nouveaux devis et les recalculs de devis en brouillon.
+
+## Opérations de fabrication dans les pièces du devis, gammes types
+
+Chaque carte de pièce (onglet « Pièces et matière ») a un bloc **Opérations de fabrication** : la gamme de l'article fabriqué. L'étape de découpe est calculée depuis la pièce (étiquette « calculée », seul son temps de réglage se saisit) ; on ajoute les autres opérations (ébavurage, pliage, soudure, traitement en sous-traitance…) avec **＋ Ajouter une opération** : poste, réglage et temps par pièce (poste horaire) ou forfait par pièce (poste forfaitaire). Les flèches réordonnent, ✕ retire. Le coût par pièce est calculé avec le tarif en vigueur ; un poste sans tarif est signalé.
+
+- **Gammes types** (Paramétrage > Atelier > Gammes types) : suites d'opérations réutilisables (« Pliage + traitement »…). Le menu « Gamme type… » les ajoute à la fin de la gamme de la pièce (copie : modifier le type ensuite ne change pas les gammes existantes). « Reprendre la gamme d'une autre pièce » copie les opérations saisies à la main d'une autre pièce du devis.
+- Les opérations appartiennent à **l'article** : elles sont reprises dans les prochains devis de la pièce. **Historique par date** : modifier une opération ferme l'ancienne version (date de fin = veille) et en crée une nouvelle, donc les devis déjà établis se recalculent avec leurs anciens temps. Code : `technique/gamme_editeur.py` (service + vue JSON `admin/gamme-editeur/<article>/`) et `comptes/static/comptes/gamme_editeur.js`, conçus pour être réutilisés dans le constructeur de devis.
+- Droits : voir les opérations = `technique.view_gamme` ; modifier = `technique.add_gamme` + `technique.change_gamme`.
+
+## Tarifs dans la fiche du poste ; éditeur d'opérations dans le constructeur de devis
+
+- **Postes de travail** : les tarifs (coût horaire, date de début, date de fin) se saisissent dans un tableau en bas de la fiche du poste ; la liste affiche le « Coût horaire actuel » (ou « aucun tarif » en rouge pour un poste horaire). L'historique est conservé (un nouveau tarif = une nouvelle ligne avec sa période ; deux périodes ne peuvent pas se chevaucher). L'ancien écran « Tarifs de poste » reste accessible par son adresse mais n'est plus dans le Paramétrage. Seuls les postes **horaires** sans tarif sont signalés dans « À compléter » (un poste forfaitaire n'a pas de coût horaire).
+- **Constructeur de devis** : la saisie des étapes de gamme d'un nouvel article utilise le même éditeur d'opérations que les cartes de pièces (flèches, retrait, gammes types). Les étapes restent en mémoire et sont envoyées à la création de l'article, avec la date de création du devis comme date de début. Un temps de réglage à 0 est désormais accepté (il était pris pour « absent »).
+
+## Chronologie d'affaire
+
+Sur les fiches **devis** (onglet « Chronologie »), **commande** et **facture** : le fil de l'affaire, de l'offre à l'encaissement, daté et cliquable — devis et révisions (création, validation, acceptation / refus / remplacement, fin de validité), commande (créée, soldée, annulée), ordres de fabrication (lancement, échec de transmission au planning), livraisons (et annulations), factures et avoirs, relances de paiement, échéances et paiements. Le document ouvert est repéré (« vous êtes ici ») ; une ligne « Aujourd'hui » sépare le passé de ce qui est à venir (échéance de l'offre, règlement attendu, livraison prévue). Depuis n'importe quel document on retrouve la même affaire (toute la chaîne des indices du devis et ses commandes). Rien n'est stocké : la chronologie est recalculée depuis les documents et leur historique (`comptes/chronologie.py`, affichage via `ChronologieMixin`). Les dates de validation et d'acceptation d'un devis viennent de l'historique des modifications ; un devis dont l'historique n'a pas gardé ces changements n'affiche que sa création.
+
+## Réglage machine par tôle (laser et jet d'eau)
+
+Le temps de réglage d'une découpe est le temps de **mise en place d'une tôle** sur la machine : il s'applique **une fois par tôle** posée, quel que soit le nombre de pièces qu'elle porte, et autant de fois qu'il y a de tôles (matière, épaisseur, procédé ou machine différents = autres tôles). Avant, il était saisi sur l'étape de découpe de chaque pièce (donc compté pour chaque pièce).
+
+- **Saisie** : « Mise en place d'une tôle (min) » sur la fiche du **poste de travail** (valeur de la machine) et, en exception, sur un **paramètre de coupe** (matière × épaisseur : tôle épaisse plus longue à poser). Vide sur le paramètre = valeur du poste.
+- **Calcul** (`chiffrage/reglage.py`) : nombre de tôles de l'imbrication **retenue** de chaque groupe ; tant qu'aucune n'est retenue, de la **meilleure imbrication calculée**, avec un avertissement (« estimé »). Le coût (minutes × tarif horaire du poste) est réparti entre les pièces du groupe **au prorata de leur temps de coupe** et **inclus dans le prix des opérations** de chaque ligne de devis. Colonne informative **« dont réglage machine (HT) »** dans les lignes du devis (le détail « 2 tôles × 10 min, part 40 % » s'affiche au survol) et ligne « Mise en place machine » dans le bilan de chaque imbrication.
+- L'étape de découpe de la gamme n'a plus de réglage propre (l'éditeur d'opérations l'indique : « par tôle : 10 min »). Les autres opérations (ajustage, pliage…) gardent leur réglage par lot.
+- **Reprise des données** (migration) : le temps de réglage des étapes de découpe en cours devient le temps de mise en place de leur poste (valeur la plus fréquente, si le poste n'en avait pas), puis ces étapes sont remises à 0. L'historique des étapes closes n'est pas modifié.
+- Limite : une ligne de commande saisie directement (sans devis) n'a pas de pièces à découper, donc pas de réglage par tôle.
+
+## Date du jour à la création
+
+À la création d'un devis, d'une commande ou d'une facture, la date (de création, de commande, de facturation) est pré-remplie avec la date du jour, modifiable (`comptes/date_du_jour.py`).
+
+## Sauvegarde, vérification et transfert vers un autre NAS
+
+Voir **`docs/SAUVEGARDE.md`** (mode d'emploi complet). En bref : `sauvegarder-nas.sh` (base + fichiers déposés, somme de contrôle, copie externe chiffrée AES-256 vers un disque USB, un dossier réseau ou un autre NAS, alerte en cas d'échec), `verifier-sauvegarde.sh` (restauration d'essai dans une base temporaire, contrôle d'âge — à planifier chaque semaine), `restaurer-nas.sh` (lit aussi les copies chiffrées, `--nouveau-nas`), `exporter-transfert.sh` / `importer-transfert.sh` (une archive chiffrée, `.env` compris, pour changer de NAS). Réglages dans `sauvegarde.conf` (modèle : `sauvegarde.conf.exemple`, conservé par `update-nas.sh`). Les scripts sont testés avec un faux Docker (`comptes/tests_sauvegarde.py`) mais **pas encore sur le vrai NAS** : faites un premier essai et une restauration d'essai.
+
+## Constructeur de devis intégré à l'onglet « Lignes du devis »
+
+Le constructeur n'est plus une page séparée : dans l'onglet **Lignes du devis**, le bouton **＋ Ajouter une ligne** ouvre l'assistant sous le tableau (devis en brouillon) — **Article existant** (recherche) ou **Nouvel article fabriqué** (référence, libellé, marge, **nomenclature**, **opérations** avec gammes types), **Aperçu du prix** (même calcul que le devis, rien n'est créé) puis **Ajouter la ligne** (article, nomenclature, gamme et ligne créés ensemble ou pas du tout). L'ancienne adresse `/constructeur/` redirige vers l'onglet.
+- Le tableau des lignes ne sert plus à en ajouter (plus de ligne vide ni de lien « Ajouter ») : il modifie ou retire les lignes existantes. Sous le tableau, chaque **ligne fabriquée** se déplie pour modifier la **nomenclature** et les **opérations** de son article (partagées avec les autres devis qui l'utilisent ; tant que le devis n'est pas validé).
+- **Devis pas encore enregistré** : cliquer sur « Pièces et matière » ou « Lignes du devis » enregistre le devis (en restant sur la fiche) puis ouvre l'onglet. Les boutons du bas ne changent pas (le bouton « Enregistrer et ouvrir le constructeur » a disparu).
+- Code : `chiffrage/templates/admin/chiffrage/devis/_constructeur.html` et `_lignes_detail.html`, `chiffrage/static/chiffrage/devis_builder.js`, `comptes/static/comptes/nomenclature_editeur.js`, `technique/nomenclature_editeur.py`.
+
+## Imbrication lourde : délai du serveur
+
+Une imbrication de grosses quantités (ex. 120 pièces + 30 autres, vraie forme) peut durer plusieurs dizaines de secondes sur un NAS modeste. Gunicorn coupait auparavant toute requête au bout de **30 s** : le navigateur recevait alors une page HTML et affichait « Imbrication : Unexpected token '<' … is not valid JSON ». Le délai est désormais de **300 s** (réglable avec `GUNICORN_TIMEOUT` dans le `.env`), le panneau n'empile plus les calculs (le plus récent remplace le précédent) et un message clair s'affiche si le serveur ne répond pas. Pour accélérer : réduire les quantités le temps de la saisie, ou décocher l'imbrication à la forme réelle. En cas de doute, `docker compose logs web` montre « WORKER TIMEOUT » quand un calcul a été coupé.
+
+Accélération de l'imbrication à la forme réelle : le tassement des pièces ne relit plus les rectangles englobants des voisines à chaque essai (calculés une fois, filtre vectorisé) ; même résultat, environ **3 fois plus rapide** (cas de 150 pièces sur 6 formats : 17 s → 6 s).
+
+## Formats de tôle : priorités, formats par matière et seuil de chutes
+
+Pour ne pas calculer inutilement des formats que vous n'utilisez que dans des cas particuliers :
+- **Formats par matière** : dans « Formats de tôle », un format peut être limité à des **familles** ou **nuances** de matière ; sans restriction, il vaut pour toutes. Un format exclu pour la matière du devis n'est jamais calculé.
+- **Priorité d'utilisation** (1 en stock / usuel, 2 sur commande, 3 exceptionnel) : l'imbrication calcule d'abord les formats de **priorité 1** ; elle n'essaie le niveau suivant que si le **taux de chutes entre pièces** du meilleur format du niveau dépasse le **seuil** (menu « Imbrication : seuil de chutes », valeur unique, 20 % par défaut). Les formats non calculés sont listés « non calculé » et le bouton **Calculer tous les formats** force la comparaison complète. Le format retenu est toujours calculé. Un niveau où aucun format ne convient (trop grand pour la machine…) fait passer au suivant.
+- **Taux de chutes entre pièces** = (surface consommée − surface des pièces) ÷ surface consommée ; la chute de bout de la dernière tôle, récupérée, n'y compte pas.
+- Par défaut tous les formats sont de priorité 1 : rien ne change tant que vous n'avez pas réglé vos priorités. Le même calcul par niveaux sert au nombre de tôles du réglage machine (`chiffrage/reglage.py`).
+
+## Colonne « Prochaine action » des listes
+
+Les listes **Devis**, **Commandes clients**, **Livraisons** et **Factures** ont une colonne « Prochaine action » : ce qu'il reste à faire sur le document, avec une couleur (rouge : en retard ; orange : à faire ; bleu : en attente ; grisé : rien). Exemples : devis en brouillon → « Ajouter des lignes » / « Terminer et valider le devis » ; devis envoyé → « Relancer le client avant le 14/10 », « Offre expirée : relancer ou refuser » ou « Attendre la réponse » ; devis accepté → « Créer la commande » ; commande → « Créer les ordres de fabrication », « Créer la livraison », « Préparer la facture » ; facture → « Envoyer un rappel / la relance / la dernière relance (échéance dépassée) » ou « Attendre le règlement (échéance 30/10) » ; payée, avoir, refusé, remplacé → « — ». La colonne se masque ou se déplace comme les autres (« Mes colonnes »). Règles : `comptes/prochaine_action.py` (fonctions `action_*`, en lecture seule).
+
+## Paramètres de coupe en grille
+
+Bouton **« Vue en grille »** en haut de la liste des paramètres de coupe (et lien dans le Paramétrage) : une ligne par famille ou nuance de matière, une colonne par épaisseur, pour un procédé (et un gaz au laser). Chaque case montre, au choix, le **poste de travail**, la **vitesse de production**, la **mise en place d'une tôle** ou l'**origine des vitesses**, avec une couleur : vert renseigné, bleu vitesses estimées, orange à compléter (mise en place absente), rouge **sans poste**, case pointillée « ＋ » = pas de paramètre (un clic ouvre le formulaire de création prérempli). Un clic sur une case ouvre la fiche du paramètre. En tête de page, le compteur « N sans poste » et le formulaire **Affecter un poste à** : toute la grille, une matière (ligne) ou une épaisseur (colonne) — une confirmation est demandée ; la sélection suit les filtres affichés (procédé, gaz). L'affectation demande le droit de modifier les paramètres ; en lecture seule, la grille s'affiche sans le formulaire. Code : `decoupe/grille_parametres.py`.
+
+## Imbrication sur plusieurs cœurs
+
+Quand plusieurs formats de tôle sont à comparer (« Calculer tous les formats », ou plusieurs formats de même priorité), ils se calculent **en parallèle**, chacun dans un processus, donc sur plusieurs cœurs du processeur (`decoupe/services/parallele.py`) : cas de 150 pièces sur 6 formats, 4 cœurs : **5,5 s → 1,6 s** (×3,4), résultats identiques au calcul séquentiel. Réglage : `ERP_IMBRICATION_PROCESSUS` dans le `.env` — 0 ou absent = automatique (cœurs − 1, plafonné à 6 : un cœur reste libre pour la base de données et le système) ; 1 = pas de parallélisme. Le calcul ne touche jamais à la base de données ; si les processus sont inutilisables (mémoire, processus tué), l'ERP retombe seul sur le calcul séquentiel. Avec un seul format à calculer, il n'y a rien à répartir : le gain vient alors des priorités de formats. Plusieurs utilisateurs qui calculent en même temps se partagent les cœurs. Prévoir environ 100 à 200 Mo de mémoire par processus de calcul.
+
+## Relecture avant production
+
+Voir `docs/RELECTURE_PRODUCTION.md` : corrections faites (droits de l'assistant « Ajouter une ligne », droits de la chronologie), réglages à faire dans le `.env`, limites connues (facture électronique non validée, estimations laser/jet d'eau, sauvegarde non essayée sur le NAS) et liste de contrôle du jour J.
+
+## Montants TTC : TVA par taux, plus d'écart d'un centime
+
+Le TTC d'une facture se calcule désormais **comme dans le PDF et le fichier Factur-X** (norme EN 16931) : la TVA est calculée **par taux sur la base HT totale** puis arrondie, et non ligne par ligne. Avant, la somme des TTC de lignes arrondies une à une pouvait différer d'un centime du total (exemple : 29,63 € HT → 35,55 € au lieu de 35,56 €), ce qui bloquait Factur-X (« le montant TTC saisi diffère du total des lignes »). Le calcul par taux sert maintenant au TTC calculé de la facture (avoirs signés), au pré-remplissage de la fiche facture et à l'**écriture comptable** (le TTC du compte client est celui de la facture ; le centime d'arrondi va au compte de vente le plus important du taux). Pour corriger une facture existante (non verrouillée), cocher la facture dans la liste et lancer l'action **« Recalculer les montants depuis les lignes »**. Les devis et commandes gardent leur calcul par ligne (un prix unitaire ligne par ligne y est normal) ; la facture est le document légal.
+
+## Imbrication en quinconce et règles de création de tôle
+
+**Quinconce** : pour un lot d'un seul modèle de pièce (3 pièces ou plus), l'imbrication selon la forme essaie aussi un **réseau régulier** : rangées au pas minimal, chaque rangée décalée d'une fraction de pas (une demi-pièce pour des ronds), rangées rapprochées au maximum, plusieurs orientations. Il est comparé au placement pièce à pièce et le meilleur est gardé ; le contrôle exact des contours (écart entre pièces, zone utile) s'applique aux deux. Exemple : 20 brides Ø165 sur 2500 × 1250 (bord 10, écart 10) : rangées de 7, 6 et 7, longueur entamée 489 mm au lieu de 547 mm (-11 %), sans surcoût de calcul. Un glissement en diagonale dans le tassement a aussi été essayé : moins de 1 % de gain pour un calcul 2 à 3 fois plus long, il n'est pas retenu.
+
+**Règles de création de tôle** (Paramétrage → Articles et matières → *Règles de création de tôle*) : quand l'imbrication d'un devis ne trouve aucune tôle pour une matière et une épaisseur, le panneau propose **« Créer cette tôle »** si une règle s'applique. Une règle porte son périmètre (toutes les matières, une famille ou une nuance, avec une plage d'épaisseurs facultative), des modèles de référence (`TOLE-{matiere}-{epaisseur}`) et de libellé, l'unité et le coût d'achat (par exemple 1,20 €/kg), la TVA et les réglages de stock. La plus précise l'emporte (nuance, puis famille, puis toutes ; à égalité la plage d'épaisseurs la plus étroite). Une référence déjà prise reçoit un suffixe -2, -3… Sans règle, le message propose d'en définir une (pré-remplie avec la matière) ou de saisir la tôle à la main. Sans coût dans la règle, la tôle est créée sans prix et le coût matière reste à renseigner. Droits : « ajouter un article » est nécessaire.
+
+## Préparer la mise en production (`preparer_production`)
+
+Commande de gestion qui vide les documents de test (devis et révisions, commandes, livraisons, ordres de fabrication, factures et avoirs, écritures comptables, achats, sous-traitance, pièces à découper et imbrications) avec leur historique, et remet leurs compteurs de codification à zéro. Elle **conserve** les données de référence : tiers, adresses, contacts, articles, matières, postes et tarifs, gammes types, paramètres de coupe, formats et règles de tôle, plan comptable, société, modèles de documents, utilisateurs, et le stock (sauf `--stock`).
+
+Sans option, elle ne fait que **lister** : `docker compose exec web python manage.py preparer_production`. Pour supprimer : faire `./sauvegarder-nas.sh`, puis `... preparer_production --confirmer --sauvegarde-faite` et taper SUPPRIMER (ou `--oui`). Options : `--stock`, `--articles-fabriques` (articles créés depuis les devis, avec nomenclature et gamme), `--journaux` (journal des connexions). Tout se fait dans une transaction : en cas d'erreur, rien n'est supprimé. Les fichiers déposés (`media`) ne sont pas touchés. Tests : `comptes/tests_preparer_production.py`.
+
+## Coût d'achat d'une matière première : au kilo, au m² ou à l'unité
+
+L'unité de coût d'un article acheté se choisit en clair : **Au kilo (€/kg)**, **Au m² (€/m²)**, **Au mètre (€/m)** ou **À l'unité (€/pièce)**. Le libellé du champ « Coût unitaire » suit le choix (« Coût unitaire (€/kg) »…). Pour une tôle : au kilo, elle est valorisée d'après sa densité et son épaisseur ; au m², directement ; à l'unité, c'est le prix de la feuille entière, réparti sur sa surface. Le calcul de l'équivalent (prix au m² ↔ au kg) reste affiché sous le coût. Les règles de création de tôle utilisent les mêmes unités. Aucune donnée n'est modifiée : seuls les libellés changent.
+
+## Renommer un article
+
+Sur la fiche d'un article, le bouton **« Renommer »** change sa référence. La référence est la clé de l'article : la modifier directement dans le formulaire créerait un second article, elle est donc **en lecture seule** une fois l'article créé. Le renommage recrée l'article sous la nouvelle référence, repointe tout ce qui s'y rattache (nomenclatures, gammes, lignes de devis et de commande, ordres de fabrication, stock, fournisseurs, comptes d'article, pièces à découper, profilés) ainsi que l'historique de ces objets, puis supprime l'ancien. Refus si la référence est vide, identique, trop longue ou déjà prise. Un article « -COPIE » (créé par « Dupliquer et modifier ») se renomme ainsi.
+
+## Modification et création par lots
+
+**Modifier par lots** : dans les listes **Articles, Matières, Postes de travail, Formats de tôle, Tiers, Comptes d'articles (vente et achat), Comptes de tiers**, sélectionnez des lignes puis l'action *« Modifier par lots… »* : cochez les champs à changer et leur nouvelle valeur (remplacer, augmenter de x %, ajouter x), un **aperçu avant → après** s'affiche pour chaque ligne (cas impossibles ou invalides signalés, rien n'est écrit), puis *Appliquer*.
+- **Articles** : prix d'achat (dans l'unité de l'article, en €/kg ou en €/m², converti avec l'épaisseur et la densité), unité de coût (€/kg ↔ €/m² en gardant le prix), marge, TVA, géré en stock, stock minimum, réapprovisionnement. Actions voisines : *Ajouter une gamme type…* (aux articles fabriqués sélectionnés) et *Affecter un compte de vente ou d'achat…* (avec code analytique).
+- **Matières** : densité, usinabilité, famille. **Postes** : marge, mise en place d'une tôle, nombre de machines. **Formats de tôle** : priorité, actif, familles et nuances. **Tiers** : conditions de paiement, devise, régime fiscal.
+- **Avec effet à une date** (*« Modifier avec effet à une date… »*) pour ce qui a un historique : **tarifs d'achat fournisseur** (hausse de x %, frais de port), **coût horaire des postes** (depuis la liste des postes) et **gammes** (poste, temps de réglage, temps par pièce). L'ancienne ligne est close la veille, une nouvelle commence à la date d'effet : l'historique et les anciens devis restent intacts. Les étapes de découpe (calculées depuis la pièce) sont ignorées.
+- **Journal et annulation** : chaque lot est tracé dans *Lots de modifications* (Paramétrage → Articles et matières) avec les anciennes valeurs ; l'action *Annuler les lots sélectionnés* rétablit ce qui n'a pas changé depuis et supprime les objets créés qui ne sont utilisés nulle part.
+
+**Base matières rapide** (liste des Matières → *Base matières rapide*) : cochez des nuances du catalogue (aciers, inox, aluminium, cuivre, laiton, ou les vôtres en collant « nuance ; densité ; prix »), cochez des épaisseurs (ou une série : courantes, fines, fortes), validez : **tout se crée à la suite sans autre intervention** — la matière si elle n'existe pas, une tôle par épaisseur (référence et libellé d'après vos modèles, prix d'achat au kilo ou au m²), le **paramètre de coupe jet d'eau** estimé d'après l'usinabilité de la famille (copié de l'épaisseur la plus proche), et une règle de création de tôle par nuance. Ce qui existe déjà est ignoré et signalé. Au laser, une épaisseur absente du tableau du constructeur n'est pas réalisable : aucun paramètre n'est créé.
+
+**Importer des tiers** (liste des Tiers → *Importer des tiers*) : collez un tableau ou choisissez un CSV (`code ; raison_sociale ; type ; siret ; numero_tva ; regime_fiscal ; conditions_paiement ; devise`) ; un code déjà pris est ignoré, le lot est annulable.
+
+## Grille des paramètres de coupe : créer sans ouvrir la fiche
+
+Au **jet d'eau**, cliquer sur un **＋** de la grille crée tout de suite le paramètre, sans ouvrir sa fiche : copie du paramètre le plus proche en épaisseur de la même matière (mêmes réglages, perçage proportionnel à l'épaisseur), **vitesses estimées d'après l'usinabilité**, et le **poste choisi dans « Affecter un poste à… → »** (à défaut, celui du modèle). Maj + clic ouvre la fiche comme avant. Le bouton **« Créer les manquants »** de la barre d'affectation fait la même chose pour une ligne, une colonne ou toute la grille. Les cases impossibles (matière sans usinabilité, par exemple) sont signalées avec leur motif et le reste est créé ; chaque création est tracée dans *Lots de modifications* (annulable). **Laser** : les épaisseurs absentes du tableau du constructeur ne sont pas réalisables, le ＋ ouvre donc toujours la fiche.
+
+## Schéma des cotes d'une section de profilé
+
+Sur la fiche d'une **section de profilé** (Socle technique → Sections de profilés), un schéma des cotes suit la famille choisie : cornière (a, b, e), UPN (h, b, tw, tf), tube carré (c, e), tube rectangulaire (h, b, e), tube rond (d, e), avec la légende des cotes à saisir et un exemple (`{"a": 20, "b": 20, "e": 3}`).
+
+## Sections de profilés : dans le socle technique
+
+Les **sections de profilés** (cornières, UPN, tubes) sont une forme particulière de matière première : elles ont quitté l'administration « Chiffrage découpe » pour le **Socle technique**, à côté des articles (menu *Gestion → Sections de profilés*, et Paramétrage → Articles et matières). Les données (cotes, masses, articles d'achat rattachés) et les droits déjà donnés aux groupes sont conservés : la table est renommée et le type de contenu d'administration suit (migrations `technique 0019-0020`, `decoupe 0034`). L'ancienne adresse `/admin/decoupe/profilesection/` n'existe plus : c'est `/admin/technique/profilesection/`.
+
+## Catalogue de profilés d'un petit atelier (acier, alu, inox)
+
+Le catalogue des **sections de profilés** (Socle technique → Sections de profilés) couvre : cornières à ailes égales et inégales, UPN, IPE, HEA, HEB, tubes carrés, rectangulaires et ronds, **plats**, **ronds pleins** et **carrés pleins** (710 sections).
+- **Masses du catalogue ArcelorMittal 2020** : 626 sections reprennent la masse linéique du catalogue général (acier, kg/m), avec la page en « Source » et la coche « Vérifié ». Chaque ligne extraite a été **contrôlée par la géométrie** (aire × 7,85 kg/dm³ : 2 % pour les sections qui se calculent, 4 % pour les cornières à congés) : les coquilles du catalogue sont écartées (par exemple plat 35×18 : 2,94 kg/m au lieu de 4,95 ; carré 5 : 0,126 au lieu de 0,196 ; l'IPE 500 sans masse). L'outil d'extraction (`docs/outils/extraire_catalogue_arcelor.py`) et les données (`decoupe/profiles_catalogue_arcelor.py`) sont dans le dépôt.
+- **Le reste** (dimensions absentes du catalogue) garde une masse **calculée** et reste « non vérifié » : tubes carrés et rectangulaires formés à froid (EN 10219, rayons d'angle 2 t / t, qui retrouvent le catalogue à moins de 2 %), tubes ronds (EN 10220), plats et pleins (aire exacte), cornières inégales sans congé. Les valeurs de départ saisies auparavant concordaient avec le catalogue à moins de 1 %.
+- **Alu et inox** : la masse saisie est celle de l'acier ; l'aluminium (≈ 2,70) et l'inox (≈ 7,90) s'en déduisent par la densité (colonne « Alu / inox » ; le prix au mètre d'un débit utilise la densité de la matière de l'article d'achat). Le catalogue confirme cette règle : plat alu 40×5 = 0,54 kg/m pour 1,57 en acier. Les masses inox des catalogues peuvent s'écarter de quelques % (rayons de congé différents).
+- Une migration complète le catalogue sans toucher à ce qui est **vérifié** ou saisi à la main. Chaque fiche exige ses cotes (schéma et liste affichés selon la famille).
+
+## Réglage de tôle et réglages d'opérations (colonnes du devis)
+
+Dans l'onglet *Lignes du devis*, deux colonnes informatives distinguent ce qui est déjà compris dans le prix des opérations : **« Dont réglage de tôle (HT) »** (mise en place d'une tôle sur la machine de découpe, une fois par tôle, d'après l'imbrication : seulement pour les articles qui ont une étape de découpe calculée) et **« Dont réglages d'opérations (HT) »** (temps de réglage par lot saisis à la main dans la gamme, colonne *Réglage (min)* : jet d'eau, ajustage, fraisage…, au taux horaire du poste et avec la marge de l'opération). Un article à opérations saisies à la main (sans découpe calculée) affiche donc « — » en réglage de tôle et ses réglages dans l'autre colonne. Les lignes déjà chiffrées se mettent à jour au prochain *Recalculer le chiffrage*.
+
+## Nom des tôles et mode d'emploi des sections de paramétrage
+
+**Nom des tôles** : la convention de Découpe H2O, **« nuance-épaisseur largeur x longueur »** (S235-3 1500x3000), est celle des règles de création et de la Base matières rapide. Les modèles de référence et de libellé acceptent les variables `{matiere}`, `{famille}`, `{largeur}`, `{longueur}` (format de tôle, en mm) et `{epaisseur}`. La Base matières rapide crée **une tôle par nuance, par épaisseur et par format** (formats cochés parmi ceux du menu *Formats de tôle*, priorité 1 par défaut) ; « Créer cette tôle » dans l'imbrication d'un devis nomme la tôle d'après le format affiché. Une tôle déjà créée n'est jamais recréée.
+
+**Mode d'emploi** : chaque liste de la page *Paramétrage* (découpe, formes, atelier, articles et matières, stock, commercial, comptabilité, société, utilisateurs) affiche en haut un encadré repliable « Mode d'emploi » : à quoi sert la section, comment s'en servir en quelques étapes, ce qu'il faut savoir. Les textes sont dans `comptes/aides.py` (un test vérifie que toute section du Paramétrage en a un). Pour créer plusieurs tôles à la volée : liste des *Règles de création de tôle* → « Créer plusieurs tôles (Base matières rapide) », ou liste des *Matières* → « Base matières rapide ».
+
+## Articles : fabriqués, composants achetés, matière première
+
+Le menu « Gestion » sépare les articles en trois entrées : **Articles fabriqués**, **Composants achetés** (composants, consommables, services achetés) et **Matière première**. Chacune a ses colonnes et son bouton « Ajouter » crée directement un article de la bonne nature. La fiche d'un article fabriqué n'affiche plus Type de profil, Poids linéique, Coût unitaire ni Unité de coût (son coût est recalculé à chaque devis) ; celle d'un composant acheté masque épaisseur et profil.
+
+L'**aperçu de la pièce** (configurateur, import DXF/DWG, débit de profilé) est affiché dans le récapitulatif de la fiche, avec le lien vers la pièce et son fichier source, et en miniature dans la liste des articles fabriqués.
+
+## Traduction de l'interface
+
+Les textes d'Unfold (recherche, filtres, boutons…) sont traduits dans `locale/fr/LC_MESSAGES/django.po`, compilé en `.mo` par `python manage.py compiler_traductions` (sans outil gettext). Après toute modification du `.po`, relancer cette commande ; un test vérifie que le `.mo` est à jour. Les noms de droits (« Peut voir… ») sont traduits à chaque `migrate`.

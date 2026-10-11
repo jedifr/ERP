@@ -1,0 +1,29 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<div class="max-w-5xl">
+  <p class="mb-6">
+    Choisissez les colonnes que vous voulez voir dans les listes et dans les tableaux de lignes des fiches.
+    Ce réglage est <strong>personnel</strong> : il ne change rien pour les autres utilisateurs.
+  </p>
+  <form method="post">
+    {% csrf_token %}
+    <div class="colonnes-grille">
+      {% for bloc in blocs %}
+        <fieldset class="colonnes-bloc">
+          <legend>{{ bloc.titre }}</legend>
+          {% for colonne in bloc.colonnes %}
+            <label class="colonnes-case">
+              <input type="checkbox" name="{{ colonne.nom }}" {% if colonne.visible %}checked{% endif %}>
+              <span>{{ colonne.libelle }}</span>
+            </label>
+          {% endfor %}
+        </fieldset>
+      {% endfor %}
+    </div>
+    <div class="flex gap-3 mt-6">
+      <button type="submit" class="bg-primary-600 text-white font-semibold px-4 py-2 rounded-default">Enregistrer</button>
+      <button type="submit" name="defaut" value="1" class="border border-base-300 px-4 py-2 rounded-default">Rétablir les colonnes par défaut</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

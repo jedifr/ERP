@@ -11,10 +11,14 @@ from django.db import transaction
 from .models import RegleCodification
 
 
+def _texte_annee(regle, annee):
+    return f"{annee % 100:02d}" if regle.format_annee == RegleCodification.FormatAnnee.DEUX else str(annee)
+
+
 def _formater(regle, numero, annee):
     chaine_numero = str(numero).zfill(regle.nombre_chiffres)
     if regle.reinitialisation == RegleCodification.Reinitialisation.ANNUELLE:
-        return f"{regle.prefixe}{annee}-{chaine_numero}"
+        return f"{regle.prefixe}{_texte_annee(regle, annee)}-{chaine_numero}"
     return f"{regle.prefixe}{chaine_numero}"
 
 
@@ -66,10 +70,13 @@ def enregistrer_code_utilise(entite, code):
 
     prefixe = re.escape(regle.prefixe)
     if regle.reinitialisation == RegleCodification.Reinitialisation.ANNUELLE:
-        motif = re.fullmatch(rf"{prefixe}(\d{{4}})-(\d+)", code)
+        chiffres_annee = 2 if regle.format_annee == RegleCodification.FormatAnnee.DEUX else 4
+        motif = re.fullmatch(rf"{prefixe}(\d{{{chiffres_annee}}})-(\d+)", code)
         if not motif:
             return
         annee_code, numero_code = int(motif.group(1)), int(motif.group(2))
+        if chiffres_annee == 2:
+            annee_code += 2000  # « 26 » désigne 2026
         if regle.annee_compteur != annee_code:
             # Le code utilisé porte une année différente de celle du
             # compteur stocké : les numéros ne se comparent pas d'une année

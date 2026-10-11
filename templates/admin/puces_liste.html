@@ -1,0 +1,5 @@
+{% if puces %}
+<nav class="puces-liste" aria-label="Filtres rapides">
+  {% for p in puces %}<a href="{{ p.url }}" class="puce{% if p.actif %} puce-active{% endif %}">{{ p.libelle }}{% if p.nombre is not None %}<span class="puce-nombre">{{ p.nombre }}</span>{% endif %}</a>{% endfor %}
+</nav>
+{% endif %}

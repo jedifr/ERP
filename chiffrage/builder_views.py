@@ -6,9 +6,8 @@ from django.contrib import admin, messages
 from django.contrib.admin.views.decorators import staff_member_required
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.http import JsonResponse
+from comptes.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect
-from django.template.response import TemplateResponse
 from django.urls import reverse
 from django.views.decorators.http import require_http_methods
 
@@ -29,17 +28,8 @@ def devis_builder_view(request, numero):
     if request.method == "POST":
         return _traiter_ajout_ligne(request, devis)
 
-    context = admin.site.each_context(request)
-    context.update(
-        {
-            "title": f"Constructeur de devis — {devis.numero}",
-            "devis": devis,
-            "lignes": devis.lignes.select_related("article").prefetch_related("operations__poste"),
-            "postes": PosteTravail.objects.all().order_by("nom"),
-            "opts": Devis._meta,
-        }
-    )
-    return TemplateResponse(request, "chiffrage/devis_builder.html", context)
+    # Le constructeur est intégré à l'onglet « Lignes du devis » de la fiche : l'ancienne adresse y renvoie.
+    return redirect(reverse("admin:chiffrage_devis_change", args=[devis.pk]) + "#onglet=lignes")
 
 
 @staff_member_required
@@ -65,6 +55,12 @@ def convertir_en_commande_view(request, numero):
 
 
 def _traiter_ajout_ligne(request, devis):
+    # Droits : modifier le devis et ajouter une ligne ; créer un nouvel article exige en plus d'ajouter article, nomenclature et gamme.
+    u = request.user
+    if not (u.has_perm("chiffrage.change_devis") and u.has_perm("chiffrage.add_devisligne")):
+        return JsonResponse({"detail": "Vous n'avez pas la permission d'ajouter une ligne à ce devis."}, status=403)
+    if devis.statut != Devis.Statut.BROUILLON:
+        return JsonResponse({"detail": "Devis validé, donc verrouillé : repassez-le en brouillon pour ajouter une ligne."}, status=409)
     try:
         payload = json.loads(request.body)
     except json.JSONDecodeError:
@@ -82,9 +78,12 @@ def _traiter_ajout_ligne(request, devis):
     # simple avertissement. calculer_ligne() (et non calculer_devis()) pour
     # ne juger que la ligne qu'on est en train d'ajouter, indépendamment de
     # l'état d'éventuelles autres lignes déjà présentes sur ce devis.
+    apercu = bool(payload.get("apercu"))  # calcule le prix puis annule tout : rien n'est créé
     try:
         with transaction.atomic():
             if payload.get("nouvel_article"):
+                if not all(u.has_perm(f"technique.add_{m}") for m in ("article", "nomenclature", "gamme")):
+                    return JsonResponse({"detail": "Vous n'avez pas la permission de créer un article fabriqué (article, nomenclature, gamme)."}, status=403)
                 article = _creer_article_depuis_payload(payload["nouvel_article"])
             else:
                 reference = payload.get("article_existant")
@@ -95,9 +94,20 @@ def _traiter_ajout_ligne(request, devis):
 
             ligne = ajouter_ligne_devis(devis, article, quantite)
             calculer_ligne(devis, ligne)
+            ligne.refresh_from_db()
+            resultat_apercu = {
+                "ok": True, "apercu": True, "article": article.reference, "quantite": ligne.quantite,
+                "cout_matiere_calcule": ligne.cout_matiere_calcule, "prix_vente_matiere": ligne.prix_vente_matiere,
+                "prix_vente_operations": ligne.prix_vente_operations, "prix_vente_total": ligne.prix_vente_total,
+                "prix_vente_unitaire": ligne.prix_vente_unitaire, "prix_vente_ttc": ligne.prix_vente_ttc,
+            } if apercu else None
+            if apercu:
+                transaction.set_rollback(True)
     except ChiffrageError as exc:
         return JsonResponse({"detail": str(exc)}, status=400)
 
+    if apercu:
+        return JsonResponse(resultat_apercu)
     ligne.refresh_from_db()
 
     return JsonResponse(
@@ -150,9 +160,9 @@ def _creer_article_depuis_payload(data):
             {
                 "poste": poste,
                 "ordre": e.get("ordre"),
-                "temps_fixe": e.get("temps_fixe") or None,
-                "temps_variable": e.get("temps_variable") or None,
-                "cout_forfaitaire": e.get("cout_forfaitaire") or None,
+                "temps_fixe": e.get("temps_fixe"),
+                "temps_variable": e.get("temps_variable"),
+                "cout_forfaitaire": e.get("cout_forfaitaire"),
                 "date_debut": datetime.date.fromisoformat(date_debut),
             }
         )
@@ -211,6 +221,8 @@ def recalculer_ligne_view(request, numero, ligne_id):
     "Recalculer le chiffrage")."""
     devis = get_object_or_404(Devis, pk=numero)
     ligne = get_object_or_404(DevisLigne, pk=ligne_id, devis=devis)
+    if devis.statut == Devis.Statut.VALIDE:
+        return JsonResponse({"detail": "Ce devis est validé : il est verrouillé."}, status=409)
 
     try:
         payload = json.loads(request.body)

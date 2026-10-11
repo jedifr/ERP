@@ -7,6 +7,7 @@ ligne de devis -> coût matière (article + composants via nomenclature)
 
 from django.db.models import Q
 
+from comptes.montants import D, D0, ZERO, arrondir, arrondir_prix, arrondir_prix_vente
 from commercial.models import TauxTVA, Tiers
 from technique.models import Article, Gamme, PosteTravail, TarifPoste
 
@@ -14,7 +15,19 @@ from .models import DevisLigne, DevisLigneOperation
 
 
 class ChiffrageError(Exception):
-    """Donnée de référence manquante ou incohérente empêchant le calcul."""
+    """Donnée de référence manquante ou incohérente empêchant le calcul. `lien` : (adresse, texte) de la page où la corriger,
+    affiché à la suite du message (voir chiffrage.admin.message_erreur)."""
+
+    def __init__(self, message="", lien=None):
+        super().__init__(message)
+        self.lien = lien
+
+
+def lien_article(article):
+    """Lien vers la fiche de l'article dont une donnée manque."""
+    from django.urls import reverse
+
+    return reverse("admin:technique_article_change", args=[article.pk]), "Renseigner le coût de l'article"
 
 
 def _valide_a_la_date(date_reference):
@@ -48,37 +61,40 @@ def cout_etape_gamme(etape, quantite, date_reference):
         # temps_fixe/temps_variable (Gamme) sont exprimés en MINUTES, alors que
         # TarifPoste.cout_horaire est un €/HEURE : diviser par 60 avant de les
         # multiplier est indispensable, sous peine de gonfler le coût x60.
-        temps_minutes = (etape.temps_fixe or 0) + (etape.temps_variable or 0) * quantite
-        return (temps_minutes / 60) * tarif.cout_horaire
-    return (etape.cout_forfaitaire or 0) * quantite
+        # Étape de découpe : pas de réglage « par lot » ; la mise en place se compte par tôle (chiffrage/reglage.py).
+        reglage = 0 if getattr(etape, "origine", "") == "decoupe" else (etape.temps_fixe or 0)
+        temps_minutes = D(reglage + (etape.temps_variable or 0) * quantite)
+        return arrondir_prix(temps_minutes / 60 * D(tarif.cout_horaire))
+    return arrondir_prix(D0(etape.cout_forfaitaire) * D(quantite))
 
 
 def cout_composant(nomenclature_ligne):
     """Coût d'un composant de nomenclature, pour UNE unité de l'article parent."""
     article = nomenclature_ligne.article_composant
-    quantite = nomenclature_ligne.quantite
+    quantite = D(nomenclature_ligne.quantite)
+    cout_unitaire = D(article.cout_unitaire)
     if article.cout_unitaire is None:
-        raise ChiffrageError(f"L'article « {article} » n'a pas de coût unitaire renseigné.")
+        raise ChiffrageError(f"L'article « {article} » n'a pas de coût unitaire renseigné.", lien=lien_article(article))
 
     if article.unite_cout == Article.UniteCout.PIECE:
-        return quantite * article.cout_unitaire
+        return quantite * cout_unitaire
 
     if article.unite_cout == Article.UniteCout.SURFACE:
         if not nomenclature_ligne.longueur_mm or not nomenclature_ligne.largeur_mm:
             raise ChiffrageError(
                 f"Longueur/largeur manquantes pour le composant « {article} » (unité : surface)."
             )
-        surface_m2 = (nomenclature_ligne.longueur_mm * nomenclature_ligne.largeur_mm) / 1_000_000
-        return surface_m2 * article.cout_unitaire * quantite
+        surface_m2 = D((nomenclature_ligne.longueur_mm * nomenclature_ligne.largeur_mm) / 1_000_000)
+        return surface_m2 * cout_unitaire * quantite
 
     if article.unite_cout == Article.UniteCout.LONGUEUR:
         if not nomenclature_ligne.longueur_mm:
             raise ChiffrageError(f"Longueur manquante pour le composant « {article} » (unité : longueur).")
-        longueur_m = nomenclature_ligne.longueur_mm / 1000
+        longueur_m = D(nomenclature_ligne.longueur_mm / 1000)
         if article.poids_lineique:
-            poids = longueur_m * article.poids_lineique
-            return poids * article.cout_unitaire * quantite
-        return longueur_m * article.cout_unitaire * quantite
+            poids = longueur_m * D(article.poids_lineique)
+            return poids * cout_unitaire * quantite
+        return longueur_m * cout_unitaire * quantite
 
     if article.unite_cout == Article.UniteCout.POIDS:
         if not nomenclature_ligne.longueur_mm or not nomenclature_ligne.largeur_mm or not article.epaisseur:
@@ -90,44 +106,96 @@ def cout_composant(nomenclature_ligne):
         volume_dm3 = (
             nomenclature_ligne.longueur_mm * nomenclature_ligne.largeur_mm * article.epaisseur
         ) / 1_000_000
-        poids = volume_dm3 * article.matiere.densite
-        return poids * article.cout_unitaire * quantite
+        poids = D(volume_dm3 * article.matiere.densite)
+        return poids * cout_unitaire * quantite
 
     raise ChiffrageError(f"Unité de coût non définie pour l'article « {article} ».")
 
 
-def cout_matiere_article(article, quantite):
+def cout_matiere_article(article, quantite, devis=None):
     """Coût matière pour `quantite` unités de `article`. Seul un article FABRIQUE
     est décomposé via sa nomenclature ; toute autre nature — matière première,
     ou achetée telle quelle (service acheté, consommable, composant) — est
-    costée directement depuis son cout_unitaire."""
+    costée directement depuis son cout_unitaire. Dans un devis, un article créé depuis une pièce importée du devis est
+    chiffré avec l'imbrication retenue de son groupe de pièces (matière répartie entre les pièces)."""
     if article.nature == Article.Nature.FABRIQUE:
-        cout_par_unite = sum(cout_composant(n) for n in article.composants.select_related("article_composant"))
-        return cout_par_unite * quantite
+        from decoupe.models import PieceDecoupe
+        from decoupe.services.imbrication_devis import cout_matiere_piece_devis
+        from decoupe.services.matiere import ErreurMatiere, cout_matiere_imbrication, piece_de_chiffrage
+
+        if devis is not None:
+            from decoupe.models import PieceProfile
+            from decoupe.services.profiles import ErreurProfile, ErreurPrixProfile, cout_matiere_piece_profile
+
+            debit = PieceProfile.objects.filter(article=article, devis=devis).select_related("section", "section__article").first()
+            if debit is not None:
+                try:
+                    return arrondir_prix(cout_matiere_piece_profile(debit, max(1, round(quantite))))
+                except (ErreurProfile, ErreurPrixProfile) as exc:
+                    raise ChiffrageError(f"Article « {article} » : matière du profilé impossible — {exc}") from exc
+            piece_devis = PieceDecoupe.objects.filter(article=article, devis=devis, tole__isnull=False, format_tole__isnull=False).first()
+            if piece_devis is not None:
+                composants = article.composants.select_related("article_composant").exclude(article_composant=piece_devis.tole)
+                cout_par_unite = sum((cout_composant(n) for n in composants), ZERO)
+                try:
+                    matiere = cout_matiere_piece_devis(piece_devis, max(1, round(quantite)))
+                except ErreurMatiere as exc:
+                    raise ChiffrageError(f"Article « {article} » : matière par imbrication impossible — {exc}") from exc
+                return arrondir_prix(cout_par_unite * D(quantite) + matiere)
+        piece = piece_de_chiffrage(article)
+        composants = article.composants.select_related("article_composant")
+        if piece is not None:
+            # La tôle de la pièce est chiffrée par imbrication (surface consommée avec les chutes, selon la quantité) :
+            # sa ligne de nomenclature (rectangle) n'est pas comptée une seconde fois.
+            composants = composants.exclude(article_composant=piece.tole)
+        cout_par_unite = sum((cout_composant(n) for n in composants), ZERO)
+        total = cout_par_unite * D(quantite)
+        if piece is not None:
+            try:
+                total += cout_matiere_imbrication(piece, max(1, round(quantite))).cout_total
+            except ErreurMatiere as exc:
+                raise ChiffrageError(f"Article « {article} » : matière par imbrication impossible — {exc}") from exc
+        return arrondir_prix(total)
 
     if article.cout_unitaire is None:
-        raise ChiffrageError(f"L'article « {article} » n'a pas de coût unitaire renseigné.")
-    return quantite * article.cout_unitaire
+        raise ChiffrageError(f"L'article « {article} » n'a pas de coût unitaire renseigné.", lien=lien_article(article))
+    return arrondir_prix(D(quantite) * D(article.cout_unitaire))
+
+
+def _vendu(cout, taux):
+    """Prix de vente (au centime) d'un coût majoré du taux de marge (en %)."""
+    return arrondir(D(cout) * (1 + D0(taux) / 100))
 
 
 def _taux_marge_matiere(devis, ligne):
     if devis.taux_marge_globale is not None:
-        return devis.taux_marge_globale
+        return D(devis.taux_marge_globale)
     if ligne.taux_marge_matiere_applique is not None:
-        return ligne.taux_marge_matiere_applique
-    return ligne.article.taux_marge_defaut or 0
+        return D(ligne.taux_marge_matiere_applique)
+    return D0(ligne.article.taux_marge_defaut)
 
 
 def _taux_marge_operation(devis, poste, operation_existante):
     if devis.taux_marge_globale is not None:
-        return devis.taux_marge_globale
+        return D(devis.taux_marge_globale)
     if operation_existante is not None and operation_existante.taux_marge_applique is not None:
-        return operation_existante.taux_marge_applique
-    return poste.taux_marge_defaut or 0
+        return D(operation_existante.taux_marge_applique)
+    return D0(poste.taux_marge_defaut)
 
 
 def _synchroniser_operations_ligne(devis, ligne):
+    from .reglage import part_ligne
+
     etapes = list(gamme_active(ligne.article, devis.date_creation))
+    reglage = part_ligne(devis, ligne.article)
+    # Le réglage machine (par tôle) est ajouté à l'étape de découpe de l'article : il part dans le prix des opérations de la ligne.
+    ordre_decoupe = next((e.ordre for e in etapes if e.origine == "decoupe"), None)
+    if ordre_decoupe is None:
+        reglage = type(reglage)()
+    ligne.prix_vente_reglage = None
+    ligne.prix_vente_reglage_operations = None
+    ligne.note_reglage = ""
+    reglages_operations = ZERO
     ordres_actifs = {etape.ordre for etape in etapes}
 
     existantes = {op.ordre: op for op in ligne.operations.all()}
@@ -142,11 +210,22 @@ def _synchroniser_operations_ligne(devis, ligne):
 
         operation.poste = etape.poste
         cout = cout_etape_gamme(etape, ligne.quantite, devis.date_creation)
+        if etape.ordre == ordre_decoupe:
+            cout += reglage.cout
         taux = _taux_marge_operation(devis, etape.poste, operation if operation.pk else None)
         operation.cout_calcule = cout
         operation.taux_marge_applique = taux
-        operation.prix_vente = cout * (1 + taux / 100)
+        operation.prix_vente = _vendu(cout, taux)
         operation.save()
+        if etape.ordre != ordre_decoupe and etape.poste.mode_calcul == PosteTravail.ModeCalcul.HORAIRE and etape.temps_fixe:
+            # temps de réglage par lot de l'opération (déjà dans son coût) : somme informative des prix de vente de ces réglages
+            tarif = tarif_poste_valide(etape.poste, devis.date_creation)
+            reglages_operations += _vendu(arrondir_prix(D(etape.temps_fixe) / 60 * D(tarif.cout_horaire)), taux)
+        if etape.ordre == ordre_decoupe and (reglage.cout or reglage.note):
+            ligne.prix_vente_reglage = _vendu(reglage.cout, taux)
+            ligne.note_reglage = (reglage.note + (" — " + " ; ".join(reglage.avertissements) if reglage.avertissements else ""))[:250]
+    ligne.prix_vente_reglage_operations = reglages_operations or None
+    ligne.save(update_fields=["prix_vente_reglage", "prix_vente_reglage_operations", "note_reglage"])
 
 
 def calculer_ligne(devis, ligne):
@@ -157,13 +236,13 @@ def calculer_ligne(devis, ligne):
     la première ligne en erreur. Utilisé isolément par le recalcul/aperçu en
     direct d'une ligne, pour qu'une ligne à problème n'empêche pas les
     autres lignes du même devis de se recalculer normalement."""
-    ligne.cout_matiere_calcule = cout_matiere_article(ligne.article, ligne.quantite)
+    ligne.cout_matiere_calcule = cout_matiere_article(ligne.article, ligne.quantite, devis=devis)
     taux = _taux_marge_matiere(devis, ligne)
     ligne.taux_marge_matiere_applique = taux
     if ligne.prix_vente_unitaire_force is not None:
-        ligne.prix_vente_matiere = ligne.prix_vente_unitaire_force * ligne.quantite
+        ligne.prix_vente_matiere = arrondir(D(ligne.prix_vente_unitaire_force) * D(ligne.quantite))
     else:
-        ligne.prix_vente_matiere = ligne.cout_matiere_calcule * (1 + taux / 100)
+        ligne.prix_vente_matiere = _vendu(ligne.cout_matiere_calcule, taux)
     ligne.save()
 
     if ligne.article.nature == Article.Nature.FABRIQUE:
@@ -199,23 +278,30 @@ def previsualiser_ligne(
         quantite=quantite,
         taux_marge_matiere_applique=taux_marge_matiere_applique,
     )
-    cout_matiere = cout_matiere_article(article, quantite)
+    cout_matiere = cout_matiere_article(article, quantite, devis=devis)
     taux = _taux_marge_matiere(devis, ligne_apercu)
 
     if prix_vente_unitaire_force is not None:
-        prix_vente_matiere = prix_vente_unitaire_force * quantite
+        prix_vente_matiere = arrondir(D(prix_vente_unitaire_force) * D(quantite))
     else:
-        prix_vente_matiere = cout_matiere * (1 + taux / 100)
+        prix_vente_matiere = _vendu(cout_matiere, taux)
 
-    prix_vente_operations = 0
+    prix_vente_operations = ZERO
     if article.nature == Article.Nature.FABRIQUE:
+        from .reglage import part_ligne
+
+        reglage = part_ligne(devis, article, quantite) if devis.pk else None
+        decoupe_vue = False
         for etape in gamme_active(article, devis.date_creation):
             cout_etape = cout_etape_gamme(etape, quantite, devis.date_creation)
+            if reglage is not None and etape.origine == "decoupe" and not decoupe_vue:
+                cout_etape += reglage.cout
+                decoupe_vue = True
             taux_operation = _taux_marge_operation(devis, etape.poste, None)
-            prix_vente_operations += cout_etape * (1 + taux_operation / 100)
+            prix_vente_operations += _vendu(cout_etape, taux_operation)
 
     prix_vente_total = prix_vente_matiere + prix_vente_operations
-    taux_tva_valeur = taux_tva.taux if taux_tva is not None else 0
+    taux_tva_valeur = D(taux_tva.taux) if taux_tva is not None else ZERO
 
     return {
         "cout_matiere_calcule": cout_matiere,
@@ -223,8 +309,8 @@ def previsualiser_ligne(
         "prix_vente_matiere": prix_vente_matiere,
         "prix_vente_operations": prix_vente_operations,
         "prix_vente_total": prix_vente_total,
-        "prix_vente_unitaire": (prix_vente_total / quantite) if quantite else None,
-        "prix_vente_ttc": prix_vente_total * (1 + taux_tva_valeur / 100),
+        "prix_vente_unitaire": arrondir_prix_vente(prix_vente_total / D(quantite)) if quantite else None,
+        "prix_vente_ttc": arrondir(prix_vente_total * (1 + taux_tva_valeur / 100)),
     }
 
 
@@ -259,18 +345,16 @@ def previsualiser_ligne_commande(article, quantite, date_reference):
     prix_vente_unitaire_force, donc les marges par défaut de
     l'article/poste s'appliquent toujours."""
     cout_matiere = cout_matiere_article(article, quantite)
-    taux_matiere = article.taux_marge_defaut or 0
-    prix_matiere = cout_matiere * (1 + taux_matiere / 100)
+    prix_matiere = _vendu(cout_matiere, article.taux_marge_defaut)
 
-    prix_operations = 0
+    prix_operations = ZERO
     if article.nature == Article.Nature.FABRIQUE:
         for etape in gamme_active(article, date_reference):
             cout_etape = cout_etape_gamme(etape, quantite, date_reference)
-            taux_operation = etape.poste.taux_marge_defaut or 0
-            prix_operations += cout_etape * (1 + taux_operation / 100)
+            prix_operations += _vendu(cout_etape, etape.poste.taux_marge_defaut)
 
     prix_total = prix_matiere + prix_operations
     return {
-        "prix_vente_unitaire": (prix_total / quantite) if quantite else None,
+        "prix_vente_unitaire": arrondir_prix_vente(prix_total / D(quantite)) if quantite else None,
         "montant_ht": prix_total,
     }

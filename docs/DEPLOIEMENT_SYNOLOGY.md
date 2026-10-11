@@ -191,3 +191,7 @@ docker compose exec db pg_dump -U erp_user erp_db > backup_$(date +%F).sql
 - Le port 8000 n'est exposé que sur le réseau local par défaut (pas
   d'exposition Internet automatique) : aucune configuration supplémentaire
   n'est nécessaire pour un simple test entre postes du réseau.
+
+## Sauvegarde et changement de NAS
+
+Voir [SAUVEGARDE.md](SAUVEGARDE.md) (y compris la section **UGREEN NASync** : le NAS cible est un DXP8800 Plus sous UGOS Pro, pas un Synology) : sauvegarde nocturne, copie externe chiffrée, vérification par restauration d'essai, transfert vers un autre NAS.

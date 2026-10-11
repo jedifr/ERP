@@ -20,7 +20,7 @@ class _BooleanFieldAvecDefautMultipart(serializers.BooleanField):
 
 
 class PieceDecoupeSerializer(FullCleanModelSerializer):
-    rotation_autorisee = _BooleanFieldAvecDefautMultipart(default=True, required=False)
+    symetrie_autorisee = _BooleanFieldAvecDefautMultipart(default=True, required=False)
 
     class Meta:
         model = PieceDecoupe
@@ -36,6 +36,11 @@ class PieceDecoupeSerializer(FullCleanModelSerializer):
             "hauteur_mm",
             "nb_contours_interieurs",
             "contour_json",
+            "calques_detectes",
+            "a_gravure",
+            "gravure_json",
+            "pliage_json",
+            "longueur_gravure_mm",
             "date_import",
         ]
 
@@ -49,7 +54,7 @@ class ImbricationLigneSerializer(serializers.ModelSerializer):
 class ImbricationPlacementSerializer(serializers.ModelSerializer):
     class Meta:
         model = ImbricationPlacement
-        fields = ["id", "piece", "numero_feuille", "x_mm", "y_mm", "rotation_deg"]
+        fields = ["id", "piece", "numero_feuille", "x_mm", "y_mm", "rotation_deg", "miroir"]
 
 
 class ImbricationJobSerializer(serializers.ModelSerializer):

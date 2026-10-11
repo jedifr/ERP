@@ -1,0 +1,8 @@
+{% if aide %}
+<details class="aide-liste" open>
+  <summary><span class="material-symbols-outlined" aria-hidden="true">help</span> Mode d'emploi</summary>
+  <p class="aide-resume">{{ aide.resume }}</p>
+  {% if aide.etapes %}<ol class="aide-etapes">{% for e in aide.etapes %}<li>{{ e }}</li>{% endfor %}</ol>{% endif %}
+  {% if aide.bon_a_savoir %}<ul class="aide-savoir">{% for b in aide.bon_a_savoir %}<li>{{ b }}</li>{% endfor %}</ul>{% endif %}
+</details>
+{% endif %}

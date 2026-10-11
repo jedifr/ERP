@@ -9,6 +9,16 @@ de la pièce avec ses trous, quel que soit le nombre de niveaux d'imbrication.
 
 Les références de bloc (INSERT) et les entités non géométriques (texte, cotes, hachures...)
 ne sont pas prises en charge et sont ignorées (avec avertissement pour les INSERT).
+
+Rôles de calque : sans profil d'import (`regles_calques=None`), toutes les entités sont
+traitées comme de la découpe — comportement historique, inchangé. Avec un profil (un dict
+`{nom de calque en minuscules: rôle}`), chaque entité est répartie selon le rôle de son
+calque : seules les entités "découpe" alimentent la reconstruction de la silhouette (contour
++ trous, inchangée) ; les entités "gravure"/"pliage" sont extraites à part, comme de simples
+tracés (pas de reconstruction de contour fermé — une gravure ou une ligne de pliage n'a pas
+de raison d'être une boucle fermée) ; les entités "ignore" sont écartées. Un calque présent
+dans le fichier mais absent du profil est traité comme découpe, avec un avertissement (plutôt
+que silencieusement ignoré, pour ne pas faire disparaître de la matière à découper).
 """
 
 from dataclasses import dataclass, field
@@ -23,9 +33,24 @@ SAGITTE_MM = 0.05  # tolérance de discrétisation des arcs / cercles / ellipses
 
 ENTITES_GEOMETRIQUES = {"LINE", "LWPOLYLINE", "POLYLINE", "ARC", "CIRCLE", "ELLIPSE", "SPLINE"}
 
+ROLE_DECOUPE = "decoupe"
+ROLE_GRAVURE = "gravure"
+ROLE_PLIAGE = "pliage"
+ROLE_IGNORE = "ignore"
+
 
 class ErreurImportGeometrie(Exception):
-    """Levée quand un fichier DXF/DWG ne peut pas être exploité pour en extraire une pièce."""
+    """Levée quand un fichier DXF/DWG ne peut pas être exploité pour en extraire une pièce.
+
+    Porte `calques`/`calques_roles` quand l'échec survient après la détection des calques (ex.
+    plus aucune entité de découpe une fois les rôles appliqués) : permet à l'appelant d'afficher
+    quand même le tableau des calques, pour corriger un mauvais classement sans tout reprendre à
+    zéro (un calque basculé par erreur en "gravure"/"ignoré" par exemple)."""
+
+    def __init__(self, message, calques=None, calques_roles=None):
+        super().__init__(message)
+        self.calques = calques or []
+        self.calques_roles = calques_roles or {}
 
 
 @dataclass
@@ -37,6 +62,14 @@ class GeometrieResultat:
     largeur_mm: float
     hauteur_mm: float
     avertissements: list = field(default_factory=list)
+    gravure: list = field(default_factory=list)
+    pliage: list = field(default_factory=list)
+    longueur_gravure_mm: float = 0.0
+    # Les autres silhouettes disjointes du fichier (plan de découpe de plusieurs pièces) : [{"exterieur", "trous"}],
+    # dans le même repère que la pièce principale. Elles comptent dans le temps de découpe.
+    autres: list = field(default_factory=list)
+    calques: list = field(default_factory=list)
+    calques_roles: dict = field(default_factory=dict)
 
 
 def _point(vecteur):
@@ -61,6 +94,19 @@ def _vers_lignes(entite, avertissements):
             "explosez-les dans votre logiciel de CAO avant export."
         )
     return []
+
+
+def _role_calque(nom_calque, regles_calques, avertissements):
+    if regles_calques is None:
+        return ROLE_DECOUPE
+    role = regles_calques.get((nom_calque or "").lower())
+    if role is None:
+        avertissements.append(
+            f"Le calque « {nom_calque} » n'est couvert par aucune règle du profil d'import : "
+            "traité comme découpe par défaut."
+        )
+        return ROLE_DECOUPE
+    return role
 
 
 class _UnionFind:
@@ -130,6 +176,13 @@ def _assembler_silhouette(anneaux):
     return resultat
 
 
+def _autres_silhouettes(geometrie, principal):
+    """Silhouettes disjointes de la principale (coordonnées brutes, à recaler comme la principale)."""
+    if geometrie.geom_type == "Polygon":
+        return []
+    return [g for g in geometrie.geoms if g.area > 1e-6 and g is not principal and not g.equals(principal)]
+
+
 def _extraire_polygone_principal(geometrie, avertissements):
     if geometrie.is_empty:
         raise ErreurImportGeometrie("Aucun contour fermé n'a été trouvé dans le fichier.")
@@ -145,8 +198,8 @@ def _extraire_polygone_principal(geometrie, avertissements):
     ignores = len(polygones) - 1
     if ignores:
         avertissements.append(
-            f"Le fichier contient {ignores} contour(s) fermé(s) supplémentaire(s), disjoints de la "
-            "silhouette principale ; seule la silhouette de plus grande surface a été retenue comme pièce."
+            f"Le fichier contient {ignores} silhouette(s) supplémentaire(s), disjointes de la silhouette principale ; "
+            "la silhouette de plus grande surface sert de pièce (aperçu, imbrication) et toutes comptent dans le temps de découpe."
         )
     return principal
 
@@ -175,34 +228,70 @@ def _charger_document(chemin, format_source):
         raise ErreurImportGeometrie(f"Impossible de lire le fichier : {exc}") from exc
 
 
-def extraire_geometrie(chemin, format_source):
+def _traits_locaux(traits, minx, miny):
+    resultat = []
+    for ligne in traits:
+        decalee = translate(ligne, xoff=-minx, yoff=-miny)
+        resultat.append([(round(x, 3), round(y, 3)) for x, y in decalee.coords])
+    return resultat
+
+
+def extraire_geometrie(chemin, format_source, regles_calques=None):
     """Lit un fichier DXF/DWG et renvoie la silhouette pleine (avec trous) de la pièce qu'il contient.
 
-    `format_source` vaut "dxf" ou "dwg". Renvoie un `GeometrieResultat` dont les coordonnées sont
-    exprimées dans un repère local à la pièce (origine = coin inférieur gauche du rectangle
-    englobant), prêt à être réutilisé tel quel pour l'imbrication.
+    `format_source` vaut "dxf" ou "dwg". `regles_calques` est optionnel : `None` traite tout le
+    fichier comme de la découpe (comportement historique) ; sinon un dict
+    `{nom de calque en minuscules: rôle}` (voir le docstring du module) répartit les entités par
+    calque. Renvoie un `GeometrieResultat` dont les coordonnées sont exprimées dans un repère
+    local à la pièce (origine = coin inférieur gauche du rectangle englobant de la découpe),
+    prêt à être réutilisé tel quel pour l'imbrication.
     """
     document = _charger_document(chemin, format_source)
     espace_objet = document.modelspace()
 
     avertissements = []
-    lignes = []
+    calques_detectes = set()
+    calques_roles = {}
+    lignes_decoupe = []
+    traits_gravure = []
+    traits_pliage = []
     for entite in espace_objet:
         if entite.dxftype() not in ENTITES_GEOMETRIQUES and entite.dxftype() != "INSERT":
             continue
-        lignes.extend(_vers_lignes(entite, avertissements))
+        nom_calque = entite.dxf.layer
+        calques_detectes.add(nom_calque)
+        role = _role_calque(nom_calque, regles_calques, avertissements)
+        calques_roles[nom_calque] = role
+        if role == ROLE_IGNORE:
+            continue
+        lignes = _vers_lignes(entite, avertissements)
+        if role == ROLE_GRAVURE:
+            traits_gravure.extend(lignes)
+        elif role == ROLE_PLIAGE:
+            traits_pliage.extend(lignes)
+        else:
+            lignes_decoupe.extend(lignes)
 
-    if not lignes:
+    calques_tries = sorted(calques_detectes)
+    if not lignes_decoupe:
         raise ErreurImportGeometrie(
-            "Aucune entité géométrique exploitable (ligne, polyligne, arc, cercle...) n'a été trouvée."
+            "Aucune entité géométrique exploitable (ligne, polyligne, arc, cercle...) n'a été trouvée "
+            "sur un calque de découpe.",
+            calques=calques_tries,
+            calques_roles=calques_roles,
         )
 
-    anneaux = _contours_fermes(lignes, avertissements)
+    anneaux = _contours_fermes(lignes_decoupe, avertissements)
     if not anneaux:
-        raise ErreurImportGeometrie("Aucun contour fermé n'a été trouvé dans le fichier.")
+        raise ErreurImportGeometrie(
+            "Aucun contour fermé n'a été trouvé dans le fichier.",
+            calques=calques_tries,
+            calques_roles=calques_roles,
+        )
 
     silhouette = _assembler_silhouette(anneaux)
     piece = _extraire_polygone_principal(silhouette, avertissements)
+    autres_brutes = _autres_silhouettes(silhouette, piece)
 
     minx, miny, maxx, maxy = piece.bounds
     piece = translate(piece, xoff=-minx, yoff=-miny)
@@ -210,6 +299,13 @@ def extraire_geometrie(chemin, format_source):
     exterior = [(round(x, 3), round(y, 3)) for x, y in piece.exterior.coords]
     holes = [[(round(x, 3), round(y, 3)) for x, y in interieur.coords] for interieur in piece.interiors]
     perimetre = piece.exterior.length + sum(interieur.length for interieur in piece.interiors)
+    autres = []
+    for g in autres_brutes:
+        g = translate(g, xoff=-minx, yoff=-miny)
+        autres.append({
+            "exterieur": [(round(x, 3), round(y, 3)) for x, y in g.exterior.coords],
+            "trous": [[(round(x, 3), round(y, 3)) for x, y in i.coords] for i in g.interiors],
+        })
 
     return GeometrieResultat(
         exterior=exterior,
@@ -219,4 +315,10 @@ def extraire_geometrie(chemin, format_source):
         largeur_mm=maxx - minx,
         hauteur_mm=maxy - miny,
         avertissements=avertissements,
+        gravure=_traits_locaux(traits_gravure, minx, miny),
+        pliage=_traits_locaux(traits_pliage, minx, miny),
+        longueur_gravure_mm=sum(ligne.length for ligne in traits_gravure),
+        calques=calques_tries,
+        calques_roles=calques_roles,
+        autres=autres,
     )

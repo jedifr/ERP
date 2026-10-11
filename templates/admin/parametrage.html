@@ -1,0 +1,20 @@
+{% extends "admin/base_site.html" %}
+{% block breadcrumbs %}{% endblock %}
+{% block content %}
+<p class="mb-6 text-sm text-base-500 dark:text-base-400">Tout ce qui se règle une fois et sert ensuite tous les jours. Chaque carte ouvre les écrans correspondants ; la pastille indique ce qui demande votre attention.</p>
+<div class="cartes-param">
+  {% for c in cartes %}
+    <section class="carte-param">
+      <header>
+        <span class="material-symbols-outlined">{{ c.icone }}</span>
+        <h2>{{ c.titre }}</h2>
+        {% if c.etat %}<span class="pastille-param pastille-{{ c.etat.1 }}">{{ c.etat.0 }}</span>{% endif %}
+      </header>
+      <p>{{ c.description }}</p>
+      <ul>{% for l in c.liens %}<li><a href="{{ l.url }}">{{ l.libelle }}</a></li>{% endfor %}</ul>
+    </section>
+  {% empty %}
+    <p>Aucun écran de paramétrage n'est accessible avec vos droits.</p>
+  {% endfor %}
+</div>
+{% endblock %}

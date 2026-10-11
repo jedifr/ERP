@@ -14,6 +14,18 @@
                 </button>
             </form>
         </li>
+        <li>
+            <form action="{% url 'admin:technique_article_renommer' original.pk %}" method="post" class="contents">
+                {% csrf_token %}
+                <input type="hidden" name="nouvelle_reference" value="">
+                <button type="submit"
+                        onclick="var n = window.prompt('Nouvelle référence de « {{ original.pk|escapejs }} » (devis, commandes, nomenclatures et stock suivent) :', '{{ original.pk|escapejs }}'); if (!n || !n.trim()) return false; this.form.nouvelle_reference.value = n; return true;"
+                        class="cursor-pointer flex grow items-center gap-2 px-3 py-2 text-left whitespace-nowrap w-full bg-transparent border-0 text-font-default-light dark:text-font-default-dark">
+                <span class="material-symbols-outlined">edit</span>
+                Renommer
+                </button>
+            </form>
+        </li>
     {% endif %}
     {{ block.super }}
 {% endblock %}

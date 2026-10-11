@@ -1,10 +1,11 @@
+from decimal import Decimal
 import datetime
 
 from django.core.exceptions import ValidationError
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from .models import Article, Gamme, Matiere, Nomenclature, PosteTravail, TarifPoste
-from .services import DuplicationError, dupliquer_article
+from .services import DuplicationError, dupliquer_article, renommer_article
 
 
 class ArticleTests(TestCase):
@@ -196,7 +197,7 @@ class DupliquerArticleTests(TestCase):
         self.assertEqual(copie.libelle, "Tôle laminée à froid")
         self.assertEqual(copie.nature, article.nature)
         self.assertEqual(copie.matiere, acier)
-        self.assertEqual(copie.cout_unitaire, 1.2)
+        self.assertEqual(copie.cout_unitaire, Decimal("1.2"))
         self.assertEqual(copie.stock_mini, 10)
         self.assertNotEqual(copie.pk, article.pk)
 
@@ -285,3 +286,218 @@ class DupliquerArticleViewTests(TestCase):
         Article.objects.create(reference="TOLE-DUP-VIEW3", nature=Article.Nature.MATIERE_PREMIERE)
         response = self.client.post("/admin/technique/article/TOLE-DUP-VIEW3/dupliquer/")
         self.assertNotEqual(response.status_code, 200)
+
+
+class FicheArticleDeuxColonnesTests(TestCase):
+    """Fiche article : saisie à gauche ; composition, prix d'achat, stock, utilisation et activité à droite."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        self.client.force_login(get_user_model().objects.create_superuser("fiche-art", "f@example.com", "pass1234"))
+        self.tole = Article.objects.create(
+            reference="TOLE-RECAP", libelle="Tôle recap", nature=Article.Nature.MATIERE_PREMIERE,
+            unite_cout=Article.UniteCout.PIECE, cout_unitaire=Decimal("12.5"), stock_mini=10, gere_en_stock=True,
+        )
+        self.piece = Article.objects.create(reference="PIECE-RECAP", libelle="Pièce recap", nature=Article.Nature.FABRIQUE)
+        Nomenclature.objects.create(article_parent=self.piece, article_composant=self.tole, quantite=2)
+
+    def url(self, article):
+        return f"/admin/technique/article/{article.pk}/change/"
+
+    def test_article_achete(self):
+        from achats.models import ArticleFournisseur, TarifAchatArticle
+        from commercial.models import Tiers
+        from stock.models import AlerteStock, Emplacement, Lot
+
+        fournisseur = Tiers.objects.create(code="FOUR-RECAP", raison_sociale="Aciers Martin", type_tiers=Tiers.TypeTiers.FOURNISSEUR)
+        lien = ArticleFournisseur.objects.create(article=self.tole, fournisseur=fournisseur)
+        TarifAchatArticle.objects.create(article_fournisseur=lien, prix_unitaire=Decimal("11.2"), date_debut=datetime.date(2020, 1, 1))
+        Lot.objects.create(article=self.tole, emplacement=Emplacement.objects.create(code="R1"), quantite=4)
+        AlerteStock.objects.create(article=self.tole)
+        page = self.client.get(self.url(self.tole))
+        for attendu in ("fiche-saisie", "fiche-recap", "Article acheté", "Coût retenu : 12,5000 €", "Aciers Martin : 11,2000 €",
+                        "En stock : 4", "Seuil d&#x27;alerte : 10", "Alerte de réapprovisionnement active",
+                        "PIECE-RECAP", "× 2", "0 ligne(s) de devis", "0 ligne(s) de commande"):
+            self.assertContains(page, attendu)
+        self.assertContains(page, "/admin/technique/article/PIECE-RECAP/change/")
+
+    def test_article_fabrique(self):
+        page = self.client.get(self.url(self.piece))
+        for attendu in ("1 composant(s) en nomenclature", "0 étape(s) de gamme", "À compléter avant de pouvoir chiffrer",
+                        "coût recalculé à chaque devis", "Article non géré en stock", "Aucune nomenclature",
+                        "0 ordre(s) de fabrication"):
+            self.assertContains(page, attendu)
+
+    @override_settings(STOCK_ACTIF=False)
+    def test_sans_gestion_de_stock_pas_de_bloc_stock(self):
+        page = self.client.get(self.url(self.tole))
+        self.assertNotContains(page, "En stock :")
+        self.assertNotContains(page, "Seuil d")
+        self.assertContains(page, "fiche-recap")
+
+    def test_formulaire_d_ajout_et_enregistrement(self):
+        self.assertContains(self.client.get("/admin/technique/article/add/"), "fiche-recap")
+        page = self.client.get(self.url(self.tole))
+        donnees = {
+            "reference": "TOLE-RECAP", "libelle": "Tôle modifiée", "nature": "matiere_premiere", "unite_cout": "piece",
+            "cout_unitaire": "12.5", "gere_en_stock": "on", "stock_mini": "10",
+            "composants-TOTAL_FORMS": "0", "composants-INITIAL_FORMS": "0",
+            "gamme_etapes-TOTAL_FORMS": "0", "gamme_etapes-INITIAL_FORMS": "0",
+            "fournisseurs-TOTAL_FORMS": "0", "fournisseurs-INITIAL_FORMS": "0",
+            "compte_vente_override-TOTAL_FORMS": "0", "compte_vente_override-INITIAL_FORMS": "0",
+            "compte_achat_override-TOTAL_FORMS": "0", "compte_achat_override-INITIAL_FORMS": "0",
+        }
+        reponse = self.client.post(self.url(self.tole), donnees)
+        self.assertEqual(reponse.status_code, 302)
+        self.tole.refresh_from_db()
+        self.assertEqual(self.tole.libelle, "Tôle modifiée")
+
+
+class RenommerArticleTests(TestCase):
+    """Renommer un article change sa clé : tout ce qui s'y rattache (et l'historique) suit ; la référence n'est plus modifiable dans le formulaire."""
+
+    def setUp(self):
+        import datetime
+
+        from django.contrib.auth import get_user_model
+
+        from chiffrage.models import Devis, DevisLigne
+        from commercial.models import Tiers
+
+        self.user = get_user_model().objects.create_superuser("renom", "r@example.com", "pass-mot-de-passe-41")
+        self.client.force_login(self.user)
+        self.matiere = Matiere.objects.create(nom="S235-R", densite=7.85)
+        self.tole = Article.objects.create(reference="TOLE-A", libelle="Tôle", nature=Article.Nature.MATIERE_PREMIERE, matiere=self.matiere, epaisseur=3, unite_cout="poids", cout_unitaire=1)
+        self.parent = Article.objects.create(reference="PIECE-R", nature=Article.Nature.FABRIQUE)
+        Nomenclature.objects.create(article_parent=self.parent, article_composant=self.tole, longueur_mm=100, largeur_mm=50, quantite=1)
+        tiers = Tiers.objects.create(code="CLI-R", raison_sociale="Client", type_tiers=Tiers.TypeTiers.CLIENT)
+        devis = Devis.objects.create(numero="DEV-R", client=tiers, date_creation=datetime.date(2026, 1, 1))
+        self.ligne = DevisLigne.objects.create(devis=devis, article=self.tole, quantite=2)
+
+    def test_les_liens_et_l_historique_suivent(self):
+        from chiffrage.models import DevisLigne
+
+        nouveau = renommer_article(self.tole, "TOLE-B")
+        self.assertEqual((nouveau.pk, nouveau.libelle, nouveau.epaisseur, nouveau.cout_unitaire), ("TOLE-B", "Tôle", 3, 1))
+        self.assertFalse(Article.objects.filter(pk="TOLE-A").exists())
+        self.assertEqual(Nomenclature.objects.get(article_parent=self.parent).article_composant_id, "TOLE-B")
+        self.assertEqual(DevisLigne.objects.get(pk=self.ligne.pk).article_id, "TOLE-B")
+        self.assertFalse(DevisLigne.history.filter(article_id="TOLE-A").exists())
+        self.assertTrue(DevisLigne.history.filter(article_id="TOLE-B").exists())
+
+    def test_refus_reference_vide_identique_ou_existante(self):
+        for valeur, message in (("  ", "Indiquez"), ("TOLE-A", "identique"), ("PIECE-R", "existe déjà"), ("X" * 150, "caractères")):
+            with self.assertRaisesMessage(DuplicationError, message):
+                renommer_article(self.tole, valeur)
+        self.assertTrue(Article.objects.filter(pk="TOLE-A").exists())
+
+    def test_vue_et_formulaire(self):
+        page = self.client.get("/admin/technique/article/TOLE-A/change/")
+        self.assertContains(page, "Renommer")
+        self.assertNotContains(page, 'name="reference"')  # référence en lecture seule : plus de second article par erreur
+        r = self.client.post("/admin/technique/article/TOLE-A/renommer/", {"nouvelle_reference": "TOLE-C"})
+        self.assertRedirects(r, "/admin/technique/article/TOLE-C/change/", fetch_redirect_response=False)
+        r = self.client.post("/admin/technique/article/TOLE-C/renommer/", {"nouvelle_reference": "PIECE-R"}, follow=True)
+        self.assertContains(r, "existe déjà")
+        self.assertTrue(Article.objects.filter(pk="TOLE-C").exists())
+
+
+class CatalogueProfilesTests(TestCase):
+    """Catalogue de profilés d'un petit atelier : masses de référence (acier), alu et inox par la densité, cotes obligatoires, dessins."""
+
+    def section(self, designation):
+        from .models import ProfileSection
+
+        return ProfileSection.objects.get(designation=designation)
+
+    def test_masses_de_reference(self):
+        import math
+
+        self.assertAlmostEqual(self.section("Tube 40×40×3").masse_lineique, 3.30, places=2)  # catalogue ArcelorMittal 2020 (EN 10219, formé à froid)
+        self.assertAlmostEqual(self.section("Tube 100×100×5").masse_lineique, 14.41, places=2)
+        self.assertAlmostEqual(self.section("Plat 40×5").masse_lineique, 40 * 5 * 7.85 / 1000, places=3)
+        self.assertAlmostEqual(self.section("Rond Ø20").masse_lineique, math.pi * 100 * 7.85 / 1000, places=2)  # catalogue : 2,47
+        self.assertAlmostEqual(self.section("Carré 20").masse_lineique, 400 * 7.85 / 1000, places=2)  # catalogue : 3,14
+        self.assertEqual(self.section("IPE 200").masse_lineique, 22.4)
+        self.assertEqual(self.section("HEB 200").masse_lineique, 61.3)
+        self.assertAlmostEqual(self.section("L 100×50×6").masse_lineique, 6 * 144 * 7.85 / 1000, places=3)
+
+    def test_toutes_les_familles_sont_presentes_et_non_verifiees(self):
+        from .models import ProfileSection
+
+        presentes = set(ProfileSection.objects.values_list("famille", flat=True))
+        self.assertEqual(presentes, set(ProfileSection.Famille.values))
+        for section in ProfileSection.objects.all():
+            section.full_clean()  # chaque ligne livrée a toutes ses cotes
+
+    def test_catalogue_arcelor_verifie_avec_sa_source(self):
+        from decoupe.profiles_catalogue_arcelor import LIGNES
+
+        s = self.section("Tube 40×40×3")
+        self.assertTrue(s.verifie)
+        self.assertIn("ArcelorMittal", s.source)
+        self.assertGreater(len(LIGNES), 600)
+        for famille, designation, cotes, masse, page in LIGNES:
+            section = self.section(designation)
+            self.assertEqual((section.famille, section.masse_lineique), (famille, masse), designation)
+
+    def test_formule_des_tubes_retrouve_le_catalogue_a_2_pour_cent(self):
+        from decoupe.profiles_catalogue_arcelor import LIGNES
+        from decoupe.profiles_data import aire_tube_rectangulaire, masse_aire
+
+        for famille, designation, cotes, masse, page in LIGNES:
+            if famille in ("tube_carre", "tube_rectangulaire"):
+                h, b = cotes.get("h", cotes.get("c")), cotes.get("b", cotes.get("c"))
+                self.assertAlmostEqual(masse_aire(aire_tube_rectangulaire(h, b, cotes["e"])) / masse, 1, delta=0.02, msg=designation)
+
+    def test_masse_alu_et_inox_par_la_densite(self):
+        s = self.section("Plat 40×5")
+        self.assertAlmostEqual(s.masse_pour(2.70), 1.57 * 2.70 / 7.85, places=3)
+        self.assertAlmostEqual(s.masse_pour(7.90), 1.57 * 7.90 / 7.85, places=3)
+
+    def test_prix_au_metre_suit_la_matiere_de_l_article(self):
+        s = self.section("Plat 40×5")
+        alu = Matiere.objects.create(nom="5754-CAT", densite=2.66)
+        acier = Matiere.objects.create(nom="S235-CAT", densite=7.85)
+        s.article = Article.objects.create(reference="PLAT-ALU", nature=Article.Nature.MATIERE_PREMIERE, matiere=alu, unite_cout="poids", cout_unitaire=4)
+        self.assertAlmostEqual(float(s.prix_au_metre()), 4 * 1.57 * 2.66 / 7.85, places=3)
+        s.article = Article.objects.create(reference="PLAT-ACIER", nature=Article.Nature.MATIERE_PREMIERE, matiere=acier, unite_cout="poids", cout_unitaire=1)
+        self.assertAlmostEqual(float(s.prix_au_metre()), 1.57, places=3)
+
+    def test_cotes_obligatoires(self):
+        from django.core.exceptions import ValidationError
+
+        from .models import ProfileSection
+
+        with self.assertRaises(ValidationError) as cm:
+            ProfileSection(famille="plat", designation="Plat X", dimensions={"l": 40}, masse_lineique=1).full_clean()
+        self.assertIn("e", str(cm.exception))
+
+    def test_dessin_de_chaque_famille(self):
+        from decoupe.services.profiles import svg_section
+
+        from .models import ProfileSection
+
+        for famille in ProfileSection.Famille.values:
+            section = ProfileSection.objects.filter(famille=famille).first()
+            svg = svg_section(section)
+            self.assertIn("<svg", svg, famille)
+            self.assertGreater(section.hauteur_mm, 0, famille)
+
+    def test_migration_de_donnees_ne_touche_pas_au_verifie_ni_au_saisi(self):
+        from importlib import import_module
+
+        from django.apps import apps
+
+        from .models import ProfileSection
+
+        etendre = import_module("technique.migrations.0022_sections_catalogue_etendu").etendre
+        appliquer = import_module("technique.migrations.0023_catalogue_arcelor").appliquer
+        s = self.section("Tube 40×40×3")
+        ProfileSection.objects.filter(pk=s.pk).update(verifie=True, masse_lineique=9.99)
+        nb = ProfileSection.objects.count()
+        etendre(apps, None)
+        appliquer(apps, None)
+        self.assertEqual(ProfileSection.objects.count(), nb)  # idempotent
+        self.assertEqual(ProfileSection.objects.get(pk=s.pk).masse_lineique, 9.99)  # vérifié : jamais recalculé

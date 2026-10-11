@@ -803,3 +803,46 @@ class DelaiProposeTests(TestCase):
     def test_str_renvoie_le_libelle(self):
         delai = DelaiPropose.objects.create(libelle="4 à 6 semaines")
         self.assertEqual(str(delai), "4 à 6 semaines")
+
+
+class AutocompletionParClientTests(TestCase):
+    """Fiches Devis / Commande : adresses et contacts proposés = ceux du client choisi."""
+
+    URL = "/admin/autocomplete/"
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        self.admin = get_user_model().objects.create_superuser("ac-admin", "a@example.com", "pass-mot-de-passe-1")
+        self.client.force_login(self.admin)
+        self.a = Tiers.objects.create(code="CLI-AC-A", raison_sociale="Client A", type_tiers=Tiers.TypeTiers.CLIENT)
+        self.b = Tiers.objects.create(code="CLI-AC-B", raison_sociale="Client B", type_tiers=Tiers.TypeTiers.CLIENT)
+        mk = lambda t, ville: Adresse.objects.create(tiers=t, est_facturation=True, est_livraison=True, adresse="1 rue", code_postal="75000", ville=ville)
+        self.adr_a, self.adr_b = mk(self.a, "Lyon"), mk(self.b, "Nantes")
+        self.contact_a = Contact.objects.create(tiers=self.a, nom="Durand", prenom="Marie")
+        self.contact_b = Contact.objects.create(tiers=self.b, nom="Martin", prenom="Paul")
+
+    def _ids(self, modele, champ, **extra):
+        params = {"term": "", "app_label": "chiffrage", "model_name": modele, "field_name": champ, **extra}
+        reponse = self.client.get(self.URL, params)
+        self.assertEqual(reponse.status_code, 200, reponse.content)
+        return {r["id"] for r in reponse.json()["results"]}
+
+    def test_adresses_du_client_seulement_sur_devis_et_commande(self):
+        for modele in ("devis", "commande"):
+            for champ in ("adresse_facturation", "adresse_livraison"):
+                self.assertEqual(self._ids(modele, champ, tiers="CLI-AC-A"), {str(self.adr_a.pk)}, (modele, champ))
+                self.assertEqual(self._ids(modele, champ, tiers="CLI-AC-B"), {str(self.adr_b.pk)}, (modele, champ))
+
+    def test_contacts_du_client_seulement(self):
+        self.assertEqual(self._ids("devis", "contact", tiers="CLI-AC-A"), {str(self.contact_a.pk)})
+
+    def test_sans_client_choisi_rien_n_est_filtre(self):
+        self.assertEqual(self._ids("devis", "adresse_livraison"), {str(self.adr_a.pk), str(self.adr_b.pk)})
+
+    def test_la_recherche_de_la_liste_d_administration_n_est_pas_filtree(self):
+        reponse = self.client.get("/admin/commercial/adresse/", {"q": "Nantes", "tiers": "CLI-AC-A"})
+        self.assertContains(reponse, "Nantes")
+
+    def test_le_script_est_charge_sur_les_pages_d_administration(self):
+        self.assertContains(self.client.get("/admin/chiffrage/devis/add/"), "comptes/filtre_client")

@@ -7,9 +7,14 @@ from django.http import JsonResponse
 from django.urls import path
 from django.views.decorators.http import require_http_methods
 from unfold.admin import ModelAdmin, TabularInline
+from unfold.decorators import action as unfold_action
+from unfold.widgets import UnfoldAdminSelectWidget
 
 from codification.mixins import CodificationInitialeMixin
+from comptes.lots import ChampLot
+from comptes.lots_admin import ModificationParLotsMixin
 from codification.models import RegleCodification
+from comptes.exports import ExportCsvMixin
 from comptabilite.models import CompteComptable, TiersCompteComptable
 
 from .models import (
@@ -70,7 +75,7 @@ class ContactInlineForm(forms.ModelForm):
     adresse_associee_ref = forms.CharField(
         label="Adresse associée",
         required=False,
-        widget=forms.Select(choices=[("", "---------")]),
+        widget=UnfoldAdminSelectWidget(choices=[("", "---------")]),
         help_text="Uniquement les adresses déjà saisies dans le tableau ci-dessus.",
     )
 
@@ -135,8 +140,36 @@ def apercu_compte_comptable_view(request):
 
 
 @admin.register(Tiers)
-class TiersAdmin(CodificationInitialeMixin, ModelAdmin):
+class TiersAdmin(ModificationParLotsMixin, ExportCsvMixin, CodificationInitialeMixin, ModelAdmin):
     codification_entite = RegleCodification.Entite.TIERS
+    actions = ["action_modifier_par_lots"]
+    actions_list = ["action_importer"]
+
+    @unfold_action(description="Importer des tiers (tableau)", url_path="importer", icon="upload_file")
+    def action_importer(self, request):
+        """Création en masse de tiers depuis un tableau collé ou un fichier CSV."""
+        from django.core.exceptions import PermissionDenied
+        from django.template.response import TemplateResponse
+
+        from . import import_tiers
+
+        if not self.has_add_permission(request):
+            raise PermissionDenied
+        rapport, texte = None, request.POST.get("tableau", "")
+        if request.method == "POST":
+            fichier = request.FILES.get("fichier")
+            if fichier is not None:
+                texte = fichier.read().decode("utf-8-sig", errors="replace")
+            rapport = import_tiers.importer(texte, request.user)
+        return TemplateResponse(request, "admin/commercial/importer_tiers.html", {
+            **self.admin_site.each_context(request), "title": "Importer des tiers", "opts": self.model._meta, "rapport": rapport, "tableau": texte,
+        })
+
+    champs_lot = [
+        ChampLot("conditions_paiement", "Conditions de paiement", genre="fk", queryset=lambda: ConditionPaiement.objects.order_by("nombre_jours"), vide_permis=True),
+        ChampLot("devise", "Devise", genre="fk", queryset=lambda: Devise.objects.order_by("code"), vide_permis=True),
+        ChampLot("regime_fiscal", "Régime fiscal", genre="choix", choix=lambda: Tiers.RegimeFiscal.choices),
+    ]
 
     list_display = ["code", "raison_sociale", "type_tiers", "regime_fiscal", "devise", "siret"]
     list_filter = ["type_tiers", "regime_fiscal"]
@@ -219,6 +252,16 @@ class TiersAdmin(CodificationInitialeMixin, ModelAdmin):
         return None
 
 
+def _du_client(request, queryset):
+    """Listes déroulantes d'autocomplétion (fiches Devis et Commande) : ne garder que ce qui appartient au
+    client choisi (paramètre `tiers`, ajouté par comptes/static/comptes/filtre_client.js). Sans client choisi,
+    ou hors autocomplétion (recherche de la liste d'administration), rien n'est filtré."""
+    code = request.GET.get("tiers")
+    if code and request.path.rstrip("/").endswith("/autocomplete"):
+        return queryset.filter(tiers_id=code)
+    return queryset
+
+
 @admin.register(Adresse)
 class AdresseAdmin(ModelAdmin):
     list_display = ["tiers", "types_affiches", "libelle", "ville", "pays", "est_principale"]
@@ -226,12 +269,16 @@ class AdresseAdmin(ModelAdmin):
     search_fields = ["tiers__code", "tiers__raison_sociale", "ville", "libelle"]
     autocomplete_fields = ["tiers", "pays"]
 
+    def get_search_results(self, request, queryset, search_term):
+        queryset, distinct = super().get_search_results(request, queryset, search_term)
+        return _du_client(request, queryset), distinct
+
     class Media:
         js = ["commercial/adresse_autocomplete.js"]
 
 
 @admin.register(Contact)
-class ContactAdmin(ModelAdmin):
+class ContactAdmin(ExportCsvMixin, ModelAdmin):
     list_display = [
         "nom",
         "prenom",
@@ -246,6 +293,10 @@ class ContactAdmin(ModelAdmin):
     search_fields = ["nom", "prenom", "tiers__code", "tiers__raison_sociale"]
     autocomplete_fields = ["tiers"]
     inlines = [ContactTelephoneInline]
+
+    def get_search_results(self, request, queryset, search_term):
+        queryset, distinct = super().get_search_results(request, queryset, search_term)
+        return _du_client(request, queryset), distinct
 
     @admin.display(description="Téléphones")
     def telephones_display(self, obj):

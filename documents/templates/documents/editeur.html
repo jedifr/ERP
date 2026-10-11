@@ -1,0 +1,54 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+{% block extrastyle %}{{ block.super }}
+<link rel="stylesheet" href="{% static 'documents/vendor/grapes.min.css' %}">
+<link rel="stylesheet" href="{% static 'documents/editeur.css' %}">
+{% endblock %}
+{% block content %}
+<div class="doc-editeur">
+  <div class="doc-editeur-barre">
+    <button type="button" id="btn-enregistrer" class="doc-btn doc-btn-primaire">Enregistrer</button>
+    <label class="doc-actif" title="Décoché : le PDF d'origine est utilisé pour ce document.">
+      <input type="checkbox" id="chk-actif"> Utiliser ce modèle pour les PDF
+    </label>
+    <span class="doc-sep"></span>
+    <select id="sel-objet" title="Document réel utilisé pour l'aperçu"><option value="">Aperçu : données d'exemple</option></select>
+    <button type="button" id="btn-apercu" class="doc-btn">Aperçu PDF</button>
+    <span class="doc-sep"></span>
+    <button type="button" id="btn-annuler" class="doc-btn" title="Annuler (Ctrl+Z)">↶</button>
+    <button type="button" id="btn-refaire" class="doc-btn" title="Rétablir (Ctrl+Y)">↷</button>
+    <button type="button" id="btn-defaut" class="doc-btn">Revenir au modèle par défaut</button>
+    <span class="doc-sep"></span>
+    <a class="doc-lien" href="{{ historique_url }}">Historique</a>
+    <a class="doc-lien" href="{{ liste_url }}">Tous les modèles</a>
+    <span id="doc-etat" class="doc-etat">Version {{ modele.version }}{% if modele.actif %} — actif{% else %} — inactif (PDF d'origine){% endif %}</span>
+  </div>
+  <div class="doc-editeur-corps">
+    <aside class="doc-colonne doc-gauche">
+      <div class="doc-onglets"><button type="button" data-onglet="blocs" class="actif">Blocs et variables</button><button type="button" data-onglet="calques">Calques</button></div>
+      <div id="panneau-blocs" class="doc-panneau"></div>
+      <div id="panneau-calques" class="doc-panneau" hidden></div>
+    </aside>
+    <div class="doc-centre"><div id="gjs"></div></div>
+    <aside class="doc-colonne doc-droite">
+      <div class="doc-onglets"><button type="button" data-onglet-d="style" class="actif">Style</button><button type="button" data-onglet-d="proprietes">Propriétés</button></div>
+      <div id="panneau-style" class="doc-panneau"><div id="selecteurs"></div><div id="styles"></div></div>
+      <div id="panneau-proprietes" class="doc-panneau" hidden><div id="proprietes"></div>
+        <p class="doc-aide">
+          <b>Afficher si</b> : n'affiche l'élément que si la variable n'est pas vide (ex. <code>delai</code>) ;
+          <code>!delai</code> pour l'inverse.<br>
+          <b>Répéter sur</b> : répète l'élément (ex. une ligne de tableau) pour chaque élément d'une liste
+          (<code>lignes</code>) ; <b>Nom de l'élément</b> est le préfixe des variables à l'intérieur (<code>ligne</code>).
+        </p></div>
+    </aside>
+  </div>
+</div>
+<div id="doc-apercu" class="doc-apercu" hidden>
+  <div class="doc-apercu-barre"><b>Aperçu PDF</b><a id="doc-apercu-lien" target="_blank" class="doc-lien">Ouvrir dans un onglet</a><button type="button" id="btn-fermer-apercu" class="doc-btn">Fermer</button></div>
+  <iframe id="doc-apercu-cadre" title="Aperçu PDF"></iframe>
+</div>
+<div id="doc-message" class="doc-message" hidden></div>
+{{ configuration|json_script:"doc-config" }}
+<script src="{% static 'documents/vendor/grapes.min.js' %}"></script>
+<script src="{% static 'documents/editeur.js' %}"></script>
+{% endblock %}

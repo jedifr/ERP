@@ -1,5 +1,6 @@
-(function () {
+function demarrerConstructeur() {
     "use strict";
+    if (!document.getElementById("lignes-constructeur")) return;
 
     const API_ARTICLES = "/api/v1/articles/";
     const API_MATIERES = "/api/v1/matieres/";
@@ -10,6 +11,7 @@
     const devisBuilderData = dataEl ? JSON.parse(dataEl.textContent) : {};
     const DEVIS_NUMERO = devisBuilderData.numero || null;
     const DEVIS_DATE_CREATION = devisBuilderData.date_creation || null;
+    const URL_AJOUT = devisBuilderData.url;
 
     const matiereCache = {};
 
@@ -242,44 +244,6 @@
         document.getElementById("add-nomenclature-row").addEventListener("click", addNomenclatureRow);
     }
 
-    // ---- Gamme rows ----
-    const gammeRowsEl = document.getElementById("gamme-rows");
-    const templateGamme = document.getElementById("template-gamme-row");
-
-    function addGammeRow() {
-        const fragment = templateGamme.content.cloneNode(true);
-        const row = fragment.querySelector(".gamme-row");
-        gammeRowsEl.appendChild(fragment);
-
-        const ordreInput = row.querySelector(".input-ordre");
-        ordreInput.value = gammeRowsEl.children.length;
-
-        // Par défaut la date de début de l'étape, c'est la date de création
-        // du DEVIS — pas la date du jour : la validité d'une étape de gamme
-        // est vérifiée par rapport à devis.date_creation (gamme_active(),
-        // chiffrage/moteur.py), donc une étape datée d'aujourd'hui sur un
-        // devis créé à une date antérieure serait silencieusement exclue du
-        // calcul (aucune erreur, juste un prix d'opérations à 0).
-        const dateDebut = row.querySelector(".input-date-debut");
-        dateDebut.value = DEVIS_DATE_CREATION || new Date().toISOString().slice(0, 10);
-
-        const selectPoste = row.querySelector(".select-poste");
-        const champsHoraire = row.querySelector(".champs-horaire");
-        const champsForfaitaire = row.querySelector(".champs-forfaitaire");
-        selectPoste.addEventListener("change", () => {
-            const option = selectPoste.selectedOptions[0];
-            const mode = option ? option.dataset.mode : "";
-            champsHoraire.classList.toggle("hidden", mode !== "horaire");
-            champsForfaitaire.classList.toggle("hidden", mode !== "forfaitaire");
-        });
-
-        row.querySelector(".remove-row").addEventListener("click", () => row.remove());
-    }
-
-    if (document.getElementById("add-gamme-row")) {
-        document.getElementById("add-gamme-row").addEventListener("click", addGammeRow);
-    }
-
     // ---- Soumission ----
     function showMessage(text, isError) {
         const el = document.getElementById("form-message");
@@ -302,81 +266,107 @@
     }
 
     function collectGamme() {
-        const etapes = [];
-        gammeRowsEl.querySelectorAll(".gamme-row").forEach((row) => {
-            etapes.push({
-                poste: row.querySelector(".select-poste").value,
-                ordre: parseInt(row.querySelector(".input-ordre").value, 10) || null,
-                temps_fixe: parseFloat(row.querySelector(".input-temps-fixe").value) || null,
-                temps_variable: parseFloat(row.querySelector(".input-temps-variable").value) || null,
-                cout_forfaitaire: parseFloat(row.querySelector(".input-cout-forfaitaire").value) || null,
-                date_debut: row.querySelector(".input-date-debut").value || null,
-            });
-        });
-        return etapes;
+        // Les étapes sont saisies avec l'éditeur d'opérations partagé (comptes/gamme_editeur.js), en mode brouillon : la date de début
+        // est celle du DEVIS (une étape datée d'aujourd'hui sur un devis plus ancien serait exclue du calcul).
+        const editeur = document.getElementById("gamme-editeur");
+        return editeur && editeur.etapesBrouillon ? editeur.etapesBrouillon() : [];
+    }
+
+    // ---- Ouverture / fermeture de l'assistant ----
+    const panneau = document.getElementById("panneau-constructeur");
+    const ouvrir = document.getElementById("ouvrir-constructeur");
+    let formulaireModifie = false;
+    document.addEventListener("input", (e) => {
+        if (e.target.closest && !e.target.closest("#lignes-constructeur") && !e.target.closest("#dp-panneau") && e.target.closest("form")) formulaireModifie = true;
+    });
+    if (ouvrir && panneau) {
+        ouvrir.addEventListener("click", () => { panneau.hidden = !panneau.hidden; ouvrir.classList.toggle("lc-ouvert", !panneau.hidden); });
+        const fermer = document.getElementById("fermer-constructeur");
+        if (fermer) fermer.addEventListener("click", () => { panneau.hidden = true; ouvrir.classList.remove("lc-ouvert"); });
+    }
+
+    function construireCharge() {
+        const quantite = parseFloat(document.getElementById("ligne-quantite").value);
+        if (!quantite) {
+            showMessage("La quantité de la ligne de devis est requise.", true);
+            return null;
+        }
+        const nouveau = document.querySelector("input[name=mode-article]:checked").value === "nouveau";
+        const payload = { quantite: quantite };
+        if (nouveau) {
+            const reference = document.getElementById("na-reference").value.trim();
+            if (!reference) {
+                showMessage("La référence du nouvel article est requise.", true);
+                return null;
+            }
+            payload.nouvel_article = {
+                reference: reference,
+                libelle: document.getElementById("na-libelle").value.trim(),
+                taux_marge_defaut: parseFloat(document.getElementById("na-taux-marge").value) || null,
+                composants: collectNomenclature(),
+                etapes: collectGamme(),
+            };
+        } else {
+            const reference = document.getElementById("article-existant-reference").value;
+            if (!reference) {
+                showMessage("Sélectionnez un article existant dans la liste.", true);
+                return null;
+            }
+            payload.article_existant = reference;
+        }
+        return payload;
+    }
+
+    function envoyer(apercu) {
+        const payload = construireCharge();
+        if (!payload) return;
+        if (apercu) payload.apercu = true;
+        else if (formulaireModifie && !window.confirm("Le devis a des modifications non enregistrées : l'ajout recharge la page et elles seront perdues. Continuer ?")) return;
+        const zoneApercu = document.getElementById("lc-apercu");
+        fetch(URL_AJOUT, {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json", "X-CSRFToken": csrfToken },
+            body: JSON.stringify(payload),
+        })
+            .then((response) => response.json().then((data) => ({ status: response.status, data })))
+            .then(({ status, data }) => {
+                if (status >= 400) {
+                    showMessage(data.detail || "Erreur lors de l'ajout de la ligne.", true);
+                    return;
+                }
+                if (apercu) {
+                    const e = (x) => (x === null || x === undefined ? "—" : Number(x).toFixed(2).replace(".", ",") + " €");
+                    zoneApercu.hidden = false;
+                    zoneApercu.innerHTML = "";
+                    [["Matière", data.prix_vente_matiere], ["Opérations", data.prix_vente_operations], ["Prix unitaire HT", data.prix_vente_unitaire], ["Total HT", data.prix_vente_total], ["Total TTC", data.prix_vente_ttc]].forEach(([titre, valeur]) => {
+                        const bloc = document.createElement("div");
+                        const petit = document.createElement("small");
+                        petit.textContent = titre;
+                        const gras = document.createElement("b");
+                        gras.textContent = e(valeur);
+                        bloc.append(petit, gras);
+                        zoneApercu.appendChild(bloc);
+                    });
+                    showMessage("Aperçu : rien n'a été créé.", false);
+                    return;
+                }
+                showMessage(`Ligne ajoutée (${data.article} × ${data.quantite}). Rechargement...`, false);
+                try { window.sessionStorage.setItem("devis-onglet-apres-rechargement", "lignes"); } catch (e) { /* ignoré */ }
+                setTimeout(() => { window.location.hash = "#onglet=lignes"; window.location.reload(); }, 800);
+            })
+            .catch(() => showMessage("Erreur réseau lors de l'envoi.", true));
     }
 
     const submitBtn = document.getElementById("submit-ligne");
-    if (submitBtn) {
-        submitBtn.addEventListener("click", () => {
-            const quantite = parseFloat(document.getElementById("ligne-quantite").value);
-            if (!quantite) {
-                showMessage("La quantité de la ligne de devis est requise.", true);
-                return;
-            }
-
-            const nouveau = document.querySelector("input[name=mode-article]:checked").value === "nouveau";
-            const payload = { quantite: quantite };
-
-            if (nouveau) {
-                const reference = document.getElementById("na-reference").value.trim();
-                if (!reference) {
-                    showMessage("La référence du nouvel article est requise.", true);
-                    return;
-                }
-                payload.nouvel_article = {
-                    reference: reference,
-                    libelle: document.getElementById("na-libelle").value.trim(),
-                    taux_marge_defaut: parseFloat(document.getElementById("na-taux-marge").value) || null,
-                    composants: collectNomenclature(),
-                    etapes: collectGamme(),
-                };
-            } else {
-                const reference = document.getElementById("article-existant-reference").value;
-                if (!reference) {
-                    showMessage("Sélectionnez un article existant dans la liste.", true);
-                    return;
-                }
-                payload.article_existant = reference;
-            }
-
-            fetch(window.location.pathname, {
-                method: "POST",
-                credentials: "same-origin",
-                headers: {
-                    "Content-Type": "application/json",
-                    "X-CSRFToken": csrfToken,
-                },
-                body: JSON.stringify(payload),
-            })
-                .then((response) => response.json().then((data) => ({ status: response.status, data })))
-                .then(({ status, data }) => {
-                    if (status >= 400) {
-                        showMessage(data.detail || "Erreur lors de l'ajout de la ligne.", true);
-                        return;
-                    }
-                    showMessage(`Ligne ajoutée (${data.article} × ${data.quantite}). Rechargement...`, false);
-                    setTimeout(() => window.location.reload(), 800);
-                })
-                .catch(() => showMessage("Erreur réseau lors de l'envoi.", true));
-        });
-    }
+    if (submitBtn) submitBtn.addEventListener("click", () => envoyer(false));
+    const apercuBtn = document.getElementById("apercu-ligne");
+    if (apercuBtn) apercuBtn.addEventListener("click", () => envoyer(true));
 
     // Une ligne de chaque par défaut pour démarrer
     if (nomenclatureRowsEl) {
         addNomenclatureRow();
     }
-    if (gammeRowsEl) {
-        addGammeRow();
-    }
-})();
+}
+if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", demarrerConstructeur);
+else demarrerConstructeur();

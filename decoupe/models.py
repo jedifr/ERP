@@ -1,8 +1,150 @@
+from decimal import Decimal
+
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 
-from technique.models import Article
+from technique.models import Article, FamilleMatiere, Matiere, ProfileSection  # noqa: F401  (ProfileSection vit dans technique ; ré-exporté ici)
+from comptes.champs import ChampDecimal
+from comptes.montants import MONTANT, D, arrondir
+
+
+# Valeurs en Decimal « à une décimale » : le formulaire compare le texte ("3.0") de la valeur enregistrée à celui du choix.
+QUALITES_COUPE = [
+    (Decimal("1.5"), "1,5 — Extra brut"), (Decimal("2.0"), "2 — Brut"), (Decimal("3.0"), "3 — Moyen+"),
+    (Decimal("4.0"), "4 — Fin"), (Decimal("5.0"), "5 — Extra fin"),
+]
+
+
+class ProcedeCoupe(models.TextChoices):
+    JET_EAU = "jet_eau", "Jet d'eau (eau + abrasif)"
+    LASER = "laser", "Laser fibre"
+
+
+class GazCoupe(models.TextChoices):
+    OXYGENE = "O2", "Oxygène (O₂)"
+    AZOTE = "N2", "Azote (N₂)"
+    AIR = "Air", "Air comprimé"
+
+
+class FormatTole(models.Model):
+    """Format de tôle standard (largeur × longueur) proposé à la simulation d'imbrication et au chiffrage de la matière."""
+
+    libelle = models.CharField("libellé", max_length=60, blank=True, help_text="Ex. « 3000 × 1500 » (laissé vide : déduit des dimensions)")
+    largeur_mm = models.FloatField("largeur (mm)")
+    longueur_mm = models.FloatField("longueur (mm)")
+    actif = models.BooleanField("proposé dans les simulations", default=True)
+
+    class Priorite(models.IntegerChoices):
+        USUEL = 1, "1 — en stock / usuel"
+        COMMANDE = 2, "2 — sur commande"
+        EXCEPTION = 3, "3 — exceptionnel"
+
+    priorite = models.PositiveSmallIntegerField(
+        "priorité d'utilisation", choices=Priorite.choices, default=Priorite.USUEL,
+        help_text="L'imbrication calcule d'abord les formats de priorité 1 ; elle n'essaie les suivants que si le taux de chutes entre pièces "
+                  "dépasse le seuil des réglages d'imbrication (ou sur demande : « Calculer tous les formats »).",
+    )
+    familles = models.ManyToManyField(
+        "technique.FamilleMatiere", verbose_name="familles de matière", blank=True, related_name="formats_tole",
+        help_text="Ce format n'existe que pour ces familles (et leurs nuances). Vide et sans nuance précisée : toutes les matières.",
+    )
+    matieres = models.ManyToManyField(
+        "technique.Matiere", verbose_name="nuances de matière", blank=True, related_name="formats_tole",
+        help_text="Ce format n'existe que pour ces nuances précises (en plus des familles ci-dessus).",
+    )
+
+    def convient_a(self, matiere):
+        """Vrai si le format existe pour cette matière : aucune restriction, ou la nuance / sa famille y figure."""
+        if not self.pk:
+            return True
+        familles = {f.pk for f in self.familles.all()}
+        nuances = {m.pk for m in self.matieres.all()}
+        if not familles and not nuances:
+            return True
+        return matiere.pk in nuances or (matiere.famille_id is not None and matiere.famille_id in familles)
+
+    class Meta:
+        verbose_name = "Format de tôle"
+        verbose_name_plural = "Formats de tôle"
+        ordering = ["-longueur_mm", "-largeur_mm"]
+        constraints = [models.UniqueConstraint(fields=["largeur_mm", "longueur_mm"], name="unique_format_tole")]
+
+    def save(self, *args, **kwargs):
+        if not self.libelle:
+            self.libelle = f"{self.longueur_mm:g} × {self.largeur_mm:g}"
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.libelle
+
+    def clean(self):
+        super().clean()
+        if self.largeur_mm is not None and self.longueur_mm is not None and (self.largeur_mm <= 0 or self.longueur_mm <= 0):
+            raise ValidationError("Les dimensions du format doivent être positives.")
+
+
+class ReglageImbrication(models.Model):
+    """Réglage unique de l'imbrication : seuil de chutes au-delà duquel les formats de priorité inférieure sont essayés."""
+
+    seuil_chutes_pct = models.FloatField(
+        "seuil de chutes entre pièces (%)", default=20,
+        help_text="Taux de chutes entre pièces = (surface consommée − surface des pièces) ÷ surface consommée ; la chute de bout de la dernière tôle, "
+                  "récupérée, n'y compte pas. Si le meilleur format d'un niveau de priorité dépasse ce taux, le niveau suivant est calculé aussi.",
+    )
+
+    class Meta:
+        verbose_name = "Réglage d'imbrication"
+        verbose_name_plural = "Réglage d'imbrication"
+
+    def __str__(self):
+        return "Réglage d'imbrication"
+
+    @classmethod
+    def charger(cls):
+        return cls.objects.get_or_create(pk=1)[0]
+
+
+class ProfilImportDecoupe(models.Model):
+    """Ensemble de règles réutilisables pour classer les calques d'un DXF/DWG au moment de
+    l'import (découpe / gravure / pliage / ignoré) — évite de reclasser les calques à la main
+    à chaque import quand les fichiers viennent toujours du même poste CAO."""
+
+    nom = models.CharField(max_length=100, unique=True)
+    description = models.TextField(blank=True)
+
+    class Meta:
+        verbose_name = "Profil d'import"
+        verbose_name_plural = "Profils d'import"
+        ordering = ["nom"]
+
+    def __str__(self):
+        return self.nom
+
+    def regles_par_calque(self):
+        """`{nom de calque en minuscules: rôle}`, prêt à passer à `extraire_geometrie()`."""
+        return {regle.calque.lower(): regle.role for regle in self.regles.all()}
+
+
+class RegleProfilImportDecoupe(models.Model):
+    class Role(models.TextChoices):
+        DECOUPE = "decoupe", "Découpe"
+        GRAVURE = "gravure", "Gravure / marquage"
+        PLIAGE = "pliage", "Pliage"
+        IGNORE = "ignore", "Ignoré"
+
+    profil = models.ForeignKey(ProfilImportDecoupe, on_delete=models.CASCADE, related_name="regles")
+    calque = models.CharField(max_length=100, help_text="Nom du calque DXF/DWG (comparaison insensible à la casse)")
+    role = models.CharField(max_length=10, choices=Role.choices)
+
+    class Meta:
+        verbose_name = "Règle de profil d'import"
+        verbose_name_plural = "Règles de profil d'import"
+        unique_together = [("profil", "calque")]
+        ordering = ["calque"]
+
+    def __str__(self):
+        return f"{self.calque} → {self.get_role_display()}"
 
 
 class PieceDecoupe(models.Model):
@@ -17,6 +159,11 @@ class PieceDecoupe(models.Model):
         OK = "ok", "Importée"
         ERREUR = "erreur", "Erreur d'import"
 
+    class PasRotation(models.IntegerChoices):
+        PAS_5 = 5, "5°"
+        PAS_45 = 45, "45°"
+        PAS_90 = 90, "90°"
+
     nom = models.CharField(max_length=200)
     article = models.ForeignKey(
         Article,
@@ -26,13 +173,104 @@ class PieceDecoupe(models.Model):
         related_name="pieces_decoupe",
         help_text="Article fabriqué correspondant, si déjà référencé au socle technique",
     )
+    matiere = models.ForeignKey(
+        Matiere,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="pieces_decoupe",
+    )
+    epaisseur = models.FloatField(null=True, blank=True, help_text="Épaisseur de tôle (mm)")
     fichier_source = models.FileField(upload_to="decoupe/sources/%Y/%m/")
     format_source = models.CharField(max_length=10, choices=FormatSource.choices, blank=True)
-    rotation_autorisee = models.BooleanField(
-        default=True,
-        help_text="À décocher si le sens de la matière (fil, grain) impose l'orientation de la pièce",
+    profil_import = models.ForeignKey(
+        ProfilImportDecoupe,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="pieces_decoupe",
+        help_text="Règles de classement des calques (découpe / gravure / pliage / ignoré) utilisées à l'import",
     )
+    regles_calques_manuelles = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Classement calque → rôle choisi à la main pour cette pièce (prioritaire sur le profil d'import)",
+    )
+    procede = models.CharField(
+        "procédé de coupe", max_length=10, choices=ProcedeCoupe.choices, default=ProcedeCoupe.JET_EAU,
+        help_text="Machine utilisée pour estimer le temps de découpe, l'écart entre pièces et la gamme. Au laser, une épaisseur absente de la base n'est pas réalisable.",
+    )
+    devis = models.ForeignKey(
+        "chiffrage.Devis", verbose_name="devis d'origine", on_delete=models.SET_NULL, null=True, blank=True, related_name="pieces_decoupe",
+        help_text="Devis dans lequel la pièce a été importée (panneau « Pièces à découper » du devis).",
+    )
+    quantite = models.PositiveIntegerField("quantité", default=1, help_text="Quantité à découper pour le devis d'origine.")
+    article_cree_automatiquement = models.BooleanField(
+        "article créé à l'import", default=False, help_text="L'article fabriqué a été créé par l'import du devis : il disparaît avec la pièce s'il n'est utilisé nulle part.",
+    )
+    gaz_coupe = models.CharField(
+        "gaz de coupe (laser)", max_length=4, choices=GazCoupe.choices, blank=True,
+        help_text="Laser uniquement. Vide : le gaz usuel de la famille de matière (oxygène pour l'acier, azote pour l'inox et l'alu…).",
+    )
+    qualite_coupe = models.DecimalField(
+        "qualité de coupe", max_digits=2, decimal_places=1, default=Decimal("3.0"), choices=QUALITES_COUPE,
+        help_text="Niveau de qualité du jet d'eau (1,5 extra brut → 5 extra fin) : plus c'est fin, plus la coupe est lente.",
+    )
+    # Matière : chiffrage par imbrication (voir services/matiere.py)
+    tole = models.ForeignKey(
+        Article, verbose_name="tôle", on_delete=models.SET_NULL, null=True, blank=True, related_name="pieces_decoupees_dans",
+        help_text="Article matière première (tôle) dans lequel la pièce est découpée : son prix sert au coût matière.",
+    )
+    format_tole = models.ForeignKey(
+        "FormatTole", verbose_name="format de tôle retenu", on_delete=models.SET_NULL, null=True, blank=True, related_name="pieces",
+        help_text="Format retenu après simulation d'imbrication.",
+    )
+    marge_bord_mm = models.FloatField("marge de bord (mm)", default=5, help_text="Bande non utilisable sur le pourtour de la tôle")
+    taux_chute_recuperable = models.DecimalField(
+        "chute récupérable (%)", max_digits=5, decimal_places=2, default=0,
+        help_text="Part des chutes réutilisée ailleurs : elle n'est pas facturée à la pièce (0 = toutes les chutes sont facturées).",
+    )
+    imbrication_forme = models.BooleanField(
+        "imbriquer selon la forme", default=True,
+        help_text="L'imbrication tient compte du contour réel des pièces (trous compris) et non de leur seul rectangle englobant : moins de chutes, calcul un peu plus long.",
+    )
+    class SensImbrication(models.TextChoices):
+        LONGUEUR = "longueur", "Dans le sens de la longueur de la tôle"
+        LARGEUR = "largeur", "Dans le sens de la largeur de la tôle"
 
+    class CoinDepart(models.TextChoices):
+        BAS_GAUCHE = "bas_gauche", "En bas à gauche"
+        HAUT_GAUCHE = "haut_gauche", "En haut à gauche"
+        BAS_DROITE = "bas_droite", "En bas à droite"
+        HAUT_DROITE = "haut_droite", "En haut à droite"
+
+    sens_imbrication = models.CharField(
+        "sens de l'imbrication", max_length=10, choices=SensImbrication.choices, default=SensImbrication.LONGUEUR,
+        help_text="Sens dans lequel la tôle se remplit : la chute de bout est la bande qui reste, sur toute la largeur (ou toute la longueur) de la tôle, après la dernière pièce.",
+    )
+    coin_depart = models.CharField(
+        "coin de départ", max_length=12, choices=CoinDepart.choices, default=CoinDepart.BAS_GAUCHE,
+        help_text="Coin de la tôle où commence l'imbrication (origine de la machine). Les coins « en haut à gauche » et « en bas à droite » retournent les pièces : refusés si une pièce ne peut pas être retournée.",
+    )
+    imbrication_chiffrage = models.BooleanField(
+        "chiffrer la matière par imbrication", default=False,
+        help_text="La matière d'un article fabriqué lié à cette pièce est calculée par imbrication (surface consommée avec les chutes, selon la quantité) au lieu du rectangle de la nomenclature.",
+    )
+    parametres_forme = models.JSONField(
+        "forme paramétrique", null=True, blank=True,
+        help_text="Recette de la pièce créée depuis la bibliothèque de formes ({famille, cotes}) ; vide pour une pièce importée d'un fichier.",
+    )
+    pas_rotation_deg = models.PositiveSmallIntegerField(
+        choices=PasRotation.choices,
+        null=True,
+        blank=True,
+        help_text="Pas de rotation autorisé pour l'imbrication — vide si aucune rotation n'est permise "
+        "(sens de la matière imposé)",
+    )
+    symetrie_autorisee = models.BooleanField(
+        default=True,
+        help_text="À décocher si la pièce ne peut pas être retournée (miroir) — gravure, marquage non symétrique...",
+    )
     statut = models.CharField(max_length=20, choices=Statut.choices, default=Statut.EN_ATTENTE)
     message_erreur = models.TextField(blank=True)
     avertissements = models.JSONField(default=list, blank=True)
@@ -48,6 +286,15 @@ class PieceDecoupe(models.Model):
     nb_contours_interieurs = models.PositiveIntegerField(default=0, help_text="Nombre de trous détectés")
     contour_json = models.JSONField(
         null=True, blank=True, help_text="Contour extérieur et trous, coordonnées locales en mm"
+    )
+    calques_detectes = models.JSONField(default=list, blank=True, help_text="Calques trouvés dans le fichier source")
+    a_gravure = models.BooleanField(
+        default=False, help_text="Détecté automatiquement : le fichier contient des tracés classés « gravure »"
+    )
+    gravure_json = models.JSONField(null=True, blank=True, help_text="Tracés de gravure/marquage, repère local en mm")
+    pliage_json = models.JSONField(null=True, blank=True, help_text="Lignes de pliage détectées, repère local en mm")
+    longueur_gravure_mm = models.FloatField(
+        null=True, blank=True, help_text="Longueur totale des tracés de gravure/marquage"
     )
 
     date_import = models.DateTimeField(auto_now_add=True)
@@ -87,8 +334,14 @@ class PieceDecoupe(models.Model):
         """
         from .services.geometrie import ErreurImportGeometrie, extraire_geometrie
 
+        if self.regles_calques_manuelles:
+            regles_calques = {calque.lower(): role for calque, role in self.regles_calques_manuelles.items()}
+        elif self.profil_import_id:
+            regles_calques = self.profil_import.regles_par_calque()
+        else:
+            regles_calques = None
         try:
-            resultat = extraire_geometrie(self.fichier_source.path, self.format_source)
+            resultat = extraire_geometrie(self.fichier_source.path, self.format_source, regles_calques=regles_calques)
         except ErreurImportGeometrie as exc:
             self.statut = self.Statut.ERREUR
             self.message_erreur = str(exc)
@@ -102,7 +355,12 @@ class PieceDecoupe(models.Model):
         self.largeur_mm = resultat.largeur_mm
         self.hauteur_mm = resultat.hauteur_mm
         self.nb_contours_interieurs = len(resultat.holes)
-        self.contour_json = {"exterieur": resultat.exterior, "trous": resultat.holes}
+        self.contour_json = {"exterieur": resultat.exterior, "trous": resultat.holes, "autres": resultat.autres}
+        self.calques_detectes = resultat.calques
+        self.a_gravure = bool(resultat.gravure)
+        self.gravure_json = {"traits": resultat.gravure}
+        self.pliage_json = {"traits": resultat.pliage}
+        self.longueur_gravure_mm = resultat.longueur_gravure_mm
         self.avertissements = resultat.avertissements
         self.save()
         return True
@@ -111,6 +369,16 @@ class PieceDecoupe(models.Model):
 class ImbricationJob(models.Model):
     """Un calcul d'imbrication : un jeu de pièces (avec quantités) placées dans une surface de
     tôle donnée, avec estimation du nombre de feuilles et du coût matière."""
+
+    class Direction(models.TextChoices):
+        HORIZONTAL = "horizontal", "Horizontal (rangées empilées verticalement)"
+        VERTICAL = "vertical", "Vertical (colonnes empilées horizontalement)"
+
+    class CoinDepart(models.TextChoices):
+        BAS_GAUCHE = "bas_gauche", "Bas gauche"
+        BAS_DROITE = "bas_droite", "Bas droite"
+        HAUT_GAUCHE = "haut_gauche", "Haut gauche"
+        HAUT_DROITE = "haut_droite", "Haut droite"
 
     article_matiere = models.ForeignKey(
         Article,
@@ -124,12 +392,24 @@ class ImbricationJob(models.Model):
     longueur_feuille_mm = models.FloatField()
     marge_bord_mm = models.FloatField(default=5, help_text="Marge non utilisable en bord de feuille")
     espacement_pieces_mm = models.FloatField(default=5, help_text="Espacement minimal entre deux pièces")
+    direction = models.CharField(
+        max_length=10,
+        choices=Direction.choices,
+        default=Direction.HORIZONTAL,
+        help_text="Sens de remplissage des pièces sur la feuille",
+    )
+    coin_depart = models.CharField(
+        max_length=12,
+        choices=CoinDepart.choices,
+        default=CoinDepart.BAS_GAUCHE,
+        help_text="Coin de la feuille où démarre le placement (convention machine la plus courante : bas gauche)",
+    )
 
     nb_feuilles = models.PositiveIntegerField(null=True, blank=True)
     surface_pieces_mm2 = models.FloatField(null=True, blank=True)
     surface_feuilles_mm2 = models.FloatField(null=True, blank=True)
     taux_utilisation_pct = models.FloatField(null=True, blank=True)
-    cout_matiere_estime = models.FloatField(null=True, blank=True)
+    cout_matiere_estime = ChampDecimal(null=True, blank=True, **MONTANT)
     pieces_non_placees = models.JSONField(default=list, blank=True)
 
     date_calcul = models.DateTimeField(null=True, blank=True)
@@ -165,7 +445,9 @@ class ImbricationJob(models.Model):
                 largeur_mm=ligne.piece.largeur_mm,
                 hauteur_mm=ligne.piece.hauteur_mm,
                 surface_mm2=ligne.piece.surface_mm2,
-                rotation_autorisee=ligne.piece.rotation_autorisee,
+                pas_rotation_deg=ligne.piece.pas_rotation_deg,
+                symetrie_autorisee=ligne.piece.symetrie_autorisee,
+                exterieur=(ligne.piece.contour_json or {}).get("exterieur") or [],
                 quantite=ligne.quantite,
             )
             for ligne in self.lignes.select_related("piece").all()
@@ -176,6 +458,8 @@ class ImbricationJob(models.Model):
             longueur_feuille_mm=self.longueur_feuille_mm,
             marge_bord_mm=self.marge_bord_mm,
             espacement_pieces_mm=self.espacement_pieces_mm,
+            direction=self.direction,
+            coin_depart=self.coin_depart,
         )
 
         self.placements.all().delete()
@@ -187,6 +471,7 @@ class ImbricationJob(models.Model):
                 x_mm=placement.x_mm,
                 y_mm=placement.y_mm,
                 rotation_deg=placement.rotation_deg,
+                miroir=placement.miroir,
             )
             for placement in resultat.placements
         )
@@ -208,7 +493,7 @@ class ImbricationJob(models.Model):
         if not self.nb_feuilles:
             return None
         surface_feuille_m2 = (self.largeur_feuille_mm * self.longueur_feuille_mm) / 1_000_000
-        return self.nb_feuilles * surface_feuille_m2 * article.cout_unitaire
+        return arrondir(D(self.nb_feuilles * surface_feuille_m2) * D(article.cout_unitaire))
 
 
 class ImbricationLigne(models.Model):
@@ -240,7 +525,8 @@ class ImbricationPlacement(models.Model):
     numero_feuille = models.PositiveIntegerField()
     x_mm = models.FloatField()
     y_mm = models.FloatField()
-    rotation_deg = models.PositiveIntegerField(choices=[(0, "0°"), (90, "90°")], default=0)
+    rotation_deg = models.PositiveSmallIntegerField(default=0, help_text="Angle de rotation appliqué (pas de 5°)")
+    miroir = models.BooleanField(default=False, help_text="Pièce retournée (symétrie miroir) pour ce placement")
 
     class Meta:
         verbose_name = "Placement"
@@ -249,3 +535,288 @@ class ImbricationPlacement(models.Model):
 
     def __str__(self):
         return f"{self.piece} — feuille {self.numero_feuille} @ ({self.x_mm:g}, {self.y_mm:g})"
+
+
+class ParametreCoupe(models.Model):
+    """Paramètres de coupe d'une matière à une épaisseur donnée, pour un procédé (aujourd'hui le jet d'eau, repris du
+    logiciel de la machine) : vitesses par niveau de qualité (VitesseCoupe), perçage, marquage, intervalle entre
+    pièces. Servent à estimer le temps de découpe d'une pièce (voir services/temps.py)."""
+
+    Procede = ProcedeCoupe
+
+    class ModePercage(models.TextChoices):
+        STATIONNAIRE_HP = "stationnaire_hp", "Stationnaire haute pression"
+        STATIONNAIRE_BP = "stationnaire_bp", "Stationnaire basse pression"
+        CIRCULAIRE_HP = "circulaire_hp", "Circulaire haute pression"
+        CIRCULAIRE_BP = "circulaire_bp", "Circulaire basse pression"
+
+    procede = models.CharField("procédé", max_length=10, choices=ProcedeCoupe.choices, default=ProcedeCoupe.JET_EAU)
+    gaz = models.CharField("gaz de coupe", max_length=4, choices=GazCoupe.choices, blank=True, help_text="Laser : un paramètre par gaz.")
+    famille = models.ForeignKey(
+        FamilleMatiere, verbose_name="famille de matière", on_delete=models.PROTECT, null=True, blank=True,
+        related_name="parametres_coupe",
+        help_text="Cas général : le paramètre vaut pour toutes les nuances de la famille (S235, S355… pour « Acier »).",
+    )
+    matiere = models.ForeignKey(
+        Matiere, verbose_name="nuance précise", on_delete=models.PROTECT, null=True, blank=True, related_name="parametres_coupe",
+        help_text="Exception : un paramètre propre à une seule nuance, qui prend le pas sur celui de sa famille. Laisser vide en général.",
+    )
+    epaisseur_mm = models.FloatField("épaisseur (mm)")
+    temps_mise_en_place_min = models.FloatField(
+        "mise en place d'une tôle (min)", null=True, blank=True,
+        help_text="Exception à la valeur du poste de travail (ex. tôle épaisse plus longue à poser). Vide = valeur du poste.",
+    )
+    poste = models.ForeignKey(
+        "technique.PosteTravail", verbose_name="poste de travail", on_delete=models.PROTECT, null=True, blank=True,
+        related_name="parametres_coupe", help_text="Machine de coupe : son tarif horaire valorise le temps calculé dans la gamme.",
+    )
+    usinabilite = models.FloatField(
+        "usinabilité", null=True, blank=True,
+        help_text="Indice d'usinabilité du logiciel de la machine ; vide : celui de la matière. Sert à calculer les vitesses.",
+    )
+    origine = models.CharField(
+        "origine des vitesses", max_length=12, default="machine",
+        choices=[
+            ("machine", "Relevées sur la machine"), ("calcule", "Calculées depuis l'usinabilité (estimation)"),
+            ("extrapole", "Extrapolées du tableau du constructeur (estimation)"),
+        ],
+        help_text="Jet d'eau : les vitesses « calculées » depuis l'usinabilité sont une estimation à confirmer. Laser : jamais de calcul d'usinabilité, les vitesses viennent du tableau du constructeur (« extrapolées » : épaisseur absente du tableau). Les vitesses relevées sur la machine ne sont jamais écrasées.",
+    )
+
+    # Laser : vitesses du constructeur (pas de niveaux de qualité) et consommations
+    vitesse_coupe_max_m_min = models.FloatField("vitesse maximale (m/min)", null=True, blank=True, help_text="Laser : vitesse maximale du constructeur (qualité et tolérance de focale réduites).")
+    vitesse_coupe_production_m_min = models.FloatField(
+        "vitesse de production (m/min)", null=True, blank=True,
+        help_text="Laser : vitesse retenue pour le calcul du temps (avant le coefficient de pondération des réglages de coupe).",
+    )
+    consommation_gaz_m3_h = models.FloatField("consommation de gaz (m³/h)", null=True, blank=True)
+    puissance_kw = models.FloatField("puissance absorbée (kW)", null=True, blank=True)
+    remarque = models.CharField("remarque", max_length=250, blank=True)
+
+    # Perçage et marquage
+    mode_percage = models.CharField("mode de perçage", max_length=16, choices=ModePercage.choices, default=ModePercage.STATIONNAIRE_HP)
+    percage_stationnaire_hp_s = models.FloatField("perçage stationnaire HP (s)", default=0)
+    percage_stationnaire_bp_s = models.FloatField("perçage stationnaire BP (s)", default=0)
+    percage_circulaire_hp_tours = models.FloatField("perçage circulaire HP (tours)", default=0)
+    percage_circulaire_bp_tours = models.FloatField("perçage circulaire BP (tours)", default=0)
+    diametre_percage_mm = models.FloatField("diamètre de perçage (mm)", default=1.4)
+    temporisation_pointage_s = models.FloatField("temporisation de pointage (s)", default=0)
+    temporisation_marquage_s = models.FloatField("temporisation de marquage (s)", default=0)
+    vitesse_marquage_mm_min = models.FloatField("vitesse de marquage (mm/min)", default=4000)
+    percement_lineaire_mm = models.FloatField("percement linéaire (mm)", default=0, help_text="Amorce de coupe avant le contour")
+    chevauchement_mm = models.FloatField("chevauchement (mm)", default=0, help_text="Recouvrement à la fermeture d'un contour")
+    intervalle_pieces_mm = models.FloatField("intervalle entre pièces (mm)", default=4, help_text="Espacement utilisé pour l'imbrication")
+    bord_tole_mm = models.FloatField(
+        "bord de tôle (mm)", null=True, blank=True,
+        help_text="Bande non découpée sur le pourtour de la tôle pour cette épaisseur. Vide : la règle du procédé s'applique (plancher des réglages de coupe ; au laser, jamais moins que l'épaisseur). Le plus grand des deux est retenu.",
+    )
+
+    # Réglages de calcul
+    rayon_pleine_vitesse_coef = models.FloatField(
+        "rayon de pleine vitesse (× épaisseur)", default=2.227,
+        help_text="Un arc dont le rayon dépasse ce multiple de l'épaisseur est coupé à la vitesse élevée ; en dessous la vitesse "
+                  "décroît jusqu'à la vitesse basse (le jet se déporte d'autant plus dans les courbes que la tôle est épaisse).",
+    )
+    facteur_vitesse_courbe = models.FloatField(
+        "facteur de vitesse en courbe", default=1.243,
+        help_text="Multiplie la vitesse basse dans les courbes et les coins (le logiciel de la machine ne descend pas aussi bas que la "
+                  "vitesse basse affichée) : calé sur les temps réels.",
+    )
+    facteur_percage = models.FloatField(
+        "facteur de perçage", default=0.5,
+        help_text="Multiplie le temps de perçage calculé (tous les contours ne sont pas percés de la même façon) : calé sur la durée de perçage donnée par le logiciel de la machine.",
+    )
+    deplacement_par_contour_s = models.FloatField(
+        "déplacement entre contours (s)", default=2.75, help_text="Transferts hauts (déplacements à vide) comptés par contour",
+    )
+    seuil_angle_coin_deg = models.FloatField("angle d'un coin (°)", default=30, help_text="Au-delà de ce changement de direction, c'est un coin (ralentissement)")
+    coefficient_ajustement = models.FloatField(
+        "coefficient d'ajustement", default=1,
+        help_text="Multiplie le temps calculé : à caler sur les temps réellement donnés par le logiciel de la machine.",
+    )
+
+    class Meta:
+        verbose_name = "Paramètre de coupe"
+        verbose_name_plural = "Paramètres de coupe"
+        ordering = ["procede", "famille", "matiere", "gaz", "epaisseur_mm"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(famille__isnull=False, matiere__isnull=True) | models.Q(famille__isnull=True, matiere__isnull=False),
+                name="parametre_coupe_famille_xor_matiere",
+            ),
+            models.UniqueConstraint(
+                fields=["procede", "famille", "gaz", "epaisseur_mm"], condition=models.Q(famille__isnull=False), name="unique_parametre_coupe_famille"
+            ),
+            models.UniqueConstraint(
+                fields=["procede", "matiere", "gaz", "epaisseur_mm"], condition=models.Q(matiere__isnull=False), name="unique_parametre_coupe_matiere"
+            ),
+        ]
+
+    @property
+    def cible(self):
+        """Famille ou nuance à laquelle le paramètre s'applique."""
+        return self.matiere if self.matiere_id else self.famille
+
+    def __str__(self):
+        gaz = f" {self.gaz}" if self.gaz else ""
+        return f"{self.cible}{gaz} {self.epaisseur_mm:g} mm ({self.get_procede_display()})"
+
+    def clean(self):
+        super().clean()
+        if bool(self.famille_id) == bool(self.matiere_id):
+            raise ValidationError("Indiquez soit une famille de matière (cas général), soit une nuance précise, pas les deux.")
+        if self.procede == ProcedeCoupe.LASER:
+            if not self.gaz:
+                raise ValidationError({"gaz": "Au laser, indiquez le gaz de coupe."})
+            if not self.vitesse_coupe_production_m_min or self.vitesse_coupe_production_m_min <= 0:
+                raise ValidationError({"vitesse_coupe_production_m_min": "Au laser, renseignez la vitesse de production."})
+
+    @property
+    def rayon_pleine_vitesse_mm(self):
+        return self.rayon_pleine_vitesse_coef * self.epaisseur_mm
+
+
+class VitesseCoupe(models.Model):
+    """Vitesses d'un ParametreCoupe pour un niveau de qualité (une ligne par niveau, comme dans le logiciel de la machine)."""
+
+    parametre = models.ForeignKey(ParametreCoupe, verbose_name="paramètre de coupe", on_delete=models.CASCADE, related_name="vitesses")
+    qualite = models.DecimalField("qualité", max_digits=2, decimal_places=1, choices=QUALITES_COUPE)
+    vitesse_haute_mm_min = models.FloatField("vitesse élevée (mm/min)")
+    vitesse_basse_mm_min = models.FloatField("vitesse basse (mm/min)")
+    paliers = models.PositiveSmallIntegerField("paliers (N)", default=1, help_text="Nombre de paliers de vitesse entre la basse et l'élevée dans les courbes")
+    distance_acceleration_mm = models.FloatField("distance d'accélération A (mm)", default=0)
+    distance_deceleration_mm = models.FloatField("distance de décélération R (mm)", default=0)
+    coefficient_haut = models.FloatField("coefficient haut", default=1)
+    coefficient_bas = models.FloatField("coefficient bas", default=1)
+    facteur_arc = models.FloatField("facteur par arc", default=1)
+
+    class Meta:
+        verbose_name = "Vitesse de coupe"
+        verbose_name_plural = "Vitesses de coupe"
+        ordering = ["parametre", "qualite"]
+        constraints = [models.UniqueConstraint(fields=["parametre", "qualite"], name="unique_vitesse_coupe")]
+
+    def __str__(self):
+        return f"{self.parametre} — qualité {self.qualite}"
+
+    def clean(self):
+        super().clean()
+        if self.vitesse_haute_mm_min is not None and self.vitesse_basse_mm_min is not None:
+            if self.vitesse_basse_mm_min <= 0 or self.vitesse_haute_mm_min < self.vitesse_basse_mm_min:
+                raise ValidationError("La vitesse basse doit être positive et inférieure ou égale à la vitesse élevée.")
+
+
+class ReglageProcede(models.Model):
+    """Réglages propres à un procédé de coupe : pondération des vitesses (laser) et écart minimal entre pièces à l'imbrication."""
+
+    procede = models.CharField("procédé", max_length=10, choices=ProcedeCoupe.choices, unique=True)
+    coefficient_vitesse = models.FloatField(
+        "coefficient de pondération des vitesses", default=1,
+        help_text="Laser : multiplie les vitesses de coupe du constructeur (0,85 = 15 % plus lent) pour tenir compte des vitesses surestimées constatées. Sans effet sur le jet d'eau, dont le calcul est déjà calé sur des temps réels.",
+    )
+    capacite_largeur_mm = models.FloatField(
+        "capacité de la machine : largeur (mm)", default=0,
+        help_text="Plus petite dimension de la plus grande tôle que la machine peut recevoir. 0 : pas de limite.",
+    )
+    capacite_longueur_mm = models.FloatField(
+        "capacité de la machine : longueur (mm)", default=0,
+        help_text="Plus grande dimension de la plus grande tôle que la machine peut recevoir (jet d'eau : 4000 × 2000 ; laser : 3000 × 1500). 0 : pas de limite.",
+    )
+    bord_tole_minimum_mm = models.FloatField(
+        "bord de tôle minimal (mm)", default=5,
+        help_text="Plancher du bord de tôle (bande non découpée sur le pourtour), quelles que soient la matière et l'épaisseur (jet d'eau : 5 constant ; laser : 10). Au laser, le bord grandit avec l'épaisseur (jamais moins que l'épaisseur) ; le paramètre de coupe peut imposer plus.",
+    )
+    espacement_minimum_mm = models.FloatField(
+        "écart minimal entre pièces (mm)", default=4,
+        help_text="Plancher de l'écart entre deux pièces à l'imbrication, quelles que soient la matière et l'épaisseur (jet d'eau : 6 ; laser : 10). Au laser, la base donne un écart plus grand quand l'épaisseur augmente : le plus grand des deux est retenu.",
+    )
+
+    class Meta:
+        verbose_name = "Réglage de coupe"
+        verbose_name_plural = "Réglages de coupe"
+        ordering = ["procede"]
+
+    def __str__(self):
+        return self.get_procede_display()
+
+    def accepte(self, format_tole):
+        """Le format de tôle tient-il dans la machine ? (la tôle peut se présenter dans un sens ou dans l'autre)"""
+        if not self.capacite_largeur_mm or not self.capacite_longueur_mm:
+            return True
+        petite, grande = sorted((format_tole.largeur_mm, format_tole.longueur_mm))
+        cap_petite, cap_grande = sorted((self.capacite_largeur_mm, self.capacite_longueur_mm))
+        return petite <= cap_petite and grande <= cap_grande
+
+    @property
+    def libelle_capacite(self):
+        grande, petite = max(self.capacite_largeur_mm, self.capacite_longueur_mm), min(self.capacite_largeur_mm, self.capacite_longueur_mm)
+        return f"{grande:g} × {petite:g} mm"
+
+    @classmethod
+    def pour(cls, procede):
+        """Réglage du procédé (créé avec les valeurs usuelles s'il n'existe pas encore)."""
+        defauts = {
+            "jet_eau": {"espacement_minimum_mm": 6, "bord_tole_minimum_mm": 5, "capacite_largeur_mm": 2000, "capacite_longueur_mm": 4000},
+            "laser": {"coefficient_vitesse": 0.85, "espacement_minimum_mm": 10, "bord_tole_minimum_mm": 10, "capacite_largeur_mm": 1500, "capacite_longueur_mm": 3000},
+        }
+        return cls.objects.get_or_create(procede=procede, defaults=defauts.get(procede, {}))[0]
+
+
+class NormeCote(models.Model):
+    """Cotes normalisées utilisées par la bibliothèque de formes : brides EN 1092-1 (DN × PN) et rondelles ISO."""
+
+    class Famille(models.TextChoices):
+        BRIDE_EN1092 = "bride_en1092", "Bride EN 1092-1"
+        RONDELLE = "rondelle", "Rondelle ISO"
+
+    famille = models.CharField("famille", max_length=20, choices=Famille.choices)
+    designation = models.CharField("désignation", max_length=60, help_text="« DN50 PN16 », « ISO 7089 M10 »…")
+    valeurs = models.JSONField(
+        "cotes (mm)", default=dict,
+        help_text="Bride : dn, pn, D (Ø extérieur), K (cercle de perçage), n (nombre de trous), L (Ø des trous), tube_od (Ø du tube). "
+        "Rondelle : norme, taille, d1 (Ø intérieur), d2 (Ø extérieur), h (épaisseur).",
+    )
+    source = models.CharField("source", max_length=200, blank=True)
+    verifie = models.BooleanField(
+        "vérifié", default=False, help_text="Cochez une fois les cotes contrôlées avec la norme en vigueur : l'avertissement disparaît de l'écran du devis.",
+    )
+    ordre = models.PositiveIntegerField("ordre", default=0)
+
+    class Meta:
+        verbose_name = "Cote normalisée"
+        verbose_name_plural = "Cotes normalisées"
+        ordering = ["famille", "ordre", "designation"]
+        constraints = [models.UniqueConstraint(fields=["famille", "designation"], name="unique_norme_cote")]
+
+    def __str__(self):
+        return f"{self.get_famille_display()} {self.designation}"
+
+
+class PieceProfile(models.Model):
+    """Débit de profilé d'un devis (longueur, coupes d'extrémité, quantité) : article fabriqué créé avec lui, matière chiffrée
+    par imbrication des débits dans les barres (voir services/profiles.py)."""
+
+    devis = models.ForeignKey("chiffrage.Devis", verbose_name="devis", on_delete=models.CASCADE, related_name="pieces_profile")
+    section = models.ForeignKey(ProfileSection, verbose_name="section", on_delete=models.PROTECT, related_name="pieces")
+    nom = models.CharField("nom", max_length=200)
+    longueur_mm = models.FloatField("longueur hors tout (mm)")
+    coupe_a_deg = models.FloatField("coupe de l'extrémité A (°)", default=90, help_text="90 : coupe droite ; 45 : biseau à 45°.")
+    coupe_b_deg = models.FloatField("coupe de l'extrémité B (°)", default=90)
+    quantite = models.PositiveIntegerField("quantité", default=1)
+    article = models.ForeignKey(Article, verbose_name="article fabriqué", on_delete=models.SET_NULL, null=True, blank=True, related_name="pieces_profile")
+    article_cree_automatiquement = models.BooleanField(default=False)
+    trait_scie_mm = models.FloatField("trait de scie (mm)", default=3)
+    marge_bout_mm = models.FloatField("chute de tête (mm)", default=0, help_text="Longueur de barre perdue à l'extrémité avant la première coupe.")
+    taux_chute_recuperable = models.DecimalField("chute récupérable (%)", max_digits=5, decimal_places=2, default=0)
+
+    class Meta:
+        verbose_name = "Débit de profilé"
+        verbose_name_plural = "Débits de profilés"
+        ordering = ["pk"]
+
+    def __str__(self):
+        return self.nom
+
+    @property
+    def masse_kg(self):
+        return self.longueur_mm / 1000 * self.section.masse_lineique

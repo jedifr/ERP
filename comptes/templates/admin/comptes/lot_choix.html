@@ -1,0 +1,25 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<div class="max-w-3xl">
+  <p class="mb-4"><strong>{{ nombre }}</strong> {{ opts.verbose_name_plural }} sélectionné(s). {{ intro }}</p>
+  <form method="post">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="{{ action }}">
+    <input type="hidden" name="confirmer" value="1">
+    {% for id in ids %}<input type="hidden" name="_selected_action" value="{{ id }}">{% endfor %}
+    {% for c in champs %}
+    <label class="block mb-4"><span class="font-semibold">{{ c.libelle }}</span><br>
+      <select name="{{ c.nom }}" class="border border-base-300 rounded-default px-2 py-1">
+        {% if c.vide %}<option value="">(aucun)</option>{% endif %}
+        {% for valeur, lib in c.options %}<option value="{{ valeur }}" {% if c.valeur == valeur|stringformat:"s" %}selected{% endif %}>{{ lib }}</option>{% endfor %}
+      </select>
+      {% if c.aide %}<span class="block text-sm text-font-subtle-light">{{ c.aide }}</span>{% endif %}
+    </label>
+    {% endfor %}
+    <div class="flex gap-3">
+      <button type="submit" class="bg-primary-600 text-white font-semibold px-4 py-2 rounded-default">{{ bouton }}</button>
+      <a href="../" class="border border-base-300 px-4 py-2 rounded-default">Annuler</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

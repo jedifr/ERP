@@ -3,9 +3,11 @@ Django settings for the ERP maison project.
 """
 
 import os
+import sys
 from pathlib import Path
 
-from django.urls import reverse_lazy
+from django.templatetags.static import static
+from django.urls import reverse, reverse_lazy
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -17,11 +19,21 @@ def _env_bool(name, default=False):
     return os.environ.get(name, str(default)).strip().lower() in ("1", "true", "yes", "on")
 
 
+# Gestion de stock optionnelle : toutes les sociétés n'en ont pas. Mettre DJANGO_STOCK_ACTIF=false
+# pour la désactiver entièrement (menu, tableau de bord, réceptions et livraisons sans lots).
+# Même activée, elle reste facultative article par article (case « géré en stock »).
+STOCK_ACTIF = _env_bool("DJANGO_STOCK_ACTIF", True)
+
+# Calcul parallèle des imbrications (voir decoupe/services/parallele.py) : nombre de processus ; 0 = automatique (cœurs − 1, plafonné à 6) ;
+# 1 = séquentiel. Les tests tournent en séquentiel (transaction de test partagée), sauf ceux qui testent le parallélisme.
+IMBRICATION_PROCESSUS = 1 if "test" in sys.argv else int(os.environ.get("ERP_IMBRICATION_PROCESSUS", "0") or 0)
+
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "django-insecure-change-me-in-production")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = _env_bool("DJANGO_DEBUG", True)
+# Faux par défaut : une variable d'environnement oubliée ne doit jamais activer le mode debug.
+DEBUG = _env_bool("DJANGO_DEBUG", False)
 
 ALLOWED_HOSTS = [h.strip() for h in os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",") if h.strip()]
 
@@ -38,6 +50,14 @@ CSRF_TRUSTED_ORIGINS = [
     o.strip() for o in os.environ.get("DJANGO_CSRF_TRUSTED_ORIGINS", "").split(",") if o.strip()
 ]
 
+# Sessions et cookies. Les cookies « sécurisés » ne partent qu'en HTTPS : à activer seulement si
+# l'ERP est servi en HTTPS (sinon la connexion en HTTP cesse de fonctionner).
+SESSION_COOKIE_AGE = int(os.environ.get("DJANGO_SESSION_HEURES", "12")) * 3600  # une journée de travail
+SESSION_COOKIE_SECURE = CSRF_COOKIE_SECURE = _env_bool("DJANGO_COOKIES_SECURISES", False)
+SECURE_HSTS_SECONDS = int(os.environ.get("DJANGO_HSTS_SECONDS", "0"))  # ex. 31536000 une fois le HTTPS validé
+SECURE_CONTENT_TYPE_NOSNIFF = True
+X_FRAME_OPTIONS = "DENY"
+
 # Les fichiers déposés (DXF/DWG des pièces à découper, app `decoupe`) sont servis par Django
 # même hors DEBUG : par défaut cet ERP reste sur le réseau local de l'atelier, éventuellement
 # derrière le reverse proxy DSM (qui gère alors le HTTPS mais pas forcément /media/). Mettre à
@@ -48,6 +68,7 @@ SERVE_MEDIA = _env_bool("DJANGO_SERVE_MEDIA", True)
 
 INSTALLED_APPS = [
     "unfold",
+    "unfold.contrib.simple_history",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -55,9 +76,11 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "rest_framework",
+    "simple_history",
     "django_filters",
     "codification",
     "comptes",
+    "documents",
     "technique",
     "decoupe",
     "commercial",
@@ -78,8 +101,18 @@ MIDDLEWARE = [
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
+    "simple_history.middleware.HistoryRequestMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
+
+# L'historique est en lecture seule (voir chiffrage.admin.HistoriqueLectureSeule).
+SIMPLE_HISTORY_REVERT_DISABLED = True
+
+# Connexion directe sur /admin/login/ (sans ?next=) : revenir à l'accueil de l'admin plutôt
+# que sur /accounts/profile/ (Django par défaut), qui n'existe pas ici (404).
+LOGIN_REDIRECT_URL = "/admin/"
+# Page de connexion unique (sinon Django redirige vers /accounts/login/, qui n'existe pas).
+LOGIN_URL = "/admin/login/"
 
 ROOT_URLCONF = "config.urls"
 
@@ -116,12 +149,34 @@ DATABASES = {
 }
 
 
+# E-mail (relances de paiement, synthèse quotidienne). Sans serveur SMTP configuré, les messages
+# sont écrits dans les journaux (`docker compose logs web`) au lieu d'être envoyés : rien ne
+# part par erreur tant que DJANGO_EMAIL_HOST n'est pas renseigné.
+EMAIL_HOST = os.environ.get("DJANGO_EMAIL_HOST", "")
+EMAIL_BACKEND = (
+    "django.core.mail.backends.smtp.EmailBackend" if EMAIL_HOST else "django.core.mail.backends.console.EmailBackend"
+)
+EMAIL_PORT = int(os.environ.get("DJANGO_EMAIL_PORT", "587"))
+EMAIL_HOST_USER = os.environ.get("DJANGO_EMAIL_USER", "")
+EMAIL_HOST_PASSWORD = os.environ.get("DJANGO_EMAIL_PASSWORD", "")
+EMAIL_USE_TLS = _env_bool("DJANGO_EMAIL_TLS", True)
+DEFAULT_FROM_EMAIL = os.environ.get("DJANGO_EMAIL_EXPEDITEUR", "erp@localhost")
+# Délai minimal entre deux relances d'une même facture (jours) et destinataires de la synthèse.
+RELANCE_DELAI_MIN_JOURS = int(os.environ.get("DJANGO_RELANCE_DELAI_MIN_JOURS", "7"))
+SYNTHESE_DESTINATAIRES = [e.strip() for e in os.environ.get("DJANGO_SYNTHESE_DESTINATAIRES", "").split(",") if e.strip()]
+
+# Authentification : refus après trop d'échecs (voir comptes.connexions). Réglable ici.
+AUTHENTICATION_BACKENDS = ["comptes.auth.ModelBackendProtege"]
+CONNEXION_ECHECS_MAX = int(os.environ.get("DJANGO_CONNEXION_ECHECS_MAX", "5"))
+CONNEXION_FENETRE_MINUTES = int(os.environ.get("DJANGO_CONNEXION_FENETRE_MINUTES", "15"))
+
+
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
-    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
+    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator", "OPTIONS": {"min_length": 10}},
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
@@ -135,6 +190,7 @@ LANGUAGE_CODE = "fr-fr"
 TIME_ZONE = "Europe/Paris"
 
 USE_I18N = True
+LOCALE_PATHS = [BASE_DIR / "locale"]  # traductions des textes d'Unfold et du projet (voir comptes/i18n.py)
 
 USE_TZ = True
 
@@ -164,13 +220,19 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # https://www.django-rest-framework.org/api-guide/settings/
 
 REST_FRAMEWORK = {
+    # Les montants sont des Decimal en base ; l'API les renvoie comme des nombres JSON
+    # (comme avant le passage en Decimal), pas comme des chaînes.
+    "COERCE_DECIMAL_TO_STRING": False,
     "DEFAULT_FILTER_BACKENDS": [
         "django_filters.rest_framework.DjangoFilterBackend",
         "rest_framework.filters.SearchFilter",
     ],
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 50,
-    "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
+    # Sécurisé par défaut : lecture = permission « voir », écriture = ajout/modification/
+    # suppression du modèle (voir comptes.permissions). Un nouveau ViewSet est donc protégé
+    # sans rien ajouter ; une vue sans modèle (APIView) doit déclarer sa propre permission.
+    "DEFAULT_PERMISSION_CLASSES": ["comptes.permissions.ModelPermissionsAvecLecture"],
 }
 
 
@@ -199,18 +261,167 @@ LOGGING = {
 }
 
 
+# Menu latéral, organisé selon le chemin d'une commande : on vend, on produit, on achète, on stocke, on
+# comptabilise ; les données de base et l'administration sont regroupées à part (et repliées par défaut).
+# Chaque entrée n'est visible que pour qui a le droit « voir » le modèle correspondant.
+def _menu(titre, icone, app, modele, droit=None, url=None):
+    droit = droit or f"{app}.view_{modele}"
+    verifier = droit if callable(droit) else (lambda request, d=droit: request.user.has_perm(d))
+    return {
+        "title": titre,
+        "icon": icone,
+        "link": reverse_lazy(url or f"admin:{app}_{modele}_changelist"),
+        "permission": verifier,
+    }
+
+
+# Les articles sont rangés en trois familles dans le menu : ce qu'on fabrique, ce qu'on achète tout fait, la matière.
+FAMILLES_ARTICLES = {
+    "fabrique": ("Articles fabriqués", "precision_manufacturing", ["fabrique"]),
+    "achete": ("Composants achetés", "shopping_cart", ["composant", "consommable", "service_achete"]),
+    "matiere": ("Matière première", "layers", ["matiere_premiere"]),
+}
+
+
+def _famille_articles(request):
+    """Famille d'articles affichée (clé de FAMILLES_ARTICLES) d'après le filtre `nature` de l'adresse, ou None."""
+    natures = request.GET.get("nature__in", request.GET.get("nature__exact", ""))
+    natures = sorted(n for n in natures.split(",") if n)
+    for cle, (_t, _i, liste) in FAMILLES_ARTICLES.items():
+        if natures == sorted(liste):
+            return cle
+    return None
+
+
+def _menu_articles(cle):
+    titre, icone, natures = FAMILLES_ARTICLES[cle]
+    filtre = f"nature__exact={natures[0]}" if len(natures) == 1 else "nature__in=" + ",".join(natures)
+    element = _menu(titre, icone, "technique", "article")
+    element["link"] = lambda request: reverse("admin:technique_article_changelist") + "?" + filtre
+    element["active"] = lambda request, c=cle: (
+        request.path == reverse("admin:technique_article_changelist") and _famille_articles(request) == c
+    )
+    return element
+
+
+def _superutilisateur(request):
+    return request.user.is_superuser
+
+
+def _lien(titre, icone, url, badge=None):
+    element = {"title": titre, "icon": icone, "link": reverse_lazy(url), "permission": lambda request: request.user.is_staff}
+    if badge:
+        element["badge"] = badge
+    return element
+
+
+def _menu_b(titre, icone, app, modele, badge=None, **kw):
+    element = _menu(titre, icone, app, modele, **kw)
+    if badge:
+        element["badge"] = badge
+    return element
+
+
+# Menu court : ce qu'on ouvre tous les jours. Tout ce qui se règle une fois est dans la page « Paramétrage »
+# (cartes + recherche Ctrl+K), pas dans le menu.
+NAVIGATION = [
+    {"title": "", "items": [_lien("Aujourd'hui", "home", "admin:index")]},
+    {
+        "title": "Ventes",
+        "separator": True,
+        "items": [
+            _menu_b("Devis", "description", "chiffrage", "devis", badge="comptes.accueil.badge_devis"),
+            _menu("Commandes clients", "shopping_cart", "chiffrage", "commande"),
+            _menu("Livraisons (BL)", "local_shipping", "chiffrage", "livraison"),
+            _menu_b("Factures", "receipt_long", "facturation", "facture", badge="comptes.accueil.badge_factures"),
+            _menu("Clients et fournisseurs", "handshake", "commercial", "tiers"),
+        ],
+    },
+    {
+        "title": "Atelier",
+        "separator": True,
+        "items": [
+            _menu_b("Ordres de fabrication", "build", "chiffrage", "ordrefabrication", badge="comptes.accueil.badge_of"),
+            _menu("Pièces à découper", "content_cut", "decoupe", "piecedecoupe"),
+            _menu("Imbrications", "grid_view", "decoupe", "imbricationjob"),
+            _menu("Envois sous-traitance", "outbound", "soustraitance", "envoisoustraitance"),
+            _menu("Retours sous-traitance", "keyboard_return", "soustraitance", "retoursoustraitance"),
+        ],
+    },
+    {
+        "title": "Achats et stock",
+        "separator": True,
+        "items": [
+            _menu("Commandes fournisseur", "local_shipping", "achats", "commandefournisseur"),
+            _menu("Réceptions", "move_to_inbox", "achats", "reception"),
+            _menu("Factures fournisseur", "request_quote", "achats", "facturefournisseur"),
+            _menu("Lots et mouvements", "inventory_2", "stock", "lot"),
+            _menu_b("Alertes de stock", "warning", "stock", "alertestock", badge="comptes.accueil.badge_alertes_stock"),
+            _menu("Inventaires", "fact_check", "stock", "inventaire"),
+        ],
+    },
+    {
+        "title": "Gestion",
+        "separator": True,
+        "items": [
+            _menu_articles("fabrique"),
+            _menu_articles("achete"),
+            _menu_articles("matiere"),
+            _menu("Sections de profilés", "straighten", "technique", "profilesection"),
+            _menu("Nomenclatures", "account_tree", "technique", "nomenclature"),
+            _menu("Écritures comptables", "list_alt", "comptabilite", "ecriturecomptable"),
+        ],
+    },
+    {
+        "title": "Réglages",
+        "separator": True,
+        "items": [
+            _menu_b("À compléter", "checklist", "comptes", "societe", badge="comptes.accueil.badge_a_completer", url="a_completer",
+                    droit=lambda request: request.user.is_staff),
+            _menu_b("Paramétrage", "tune", "comptes", "societe", badge="comptes.accueil.badge_parametrage", url="parametrage",
+                          droit=lambda request: request.user.is_staff),
+        ],
+    },
+]
+
+
 # Unfold — thème de l'admin Django
 # https://unfoldadmin.com/docs/configuration/settings/
 
 UNFOLD = {
+    "STYLES": [
+        lambda request: static("comptes/admin_extra.css"),
+        lambda request: static("comptes/fiche_deux_colonnes.css"),
+        lambda request: static("comptes/theme.css"),
+        lambda request: static("comptes/navigation_documents.css"),
+        lambda request: static("comptes/accueil.css"),
+    ],
+    "SCRIPTS": [
+        lambda request: static("comptes/anti_double_clic.js"),
+        lambda request: static("comptes/filtre_client.js"),
+        lambda request: static("comptes/navigation_documents.js"),
+        lambda request: static("comptes/pdf_nouvel_onglet.js"),
+        lambda request: static("comptes/devis_onglets.js"),
+        lambda request: static("comptes/gamme_editeur.js"),
+        lambda request: static("comptes/nomenclature_editeur.js"),
+        lambda request: static("chiffrage/devis_builder.js"),
+    ],
     "SITE_TITLE": "ERP maison",
     "SITE_HEADER": "ERP maison",
     "SITE_SUBHEADER": "Métallurgie & chaudronnerie",
     "SITE_SYMBOL": "factory",
+    "ACCOUNT": {
+        "navigation": [
+            {"title": "Mes colonnes", "link": reverse_lazy("mes_colonnes")},
+            {"title": "Changer le mot de passe", "link": reverse_lazy("admin:password_change")},
+        ],
+    },
     "SHOW_HISTORY": True,
     "SHOW_VIEW_ON_SITE": False,
     "DASHBOARD_CALLBACK": "comptes.dashboard.dashboard_callback",
     "GLOBAL_CALLBACK": "comptes.layout.global_callback",
+    "ENVIRONMENT": "comptes.version.badge_environnement",
+    "ENVIRONMENT_TITLE_PREFIX": "comptes.version.prefixe_titre",
     # Identité "atelier" : ambre/acier plutôt que le violet par défaut d'Unfold.
     "COLORS": {
         "primary": {
@@ -227,229 +438,21 @@ UNFOLD = {
             "950": "oklch(27.9% .077 45.635)",
         },
     },
+    # Recherche globale (Ctrl+K / ⌘K) : documents et écrans, voir comptes/recherche.py.
+    "COMMAND": {
+        "search_models": False,
+        "search_callback": "comptes.recherche.recherche_globale",
+        "show_history": True,
+    },
     "SIDEBAR": {
         "show_search": True,
+        "command_search": True,
         "show_all_applications": False,
-        "navigation": [
-            {
-                "title": "Socle technique",
-                "separator": True,
-                "items": [
-                    {
-                        "title": "Matières",
-                        "icon": "science",
-                        "link": reverse_lazy("admin:technique_matiere_changelist"),
-                    },
-                    {
-                        "title": "Articles",
-                        "icon": "category",
-                        "link": reverse_lazy("admin:technique_article_changelist"),
-                    },
-                    {
-                        "title": "Postes de travail",
-                        "icon": "precision_manufacturing",
-                        "link": reverse_lazy("admin:technique_postetravail_changelist"),
-                    },
-                    {
-                        "title": "Tarifs de poste",
-                        "icon": "payments",
-                        "link": reverse_lazy("admin:technique_tarifposte_changelist"),
-                    },
-                    {
-                        "title": "Nomenclatures",
-                        "icon": "account_tree",
-                        "link": reverse_lazy("admin:technique_nomenclature_changelist"),
-                    },
-                    {
-                        "title": "Gammes",
-                        "icon": "route",
-                        "link": reverse_lazy("admin:technique_gamme_changelist"),
-                    },
-                ],
-            },
-            {
-                "title": "Commercial",
-                "separator": True,
-                "items": [
-                    {
-                        "title": "Tiers",
-                        "icon": "handshake",
-                        "link": reverse_lazy("admin:commercial_tiers_changelist"),
-                    },
-                    {
-                        "title": "Adresses",
-                        "icon": "location_on",
-                        "link": reverse_lazy("admin:commercial_adresse_changelist"),
-                    },
-                    {
-                        "title": "Contacts",
-                        "icon": "contacts",
-                        "link": reverse_lazy("admin:commercial_contact_changelist"),
-                    },
-                    {
-                        "title": "Taux de TVA",
-                        "icon": "percent",
-                        "link": reverse_lazy("admin:commercial_tauxtva_changelist"),
-                    },
-                ],
-            },
-            {
-                "title": "Chiffrage et production",
-                "separator": True,
-                "items": [
-                    {
-                        "title": "Devis",
-                        "icon": "request_quote",
-                        "link": reverse_lazy("admin:chiffrage_devis_changelist"),
-                    },
-                    {
-                        "title": "Commandes",
-                        "icon": "shopping_cart",
-                        "link": reverse_lazy("admin:chiffrage_commande_changelist"),
-                    },
-                    {
-                        "title": "Ordres de fabrication",
-                        "icon": "build",
-                        "link": reverse_lazy("admin:chiffrage_ordrefabrication_changelist"),
-                    },
-                ],
-            },
-            {
-                "title": "Chiffrage découpe",
-                "separator": True,
-                "items": [
-                    {
-                        "title": "Pièces à découper",
-                        "icon": "content_cut",
-                        "link": reverse_lazy("admin:decoupe_piecedecoupe_changelist"),
-                    },
-                    {
-                        "title": "Imbrications",
-                        "icon": "grid_view",
-                        "link": reverse_lazy("admin:decoupe_imbricationjob_changelist"),
-                    },
-                ],
-            },
-            {
-                "title": "Stock",
-                "separator": True,
-                "items": [
-                    {
-                        "title": "Emplacements",
-                        "icon": "warehouse",
-                        "link": reverse_lazy("admin:stock_emplacement_changelist"),
-                    },
-                    {
-                        "title": "Lots",
-                        "icon": "inventory_2",
-                        "link": reverse_lazy("admin:stock_lot_changelist"),
-                    },
-                    {
-                        "title": "Mouvements de stock",
-                        "icon": "sync_alt",
-                        "link": reverse_lazy("admin:stock_mouvementstock_changelist"),
-                    },
-                    {
-                        "title": "Alertes de stock",
-                        "icon": "warning",
-                        "link": reverse_lazy("admin:stock_alertestock_changelist"),
-                    },
-                ],
-            },
-            {
-                "title": "Achats et sous-traitance",
-                "separator": True,
-                "items": [
-                    {
-                        "title": "Commandes fournisseur",
-                        "icon": "local_shipping",
-                        "link": reverse_lazy("admin:achats_commandefournisseur_changelist"),
-                    },
-                    {
-                        "title": "Réceptions",
-                        "icon": "move_to_inbox",
-                        "link": reverse_lazy("admin:achats_reception_changelist"),
-                    },
-                    {
-                        "title": "Envois sous-traitance",
-                        "icon": "outbound",
-                        "link": reverse_lazy("admin:soustraitance_envoisoustraitance_changelist"),
-                    },
-                    {
-                        "title": "Retours sous-traitance",
-                        "icon": "keyboard_return",
-                        "link": reverse_lazy("admin:soustraitance_retoursoustraitance_changelist"),
-                    },
-                ],
-            },
-            {
-                "title": "Facturation",
-                "separator": True,
-                "items": [
-                    {
-                        "title": "Factures",
-                        "icon": "receipt_long",
-                        "link": reverse_lazy("admin:facturation_facture_changelist"),
-                    },
-                ],
-            },
-            {
-                "title": "Comptabilité",
-                "separator": True,
-                "items": [
-                    {
-                        "title": "Plan comptable",
-                        "icon": "account_balance",
-                        "link": reverse_lazy("admin:comptabilite_comptecomptable_changelist"),
-                    },
-                    {
-                        "title": "Journaux comptables",
-                        "icon": "book",
-                        "link": reverse_lazy("admin:comptabilite_journalcomptable_changelist"),
-                    },
-                    {
-                        "title": "Écritures comptables",
-                        "icon": "receipt",
-                        "link": reverse_lazy("admin:comptabilite_ecriturecomptable_changelist"),
-                    },
-                    {
-                        "title": "Postes de gestion",
-                        "icon": "category",
-                        "link": reverse_lazy("admin:comptabilite_postegestion_changelist"),
-                    },
-                    {
-                        "title": "Codes analytiques",
-                        "icon": "sell",
-                        "link": reverse_lazy("admin:comptabilite_codeanalytique_changelist"),
-                    },
-                    {
-                        "title": "Paramètres comptables",
-                        "icon": "settings",
-                        "link": reverse_lazy("admin:comptabilite_parametrescomptables_changelist"),
-                    },
-                ],
-            },
-            {
-                "title": "Paramétrage",
-                "separator": True,
-                "items": [
-                    {
-                        "title": "Règles de codification",
-                        "icon": "tag",
-                        "link": reverse_lazy("admin:codification_reglecodification_changelist"),
-                    },
-                    {
-                        "title": "Utilisateurs",
-                        "icon": "person",
-                        "link": reverse_lazy("admin:auth_user_changelist"),
-                    },
-                    {
-                        "title": "Groupes",
-                        "icon": "groups",
-                        "link": reverse_lazy("admin:auth_group_changelist"),
-                    },
-                ],
-            },
-        ],
+        "navigation": NAVIGATION,
     },
 }
+
+
+if not STOCK_ACTIF:
+    for _groupe in UNFOLD["SIDEBAR"]["navigation"]:
+        _groupe["items"] = [i for i in _groupe["items"] if i["title"] not in ("Lots et mouvements", "Alertes de stock", "Inventaires")]

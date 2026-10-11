@@ -90,3 +90,34 @@ def dupliquer_article(article):
         )
 
     return copie
+
+
+@transaction.atomic
+def renommer_article(article, nouvelle_reference):
+    """Change la référence d'un article (clé primaire) en reportant le changement sur tout ce qui s'y rattache : nomenclatures, gammes,
+    lignes de devis et de commande, ordres de fabrication, stock, fournisseurs, comptes d'article, pièces à découper… et sur l'historique
+    de ces objets. L'article est recréé sous sa nouvelle référence, les liens sont repointés, puis l'ancien est supprimé. Retourne
+    le nouvel article."""
+    nouvelle = (nouvelle_reference or "").strip()
+    if not nouvelle:
+        raise DuplicationError("Indiquez la nouvelle référence.")
+    if nouvelle == article.reference:
+        raise DuplicationError("La nouvelle référence est identique à l'ancienne.")
+    if len(nouvelle) > Article._meta.pk.max_length:
+        raise DuplicationError(f"La référence ne peut dépasser {Article._meta.pk.max_length} caractères.")
+    if Article.objects.filter(pk=nouvelle).exists():
+        raise DuplicationError(f"La référence « {nouvelle} » existe déjà.")
+    ancienne = article.reference
+    valeurs = {f.attname: getattr(article, f.attname) for f in Article._meta.concrete_fields}
+    valeurs["reference"] = nouvelle
+    nouveau = Article(**valeurs)
+    _valider_et_sauver(nouveau)
+    for lien in Article._meta.related_objects:
+        champ = lien.field
+        modele = lien.related_model
+        modele.objects.filter(**{champ.name: ancienne}).update(**{champ.attname: nouvelle})
+        historique = getattr(modele, "history", None)
+        if historique is not None:  # simple_history garde la clé étrangère comme une simple colonne
+            historique.model.objects.filter(**{champ.attname: ancienne}).update(**{champ.attname: nouvelle})
+    Article.objects.filter(pk=ancienne).delete()
+    return nouveau

@@ -1,0 +1,26 @@
+{% if chronologie %}
+<section class="chrono" id="chronologie-affaire" aria-label="Chronologie de l'affaire">
+  <h2 class="chrono-titre">Chronologie de l'affaire</h2>
+  <ol class="chrono-liste">
+    {% for e in chronologie.passes %}
+      <li class="chrono-evt chrono-{{ e.ton }}{% if e.courant %} chrono-courant{% endif %}">
+        <span class="chrono-date">{{ e.date|date:"d/m/Y" }}</span>
+        <span class="chrono-puce material-symbols-outlined">{{ e.icone }}</span>
+        <span class="chrono-texte">
+          {% if e.url and not e.courant %}<a href="{{ e.url }}">{{ e.titre }}</a>{% else %}<b>{{ e.titre }}</b>{% endif %}
+          {% if e.courant %}<span class="chrono-ici">vous êtes ici</span>{% endif %}
+          {% if e.detail %}<small>{{ e.detail }}</small>{% endif %}
+        </span>
+      </li>
+    {% endfor %}
+    <li class="chrono-evt chrono-aujourdhui"><span class="chrono-date">{{ chronologie.aujourdhui|date:"d/m/Y" }}</span><span class="chrono-puce material-symbols-outlined">flag</span><span class="chrono-texte"><b>Aujourd'hui</b></span></li>
+    {% for e in chronologie.a_venir %}
+      <li class="chrono-evt chrono-futur chrono-{{ e.ton }}{% if e.courant %} chrono-courant{% endif %}">
+        <span class="chrono-date">{{ e.date|date:"d/m/Y" }}</span>
+        <span class="chrono-puce material-symbols-outlined">{{ e.icone }}</span>
+        <span class="chrono-texte">{% if e.url and not e.courant %}<a href="{{ e.url }}">{{ e.titre }}</a>{% else %}<b>{{ e.titre }}</b>{% endif %}{% if e.detail %}<small>{{ e.detail }}</small>{% endif %}</span>
+      </li>
+    {% endfor %}
+  </ol>
+</section>
+{% endif %}

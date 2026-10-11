@@ -1,0 +1,49 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<div class="max-w-5xl">
+  <div class="mb-6 rounded-default border border-base-200 p-4">
+    <div><strong>{{ lot.article }}</strong> — emplacement {{ lot.emplacement }} — quantité en stock : <strong>{{ lot.quantite|floatformat:"-3" }}</strong></div>
+    <div>N° de coulée : <strong>{{ lot.numero_coulee|default:"—" }}</strong>
+      {% if lot.certificat %} — <a href="{{ lot.certificat.url }}" target="_blank">certificat matière</a>{% endif %}</div>
+  </div>
+
+  <h3 class="font-semibold mb-2">D'où il vient (réceptions)</h3>
+  {% if trace.receptions %}
+  <table class="w-full text-left mb-6">
+    <thead><tr><th class="py-1">Date</th><th>Réception</th><th>Fournisseur</th><th>Quantité</th></tr></thead>
+    <tbody>{% for r in trace.receptions %}
+      <tr class="border-t border-base-200"><td class="py-1">{{ r.mouvement.date_mouvement|date:"d/m/Y" }}</td>
+        <td>{{ r.reception.numero|default:r.mouvement.reference_origine }}</td>
+        <td>{{ r.reception.commande_fournisseur.fournisseur|default:"—" }}</td>
+        <td>{{ r.mouvement.quantite|floatformat:"-3" }}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="mb-6">Aucune réception enregistrée pour ce lot.</p>{% endif %}
+
+  <h3 class="font-semibold mb-2">Où il est parti (livraisons clients)</h3>
+  {% if trace.livraisons %}
+  <table class="w-full text-left mb-6">
+    <thead><tr><th class="py-1">Date</th><th>Bon de livraison</th><th>Client</th><th>Commande</th><th>Quantité</th></tr></thead>
+    <tbody>{% for l in trace.livraisons %}
+      <tr class="border-t border-base-200"><td class="py-1">{{ l.mouvement.date_mouvement|date:"d/m/Y" }}</td>
+        <td>{{ l.livraison.numero|default:l.mouvement.reference_origine }}{% if l.livraison.statut == "annulee" %} <span class="text-red-700">(annulée)</span>{% endif %}</td>
+        <td>{{ l.livraison.commande.client|default:"—" }}</td>
+        <td>{{ l.livraison.commande.numero|default:"—" }}</td>
+        <td>{{ l.mouvement.quantite|floatformat:"-3" }}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="mb-6">Aucune livraison client pour ce lot.</p>{% endif %}
+
+  {% if trace.autres %}
+  <h3 class="font-semibold mb-2">Autres mouvements</h3>
+  <table class="w-full text-left mb-6">
+    <thead><tr><th class="py-1">Date</th><th>Type</th><th>Quantité</th><th>Référence</th><th>Motif</th></tr></thead>
+    <tbody>{% for m in trace.autres %}
+      <tr class="border-t border-base-200"><td class="py-1">{{ m.date_mouvement|date:"d/m/Y" }}</td><td>{{ m.get_type_mouvement_display }}</td>
+        <td>{{ m.quantite|floatformat:"-3" }}</td><td>{{ m.reference_origine|default:"—" }}</td><td>{{ m.motif|default:"—" }}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+  <a href="{{ retour }}">Retour au lot</a>
+</div>
+{% endblock %}

@@ -1,20 +1,43 @@
-"""Imbrication (nesting) rectangulaire de pièces dans des feuilles de dimensions données.
+"""Imbrication (nesting) de pièces dans des feuilles de dimensions données.
 
-Approche retenue : chaque pièce est représentée par son rectangle englobant, avec rotation
-possible par pas de 90° si autorisée (`PieceDecoupe.rotation_autorisee` — à décocher quand le
-sens de la matière ou une contrainte d'orientation l'impose). Le compactage utilise un
-algorithme d'étagères ("shelf packing", variante Best-Fit Decreasing Height) : simple,
-déterministe, et qui se généralise naturellement à plusieurs feuilles.
+Approche retenue : chaque pièce est représentée par le rectangle englobant *de son orientation
+candidate* — rotation par pas de 5°/45°/90° selon `PieceDecoupe.pas_rotation_deg`, recalculé à
+partir de son contour réel (pas seulement de sa largeur/hauteur à 0°). Le compactage lui-même
+reste un algorithme d'étagères ("shelf packing", variante Best-Fit Decreasing Height) : simple,
+déterministe, et qui se généralise naturellement à plusieurs feuilles. Pour chaque pièce à
+placer, toutes les orientations candidates sont essayées sur l'étagère courante, les plus
+compactes (plus petite aire de rectangle englobant) en premier, et la première qui rentre est
+retenue.
 
-Ce n'est donc pas une imbrication polygonale exacte (No-Fit-Polygon) : le remplissage réel
-serait meilleur avec des pièces pivotées à un angle quelconque et glissées entre les
-concavités. Cette approximation par rectangle englobant est cependant standard pour un
-chiffrage — et le taux d'utilisation retourné est calculé à partir de la surface réelle des
-pièces (issue de leur contour, pas de leur rectangle englobant), ce qui donne une estimation
-matière prudente et réaliste malgré l'algorithme de placement simplifié.
+Ce n'est donc toujours pas une imbrication polygonale exacte (No-Fit-Polygon) : deux pièces ne
+peuvent pas s'imbriquer l'une dans les concavités de l'autre, seuls leurs rectangles englobants
+respectifs sont comparés. Mais contrairement à la version précédente (limitée à une rotation
+fixe 0°/90°), le rectangle englobant est maintenant évalué sous plusieurs angles, ce qui réduit
+sensiblement la perte de place sur des pièces non rectangulaires mal orientées dans leur
+fichier source. Le taux d'utilisation retourné reste calculé à partir de la surface réelle des
+pièces (issue de leur contour, pas de leur rectangle englobant), pour une estimation matière
+prudente et réaliste malgré l'algorithme de placement par rectangles englobants.
+
+Pourquoi `symetrie_autorisee` n'influence pas le placement ici : retourner une pièce (miroir)
+ne change JAMAIS la largeur ni la hauteur de son rectangle englobant, quelle que soit la forme
+— une réflexion est une isométrie qui préserve l'étendue de la pièce sur chaque axe, elle ne
+fait que changer le signe des coordonnées. Autrement dit, pour cet algorithme fondé sur des
+rectangles englobants, retourner une pièce n'ouvre jamais une possibilité de placement que la
+rotation seule n'explorait pas déjà — le moteur n'a donc jamais besoin de retourner une pièce
+pour la caser, et ne le fait jamais. La contrainte "pas de symétrie si gravure" est de ce fait
+toujours respectée, mais par construction plutôt que par un choix actif du moteur : elle n'aura
+d'effet observable sur le nombre de feuilles/le placement que le jour où une imbrication
+polygonale exacte (No-Fit-Polygon) remplacera cette approche par rectangles englobants — c'est
+seulement là qu'un retournement peut réellement faire gagner de la place en présentant à une
+pièce voisine un profil différent. `Placement.miroir` (toujours `False` aujourd'hui) et
+`ItemANester.symetrie_autorisee` sont conservés pour cette évolution future, sans être exploités
+ici.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+from shapely.affinity import rotate
+from shapely.geometry import Polygon
 
 
 @dataclass
@@ -23,8 +46,18 @@ class ItemANester:
     largeur_mm: float
     hauteur_mm: float
     surface_mm2: float
-    rotation_autorisee: bool
     quantite: int
+    pas_rotation_deg: int | None = None
+    symetrie_autorisee: bool = True
+    exterieur: list = field(default_factory=list)
+    trous: list = field(default_factory=list)  # utilisés par l'imbrication selon la forme (imbrication_forme.py)
+
+    def polygone(self):
+        """Contour réel si connu, sinon un rectangle synthétique largeur × hauteur — les deux
+        cas se traitent alors de façon strictement identique par `_orientations`."""
+        if len(self.exterieur) >= 3:
+            return Polygon(self.exterieur)
+        return Polygon([(0, 0), (self.largeur_mm, 0), (self.largeur_mm, self.hauteur_mm), (0, self.hauteur_mm)])
 
 
 @dataclass
@@ -36,6 +69,7 @@ class Placement:
     largeur_placee_mm: float
     hauteur_placee_mm: float
     rotation_deg: int
+    miroir: bool = False
 
 
 @dataclass
@@ -46,6 +80,7 @@ class ResultatImbrication:
     surface_feuilles_mm2: float
     taux_utilisation_pct: float
     pieces_non_placees: list
+    axe: str = "y"  # axe sur lequel la feuille se remplit : « y » (de bas en haut) ou « x » (de gauche à droite)
 
 
 class _Etagere:
@@ -84,30 +119,85 @@ class _Feuille:
         return 0.0, y_nouvelle
 
 
+def _angles_candidats(pas_rotation_deg):
+    if not pas_rotation_deg:
+        return [0]
+    nb = max(1, 360 // pas_rotation_deg)
+    return [i * pas_rotation_deg for i in range(nb)]
+
+
 def _orientations(item, largeur_utile, hauteur_utile):
-    """Renvoie les (largeur, hauteur, rotation) sous lesquelles la pièce tient dans une feuille vide."""
+    """Renvoie les (largeur, hauteur, rotation) de rectangle englobant sous lesquelles la pièce
+    tient dans une feuille vide, triées par aire croissante (les plus compactes d'abord —
+    heuristique simple pour limiter la place perdue).
+
+    Pas de candidats "miroir" ici : voir le docstring du module — un retournement ne change
+    jamais la largeur/hauteur du rectangle englobant, ce serait donc systématiquement écarté
+    par la déduplication ci-dessous sans jamais influencer un seul placement."""
+    polygone = item.polygone()
+    vus = set()
     options = []
-    if item.largeur_mm <= largeur_utile + 1e-6 and item.hauteur_mm <= hauteur_utile + 1e-6:
-        options.append((item.largeur_mm, item.hauteur_mm, 0))
-    if (
-        item.rotation_autorisee
-        and item.hauteur_mm <= largeur_utile + 1e-6
-        and item.largeur_mm <= hauteur_utile + 1e-6
-    ):
-        options.append((item.hauteur_mm, item.largeur_mm, 90))
+    for angle in _angles_candidats(item.pas_rotation_deg):
+        g = rotate(polygone, angle, origin=(0, 0)) if angle else polygone
+        minx, miny, maxx, maxy = g.bounds
+        largeur, hauteur = maxx - minx, maxy - miny
+        cle = (round(largeur, 2), round(hauteur, 2))
+        if cle in vus:
+            continue
+        vus.add(cle)
+        if largeur <= largeur_utile + 1e-6 and hauteur <= hauteur_utile + 1e-6:
+            options.append((largeur, hauteur, angle))
+    options.sort(key=lambda o: o[0] * o[1])
     return options
 
 
 def calculer_imbrication(
-    items, largeur_feuille_mm, longueur_feuille_mm, marge_bord_mm=0.0, espacement_pieces_mm=0.0
+    items,
+    largeur_feuille_mm,
+    longueur_feuille_mm,
+    marge_bord_mm=0.0,
+    espacement_pieces_mm=0.0,
+    direction="horizontal",
+    coin_depart="bas_gauche",
 ):
     """Place les `items` (avec leur quantité) sur autant de feuilles que nécessaire.
 
     `items` : itérable de `ItemANester`. Les pièces trop grandes pour tenir sur une feuille
-    vide (même seules) sont écartées et listées dans `pieces_non_placees`.
+    vide (même seules, sous quelque orientation autorisée que ce soit) sont écartées et
+    listées dans `pieces_non_placees`.
+
+    `direction` : "horizontal" (rangées remplies horizontalement, empilées verticalement — le
+    comportement historique) ou "vertical" (colonnes remplies verticalement, empilées
+    horizontalement). L'algorithme d'étagères lui-même ne change pas : en mode vertical, on lui
+    présente juste la feuille et chaque pièce avec largeur/hauteur inversées ("une étagère"
+    devient alors une colonne), puis on ré-inverse la position obtenue.
+
+    `coin_depart` : coin de la feuille où démarre le placement — "bas_gauche" (par défaut,
+    convention machine la plus courante), "bas_droite", "haut_gauche" ou "haut_droite".
+    L'algorithme calcule toujours en interne dans un repère canonique (origine en haut à
+    gauche) ; `coin_depart` ne fait que réfléchir les coordonnées obtenues selon l'axe
+    concerné, une fois le placement calculé.
     """
     largeur_utile = largeur_feuille_mm - 2 * marge_bord_mm
     hauteur_utile = longueur_feuille_mm - 2 * marge_bord_mm
+    vertical = direction == "vertical"
+    largeur_algo, hauteur_algo = (hauteur_utile, largeur_utile) if vertical else (largeur_utile, hauteur_utile)
+
+    def _placer(feuille, largeur, hauteur):
+        """Place une pièce (dimensions réelles largeur × hauteur) sur `feuille` et renvoie sa
+        position réelle (x, y), en tenant compte de `direction` et `coin_depart`."""
+        position = feuille.placer(hauteur, largeur, espacement_pieces_mm) if vertical else feuille.placer(
+            largeur, hauteur, espacement_pieces_mm
+        )
+        if position is None:
+            return None
+        a, b = position
+        x, y = (b, a) if vertical else (a, b)
+        if coin_depart in ("bas_gauche", "bas_droite"):
+            y = hauteur_utile - y - hauteur
+        if coin_depart in ("bas_droite", "haut_droite"):
+            x = largeur_utile - x - largeur
+        return x, y
 
     unites = []
     pieces_non_placees = []
@@ -130,7 +220,7 @@ def calculer_imbrication(
         place = False
         for numero_feuille, feuille in enumerate(feuilles, start=1):
             for largeur, hauteur, rotation in options:
-                position = feuille.placer(largeur, hauteur, espacement_pieces_mm)
+                position = _placer(feuille, largeur, hauteur)
                 if position is not None:
                     x, y = position
                     placements.append(
@@ -150,12 +240,12 @@ def calculer_imbrication(
                 break
 
         if not place:
-            feuille = _Feuille(largeur_utile, hauteur_utile)
+            feuille = _Feuille(largeur_algo, hauteur_algo)
             feuilles.append(feuille)
-            # Une feuille neuve peut toujours accueillir la première orientation valide,
+            # Une feuille neuve peut toujours accueillir la première orientation candidate,
             # puisque celle-ci a déjà été validée contre la zone utile complète.
             largeur, hauteur, rotation = options[0]
-            x, y = feuille.placer(largeur, hauteur, espacement_pieces_mm)
+            x, y = _placer(feuille, largeur, hauteur)
             placements.append(
                 Placement(
                     piece_id=item.piece_id,
@@ -180,3 +270,197 @@ def calculer_imbrication(
         taux_utilisation_pct=taux,
         pieces_non_placees=pieces_non_placees,
     )
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Placement plus dense : MaxRects (rectangles libres maximaux), pour le chiffrage de la matière.
+#
+# Même principe que l'étagère (pièces représentées par le rectangle englobant de leur orientation), mais chaque pièce
+# est posée dans le meilleur espace libre de la feuille entière (« best short side fit ») et non seulement dans la
+# ligne courante : les creux laissés par les pièces plus petites sont comblés. `imbriquer_meilleur` essaie plusieurs
+# variantes (étagères et MaxRects, plusieurs tris) et retient la plus économe — jamais pire que l'étagère seule.
+# ---------------------------------------------------------------------------------------------------------------------
+
+
+class _MaxRects:
+    def __init__(self, largeur, hauteur, score="bssf"):
+        self.libres = [(0.0, 0.0, largeur, hauteur)]
+        self.score = score
+
+    def placer(self, options, espacement):
+        """Pose la pièce dans le meilleur rectangle libre parmi ses orientations ; renvoie (x, y, largeur, hauteur, rotation) ou None."""
+        meilleur = None
+        for largeur, hauteur, rotation in options:
+            lw, lh = largeur + espacement, hauteur + espacement
+            for (x, y, w, h) in self.libres:
+                if lw <= w + 1e-6 and lh <= h + 1e-6:
+                    if self.score == "bl":  # « bas-gauche » : on tasse les pièces vers un bord (la feuille se vide d'un seul côté)
+                        score = (y + lh, x)
+                    else:  # « best short side fit » : espace libre le mieux ajusté
+                        score = (min(w - lw, h - lh), max(w - lw, h - lh))
+                    if meilleur is None or score < meilleur[0]:
+                        meilleur = (score, x, y, lw, lh, largeur, hauteur, rotation)
+        if meilleur is None:
+            return None
+        _, x, y, lw, lh, largeur, hauteur, rotation = meilleur
+        self._decouper(x, y, lw, lh)
+        return x, y, largeur, hauteur, rotation
+
+    def _decouper(self, px, py, pw, ph):
+        nouveaux = []
+        for (x, y, w, h) in self.libres:
+            if px >= x + w - 1e-9 or px + pw <= x + 1e-9 or py >= y + h - 1e-9 or py + ph <= y + 1e-9:
+                nouveaux.append((x, y, w, h))  # pas de chevauchement : inchangé
+                continue
+            if px > x + 1e-9:
+                nouveaux.append((x, y, px - x, h))
+            if px + pw < x + w - 1e-9:
+                nouveaux.append((px + pw, y, x + w - (px + pw), h))
+            if py > y + 1e-9:
+                nouveaux.append((x, y, w, py - y))
+            if py + ph < y + h - 1e-9:
+                nouveaux.append((x, py + ph, w, y + h - (py + ph)))
+        # on retire les rectangles entièrement contenus dans un autre
+        nouveaux.sort(key=lambda r: -r[2] * r[3])
+        gardes = []
+        for r in nouveaux:
+            if not any(
+                g[0] <= r[0] + 1e-9 and g[1] <= r[1] + 1e-9 and g[0] + g[2] >= r[0] + r[2] - 1e-9 and g[1] + g[3] >= r[1] + r[3] - 1e-9
+                for g in gardes
+            ):
+                gardes.append(r)
+        self.libres = gardes
+
+
+def _unites(items, largeur_utile, hauteur_utile):
+    unites, non_placees, surface = [], [], 0.0
+    for item in items:
+        if not _orientations(item, largeur_utile, hauteur_utile):
+            non_placees.append(item.piece_id)
+            continue
+        unites.extend([item] * item.quantite)
+        surface += item.surface_mm2 * item.quantite
+    return unites, non_placees, surface
+
+
+def _resultat(placements, nb_feuilles, surface_pieces, largeur_feuille, longueur_feuille, non_placees):
+    surface_feuilles = nb_feuilles * largeur_feuille * longueur_feuille
+    return ResultatImbrication(
+        placements=placements, nb_feuilles=nb_feuilles, surface_pieces_mm2=surface_pieces, surface_feuilles_mm2=surface_feuilles,
+        taux_utilisation_pct=(surface_pieces / surface_feuilles * 100) if surface_feuilles else 0.0, pieces_non_placees=non_placees,
+    )
+
+
+def _imbriquer_maxrects(items, largeur_feuille_mm, longueur_feuille_mm, marge_bord_mm, espacement_pieces_mm, tri, score="bssf"):
+    largeur_utile = largeur_feuille_mm - 2 * marge_bord_mm
+    hauteur_utile = longueur_feuille_mm - 2 * marge_bord_mm
+    unites, non_placees, surface = _unites(items, largeur_utile, hauteur_utile)
+    cle = (lambda it: -it.largeur_mm * it.hauteur_mm) if tri == "aire" else (lambda it: -max(it.largeur_mm, it.hauteur_mm))
+    unites.sort(key=cle)
+    options_par_piece = {}
+    feuilles, placements = [], []
+    for item in unites:
+        options = options_par_piece.get(item.piece_id)
+        if options is None:
+            options = options_par_piece[item.piece_id] = _orientations(item, largeur_utile, hauteur_utile)
+        resultat = None
+        for numero, feuille in enumerate(feuilles, start=1):
+            resultat = feuille.placer(options, espacement_pieces_mm)
+            if resultat:
+                break
+        if not resultat:
+            feuille = _MaxRects(largeur_utile + espacement_pieces_mm, hauteur_utile + espacement_pieces_mm, score)
+            feuilles.append(feuille)
+            numero = len(feuilles)
+            resultat = feuille.placer(options, espacement_pieces_mm)
+        x, y, largeur, hauteur, rotation = resultat
+        placements.append(Placement(
+            piece_id=item.piece_id, numero_feuille=numero, x_mm=marge_bord_mm + x, y_mm=marge_bord_mm + y,
+            largeur_placee_mm=largeur, hauteur_placee_mm=hauteur, rotation_deg=rotation,
+        ))
+    return _resultat(placements, len(feuilles), surface, largeur_feuille_mm, longueur_feuille_mm, non_placees)
+
+
+def etendue_derniere_feuille_mm(resultat, marge_bord_mm=0.0):
+    """Hauteur utilisée (bord compris) de la dernière feuille : le reste de la feuille est une chute réutilisable."""
+    if not resultat.nb_feuilles:
+        return 0.0
+    derniere = [p for p in resultat.placements if p.numero_feuille == resultat.nb_feuilles]
+    if not derniere:
+        return 0.0
+    # bande occupée (les pièces sont tassées contre un bord de la feuille) + les deux marges de bord
+    if getattr(resultat, "axe", "y") == "x":
+        return max(p.x_mm + p.largeur_placee_mm for p in derniere) - min(p.x_mm for p in derniere) + 2 * marge_bord_mm
+    return max(p.y_mm + p.hauteur_placee_mm for p in derniere) - min(p.y_mm for p in derniere) + 2 * marge_bord_mm
+
+
+def _transposer_item(item):
+    """Même pièce vue dans le repère dont les axes x et y sont échangés (symétrie par rapport à la diagonale)."""
+    from dataclasses import replace
+
+    def echange(anneau):
+        return [(y, x) for x, y in anneau]
+
+    return replace(
+        item, largeur_mm=item.hauteur_mm, hauteur_mm=item.largeur_mm,
+        exterieur=echange(item.exterieur), trous=[echange(t) for t in item.trous],
+    )
+
+
+def _retransposer(resultat):
+    """Résultat d'une imbrication faite dans le repère transposé, ramené au repère réel. La transposition d'une pièce tournée de
+    θ est la pièce d'origine tournée de −θ : aucune pièce n'est retournée (miroir), les positions et dimensions s'échangent."""
+    placements = [
+        Placement(
+            piece_id=p.piece_id, numero_feuille=p.numero_feuille, x_mm=p.y_mm, y_mm=p.x_mm, largeur_placee_mm=p.hauteur_placee_mm,
+            hauteur_placee_mm=p.largeur_placee_mm, rotation_deg=(-p.rotation_deg) % 360, miroir=p.miroir,
+        )
+        for p in resultat.placements
+    ]
+    return ResultatImbrication(
+        placements=placements, nb_feuilles=resultat.nb_feuilles, surface_pieces_mm2=resultat.surface_pieces_mm2,
+        surface_feuilles_mm2=resultat.surface_feuilles_mm2, taux_utilisation_pct=resultat.taux_utilisation_pct,
+        pieces_non_placees=resultat.pieces_non_placees, axe="x",
+    )
+
+
+def _caler_sur_l_origine(resultat, marge_bord_mm):
+    """Ramène sur chaque feuille la bande de pièces contre le bord y = 0 (marge de bord comprise) : la chute de bout est alors
+    toujours à l'extrémité opposée, quelle que soit la variante qui a gagné (certaines tassent vers le haut)."""
+    from dataclasses import replace
+
+    decalage = {}
+    for p in resultat.placements:
+        decalage[p.numero_feuille] = min(decalage.get(p.numero_feuille, p.y_mm), p.y_mm)
+    placements = [replace(p, y_mm=p.y_mm - max(decalage[p.numero_feuille] - marge_bord_mm, 0.0)) for p in resultat.placements]
+    return replace(resultat, placements=placements)
+
+
+def imbriquer_meilleur(items, largeur_feuille_mm, longueur_feuille_mm, marge_bord_mm=0.0, espacement_pieces_mm=0.0, forme=False, axe="y"):
+    """Meilleur placement parmi plusieurs variantes : le moins de feuilles, puis la plus petite étendue utilisée sur la
+    dernière feuille (ce qui reste d'une feuille entamée se récupère). Toujours au moins aussi bon que l'étagère.
+    Avec `forme`, l'imbrication selon la forme réelle des pièces (imbrication_forme.py) entre dans la comparaison ; si elle
+    n'est pas possible (pas de contour, contrôle géométrique refusé), les rectangles seuls sont comparés.
+    `axe` : sens de remplissage de la feuille (x : de gauche à droite, la chute de bout est à droite sur toute la hauteur ; y :
+    de bas en haut, la chute est en haut). La feuille s'étend de 0 à `largeur_feuille_mm` en x et de 0 à `longueur_feuille_mm`
+    en y. Pour « x », le problème est résolu dans le repère transposé puis ramené, sans jamais retourner une pièce."""
+    if axe == "x":
+        transposes = [_transposer_item(i) for i in items]
+        return _retransposer(imbriquer_meilleur(transposes, longueur_feuille_mm, largeur_feuille_mm, marge_bord_mm, espacement_pieces_mm, forme, axe="y"))
+    candidats = [
+        _imbriquer_maxrects(items, largeur_feuille_mm, longueur_feuille_mm, marge_bord_mm, espacement_pieces_mm, tri, score)
+        for tri in ("aire", "dimension")
+        for score in ("bssf", "bl")
+    ]
+    candidats.insert(0, calculer_imbrication(items, largeur_feuille_mm, longueur_feuille_mm, marge_bord_mm, espacement_pieces_mm))
+    if forme:
+        from .imbrication_forme import ImbricationFormeImpossible, imbriquer_forme
+
+        try:
+            candidat = imbriquer_forme(items, largeur_feuille_mm, longueur_feuille_mm, marge_bord_mm, espacement_pieces_mm)
+            if not candidat.pieces_non_placees:
+                candidats.append(candidat)
+        except ImbricationFormeImpossible:
+            pass
+    meilleur = min(candidats, key=lambda r: (r.nb_feuilles, etendue_derniere_feuille_mm(r, marge_bord_mm)))
+    return _caler_sur_l_origine(meilleur, marge_bord_mm)

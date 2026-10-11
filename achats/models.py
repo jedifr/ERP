@@ -1,13 +1,16 @@
+from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, transaction
 from django.db.models import Q
 from django.utils import timezone
 
 from chiffrage.models import CommandeLigne
 from commercial.models import TauxTVA, Tiers
 from comptabilite.models import PosteGestion
-from stock.models import AlerteStock, Lot, MouvementStock
+from stock.models import AlerteStock, Lot, MouvementStock, stock_actif_pour
 from technique.models import Article, DateRangeHistoriqueMixin
+from comptes.champs import ChampDecimal
+from comptes.montants import MONTANT, PRIX, ZERO, D, D0, arrondir
 
 
 class AchatsError(Exception):
@@ -80,9 +83,9 @@ class TarifAchatArticle(DateRangeHistoriqueMixin, models.Model):
     article_fournisseur = models.ForeignKey(
         ArticleFournisseur, verbose_name="fournisseur de l'article", on_delete=models.CASCADE, related_name="tarifs"
     )
-    prix_unitaire = models.FloatField("prix unitaire", help_text="€, prix d'achat proposé par ce fournisseur")
-    frais_port = models.FloatField(
-        "frais de port", null=True, blank=True, help_text="€, forfait de livraison associé à ce tarif (facultatif)"
+    prix_unitaire = ChampDecimal("prix unitaire", help_text="€, prix d'achat proposé par ce fournisseur", **PRIX)
+    frais_port = ChampDecimal(
+        "frais de port", null=True, blank=True, help_text="€, forfait de livraison associé à ce tarif (facultatif)", **MONTANT,
     )
     date_debut = models.DateField("date de début")
     date_fin = models.DateField("date de fin", null=True, blank=True)
@@ -171,7 +174,7 @@ class LigneCommandeFournisseur(models.Model):
         ),
     )
     quantite_commandee = models.FloatField("quantité commandée")
-    prix_unitaire_achat = models.FloatField("prix unitaire d'achat")
+    prix_unitaire_achat = ChampDecimal("prix unitaire d'achat", **PRIX)
     taux_tva = models.ForeignKey(
         TauxTVA,
         verbose_name="taux de TVA",
@@ -196,14 +199,14 @@ class LigneCommandeFournisseur(models.Model):
 
     @property
     def montant_ht(self):
-        return self.prix_unitaire_achat * self.quantite_commandee
+        return arrondir(D(self.prix_unitaire_achat) * D(self.quantite_commandee))
 
     montant_ht.fget.short_description = "Montant HT"
 
     @property
     def montant_ttc(self):
-        taux = self.taux_tva.taux if self.taux_tva_id else 0
-        return self.montant_ht * (1 + taux / 100)
+        taux = D0(self.taux_tva.taux) if self.taux_tva_id else ZERO
+        return arrondir(self.montant_ht * (1 + taux / 100))
 
     montant_ttc.fget.short_description = "Montant TTC"
 
@@ -265,6 +268,24 @@ class ReceptionLigne(models.Model):
         related_name="receptions_lignes",
     )
     quantite_recue = models.FloatField("quantité reçue")
+    lot = models.ForeignKey(
+        Lot, verbose_name="lot de destination", on_delete=models.PROTECT, null=True, blank=True,
+        related_name="receptions_lignes",
+        help_text="Lot existant qui reçoit cette quantité. Laisser vide pour le déduire du n° de coulée.",
+    )
+    emplacement = models.ForeignKey(
+        "stock.Emplacement", verbose_name="emplacement", on_delete=models.PROTECT, null=True, blank=True,
+        related_name="receptions_lignes",
+        help_text="Emplacement du lot, nécessaire pour créer un nouveau lot.",
+    )
+    numero_coulee = models.CharField(
+        "n° de coulée", max_length=100, blank=True,
+        help_text="Un n° déjà connu complète son lot ; un nouveau n° crée un lot (traçabilité matière).",
+    )
+    certificat = models.FileField(
+        "certificat matière (3.1)", upload_to="stock/certificats/%Y/", blank=True,
+        help_text="Rattaché au lot de la coulée s'il n'en a pas encore.",
+    )
 
     class Meta:
         verbose_name = "Ligne de réception"
@@ -288,42 +309,87 @@ class ReceptionLigne(models.Model):
 
     def save(self, *args, **kwargs):
         creation = self.pk is None
-        super().save(*args, **kwargs)
-        if creation:
+        if not creation:
+            return super().save(*args, **kwargs)
+        # Tout ou rien : si le lot de destination est introuvable ou ambigu (AchatsError), ni la
+        # ligne ni le cumul reçu ne doivent être enregistrés.
+        with transaction.atomic():
+            super().save(*args, **kwargs)
             self._appliquer()
 
     def _appliquer(self):
         ligne = self.ligne_commande_fournisseur
+
+        # Le lot est résolu AVANT toute mise à jour : s'il échoue, rien n'a bougé.
+        lot = None
+        if ligne.article_id is not None:
+            lot = self._resoudre_lot(ligne.article)
+
         LigneCommandeFournisseur.objects.filter(pk=ligne.pk).update(
             quantite_recue=models.F("quantite_recue") + self.quantite_recue
         )
 
-        if ligne.article_id is None:
-            # Ligne "poste de gestion" (charge générale sans article, ex.
-            # assurance) : pas de stock à mouvementer, seul le cumul
-            # quantite_recue (mis à jour ci-dessus) a un sens ici.
+        if lot is None:
+            # Ligne "poste de gestion" (charge générale sans article, ex. assurance) : pas de
+            # stock à mouvementer, seul le cumul quantite_recue a un sens ici.
             return
 
-        lot = self._lot_unique_pour_article(ligne.article)
         MouvementStock.objects.create(
             lot=lot,
             type_mouvement=MouvementStock.TypeMouvement.ENTREE,
             quantite=self.quantite_recue,
             date_mouvement=self.reception.date_reception,
             reference_origine=f"RECEPTION-{self.reception.numero}",
+            cout_unitaire=ligne.prix_unitaire_achat,
         )
+
+    def _resoudre_lot(self, article):
+        """Lot qui reçoit la marchandise : le lot choisi ; sinon celui de la coulée (créé au besoin,
+        avec son certificat) ; sinon, comme avant, l'unique lot de l'article."""
+        if not stock_actif_pour(article):
+            # Pas de stock (société sans gestion de stock, ou article non géré en stock) : la réception
+            # n'enregistre que la quantité reçue. Désigner un lot pour un tel article est une erreur.
+            if settings.STOCK_ACTIF and (self.lot_id or self.numero_coulee or self.emplacement_id):
+                raise AchatsError(f"L'article « {article} » n'est pas géré en stock : pas de lot à alimenter.")
+            return None
+        if self.lot_id:
+            if self.lot.article_id != article.pk:
+                raise AchatsError(f"Le lot choisi ({self.lot}) n'est pas un lot de l'article « {article} ».")
+            lot = self.lot
+        elif self.numero_coulee or self.emplacement_id:
+            filtres = {"article": article}
+            if self.numero_coulee:
+                filtres["numero_coulee"] = self.numero_coulee
+            if self.emplacement_id:
+                filtres["emplacement"] = self.emplacement
+            lot = Lot.objects.filter(**filtres).order_by("id").first()
+            if lot is None:
+                if not self.emplacement_id:
+                    raise AchatsError(
+                        f"Précisez l'emplacement pour créer le lot de la coulée « {self.numero_coulee} »."
+                    )
+                lot = Lot.objects.create(
+                    article=article, emplacement=self.emplacement, numero_coulee=self.numero_coulee
+                )
+        else:
+            return self._lot_unique_pour_article(article)
+        if self.certificat and not lot.certificat:
+            lot.certificat.name = self.certificat.name
+            lot.save(update_fields=["certificat"])
+        return lot
 
     @staticmethod
     def _lot_unique_pour_article(article):
         lots = list(Lot.objects.filter(article=article))
         if len(lots) == 0:
             raise AchatsError(
-                f"Aucun lot existant pour l'article « {article} ». Créez-en un (module Stock) avant de réceptionner."
+                f"Aucun lot existant pour l'article « {article} ». Indiquez un emplacement (et un n° de "
+                "coulée) pour en créer un, ou créez-le dans le module Stock."
             )
         if len(lots) > 1:
             raise AchatsError(
-                f"Plusieurs lots existent pour l'article « {article} » : réception automatique non "
-                "applicable, mettez à jour le stock manuellement."
+                f"Plusieurs lots existent pour l'article « {article} » : choisissez le lot de destination "
+                "ou indiquez un n° de coulée."
             )
         return lots[0]
 
@@ -346,9 +412,19 @@ class FactureFournisseur(models.Model):
         help_text="Numéro de facture tel qu'indiqué par le fournisseur (distinct du numéro interne ci-dessus)",
     )
     date_facture = models.DateField("date de facture")
-    montant_ht = models.FloatField("montant HT", null=True, blank=True)
-    montant_ttc = models.FloatField("montant TTC", null=True, blank=True)
+    montant_ht = ChampDecimal("montant HT", null=True, blank=True, **MONTANT)
+    montant_ttc = ChampDecimal("montant TTC", null=True, blank=True, **MONTANT)
     statut_paiement = models.CharField("statut de paiement", max_length=50, blank=True)
+    autoliquidation = models.BooleanField(
+        "autoliquidation de la TVA", null=True, blank=True,
+        help_text="Facture d'un fournisseur étranger sans TVA : l'ERP comptabilise la TVA à la fois déductible et due. Vide : automatique "
+                  "selon le régime fiscal du fournisseur (intracommunautaire ou hors UE : oui). Choisir « Non » pour une importation de "
+                  "marchandises dont la TVA est payée à la douane.",
+    )
+    date_paiement = models.DateField(
+        "date de règlement", null=True, blank=True,
+        help_text="Date à laquelle la facture a été réglée au fournisseur : elle alimente le journal de banque de l'export comptable.",
+    )
 
     class Meta:
         verbose_name = "Facture fournisseur"
@@ -357,3 +433,12 @@ class FactureFournisseur(models.Model):
 
     def __str__(self):
         return self.numero
+
+    @property
+    def est_en_autoliquidation(self):
+        """Choix explicite de la facture, à défaut selon le régime fiscal du fournisseur (UE ou hors UE : autoliquidation)."""
+        if self.autoliquidation is not None:
+            return self.autoliquidation
+        from commercial.models import Tiers
+
+        return self.commande_fournisseur.fournisseur.regime_fiscal in (Tiers.RegimeFiscal.INTRA_UE, Tiers.RegimeFiscal.HORS_UE)

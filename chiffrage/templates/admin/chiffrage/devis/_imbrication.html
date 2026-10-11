@@ -1,0 +1,130 @@
+{% load l10n dp_filtres %}
+{% if sans_format %}<p class="dp-aide">Aucun format de tôle actif : ajoutez-en dans le menu « Formats de tôle ».</p>{% endif %}
+{% for b in blocs %}
+<div class="dp-groupe" id="{{ b.groupe.ancre }}" data-cle="{{ b.cle }}">
+  <h3 class="dp-groupe-titre">Imbrication — {{ b.groupe.libelle }} <span class="dp-groupe-nb">{{ b.groupe.pieces|length }} pièce{{ b.groupe.pieces|length|pluralize }}{% if b.groupe.exclues %} · {{ b.groupe.exclues|length }} exclue{{ b.groupe.exclues|length|pluralize }}{% endif %}</span></h3>
+  {% if b.avertissement %}<div class="dp-message dp-message-ko">{{ b.avertissement }}{% if b.avertissement_lien %} <a class="dp-lien" href="{{ b.avertissement_lien.0 }}" target="_blank" rel="noopener">{{ b.avertissement_lien.1 }} ↗</a>{% endif %}</div>{% endif %}
+  <div class="dp-barre">
+    <label>Tôle
+      <select data-i="tole">
+        <option value="">{% if b.toles %}— sans coût matière —{% else %}Aucune tôle correspondante{% endif %}</option>
+        {% for t in b.toles %}<option value="{{ t.pk }}" {% if b.tole and t.pk == b.tole.pk %}selected{% endif %}>{{ t.reference }}{% if t.libelle %} — {{ t.libelle }}{% endif %}</option>{% endfor %}
+      </select>
+    </label>
+    <label title="Bande non découpée sur le pourtour de la tôle : selon la matière, l'épaisseur et le procédé (paramètres de coupe). Modifiez la valeur pour l'imposer ; videz le champ pour revenir au calcul automatique.">Bord de tôle (mm){% if b.marge_auto %} <em class="dp-auto">auto</em>{% endif %}<input type="text" inputmode="decimal" data-i="marge" data-auto="{% if b.marge_auto %}1{% else %}0{% endif %}" placeholder="auto" value="{{ b.marge|unlocalize }}"></label>
+    <label>Chute récupérable (%)<input type="text" inputmode="decimal" data-i="chute" value="{{ b.chute|unlocalize }}"></label>
+    <label>Remplissage
+      <select data-i="sens">{% for v, l in b.sens_choix %}<option value="{{ v }}" {% if v == b.sens %}selected{% endif %}>{{ l }}</option>{% endfor %}</select>
+    </label>
+    <label>Départ
+      <select data-i="coin">{% for v, l in b.coin_choix %}<option value="{{ v }}" {% if v == b.coin %}selected{% endif %}>{{ l }}</option>{% endfor %}</select>
+    </label>
+    <label class="dp-case" title="Tient compte du contour réel des pièces (trous compris) et non de leur seul rectangle : moins de feuilles, calcul plus long."><input type="checkbox" data-i="forme" {% if b.forme %}checked{% endif %}> Selon la forme</label>
+    {% if b.resultat %}<span class="dp-espacement">Écart entre pièces : <strong>{{ b.resultat.espacement_mm|floatformat:"-1" }} mm</strong></span>{% endif %}
+  </div>
+  {% if not b.toles %}{% if b.regle %}<p class="dp-aide">Aucune tôle {{ b.groupe.matiere.nom }} de {{ b.groupe.epaisseur|floatformat:"-2" }} mm en base. La règle « {{ b.regle.nom }} » créerait <strong>{{ b.regle.reference }}</strong> ({{ b.regle.libelle }}, {{ b.regle.cout }}).
+    {% if editable %}<button type="button" class="dp-creer-tole" data-cle="{{ b.cle }}" data-format="{{ b.regle.format }}">Créer cette tôle</button>{% endif %}
+    <a class="dp-lien" href="{{ b.lien_creer_tole }}" target="_blank" rel="noopener">ou la saisir à la main ↗</a></p>
+  {% else %}<p class="dp-aide">Aucune tôle {{ b.groupe.matiere.nom }} de {{ b.groupe.epaisseur|floatformat:"-2" }} mm en base : créez l'article matière première (nature « Matière première », matière {{ b.groupe.matiere.nom }}{% if b.groupe.matiere.famille %} ou une nuance de la famille {{ b.groupe.matiere.famille.nom }}{% endif %}, épaisseur {{ b.groupe.epaisseur|floatformat:"-2" }} mm, unité et coût) pour chiffrer la matière. <a class="dp-lien" href="{{ b.lien_creer_tole }}" target="_blank" rel="noopener">Créer la tôle ↗</a>{% if b.epaisseurs_toles %} Épaisseurs déjà en base pour cette matière : {% for e in b.epaisseurs_toles %}{{ e|floatformat:"-2" }} mm{% if not forloop.last %}, {% endif %}{% endfor %}.{% else %} Aucune tôle n'existe encore pour cette matière.{% endif %} Ou <a class="dp-lien" href="{{ b.lien_creer_regle }}" target="_blank" rel="noopener">définissez une règle de création ↗</a> pour créer les prochaines en un clic.</p>{% endif %}{% endif %}
+  {% if b.erreur %}
+    <div class="dp-message dp-message-ko">{{ b.erreur }}</div>
+  {% else %}
+    <div class="dp-travail">
+    <div class="dp-feuilles">
+      {% for f in b.feuilles %}
+        <figure class="dp-feuille">
+          <figcaption>Feuille {{ f.numero }} sur {{ b.resultat.nb_feuilles }} · {{ f.nb_pieces }} pièce{{ f.nb_pieces|pluralize }}{% if f.partielle and b.resultat.nb_feuilles > 1 %} · <strong class="dp-chute-titre">chute de bout {{ b.resultat.chute_bout_mm2|mm2_en_m2|floatformat:2 }} m²</strong>{% endif %}</figcaption>
+          {{ f.svg|safe }}
+        </figure>
+      {% endfor %}
+    </div>
+    <aside class="dp-bilan">
+      <div><span>Tôles complètes<small>{{ b.resultat.nb_feuilles }} × {{ b.resultat.largeur_x_mm|floatformat:"-1" }} × {{ b.resultat.hauteur_y_mm|floatformat:"-1" }} mm</small></span><b>{{ b.resultat.surface_feuilles_mm2|mm2_en_m2|floatformat:2 }} m²</b></div>
+      <div class="dp-moins"><span>− Chute de bout<small>{% if b.resultat.chute_bout %}dernière feuille : bande de {{ b.resultat.chute_bout.2|floatformat:0 }} × {{ b.resultat.chute_bout.3|floatformat:0 }} mm{% else %}aucune : feuille pleine{% endif %}</small></span><b>− {{ b.resultat.chute_bout_mm2|mm2_en_m2|floatformat:2 }} m²</b></div>
+      <div class="dp-total"><span>= Surface consommée</span><b>{{ b.resultat.surface_consommee_m2|floatformat:2 }} m²</b></div>
+      <div><span>Pièces (surface nette)<small>utilisation {{ b.resultat.taux_utilisation_pct|floatformat:0 }} %</small></span><b>{{ b.resultat.surface_pieces_mm2|mm2_en_m2|floatformat:2 }} m²</b></div>
+      <div><span>Chutes entre les pièces<small>comprises dans la surface consommée</small></span><b>{{ b.resultat.surface_chutes_internes_mm2|mm2_en_m2|floatformat:2 }} m²</b></div>
+      {% if b.resultat.surface_recuperee_mm2 > 1 %}<div class="dp-moins"><span>− Chute récupérée ({{ b.chute|floatformat:"-1" }} %)<small>non facturée</small></span><b>− {{ b.resultat.surface_recuperee_mm2|mm2_en_m2|floatformat:2 }} m²</b></div>
+      <div class="dp-total"><span>= Surface facturée</span><b>{{ b.resultat.surface_facturee_mm2|mm2_en_m2|floatformat:2 }} m²</b></div>{% endif %}
+      {% if b.reglage and b.reglage.minutes_total %}<div><span>Mise en place machine<small>{{ b.reglage.feuilles }} tôle{{ b.reglage.feuilles|pluralize }}{% if b.reglage.minutes_par_tole %} × {{ b.reglage.minutes_par_tole|floatformat:"-1" }} min{% endif %} · une fois par tôle{% if not b.retenu %} · estimé : tôle non retenue{% endif %}</small></span><b>{{ b.reglage.minutes_total|floatformat:"-1" }} min</b></div>{% endif %}
+      <div class="dp-prix"><span>Coût matière du lot<small>{% if b.tole %}sur la surface {% if b.resultat.surface_recuperee_mm2 > 1 %}facturée{% else %}consommée{% endif %}{% elif b.lien_creer_tole %}<a class="dp-lien" href="{{ b.lien_creer_tole }}" target="_blank" rel="noopener">créer la tôle ↗</a>{% else %}choisissez une tôle{% endif %}</small></span><b>{% if b.resultat.cout_total is not None %}{{ b.resultat.cout_total|floatformat:2 }} €{% else %}—{% endif %}</b></div>
+    </aside>
+    </div>
+    {% if b.feuilles_masquees %}<p class="dp-aide">{{ b.feuilles_masquees }} feuille{{ b.feuilles_masquees|pluralize }} de plus non dessinée{{ b.feuilles_masquees|pluralize }} (les {{ b.feuilles|length }} premières sont affichées).</p>{% endif %}
+    <div class="dp-legende">
+      {% for p, c in b.legende %}<span><i style="background:{{ c.0 }};border-color:{{ c.1 }}"></i>{{ p.nom }} × {{ p.quantite }}</span>{% endfor %}
+      <span><i style="background:#e5e7eb"></i>Chute entre les pièces (consommée)</span><span><i class="dp-hachure"></i>Chute de bout (non consommée)</span><span class="dp-legende-note">Format {{ b.format }} · {{ b.resultat.nb_feuilles }} feuille{{ b.resultat.nb_feuilles|pluralize }}</span>
+    </div>
+    <table class="dp-table">
+      <caption>Comparaison des formats de tôle</caption>
+      <thead><tr><th>Format</th><th class="n">Feuilles</th><th class="n">Utilisation</th><th class="n">Surface consommée</th><th class="n">Coût matière</th></tr></thead>
+      <tbody>
+      {% for l in b.lignes %}
+        <tr class="dp-format {% if l.choisi %}dp-choisi{% endif %} {% if l.meilleur %}dp-meilleur{% endif %}" data-i="format" data-valeur="{{ l.format.pk }}" tabindex="0">
+          <td>{{ l.format }}{% if l.meilleur %} <span class="dp-etiquette">le moins cher</span>{% endif %}{% if l.choisi %} <span class="dp-etiquette dp-etiquette-choisi">affiché</span>{% endif %}</td>
+          {% if l.resultat %}
+            <td class="n">{{ l.resultat.nb_feuilles }}</td><td class="n">{{ l.resultat.taux_utilisation_pct|floatformat:0 }} %</td>
+            <td class="n">{{ l.resultat.surface_consommee_m2|floatformat:2 }} m²</td>
+            <td class="n">{% if l.resultat.cout_total is not None %}{{ l.resultat.cout_total|floatformat:2 }} €{% else %}—{% endif %}</td>
+          {% else %}<td colspan="4" class="dp-erreur-ligne">{{ l.erreur }}</td>{% endif %}
+        </tr>
+      {% endfor %}
+      {% for f in b.non_calcules %}
+        <tr class="dp-format dp-non-calcule"><td>{{ f }} <span class="dp-etiquette">priorité {{ f.priorite }}</span></td><td colspan="4">non calculé : un format de priorité inférieure suffit</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% if b.message_paliers %}<p class="dp-aide dp-attention">{{ b.message_paliers }}</p>{% endif %}
+    {% if b.non_calcules %}<p class="dp-aide"><button type="button" class="dp-tout-formats" data-cle="{{ b.cle }}">Calculer tous les formats</button> Les formats de priorité inférieure ne sont essayés que si les chutes entre pièces dépassent le seuil des réglages d'imbrication.</p>{% endif %}
+    <table class="dp-table">
+      <caption>Matière répartie entre les pièces (au prorata de leur surface)</caption>
+      <thead><tr><th>Pièce</th><th class="n">Quantité</th><th class="n">Matière par pièce</th><th class="n">Total matière</th></tr></thead>
+      <tbody>
+      {% for r in b.resultat.par_piece %}
+        <tr><td>{{ r.piece.nom }}</td><td class="n">{{ r.quantite }}</td>
+          <td class="n">{% if r.unitaire is not None %}{{ r.unitaire|floatformat:2 }} €{% else %}—{% endif %}</td>
+          <td class="n">{% if r.total is not None %}{{ r.total|floatformat:2 }} €{% else %}—{% endif %}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <div class="dp-pied">
+      <span class="dp-aide">{% if b.retenu %}<strong class="dp-retenu">✓ Retenu</strong> : cette tôle et ce format serviront au chiffrage.{% else %}Le choix n'est enregistré que si vous le retenez.{% endif %}</span>
+      {% if editable and not b.retenu %}<button type="button" class="dp-retenir" data-format="{{ b.format.pk }}">Retenir « {{ b.format }} »</button>{% endif %}
+    </div>
+  {% endif %}
+  {% for p, raison in b.groupe.exclues %}<p class="dp-aide dp-exclue">Exclue de l'imbrication : <a class="dp-lien" href="#dp-piece-{{ p.pk }}"><strong>{{ p.nom }}</strong></a> — {{ raison }} <a class="dp-lien" href="{% url 'admin:decoupe_parametrecoupe_changelist' %}?procede={{ b.groupe.procede }}" target="_blank" rel="noopener">Voir les paramètres de coupe ↗</a></p>{% endfor %}
+</div>
+{% endfor %}
+{% if a_regler %}<p class="dp-aide">À régler avant imbrication : {% for p, raison in a_regler %}<a class="dp-lien" href="#dp-piece-{{ p.pk }}"><strong>{{ p.nom }}</strong></a> ({{ raison }}){% if not forloop.last %}, {% endif %}{% endfor %}.</p>{% endif %}
+
+{% for b in blocs_profils %}{% include "admin/chiffrage/devis/_imbrication_profils.html" %}{% endfor %}
+
+{% if chiffrage %}
+<div class="dp-groupe dp-chiffrage">
+  <h3 class="dp-groupe-titre">Chiffrage des pièces <span class="dp-groupe-nb">matière répartie par l'imbrication retenue + temps de coupe de la gamme</span></h3>
+  <table class="dp-table">
+    <thead><tr><th>Pièce</th><th class="n">Qté</th><th class="n">Temps de coupe / pièce</th><th class="n">Matière HT</th><th class="n">Opérations HT</th><th class="n">Prix unitaire HT</th><th class="n">Total HT</th><th>Dans le devis</th></tr></thead>
+    <tbody>
+    {% for c in chiffrage %}
+      <tr>
+        <td>{{ c.piece.nom }}</td><td class="n">{{ c.piece.quantite }}</td>
+        {% if c.pret %}
+          <td class="n">{% if c.temps_min is not None %}{{ c.temps_min|floatformat:2 }} min{% else %}—{% endif %}</td>
+          <td class="n">{{ c.prix.prix_vente_matiere|floatformat:2 }} €</td>
+          <td class="n">{{ c.prix.prix_vente_operations|floatformat:2 }} €</td>
+          <td class="n">{{ c.prix.prix_vente_unitaire|floatformat:2 }} €</td>
+          <td class="n"><strong>{{ c.prix.prix_vente_total|floatformat:2 }} €</strong></td>
+        {% else %}
+          <td colspan="5" class="dp-erreur-ligne">À compléter : {{ c.raison }}{% if c.lien %} <a class="dp-lien" href="{{ c.lien.0 }}"{% if c.lien.2 %} target="_blank" rel="noopener"{% endif %}>{{ c.lien.1 }}{% if c.lien.2 %} ↗{% else %} ↓{% endif %}</a>{% endif %}</td>
+        {% endif %}
+        <td>{% if c.ligne %}<span class="dp-etiquette dp-etiquette-choisi">oui</span>{% else %}<span class="dp-aide">non</span>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <div class="dp-pied">
+    <span class="dp-aide">Les prix reprennent les marges du devis (matière, poste). Une pièce déjà dans le devis voit sa quantité et son prix mis à jour.</span>
+    {% if peut_ajouter %}<button type="button" class="dp-ajouter" {% if not chiffrage|length %}disabled{% endif %}>Ajouter au devis</button>{% endif %}
+  </div>
+</div>
+{% endif %}

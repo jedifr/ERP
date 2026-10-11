@@ -11,6 +11,9 @@ class RegleCodificationAdmin(ModelAdmin):
         "prefixe",
         "nombre_chiffres",
         "reinitialisation",
+        "format_annee",
         "compteur_actuel",
+        "exemple",
     ]
     list_filter = ["reinitialisation"]
+    readonly_fields = ["exemple"]

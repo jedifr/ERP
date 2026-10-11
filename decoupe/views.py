@@ -10,10 +10,10 @@ from .services.apercu_svg import generer_svg_feuille
 
 
 class PieceDecoupeViewSet(viewsets.ModelViewSet):
-    queryset = PieceDecoupe.objects.select_related("article").all()
+    queryset = PieceDecoupe.objects.select_related("article", "matiere", "profil_import").all()
     serializer_class = PieceDecoupeSerializer
     parser_classes = [MultiPartParser, FormParser]
-    filterset_fields = ["statut", "format_source", "article", "rotation_autorisee"]
+    filterset_fields = ["statut", "format_source", "article", "pas_rotation_deg", "symetrie_autorisee", "a_gravure"]
     search_fields = ["nom"]
 
     def perform_create(self, serializer):
@@ -59,6 +59,6 @@ class ImbricationJobViewSet(viewsets.ModelViewSet):
         svg = generer_svg_feuille(
             job.largeur_feuille_mm,
             job.longueur_feuille_mm,
-            [(p.piece, p.x_mm, p.y_mm, p.rotation_deg) for p in placements],
+            [(p.piece, p.x_mm, p.y_mm, p.rotation_deg, p.miroir) for p in placements],
         )
         return HttpResponse(svg, content_type="image/svg+xml")

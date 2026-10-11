@@ -18,9 +18,23 @@ Including another URLconf
 from django.conf import settings
 from django.contrib import admin
 from django.urls import include, path, re_path
-from django.views.static import serve as serve_static
+
+from comptes.a_completer import a_completer_view
+from comptes.colonnes import mes_colonnes
+from comptes.navigation import navigation_view
+from comptes.parametrage import parametrage_view
+from comptes.views import media_protege
+from technique.nomenclature_editeur import nomenclature_editeur_view
+from technique.gamme_editeur import gamme_editeur_options_view, gamme_editeur_view
 
 urlpatterns = [
+    path("admin/mes-colonnes/", admin.site.admin_view(mes_colonnes), name="mes_colonnes"),
+    path("admin/navigation/<str:app>/<str:modele>/", admin.site.admin_view(navigation_view), name="navigation_documents"),
+    path("admin/a-completer/", admin.site.admin_view(a_completer_view), name="a_completer"),
+    path("admin/nomenclature-editeur/<str:reference>/", admin.site.admin_view(nomenclature_editeur_view), name="nomenclature_editeur"),
+    path("admin/gamme-editeur-options/", admin.site.admin_view(gamme_editeur_options_view), name="gamme_editeur_options"),
+    path("admin/gamme-editeur/<str:reference>/", admin.site.admin_view(gamme_editeur_view), name="gamme_editeur"),
+    path("admin/parametrage/", admin.site.admin_view(parametrage_view), name="parametrage"),
     path("admin/", admin.site.urls),
     path("api/v1/", include("technique.urls")),
     path("api/v1/", include("decoupe.urls")),
@@ -36,10 +50,9 @@ urlpatterns = [
 ]
 
 if settings.SERVE_MEDIA:
-    # `django.conf.urls.static.static()` refuse de servir les fichiers hors DEBUG (c'est
-    # voulu pour un vrai déploiement Internet) ; on appelle donc la vue directement, ce qui
-    # est un choix assumé pour cet ERP interne au réseau local (voir `SERVE_MEDIA` dans
-    # `config/settings.py`).
+    # Servi par Django même hors DEBUG (`django.conf.urls.static.static()` refuse hors DEBUG) :
+    # choix assumé pour cet ERP interne au réseau local (voir `SERVE_MEDIA` dans
+    # `config/settings.py`). Réservé aux comptes connectés habilités : voir comptes.views.
     urlpatterns += [
-        re_path(r"^media/(?P<path>.*)$", serve_static, {"document_root": settings.MEDIA_ROOT}),
+        re_path(r"^media/(?P<path>.*)$", media_protege),
     ]

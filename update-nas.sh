@@ -36,6 +36,19 @@ TARBALL="${PARENT_DIR}/${PROJECT_NAME}_update.tar.gz"
 echo "==> Mise à jour de l'ERP — branche : ${BRANCH}"
 echo "==> Dossier projet : ${PROJECT_DIR}"
 
+# Sauvegarde de la base et des fichiers AVANT de toucher à quoi que ce soit (si le script de
+# sauvegarde est présent). Un échec n'est pas ignoré en silence : on demande confirmation.
+# Pour passer outre sans question : ERP_UPDATE_SANS_SAUVEGARDE=1 ./update-nas.sh ...
+if [ -x "${PROJECT_DIR}/sauvegarder-nas.sh" ] && [ -z "$ERP_UPDATE_SANS_SAUVEGARDE" ]; then
+    echo "==> Sauvegarde avant mise à jour..."
+    if ! (cd "$PROJECT_DIR" && ./sauvegarder-nas.sh); then
+        echo "!! La sauvegarde a échoué." >&2
+        printf "Continuer quand même la mise à jour ? (o/N) "
+        read -r reponse
+        [ "$reponse" = "o" ] || { echo "Mise à jour annulée."; exit 1; }
+    fi
+fi
+
 echo "==> Téléchargement..."
 rm -rf "$NEW_DIR" "$TARBALL"
 curl -fL -o "$TARBALL" "https://codeload.github.com/${REPO}/tar.gz/refs/heads/${BRANCH}"
@@ -50,6 +63,10 @@ if [ -f "${PROJECT_DIR}/.env" ]; then
     cp "${PROJECT_DIR}/.env" "${NEW_DIR}/.env"
 else
     echo "!! Aucun .env existant trouvé : à configurer dans ${PROJECT_DIR} après la mise à jour."
+fi
+# Réglages de la sauvegarde (copie externe, chiffrement, alertes) : conservés comme le .env.
+if [ -f "${PROJECT_DIR}/sauvegarde.conf" ]; then
+    cp "${PROJECT_DIR}/sauvegarde.conf" "${NEW_DIR}/sauvegarde.conf"
 fi
 
 echo "==> Bascule vers la nouvelle version..."
@@ -73,6 +90,13 @@ rm -rf "$OLD_DIR"
 
 echo "==> Terminé. État des conteneurs :"
 $DOCKER_CMD ps
+
+echo
+if [ -f "${PROJECT_DIR}/VERSION" ]; then
+    echo "==> Version déployée : $(cat "${PROJECT_DIR}/VERSION")"
+else
+    echo "!! Fichier VERSION introuvable."
+fi
 
 echo
 echo "En cas de souci : $DOCKER_CMD logs -f web"

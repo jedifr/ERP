@@ -1,18 +1,18 @@
 import datetime
 
 from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from chiffrage.models import OrdreFabrication
+from comptes.permissions import PeutVoirLePilotage
 from technique.models import PosteTravail
 
 from .services import PilotageError, marge_reelle_ordre_fabrication, taux_charge_poste
 
 
 class MargeReelleOrdreFabricationView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [PeutVoirLePilotage]
 
     def get(self, request, numero):
         try:
@@ -29,7 +29,7 @@ class MargeReelleOrdreFabricationView(APIView):
 
 
 class TauxChargePosteView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [PeutVoirLePilotage]
 
     def get(self, request, nom_poste):
         try:

@@ -3,6 +3,35 @@
 
     document.addEventListener("DOMContentLoaded", init);
     document.addEventListener("DOMContentLoaded", initGammeToggle);
+    document.addEventListener("DOMContentLoaded", initChampsSelonNature);
+
+    // Chaque nature n'affiche que les champs qui la concernent : un article fabriqué n'a ni type de profil, ni poids
+    // linéique, ni coût d'achat (son coût est recalculé à chaque devis) ; un composant acheté n'a ni épaisseur, ni profil.
+    const CHAMPS_MASQUES = {
+        fabrique: ["type_profil", "poids_lineique", "cout_unitaire", "unite_cout"],
+        composant: ["epaisseur", "type_profil", "poids_lineique"],
+        consommable: ["epaisseur", "type_profil", "poids_lineique"],
+        service_achete: ["epaisseur", "type_profil", "poids_lineique", "matiere"],
+    };
+    const TOUS_CHAMPS = ["epaisseur", "type_profil", "poids_lineique", "cout_unitaire", "unite_cout", "matiere"];
+
+    function initChampsSelonNature() {
+        const natureField = document.getElementById("id_nature");
+        if (!natureField) return;
+        function ligne(nom) {
+            const champ = document.getElementById("id_" + nom);
+            return champ ? champ.closest(".field-row, .form-row, [class*='field-']") : null;
+        }
+        function maj() {
+            const masques = CHAMPS_MASQUES[natureField.value] || [];
+            TOUS_CHAMPS.forEach((nom) => {
+                const el = ligne(nom);
+                if (el) el.hidden = masques.includes(nom);
+            });
+        }
+        natureField.addEventListener("change", maj);
+        maj();
+    }
 
     // La gamme (étapes d'opérations) n'a de sens que pour un article
     // fabriqué : pour toute autre nature, la section "Gammes" de la fiche
@@ -55,6 +84,25 @@
                 })
                 .catch(() => callback(null));
         }
+
+        // Le libellé du coût suit l'unité choisie : « Coût unitaire (€/kg) », « (€/m²) », « (€/pièce) »…
+        const SUFFIXES = { poids: "€/kg", surface: "€/m²", longueur: "€/m", piece: "€/pièce" };
+        const AIDES = {
+            poids: "Prix d'achat au kilo.",
+            surface: "Prix d'achat au mètre carré.",
+            longueur: "Prix d'achat au mètre.",
+            piece: "Prix d'achat d'une pièce ; pour une tôle : prix de la feuille entière, réparti sur sa surface.",
+        };
+        const coutLabel = document.querySelector('label[for="id_cout_unitaire"]');
+        const coutAide = coutUnitaireField.closest(".field-row, .form-row, div")?.querySelector(".help, p");
+        const libelleCout = coutLabel ? coutLabel.textContent.replace(/\s*\(€.*\)\s*$/, "").replace(/\*$/, "").trim() : "";
+        function majLibelleCout() {
+            const suffixe = SUFFIXES[uniteCoutField.value];
+            if (coutLabel && libelleCout) coutLabel.textContent = suffixe ? `${libelleCout} (${suffixe})` : libelleCout;
+            if (coutAide && AIDES[uniteCoutField.value]) coutAide.textContent = AIDES[uniteCoutField.value];
+        }
+        uniteCoutField.addEventListener("change", majLibelleCout);
+        majLibelleCout();
 
         let syncing = false;
 

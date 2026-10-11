@@ -1,0 +1,27 @@
+{% load l10n %}
+<div class="dp-carte dp-carte-profil" data-profil="{{ piece.pk }}" data-url-enregistrer="{{ url_enregistrer }}" data-url-supprimer="{{ url_supprimer }}">
+  <div class="dp-apercu dp-apercu-profil">{{ section_svg|safe }}</div>
+  <div class="dp-corps">
+    <div class="dp-ligne-titre">
+      <input type="text" data-champ="nom" value="{{ piece.nom }}" class="dp-nom" {% if not editable %}disabled{% endif %} aria-label="Nom du débit">
+      <span class="dp-pastille dp-pastille-ok">Profilé</span>
+      {% if piece.article_id %}<a class="dp-article" href="{% url 'admin:technique_article_change' piece.article_id %}" target="_blank" title="Article fabriqué créé avec le débit">{{ piece.article_id }}</a>{% endif %}
+      {% if editable %}<button type="button" class="dp-supprimer" title="Retirer le débit du devis">Retirer</button>{% endif %}
+    </div>
+    <div class="dp-meta">{{ piece.section.get_famille_display }} · {{ piece.section.masse_lineique|floatformat:2 }} kg/m · {{ piece.masse_kg|floatformat:2 }} kg le débit · barre de {{ piece.section.longueur_barre_mm|floatformat:0 }} mm</div>
+    <div class="dp-champs">
+      <label>Section
+        <select data-champ="section" {% if not editable %}disabled{% endif %}>{% for s in sections %}<option value="{{ s.pk }}" {% if s.pk == piece.section_id %}selected{% endif %}>{{ s.designation }}</option>{% endfor %}</select>
+      </label>
+      <label>Longueur (mm)<input type="text" inputmode="decimal" data-champ="longueur" value="{{ piece.longueur_mm|unlocalize }}" {% if not editable %}disabled{% endif %}></label>
+      <label>Coupe A
+        <select data-champ="coupe_a" {% if not editable %}disabled{% endif %}>{% for v, l in coupes %}<option value="{{ v|unlocalize }}" {% if v == piece.coupe_a_deg %}selected{% endif %}>{{ l }}</option>{% endfor %}</select>
+      </label>
+      <label>Coupe B
+        <select data-champ="coupe_b" {% if not editable %}disabled{% endif %}>{% for v, l in coupes %}<option value="{{ v|unlocalize }}" {% if v == piece.coupe_b_deg %}selected{% endif %}>{{ l }}</option>{% endfor %}</select>
+      </label>
+      <label>Quantité<input type="number" min="1" step="1" data-champ="quantite" value="{{ piece.quantite }}" {% if not editable %}disabled{% endif %}></label>
+    </div>
+    <div class="dp-debit-apercu">{{ apercu|safe }}</div>
+  </div>
+</div>

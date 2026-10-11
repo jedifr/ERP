@@ -1,0 +1,64 @@
+{% with p=panneau_pieces %}
+{% if p.actif %}
+<section class="dp-panneau" id="dp-panneau" data-url-importer="{{ p.url_importer }}" data-url-ajouter="{{ p.url_ajouter }}">
+  <h2 class="dp-titre-section">Pièces à découper <span class="dp-badge">Import DXF / DWG</span></h2>
+  {% if p.editable %}
+    <ol class="dp-etapes" aria-label="Les 3 étapes">
+      <li class="{% if p.cartes or p.cartes_profils %}fait{% else %}courant{% endif %}"><b>1</b> Ajouter les pièces <small>DXF, bibliothèque ou profilés</small></li>
+      <li class="{% if p.cartes or p.cartes_profils %}courant{% endif %}"><b>2</b> Choisir la matière et l'imbrication <small>sur chaque pièce, puis « Retenir »</small></li>
+      <li><b>3</b> Ajouter au devis <small>les lignes se créent avec leur gamme et leur nomenclature</small></li>
+    </ol>
+    <div class="dp-drop" id="dp-drop" tabindex="0" role="button" aria-label="Importer des fichiers DXF ou DWG">
+      <div class="dp-drop-icone material-symbols-outlined">upload_file</div>
+      <div><strong>Glissez vos fichiers DXF / DWG ici</strong> ou <u>parcourez</u> — plusieurs à la fois.</div>
+      <div class="dp-drop-options">
+        <label>Procédé par défaut
+          <select id="dp-procede-defaut"><option value="laser">Laser</option><option value="jet_eau">Jet d'eau</option></select>
+        </label>
+        <label>Profil d'import (calques)
+          <select id="dp-profil"><option value="">Tout en découpe</option>{% for pr in p.profils %}<option value="{{ pr.pk }}">{{ pr.nom }}</option>{% endfor %}</select>
+        </label>
+      </div>
+      <input type="file" id="dp-fichiers" accept=".dxf,.dwg" multiple hidden>
+    </div>
+    <details class="dp-formes" id="dp-formes" data-url-apercu="{{ p.url_forme_apercu }}" data-url-ajouter="{{ p.url_forme_ajouter }}" data-url-profil-apercu="{{ p.url_profil_apercu }}" data-url-profil-ajouter="{{ p.url_profil_ajouter }}">
+      <summary><span class="material-symbols-outlined">shapes</span> Bibliothèque de formes — rectangle, disque, bride, platine, équerre… ou cotes normalisées (EN 1092-1, rondelles)</summary>
+      <div class="dp-formes-corps">
+        <div class="dp-formes-saisie">
+          <label>Forme <select id="dpf-famille"></select></label>
+          <p class="dp-aide" id="dpf-description"></p>
+          <div id="dpf-champs" class="dp-champs"></div>
+          <div class="dp-champs">
+            <label>Quantité <input type="number" id="dpf-quantite" min="1" step="1" value="1"></label>
+            <label>Procédé <select id="dpf-procede"><option value="laser">Laser</option><option value="jet_eau">Jet d'eau</option></select></label>
+          </div>
+          <p class="dp-aide dp-attention" id="dpf-attention" hidden>Les cotes normalisées livrées avec l'application n'ont pas encore été vérifiées avec la norme : contrôlez-les (Production &gt; Cotes normalisées) avant de lancer une production.</p>
+          <div class="dp-formes-actions">
+            <button type="button" id="dpf-valider" class="dp-bouton">Ajouter la pièce au devis</button>
+            <button type="button" id="dpf-annuler" class="dp-bouton dp-bouton-discret" hidden>Annuler la modification</button>
+          </div>
+          <div id="dpf-erreur" class="dp-message dp-message-ko" role="alert" hidden></div>
+        </div>
+        <div class="dp-formes-apercu"><div id="dpf-svg" class="dp-apercu"></div><div id="dpf-resume" class="dp-meta"></div></div>
+      </div>
+    </details>
+    {{ p.catalogue_formes|json_script:"dp-catalogue-formes" }}
+    <p class="dp-aide">Chaque pièce crée son <strong>article fabriqué</strong> ; le temps de coupe alimente sa gamme dès que le paramètre de coupe a un poste de travail. Une épaisseur absente de la base laser n'est pas réalisable.</p>
+  {% elif p.verrouille %}
+    <p class="dp-aide">Devis validé, donc verrouillé : repassez-le en brouillon pour modifier ses pièces.</p>
+  {% else %}
+    <p class="dp-aide">Vous pouvez consulter les pièces mais pas les modifier (droits insuffisants).</p>
+  {% endif %}
+  <div id="dp-cartes">{% for carte in p.cartes %}{{ carte|safe }}{% endfor %}</div>
+  <div id="dp-profils" class="dp-profils" data-url-retenir="{{ p.url_profil_retenir }}">{% for carte in p.cartes_profils %}{{ carte|safe }}{% endfor %}</div>
+  <div class="dp-vues" id="dp-vues" role="group" aria-label="Imbrications par ligne">
+    <span>Imbrications par ligne</span>
+    {% for n in "1234" %}<button type="button" data-colonnes="{{ n }}" aria-pressed="false" title="{{ n }} imbrication{{ n|pluralize }} sur la largeur de l'écran">{{ n }}</button>{% endfor %}
+  </div>
+  <div id="dp-imbrication" class="dp-imbrication" data-colonnes="1" data-url-imbrication="{{ p.url_imbrication }}" data-url-retenir="{{ p.url_retenir }}" data-url-creer-tole="{{ p.url_creer_tole }}"></div>
+  <div id="dp-messages" class="dp-messages" role="status"></div>
+</section>
+{% elif p.nouveau %}
+<section class="dp-panneau"><h2 class="dp-titre-section">Pièces à découper</h2><p class="dp-aide">Enregistrez d'abord le devis (« Enregistrer et continuer les modifications ») pour importer des DXF / DWG.</p></section>
+{% endif %}
+{% endwith %}

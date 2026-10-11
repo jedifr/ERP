@@ -9,9 +9,12 @@ que pour les pages de liste, faute de `cl` dans le contexte d'une fiche.
 """
 
 
+from .raccourcis import menu_nouveau
+
+
 def global_callback(request):
     # Désactive le conteneur centré à largeur plafonnée (classe Tailwind
     # "container") sur toutes les pages admin — nos tableaux de lignes
     # (devis, commandes...) sont larges et gagnent à profiter de tout
     # l'écran plutôt que de scroller horizontalement dans un espace réduit.
-    return {"is_fullwidth": "1"}
+    return {"is_fullwidth": "1", "menu_nouveau": menu_nouveau(request)}

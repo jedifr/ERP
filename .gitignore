@@ -9,3 +9,4 @@ venv/
 staticfiles/
 media/
 .pytest_cache/
+sauvegarde.conf

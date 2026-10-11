@@ -1,0 +1,20 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<div class="max-w-4xl">
+  <p class="mb-3">Collez un tableau (depuis un tableur) ou choisissez un fichier CSV. Colonnes : <code>code ; raison_sociale ; type ; siret ; numero_tva ; regime_fiscal ; conditions_paiement ; devise</code> (seuls code et raison sociale sont obligatoires ; type : client, fournisseur ou les deux). Un code déjà pris est ignoré.</p>
+  {% if rapport %}
+  <div class="mb-4 p-4 rounded-default border border-base-200">
+    <p class="font-semibold">{{ rapport.crees|length }} tiers créé(s), {{ rapport.ignores|length }} ligne(s) ignorée(s).
+      {% if rapport.lot %}<a class="underline" href="/admin/comptes/lotmodification/{{ rapport.lot.pk }}/change/">Voir le lot (annulable)</a>{% endif %}</p>
+    {% if rapport.ignores %}<ul class="text-sm mt-2">{% for ligne, motif in rapport.ignores %}<li>{{ ligne }} : {{ motif }}</li>{% endfor %}</ul>{% endif %}
+  </div>
+  {% endif %}
+  <form method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+    <textarea name="tableau" rows="10" class="border border-base-300 rounded-default px-2 py-1 w-full font-mono text-sm" placeholder="code;raison_sociale;type;siret;numero_tva&#10;CLI-001;Dupont SAS;client;12345678900011;FR12345678901">{{ tableau }}</textarea>
+    <p class="my-2">ou <input type="file" name="fichier" accept=".csv,.txt"></p>
+    <div class="flex gap-3"><button type="submit" class="bg-primary-600 text-white font-semibold px-4 py-2 rounded-default">Importer</button>
+      <a href="../" class="border border-base-300 px-4 py-2 rounded-default">Retour</a></div>
+  </form>
+</div>
+{% endblock %}
