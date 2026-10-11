@@ -292,7 +292,7 @@ function demarrerConstructeur() {
             return null;
         }
         const nouveau = document.querySelector("input[name=mode-article]:checked").value === "nouveau";
-        const payload = { quantite: quantite };
+        const payload = { quantite: quantite, designation: document.getElementById("ligne-designation").value.trim() };
         if (nouveau) {
             const reference = document.getElementById("na-reference").value.trim();
             if (!reference) {

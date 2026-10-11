@@ -84,7 +84,7 @@ def _traiter_ajout_ligne(request, devis):
             if payload.get("nouvel_article"):
                 if not all(u.has_perm(f"technique.add_{m}") for m in ("article", "nomenclature", "gamme")):
                     return JsonResponse({"detail": "Vous n'avez pas la permission de créer un article fabriqué (article, nomenclature, gamme)."}, status=403)
-                article = _creer_article_depuis_payload(payload["nouvel_article"])
+                article = _creer_article_depuis_payload(payload["nouvel_article"], devis.date_creation)
             else:
                 reference = payload.get("article_existant")
                 try:
@@ -92,7 +92,7 @@ def _traiter_ajout_ligne(request, devis):
                 except Article.DoesNotExist:
                     raise ChiffrageError(f"Article « {reference} » introuvable.")
 
-            ligne = ajouter_ligne_devis(devis, article, quantite)
+            ligne = ajouter_ligne_devis(devis, article, quantite, designation=(payload.get("designation") or "").strip()[:255])
             calculer_ligne(devis, ligne)
             ligne.refresh_from_db()
             resultat_apercu = {
@@ -128,7 +128,7 @@ def _traiter_ajout_ligne(request, devis):
     )
 
 
-def _creer_article_depuis_payload(data):
+def _creer_article_depuis_payload(data, date_devis=None):
     try:
         reference = data["reference"]
     except KeyError:
@@ -155,7 +155,9 @@ def _creer_article_depuis_payload(data):
             poste = PosteTravail.objects.get(pk=e["poste"])
         except PosteTravail.DoesNotExist:
             raise ChiffrageError(f"Poste « {e.get('poste')} » introuvable.")
-        date_debut = e.get("date_debut") or datetime.date.today().isoformat()
+        # Sans date, l'étape démarre à la date du DEVIS : datée du jour, elle serait exclue du chiffrage d'un devis plus ancien
+        # (gamme_active) et les opérations tomberaient à 0 €.
+        date_debut = e.get("date_debut") or (date_devis or datetime.date.today()).isoformat()
         etapes.append(
             {
                 "poste": poste,

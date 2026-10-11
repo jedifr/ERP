@@ -190,8 +190,9 @@ def generer_pdf_devis(devis):
         total_ttc += ttc
         par_taux[taux] = arrondir(par_taux.get(taux, ZERO) + (ttc - ht))
         designation = f"<b>{echapper(ligne.article.reference)}</b>"
-        if ligne.article.libelle:
-            designation += f"<br/>{echapper(ligne.article.libelle)}"
+        libelle = ligne.designation or ligne.article.libelle
+        if libelle:
+            designation += f"<br/>{echapper(libelle)}"
         pu = arrondir_prix(ligne.prix_vente_unitaire) if ligne.prix_vente_unitaire is not None else ZERO
         cellules = [
             Paragraph(designation, st["normal"]),

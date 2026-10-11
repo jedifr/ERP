@@ -4,7 +4,7 @@
   <h2 class="chrono-titre">Nomenclature et opérations des articles fabriqués</h2>
   {% for l in lignes_detail %}
   <details>
-    <summary>{{ l.article_id }}{% if l.article.libelle %} — {{ l.article.libelle }}{% endif %} × {{ l.quantite|floatformat:"-2" }}</summary>
+    <summary>{{ l.article_id }}{% if l.designation %} — {{ l.designation }}{% elif l.article.libelle %} — {{ l.article.libelle }}{% endif %} × {{ l.quantite|floatformat:"-2" }}</summary>
     {% with m=l.matiere_piece %}{% if m %}
     <p class="ge-matiere" title="Pour contrôle : prix et poids de la matière rapportés à une pièce.">
       <strong>Matière par pièce</strong>

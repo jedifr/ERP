@@ -155,7 +155,7 @@ def contexte_devis(devis):
         calcul.append((ht, ttc, taux))
         pu = arrondir_prix(ligne.prix_vente_unitaire) if ligne.prix_vente_unitaire is not None else ZERO
         lignes.append({
-            **_designation(ligne.article), "quantite": quantite(ligne.quantite), "pu_ht": montant(pu),
+            **_designation(ligne.article, ligne.designation), "quantite": quantite(ligne.quantite), "pu_ht": montant(pu),
             "tva": f"{pourcent(taux)} %".replace(".", ","), "total_ht": montant(ht),
         })
     paiement = getattr(devis.client, "conditions_paiement", None)

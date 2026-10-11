@@ -36,6 +36,28 @@ class ArticleTests(TestCase):
         )
         self.assertTrue(article.gere_en_stock)
 
+    def test_prix_au_kg_selon_l_unite_de_cout(self):
+        inox = Matiere.objects.create(nom="Inox", densite=8)
+        kg = Article(reference="T-KG", nature="matiere_premiere", matiere=inox, unite_cout="poids", epaisseur=3, cout_unitaire=6)
+        m2 = Article(reference="T-M2", nature="matiere_premiere", matiere=inox, unite_cout="surface", epaisseur=2.5, cout_unitaire=120)
+        barre = Article(reference="B-KG", nature="matiere_premiere", unite_cout="longueur", poids_lineique=4.2, cout_unitaire=3)
+        feuille = Article(reference="T-PC", nature="matiere_premiere", matiere=inox, unite_cout="piece", epaisseur=3, cout_unitaire=500)
+        self.assertEqual(kg.prix_au_kg(), Decimal("6"))
+        self.assertEqual(m2.prix_au_kg(), Decimal("6"))  # 120 €/m² ÷ (2,5 mm × 8 kg/dm³ = 20 kg/m²)
+        self.assertEqual(barre.prix_au_kg(), Decimal("3"))
+        self.assertIsNone(feuille.prix_au_kg())
+        self.assertIsNone(Article(reference="X", nature="matiere_premiere", unite_cout="poids").prix_au_kg())
+
+    def test_liste_des_matieres_affiche_le_prix_au_kg(self):
+        from django.contrib.auth import get_user_model
+
+        self.client.force_login(get_user_model().objects.create_superuser("adm-kg", "a@x.fr", "pass-mot-de-passe-20"))
+        inox = Matiere.objects.create(nom="Inox", densite=8)
+        Article.objects.create(reference="T-M2", nature="matiere_premiere", matiere=inox, unite_cout="surface", epaisseur=2.5, cout_unitaire=120)
+        reponse = self.client.get("/admin/technique/article/?nature__exact=matiere_premiere")
+        self.assertContains(reponse, "Prix au kg")
+        self.assertContains(reponse, "6,0000 €/kg")
+
     def test_article_fabrique_sans_cout_unitaire(self):
         article = Article(reference="PIECE-003", nature=Article.Nature.FABRIQUE, cout_unitaire=10)
         with self.assertRaises(ValidationError):

@@ -1257,6 +1257,10 @@ class DevisBuilderViewTests(TestCase):
         # date_creation du devis exposée au JS (devis_builder.js) : les nouvelles étapes de gamme sont datées de la date de création du
         # DEVIS, pas du jour — sinon une étape plus récente que le devis serait exclue du calcul (prix d'opérations à 0).
         self.assertContains(response, '"date_creation": "2026-01-01"')
+        # Régression : l'éditeur d'opérations partagé lit la date de début des étapes sur data-date-debut — vide, elles
+        # étaient datées du jour et l'aperçu affichait « Opérations 0,00 € » sur un devis plus ancien.
+        self.assertContains(response, 'data-date-debut="2026-01-01"')
+        self.assertContains(response, 'id="ligne-designation"')
         self.devis.statut = Devis.Statut.VALIDE
         self.devis.save()
         self.assertNotContains(self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/change/"), 'id="lignes-constructeur"')
@@ -1335,6 +1339,29 @@ class DevisBuilderViewTests(TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         data = response.json()
         self.assertEqual(data["prix_vente_operations"], 0)
+
+    def test_etape_sans_date_prend_la_date_du_devis(self):
+        payload = {
+            "quantite": 3, "apercu": True,
+            "nouvel_article": {
+                "reference": "PIECE-SANS-DATE",
+                "composants": [{"article_composant": "VIS-VIEW", "quantite": 5}],
+                "etapes": [{"poste": "Poste-View", "ordre": 1, "cout_forfaitaire": 50, "date_debut": None}],
+            },
+        }
+        reponse = self.client.post(f"/admin/chiffrage/devis/{self.devis.pk}/constructeur/", data=payload, content_type="application/json")
+        self.assertEqual(reponse.status_code, 200, reponse.content)
+        self.assertAlmostEqual(float(reponse.json()["prix_vente_operations"]), 150)
+
+    def test_libelle_facultatif_de_la_ligne(self):
+        Article.objects.create(reference="PIECE-LIB", libelle="Libellé article", nature=Article.Nature.MATIERE_PREMIERE,
+                               unite_cout=Article.UniteCout.PIECE, cout_unitaire=4)
+        url = f"/admin/chiffrage/devis/{self.devis.pk}/constructeur/"
+        reponse = self.client.post(url, data={"quantite": 1, "article_existant": "PIECE-LIB", "designation": "  Cloche côté moteur "}, content_type="application/json")
+        self.assertEqual(reponse.status_code, 200, reponse.content)
+        self.assertEqual(self.devis.lignes.get().designation, "Cloche côté moteur")
+        self.client.post(url, data={"quantite": 2, "article_existant": "PIECE-LIB"}, content_type="application/json")
+        self.assertEqual(self.devis.lignes.order_by("id").last().designation, "")
 
     def test_post_article_existant(self):
         article = Article.objects.create(
@@ -4262,7 +4289,9 @@ class CycleDeVieDevisTests(_FixtureModuleA, TestCase):
         from .production import reviser_devis
 
         self._valider()
+        self.devis.lignes.update(designation="Libellé propre au devis")
         revision = reviser_devis(self.devis, "Quantité portée à 3")
+        self.assertEqual(revision.lignes.get().designation, "Libellé propre au devis")
         self.assertEqual((revision.numero, revision.revision, revision.statut), ("DEV-REC-A-B", 2, "brouillon"))
         self.assertEqual((revision.indice, self.devis.indice), ("B", "A"))
         self.assertEqual(revision.motif_revision, "Quantité portée à 3")
