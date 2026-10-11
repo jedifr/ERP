@@ -205,6 +205,9 @@ function demarrerConstructeur() {
             } else {
                 infoEl.textContent = "⚠ Matière ou épaisseur manquante sur cet article : poids non calculable.";
             }
+        } else if (article.nature === "fabrique") {
+            infoEl.textContent = "Sous-ensemble fabriqué : compté à son coût de revient (matière + opérations).";
+            champsDimension.classList.add("hidden");
         } else {
             infoEl.textContent = "⚠ Unité de coût non définie sur cet article.";
             champsDimension.classList.add("hidden");

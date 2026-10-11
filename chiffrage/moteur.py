@@ -68,10 +68,29 @@ def cout_etape_gamme(etape, quantite, date_reference):
     return arrondir_prix(D0(etape.cout_forfaitaire) * D(quantite))
 
 
-def cout_composant(nomenclature_ligne):
-    """Coût d'un composant de nomenclature, pour UNE unité de l'article parent."""
+def cout_sous_ensemble(article, quantite, date_reference, devis=None, chemin=()):
+    """Coût de revient de `quantite` unités d'un article FABRIQUE utilisé comme composant d'un autre : sa matière (nomenclature,
+    récursivement) + ses opérations au coût (gamme active à `date_reference`), sans marge — la marge s'applique sur l'article vendu."""
+    if article.pk in chemin:
+        raise ChiffrageError(f"Nomenclature en boucle : « {article} » se contient lui-même (directement ou via un sous-ensemble).")
+    total = cout_matiere_article(article, quantite, devis=devis, date_reference=date_reference, chemin=chemin + (article.pk,))
+    for etape in gamme_active(article, date_reference):
+        total += cout_etape_gamme(etape, quantite, date_reference)
+    return arrondir_prix(total)
+
+
+def cout_composant(nomenclature_ligne, quantite_parent=1, date_reference=None, devis=None, chemin=()):
+    """Coût d'un composant de nomenclature, pour UNE unité de l'article parent. Un composant lui-même fabriqué (sous-ensemble) est
+    valorisé à son coût de revient pour les `quantite_parent` pièces (réglages répartis sur le lot)."""
     article = nomenclature_ligne.article_composant
     quantite = D(nomenclature_ligne.quantite)
+    if article.nature == Article.Nature.FABRIQUE:
+        import datetime
+
+        quantite_parent = quantite_parent or 1
+        date_reference = date_reference or datetime.date.today()
+        total = cout_sous_ensemble(article, float(quantite * D(quantite_parent)), date_reference, devis=devis, chemin=chemin)
+        return total / D(quantite_parent)
     cout_unitaire = D(article.cout_unitaire)
     if article.cout_unitaire is None:
         raise ChiffrageError(f"L'article « {article} » n'a pas de coût unitaire renseigné.", lien=lien_article(article))
@@ -112,14 +131,18 @@ def cout_composant(nomenclature_ligne):
     raise ChiffrageError(f"Unité de coût non définie pour l'article « {article} ».")
 
 
-def cout_matiere_article(article, quantite, devis=None):
+def cout_matiere_article(article, quantite, devis=None, date_reference=None, chemin=()):
     """Coût matière pour `quantite` unités de `article`. Seul un article FABRIQUE
     est décomposé via sa nomenclature ; toute autre nature — matière première,
     ou achetée telle quelle (service acheté, consommable, composant) — est
     costée directement depuis son cout_unitaire. Dans un devis, un article créé depuis une pièce importée du devis est
     chiffré avec l'imbrication retenue de son groupe de pièces (matière répartie entre les pièces)."""
     if article.nature == Article.Nature.FABRIQUE:
+        import datetime
+
         from decoupe.models import PieceDecoupe
+
+        date_ref = date_reference or (devis.date_creation if devis is not None else None) or datetime.date.today()
         from decoupe.services.imbrication_devis import cout_matiere_piece_devis
         from decoupe.services.matiere import ErreurMatiere, cout_matiere_imbrication, piece_de_chiffrage
 
@@ -136,7 +159,7 @@ def cout_matiere_article(article, quantite, devis=None):
             piece_devis = PieceDecoupe.objects.filter(article=article, devis=devis, tole__isnull=False, format_tole__isnull=False).first()
             if piece_devis is not None:
                 composants = article.composants.select_related("article_composant").exclude(article_composant=piece_devis.tole)
-                cout_par_unite = sum((cout_composant(n) for n in composants), ZERO)
+                cout_par_unite = sum((cout_composant(n, quantite, date_ref, devis, chemin) for n in composants), ZERO)
                 try:
                     matiere = cout_matiere_piece_devis(piece_devis, max(1, round(quantite)))
                 except ErreurMatiere as exc:
@@ -148,7 +171,7 @@ def cout_matiere_article(article, quantite, devis=None):
             # La tôle de la pièce est chiffrée par imbrication (surface consommée avec les chutes, selon la quantité) :
             # sa ligne de nomenclature (rectangle) n'est pas comptée une seconde fois.
             composants = composants.exclude(article_composant=piece.tole)
-        cout_par_unite = sum((cout_composant(n) for n in composants), ZERO)
+        cout_par_unite = sum((cout_composant(n, quantite, date_ref, devis, chemin) for n in composants), ZERO)
         total = cout_par_unite * D(quantite)
         if piece is not None:
             try:
@@ -344,7 +367,7 @@ def previsualiser_ligne_commande(article, quantite, date_reference):
     ligne/devis : CommandeLigne n'a ni taux_marge_matiere_applique ni
     prix_vente_unitaire_force, donc les marges par défaut de
     l'article/poste s'appliquent toujours."""
-    cout_matiere = cout_matiere_article(article, quantite)
+    cout_matiere = cout_matiere_article(article, quantite, date_reference=date_reference)
     prix_matiere = _vendu(cout_matiere, article.taux_marge_defaut)
 
     prix_operations = ZERO

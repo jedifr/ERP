@@ -3227,9 +3227,11 @@ Le catalogue des **sections de profilés** (Socle technique → Sections de prof
 - **Alu et inox** : la masse saisie est celle de l'acier ; l'aluminium (≈ 2,70) et l'inox (≈ 7,90) s'en déduisent par la densité (colonne « Alu / inox » ; le prix au mètre d'un débit utilise la densité de la matière de l'article d'achat). Le catalogue confirme cette règle : plat alu 40×5 = 0,54 kg/m pour 1,57 en acier. Les masses inox des catalogues peuvent s'écarter de quelques % (rayons de congé différents).
 - Une migration complète le catalogue sans toucher à ce qui est **vérifié** ou saisi à la main. Chaque fiche exige ses cotes (schéma et liste affichés selon la famille).
 
-## Réglage de tôle et réglages d'opérations (colonnes du devis)
+## Réglages (colonne du devis) et sous-ensembles fabriqués
 
-Dans l'onglet *Lignes du devis*, deux colonnes informatives distinguent ce qui est déjà compris dans le prix des opérations : **« Dont réglage de tôle (HT) »** (mise en place d'une tôle sur la machine de découpe, une fois par tôle, d'après l'imbrication : seulement pour les articles qui ont une étape de découpe calculée) et **« Dont réglages d'opérations (HT) »** (temps de réglage par lot saisis à la main dans la gamme, colonne *Réglage (min)* : jet d'eau, ajustage, fraisage…, au taux horaire du poste et avec la marge de l'opération). Un article à opérations saisies à la main (sans découpe calculée) affiche donc « — » en réglage de tôle et ses réglages dans l'autre colonne. Les lignes déjà chiffrées se mettent à jour au prochain *Recalculer le chiffrage*.
+Dans l'onglet *Lignes du devis*, une seule colonne informative, **« Dont réglages (HT) »**, montre ce qui est déjà compris dans le prix des opérations : la mise en place d'une tôle sur la machine de découpe (une fois par tôle, d'après l'imbrication, seulement pour les articles qui ont une étape de découpe calculée) plus les temps de réglage par lot saisis dans la gamme (colonne *Réglage (min)* : jet d'eau, ajustage, fraisage…, au taux horaire du poste et avec la marge de l'opération). L'infobulle détaille les deux parts. Les lignes déjà chiffrées se mettent à jour au prochain *Recalculer le chiffrage*.
+
+Un article fabriqué peut avoir pour composant un autre article fabriqué (sous-ensemble) : celui-ci est compté dans le coût matière du parent à son coût de revient (sa matière + ses opérations au coût, réglages répartis sur la quantité), sans marge propre ; la marge matière du parent s'applique dessus.
 
 ## Nom des tôles et mode d'emploi des sections de paramétrage
 
