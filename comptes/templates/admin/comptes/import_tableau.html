@@ -1,0 +1,133 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<style>
+  .imp-pill { display: inline-flex; align-items: center; gap: .35rem; font-size: 12px; font-weight: 500; padding: 1px 9px; border-radius: 999px; white-space: nowrap; }
+  .imp-pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .imp-sur { background: rgba(22, 163, 74, .14); color: rgb(21, 128, 61); }
+  .imp-verif { background: rgba(217, 119, 6, .16); color: rgb(180, 83, 9); }
+  .imp-contenu { background: rgba(37, 99, 235, .13); color: rgb(29, 78, 216); }
+  .imp-manuel { background: rgba(234, 88, 12, .14); color: rgb(194, 65, 12); }
+  .imp-aucun { background: rgba(120, 113, 108, .14); color: rgb(120, 113, 108); }
+  .dark .imp-sur { color: rgb(74, 222, 128); } .dark .imp-verif { color: rgb(252, 211, 77); }
+  .dark .imp-contenu { color: rgb(147, 197, 253); } .dark .imp-manuel { color: rgb(253, 186, 116); }
+  .imp-etapes { display: flex; gap: .4rem; flex-wrap: wrap; margin-bottom: 1rem; font-size: 13px; }
+  .imp-etapes span { padding: 2px 12px; border-radius: 999px; border: 1px solid rgba(120, 113, 108, .3); opacity: .7; }
+  .imp-etapes span.on { opacity: 1; font-weight: 600; border-color: currentColor; }
+</style>
+<div class="max-w-5xl">
+  <div class="imp-etapes">
+    <span class="{% if etape == 'donnees' %}on{% endif %}">1. Données</span>
+    <span class="{% if etape == 'colonnes' %}on{% endif %}">2. Correspondance des colonnes</span>
+    <span class="{% if etape == 'verifier' or etape == 'importer' %}on{% endif %}">3. Vérification et import</span>
+  </div>
+
+  {% if erreur %}<p class="mb-3 text-red-600">{{ erreur }}</p>{% endif %}
+
+  <form method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+
+    {% if etape == "donnees" %}
+      <p class="mb-3">Collez un tableau (depuis un tableur) ou choisissez un fichier CSV. Les en-têtes peuvent porter n'importe quel nom :
+        l'ERP les rapproche des champs à l'étape suivante, et vous corrigez au besoin. Champs :
+        {% for c in spec.champs %}<code>{{ c.libelle }}</code>{% if c.obligatoire %}*{% endif %}{% if not forloop.last %}, {% endif %}{% endfor %}
+        (* obligatoire).{% if spec.aide %} {{ spec.aide }}{% endif %}</p>
+      <textarea name="tableau" rows="10" class="border border-base-300 rounded-default px-2 py-1 w-full font-mono text-sm" placeholder="{{ spec.exemple }}">{{ tableau }}</textarea>
+      <p class="my-2">ou <input type="file" name="fichier" accept=".csv,.txt,.tsv"></p>
+      <input type="hidden" name="etape" value="donnees">
+      <div class="flex gap-3"><button type="submit" class="bg-primary-600 text-white font-semibold px-4 py-2 rounded-default">Analyser les colonnes</button>
+        <a href="../" class="border border-base-300 px-4 py-2 rounded-default">Retour</a></div>
+
+    {% elif etape == "colonnes" %}
+      <textarea name="tableau" hidden>{{ tableau }}</textarea>
+      <p class="mb-3"><strong>{{ nb_lignes }}</strong> ligne(s) lue(s).
+        {% if profil %}Profil « <strong>{{ profil.nom }}</strong> » appliqué (mêmes en-têtes).{% endif %}
+        Vérifiez le champ retenu pour chaque colonne{% if a_verifier %}, en particulier les <strong>{{ a_verifier }}</strong> colonne(s) devinée(s) (en orange ou en bleu){% endif %}.</p>
+      {% if manquants %}<p class="mb-3 text-red-600">Champ obligatoire sans colonne : <strong>{% for c in manquants %}{{ c.libelle }}{% if not forloop.last %}, {% endif %}{% endfor %}</strong>. Choisissez la colonne correspondante.</p>{% endif %}
+      <div class="overflow-x-auto mb-4">
+        <table class="w-full text-sm">
+          <thead><tr class="text-left"><th class="py-2 pr-3">Colonne du fichier</th><th class="pr-3">Exemples</th><th class="pr-3">Champ de l'ERP</th><th>Reconnaissance</th></tr></thead>
+          <tbody>
+          {% for col in colonnes %}
+            <tr class="border-t border-base-200 align-top">
+              <td class="py-2 pr-3 font-semibold{% if not col.champ %} opacity-60{% endif %}">{{ col.entete|default:"(sans nom)" }}</td>
+              <td class="py-2 pr-3 font-mono text-xs opacity-70">{% for v in col.exemples %}<div class="truncate max-w-64">{{ v }}</div>{% empty %}(vide){% endfor %}</td>
+              <td class="py-2 pr-3">
+                <select name="col_{{ col.i }}" class="border border-base-300 rounded-default px-2 py-1">
+                  <option value="">— Ne pas importer —</option>
+                  {% for c in spec.champs %}<option value="{{ c.nom }}" {% if col.champ == c.nom %}selected{% endif %}>{{ c.libelle }}{% if c.obligatoire %} *{% endif %}</option>{% endfor %}
+                </select>
+              </td>
+              <td class="py-2">
+                <span class="imp-pill {% if col.niveau == 'exact' or col.niveau == 'synonyme' or col.niveau == 'profil' %}imp-sur{% elif col.niveau == 'approchant' %}imp-verif{% elif col.niveau == 'contenu' %}imp-contenu{% elif col.niveau == 'manuel' %}imp-manuel{% else %}imp-aucun{% endif %}">{% for cle, libelle in niveaux.items %}{% if cle == col.niveau %}{{ libelle }}{% endif %}{% endfor %}</span>
+                {% if col.raison %}<div class="text-xs text-font-subtle-light mt-1">{{ col.raison }}</div>{% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% if sans_colonne %}
+      <div class="mb-4">
+        <p class="font-semibold mb-1">Champs sans colonne : valeur pour toutes les lignes</p>
+        <div class="flex gap-4 flex-wrap">
+        {% for d in sans_colonne %}
+          <label class="text-sm">{{ d.champ.libelle }}<br>
+            <select name="defaut_{{ d.champ.nom }}" class="border border-base-300 rounded-default px-2 py-1">
+              <option value="">(non renseigné)</option>
+              {% for code, lib in d.choix %}<option value="{{ code }}" {% if d.valeur == code %}selected{% endif %}>{{ lib }}</option>{% endfor %}
+            </select></label>
+        {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+      <label class="flex gap-2 items-start mb-4 text-sm"><input type="checkbox" name="memoriser" value="1" {% if memoriser %}checked{% endif %} class="mt-1">
+        <span>Mémoriser cette correspondance sous le nom <input type="text" name="nom_profil" value="{{ nom_profil }}" placeholder="Ex. Export comptable" class="border border-base-300 rounded-default px-2 py-1 w-56">
+          <span class="block text-font-subtle-light">Elle sera appliquée d'office au prochain fichier qui aura les mêmes en-têtes (enregistrée au moment de l'import).</span></span></label>
+      <div class="flex gap-3">
+        <button type="submit" name="etape" value="verifier" class="bg-primary-600 text-white font-semibold px-4 py-2 rounded-default">Vérifier les lignes</button>
+        <button type="submit" name="etape" value="donnees" class="border border-base-300 px-4 py-2 rounded-default">Modifier les données</button>
+        <a href="../" class="border border-base-300 px-4 py-2 rounded-default">Annuler</a>
+      </div>
+
+    {% else %}
+      <textarea name="tableau" hidden>{{ tableau }}</textarea>
+      {% for col in colonnes %}<input type="hidden" name="col_{{ col.i }}" value="{{ col.champ }}">{% endfor %}
+      {% for d in sans_colonne %}<input type="hidden" name="defaut_{{ d.champ.nom }}" value="{{ d.valeur }}">{% endfor %}
+      <input type="hidden" name="nom_profil" value="{{ nom_profil }}">{% if memoriser %}<input type="hidden" name="memoriser" value="1">{% endif %}
+      {% if etape == "importer" %}
+        <div class="mb-4 p-4 rounded-default border border-base-200">
+          <p class="font-semibold">{{ rapport.crees }} ligne(s) importée(s), {{ rapport.ignores }} ignorée(s).
+            {% if rapport.lot %}<a class="underline" href="/admin/comptes/lotmodification/{{ rapport.lot.pk }}/change/">Voir le lot (annulable)</a>{% endif %}</p>
+          {% if profil_enregistre %}<p class="text-sm mt-1">Correspondance mémorisée : « {{ profil_enregistre }} ».</p>{% endif %}
+        </div>
+      {% else %}
+        <p class="mb-3"><strong>{{ rapport.crees }}</strong> ligne(s) à importer{% if rapport.ignores %}, <strong class="text-red-600">{{ rapport.ignores }}</strong> ignorée(s){% endif %}.
+          {% if ignorees %}Colonnes laissées de côté : {{ ignorees|join:", " }}.{% endif %} Rien n'est encore enregistré.</p>
+      {% endif %}
+      <div class="overflow-x-auto mb-4">
+        <table class="w-full text-sm">
+          <thead><tr class="text-left"><th class="py-1 pr-3">Ligne</th>{% for c in champs_importes %}<th class="py-1 pr-3">{{ c.libelle }}</th>{% endfor %}<th class="py-1">Résultat</th></tr></thead>
+          <tbody>
+          {% for numero, valeurs, objet, motif in apercu %}
+            <tr class="border-t border-base-200 align-top">
+              <td class="py-1 pr-3 opacity-60">{{ numero }}</td>
+              {% for v in valeurs %}<td class="py-1 pr-3">{{ v|default:"—" }}</td>{% endfor %}
+              <td class="py-1">{% if motif %}<span class="text-red-600">Ignorée : {{ motif }}</span>{% elif etape == "importer" %}<span class="text-green-700">Créé : {{ objet }}</span>{% else %}<span class="text-green-700">Sera créé</span>{% endif %}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        {% if tronque %}<p class="text-sm text-font-subtle-light mt-2">… et {{ tronque }} ligne(s) de plus.</p>{% endif %}
+      </div>
+      <div class="flex gap-3">
+        {% if etape == "verifier" %}
+          {% if rapport.crees %}<button type="submit" name="etape" value="importer" class="bg-primary-600 text-white font-semibold px-4 py-2 rounded-default">Importer {{ rapport.crees }} ligne(s)</button>{% endif %}
+          <button type="submit" name="etape" value="colonnes_revoir" class="border border-base-300 px-4 py-2 rounded-default">Revoir les colonnes</button>
+        {% endif %}
+        <a href="../" class="border border-base-300 px-4 py-2 rounded-default">Retour à la liste</a>
+      </div>
+      {% if etape == "verifier" %}<p class="mt-3 text-sm text-font-subtle-light">Un doublon est ignoré, jamais écrasé. L'import est tracé (Lots de modifications) et peut être annulé.</p>{% endif %}
+    {% endif %}
+  </form>
+</div>
+{% endblock %}

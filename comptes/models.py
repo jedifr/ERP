@@ -165,3 +165,24 @@ class ReglageAffichage(models.Model):
     def save(self, *args, **kwargs):
         self.pk = 1  # une seule fiche
         super().save(*args, **kwargs)
+
+
+class ProfilImportColonnes(models.Model):
+    """Correspondance mémorisée entre les colonnes d'un fichier et les champs d'un import (voir comptes/imports.py) : appliquée
+    d'office à tout fichier qui a les mêmes en-têtes."""
+
+    cible = models.CharField("import", max_length=50, help_text="Clé de l'import concerné (tiers, articles…)")
+    nom = models.CharField("nom", max_length=100)
+    signature = models.TextField("en-têtes", help_text="En-têtes du fichier, normalisés")
+    correspondance = models.JSONField("correspondance", default=dict, help_text="{en-tête normalisé: champ ('' = colonne ignorée)}")
+    defauts = models.JSONField("valeurs imposées", default=dict, blank=True, help_text="{champ: valeur pour toutes les lignes}")
+    modifie_le = models.DateTimeField("modifié le", auto_now=True)
+
+    class Meta:
+        verbose_name = "Profil d'import de tableau"
+        verbose_name_plural = "Profils d'import de tableau"
+        ordering = ["cible", "nom"]
+        constraints = [models.UniqueConstraint(fields=["cible", "signature"], name="unique_profil_import_colonnes")]
+
+    def __str__(self):
+        return self.nom

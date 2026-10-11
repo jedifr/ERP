@@ -11,7 +11,7 @@ from django.template.response import TemplateResponse
 from django.urls import path
 
 from . import audit_droits, connexions
-from .models import EvenementConnexion, LotModification, ReglageAffichage, Societe
+from .models import EvenementConnexion, LotModification, ProfilImportColonnes, ReglageAffichage, Societe
 
 
 class UserCreationForm(UnfoldUserCreationForm):
@@ -185,6 +185,20 @@ class ReglageAffichageAdmin(ModelAdmin):
 
         fiche = ReglageAffichage.charger()
         return redirect(reverse("admin:comptes_reglageaffichage_change", args=[fiche.pk]))
+
+@admin.register(ProfilImportColonnes)
+class ProfilImportColonnesAdmin(ModelAdmin):
+    """Correspondances de colonnes mémorisées lors des imports de tableaux : on peut les renommer ou les supprimer."""
+
+    list_display = ["nom", "cible", "modifie_le"]
+    list_filter = ["cible"]
+    search_fields = ["nom"]
+    fields = ["nom", "cible", "signature", "correspondance", "defauts", "modifie_le"]
+    readonly_fields = ["cible", "signature", "correspondance", "defauts", "modifie_le"]
+
+    def has_add_permission(self, request):
+        return False
+
 
 @admin.register(LotModification)
 class LotModificationAdmin(ModelAdmin):

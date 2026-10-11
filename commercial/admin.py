@@ -15,8 +15,10 @@ from comptes.lots import ChampLot
 from comptes.lots_admin import ModificationParLotsMixin
 from codification.models import RegleCodification
 from comptes.exports import ExportCsvMixin
+from comptes.imports_admin import ImportTableauMixin
 from comptabilite.models import CompteComptable, TiersCompteComptable
 
+from .imports import IMPORT_ADRESSES, IMPORT_CONTACTS, IMPORT_TIERS
 from .models import (
     Adresse,
     Contact,
@@ -140,30 +142,11 @@ def apercu_compte_comptable_view(request):
 
 
 @admin.register(Tiers)
-class TiersAdmin(ModificationParLotsMixin, ExportCsvMixin, CodificationInitialeMixin, ModelAdmin):
+class TiersAdmin(ImportTableauMixin, ModificationParLotsMixin, ExportCsvMixin, CodificationInitialeMixin, ModelAdmin):
     codification_entite = RegleCodification.Entite.TIERS
     actions = ["action_modifier_par_lots"]
-    actions_list = ["action_importer"]
-
-    @unfold_action(description="Importer des tiers (tableau)", url_path="importer", icon="upload_file")
-    def action_importer(self, request):
-        """Création en masse de tiers depuis un tableau collé ou un fichier CSV."""
-        from django.core.exceptions import PermissionDenied
-        from django.template.response import TemplateResponse
-
-        from . import import_tiers
-
-        if not self.has_add_permission(request):
-            raise PermissionDenied
-        rapport, texte = None, request.POST.get("tableau", "")
-        if request.method == "POST":
-            fichier = request.FILES.get("fichier")
-            if fichier is not None:
-                texte = fichier.read().decode("utf-8-sig", errors="replace")
-            rapport = import_tiers.importer(texte, request.user)
-        return TemplateResponse(request, "admin/commercial/importer_tiers.html", {
-            **self.admin_site.each_context(request), "title": "Importer des tiers", "opts": self.model._meta, "rapport": rapport, "tableau": texte,
-        })
+    actions_list = ["action_importer_tableau"]
+    import_tableau = IMPORT_TIERS
 
     champs_lot = [
         ChampLot("conditions_paiement", "Conditions de paiement", genre="fk", queryset=lambda: ConditionPaiement.objects.order_by("nombre_jours"), vide_permis=True),
@@ -263,7 +246,9 @@ def _du_client(request, queryset):
 
 
 @admin.register(Adresse)
-class AdresseAdmin(ModelAdmin):
+class AdresseAdmin(ImportTableauMixin, ModelAdmin):
+    actions_list = ["action_importer_tableau"]
+    import_tableau = IMPORT_ADRESSES
     list_display = ["tiers", "types_affiches", "libelle", "ville", "pays", "est_principale"]
     list_filter = ["est_livraison", "est_facturation", "est_principale", "pays"]
     search_fields = ["tiers__code", "tiers__raison_sociale", "ville", "libelle"]
@@ -278,7 +263,9 @@ class AdresseAdmin(ModelAdmin):
 
 
 @admin.register(Contact)
-class ContactAdmin(ExportCsvMixin, ModelAdmin):
+class ContactAdmin(ImportTableauMixin, ExportCsvMixin, ModelAdmin):
+    actions_list = ["action_importer_tableau"]
+    import_tableau = IMPORT_CONTACTS
     list_display = [
         "nom",
         "prenom",
