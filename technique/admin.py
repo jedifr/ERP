@@ -14,12 +14,14 @@ from unfold.decorators import action as unfold_action
 
 from comptes.colonnes import ColonnesPersonnalisablesMixin
 from comptes.exports import ExportCsvMixin
+from comptes.imports_admin import ImportTableauMixin
 from comptes.lots_admin import ModificationParLotsMixin, vue_lot
 from achats.models import ArticleFournisseur
 from comptabilite.models import ArticleCompteAchat, ArticleCompteVente
 
 from .models import Article, FamilleMatiere, Gamme, GammeType, GammeTypeEtape, Matiere, Nomenclature, PosteTravail, ProfileSection, RegleCreationTole, TarifPoste
 from . import lots_champs
+from .imports import IMPORT_ARTICLES, IMPORT_MATIERES, IMPORT_NOMENCLATURES
 from .services import DuplicationError, dupliquer_article, renommer_article
 
 
@@ -113,13 +115,14 @@ def rattacher_matieres(modele_admin, request, matieres):
 
 
 @admin.register(Matiere)
-class MatiereAdmin(ModificationParLotsMixin, ModelAdmin):
+class MatiereAdmin(ImportTableauMixin, ModificationParLotsMixin, ModelAdmin):
     list_display = ["nom", "famille", "densite", "usinabilite"]
     list_filter = ["famille"]
     search_fields = ["nom", "famille__nom"]
     autocomplete_fields = ["famille"]
     actions = ["action_modifier_par_lots", "action_usinabilite_standard", "action_rattacher_famille"]
-    actions_list = ["action_catalogue"]
+    actions_list = ["action_catalogue", "action_importer_tableau"]
+    import_tableau = IMPORT_MATIERES
     champs_lot = lots_champs.champs_matiere()
 
     @unfold_action(description="Base matières rapide", url_path="catalogue", icon="library_add")
@@ -286,7 +289,7 @@ def dimensionner_svg(svg, largeur_max, hauteur_max):
 
 
 @admin.register(Article)
-class ArticleAdmin(ModificationParLotsMixin, ColonnesPersonnalisablesMixin, ExportCsvMixin, ModelAdmin):
+class ArticleAdmin(ImportTableauMixin, ModificationParLotsMixin, ColonnesPersonnalisablesMixin, ExportCsvMixin, ModelAdmin):
     # Union de toutes les colonnes ; chaque famille d'articles n'en affiche qu'une partie (voir get_list_display).
     list_display = [
         "reference",
@@ -308,6 +311,8 @@ class ArticleAdmin(ModificationParLotsMixin, ColonnesPersonnalisablesMixin, Expo
     list_filter = ["nature", "unite_cout", "type_profil", "gere_en_stock"]
     actions = ["action_modifier_par_lots", "action_ajouter_gamme_type", "action_affecter_compte"]
     champs_lot = lots_champs.champs_article()
+    actions_list = ["action_importer_tableau"]
+    import_tableau = IMPORT_ARTICLES
     search_fields = ["reference", "libelle"]
     autocomplete_fields = ["matiere"]
     inlines = [
@@ -727,7 +732,9 @@ class TarifPosteAdmin(ModificationParLotsMixin, ModelAdmin):
 
 
 @admin.register(Nomenclature)
-class NomenclatureAdmin(ModelAdmin):
+class NomenclatureAdmin(ImportTableauMixin, ModelAdmin):
+    actions_list = ["action_importer_tableau"]
+    import_tableau = IMPORT_NOMENCLATURES
     list_display = ["article_parent", "article_composant", "quantite", "longueur_mm", "largeur_mm"]
     search_fields = ["article_parent__reference", "article_composant__reference"]
     autocomplete_fields = ["article_parent", "article_composant"]

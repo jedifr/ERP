@@ -15,8 +15,10 @@ from codification.mixins import CodificationInitialeMixin
 from codification.models import RegleCodification
 
 from comptes.exports import ExportCsvMixin
+from comptes.imports_admin import ImportTableauMixin
 from comptes.montants import arrondir, somme
 from .generation import GenerationEcritureAchatError, generer_ecriture_achat
+from .imports import IMPORT_TARIFS
 from .models import (
     AchatsError,
     ArticleFournisseur,
@@ -40,7 +42,9 @@ class TarifAchatArticleInline(TabularInline):
 
 
 @admin.register(ArticleFournisseur)
-class ArticleFournisseurAdmin(ModelAdmin):
+class ArticleFournisseurAdmin(ImportTableauMixin, ModelAdmin):
+    actions_list = ["action_importer_tableau"]
+    import_tableau = IMPORT_TARIFS
     list_display = [
         "article",
         "fournisseur",
@@ -59,7 +63,9 @@ class ArticleFournisseurAdmin(ModelAdmin):
 
 
 @admin.register(TarifAchatArticle)
-class TarifAchatArticleAdmin(ModificationParLotsMixin, ModelAdmin):
+class TarifAchatArticleAdmin(ImportTableauMixin, ModificationParLotsMixin, ModelAdmin):
+    actions_list = ["action_importer_tableau"]
+    import_tableau = IMPORT_TARIFS
     list_display = ["article_fournisseur", "prix_unitaire", "frais_port", "date_debut", "date_fin"]
     actions = ["action_modifier_periode", "action_modifier_par_lots"]
     champs_periode = [

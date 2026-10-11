@@ -194,17 +194,22 @@ class FormatsEtCreationsTests(LotsBase):
         self.assertEqual(Article.objects.get(reference="TOLE-S235-2").cout_unitaire, Decimal("0.95"))
 
     def test_import_de_tiers(self):
-        from commercial.import_tiers import importer
+        from comptes.imports import executer, lire, rapprocher
+        from commercial.imports import IMPORT_TIERS
         from commercial.models import Tiers
 
-        rapport = importer("code;raison_sociale;type;siret;numero_tva\nCLI-A;Alpha SAS;client;;\nFOU-B;Bravo;fournisseur;;FR12345678901\nCLI-A;Doublon;client;;\n;Sans code;client;;", self.user)
-        self.assertEqual(rapport["crees"], ["CLI-A", "FOU-B"])
-        self.assertEqual(len(rapport["ignores"]), 2)
+        entetes, lignes = lire("code;raison_sociale;type;siret;numero_tva\nCLI-A;Alpha SAS;client;;\nFOU-B;Bravo;fournisseur;;FR12345678901\nCLI-A;Doublon;client;;\n;Sans code;client;;")
+        correspondance = [p["champ"] for p in rapprocher(entetes, lignes, IMPORT_TIERS.champs)]
+        rapport = executer(IMPORT_TIERS, lignes, correspondance, {}, self.user, essai=False)
+        self.assertEqual(rapport["crees"], 2)
+        self.assertEqual(rapport["ignores"], 2)
         self.assertEqual(Tiers.objects.get(pk="FOU-B").type_tiers, "fournisseur")
         lots.annuler(rapport["lot"])
         self.assertFalse(Tiers.objects.filter(pk__in=["CLI-A", "FOU-B"]).exists())
-        page = self.client.post("/admin/commercial/tiers/importer/", {"tableau": "code;raison_sociale\nCLI-Z;Zeta"})
-        self.assertContains(page, "1 tiers créé(s)")
+        page = self.client.post("/admin/commercial/tiers/importer/", {"tableau": "code;raison_sociale\nCLI-Z;Zeta", "etape": "verifier", "col_0": "code", "col_1": "raison_sociale"})
+        self.assertContains(page, "Sera créé")
+        page = self.client.post("/admin/commercial/tiers/importer/", {"tableau": "code;raison_sociale\nCLI-Z;Zeta", "etape": "importer", "col_0": "code", "col_1": "raison_sociale"})
+        self.assertContains(page, "1 ligne(s) importée(s)")
 
     def test_gamme_type_et_comptes_d_articles(self):
         from comptabilite.models import ArticleCompteVente, CompteComptable

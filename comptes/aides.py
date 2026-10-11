@@ -127,6 +127,11 @@ AIDES = {
         "etapes": ["Pour défaire un lot : cochez-le puis l'action « Annuler les lots sélectionnés »."],
         "bon_a_savoir": ["L'annulation ne rétablit que ce qui n'a pas changé depuis ; les objets créés encore utilisés ailleurs sont conservés."],
     },
+    "comptes.profilimportcolonnes": {
+        "resume": "Les correspondances de colonnes mémorisées lors des imports de tableaux (tiers, articles, tarifs…) : quel en-tête du fichier va dans quel champ de l'ERP.",
+        "etapes": ["Un profil se crée à l'import, en cochant « Mémoriser cette correspondance ».", "Il s'applique d'office au prochain fichier qui a exactement les mêmes en-têtes ; renommez-le ou supprimez-le ici."],
+        "bon_a_savoir": ["Supprimer un profil ne touche à aucune donnée importée : le rapprochement automatique reprend simplement la main."],
+    },
     # ------------------------------------------------------------------ stock
     "stock.emplacement": {
         "resume": "Les endroits où se trouve le stock (rayonnage, atelier, extérieur).",
