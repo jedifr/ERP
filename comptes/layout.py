@@ -17,4 +17,27 @@ def global_callback(request):
     # "container") sur toutes les pages admin — nos tableaux de lignes
     # (devis, commandes...) sont larges et gagnent à profiter de tout
     # l'écran plutôt que de scroller horizontalement dans un espace réduit.
-    return {"is_fullwidth": "1", "menu_nouveau": menu_nouveau(request)}
+    contexte = {"is_fullwidth": "1", "menu_nouveau": menu_nouveau(request)}
+    utilisateur = getattr(request, "user", None)
+    if utilisateur is not None and not utilisateur.is_authenticated:
+        contexte.update(page_connexion())
+    return contexte
+
+
+def page_connexion():
+    """Logo et pied de page des pages hors connexion (connexion, déconnexion), tirés de la fiche Société."""
+    import zlib
+
+    from django.urls import reverse
+
+    from .models import Societe
+
+    societe = Societe.objects.filter(pk=1).first()
+    if societe is None:
+        return {}
+    image = societe.image_connexion
+    return {
+        # ?v= : change avec le fichier, pour que le navigateur ne garde pas l'ancien logo en cache.
+        "logo_connexion_url": f"{reverse('logo_connexion')}?v={zlib.crc32(image.name.encode())}" if image else None,
+        "nom_societe": societe.raison_sociale,
+    }
