@@ -212,7 +212,7 @@ App `chiffrage`, plus un socle minimal de l'app `commercial` (Tiers, Adresse
   statut et la date de paiement de la facture), échéanciers clients et
   fournisseurs (relances de paiement depuis l'échéancier client, historique
   des relances), `LotVirement` / `LigneLotVirement` : lot de virements
-  fournisseurs exporté en XML SEPA (pain.001.001.03, `tresorerie/sepa.py`)
+  fournisseurs exporté en XML SEPA (pain.001.001.02, format de la Banque Populaire, `tresorerie/sepa.py`)
   pour la banque ; « Marquer comme exécuté » enregistre les règlements.
 - **pilotage** : aucune nouvelle table (cahier des charges) — fonctions de
   service dans `pilotage/services.py`, exposées en lecture seule via l'API :
