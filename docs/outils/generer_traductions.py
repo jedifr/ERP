@@ -60,7 +60,7 @@ TRAD = {
  "To": "À", "Toggle password visibility": "Afficher ou masquer le mot de passe", "True": "Vrai", "Type to search": "Rechercher…",
  "Underlined": "Souligné", "Undo": "Annuler", "Unlink": "Délier", "Unordered list": "Liste à puces", "Update": "Mettre à jour",
  "User permissions": "Droits de l'utilisateur", "Value": "Valeur", "View selected %(model)s": "Voir la sélection (%(model)s)",
- "View traceback": "Voir la trace", "Welcome": "Bienvenue",
+ "View traceback": "Voir la trace", "Welcome": "Bienvenue", "Welcome back to": "Bienvenue sur",
  "You are authenticated as %(username)s, but are not authorized to access this page. Would you like to login to a different account?": "Vous êtes connecté en tant que %(username)s, mais vous n'avez pas accès à cette page. Voulez-vous vous connecter avec un autre compte ?",
  "You can not create nested object without parent": "Impossible de créer un objet imbriqué sans son parent",
  "You have been successfully logged out from the administration": "Vous êtes bien déconnecté de l'administration",

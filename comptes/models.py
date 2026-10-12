@@ -51,6 +51,10 @@ class Societe(models.Model):
     iban = models.CharField("IBAN", max_length=40, blank=True)
     bic = models.CharField("BIC", max_length=15, blank=True)
     logo = models.ImageField("logo", upload_to="societe/", blank=True, help_text="Affiché en en-tête des documents (PNG ou JPEG).")
+    logo_connexion = models.ImageField(
+        "logo de la page de connexion", upload_to="societe/", blank=True,
+        help_text="Affiché au-dessus du formulaire de connexion (PNG ou JPEG). Vide : le logo des documents est repris.",
+    )
     mentions_devis = models.TextField(
         "mentions sur les devis", blank=True,
         help_text="Conditions de vente, pénalités de retard, etc., imprimées en bas du devis.",
@@ -77,6 +81,11 @@ class Societe(models.Model):
     def charger(cls):
         societe, _ = cls.objects.get_or_create(pk=1)
         return societe
+
+    @property
+    def image_connexion(self):
+        """Logo montré sur la page de connexion : le sien, sinon celui des documents."""
+        return self.logo_connexion or self.logo
 
     def save(self, *args, **kwargs):
         self.pk = 1  # une seule fiche

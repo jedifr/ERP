@@ -321,6 +321,9 @@ msgstr "Voir la trace"
 msgid "Welcome"
 msgstr "Bienvenue"
 
+msgid "Welcome back to"
+msgstr "Bienvenue sur"
+
 msgid "You can not create nested object without parent"
 msgstr "Impossible de créer un objet imbriqué sans son parent"
 
