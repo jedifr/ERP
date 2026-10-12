@@ -1,0 +1,32 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<div class="max-w-4xl">
+  <p class="mb-4">
+    Bons de livraison validés de <strong>{{ facture.client }}</strong> dont il reste quelque chose à facturer.
+    Les lignes cochées sont ajoutées à la facture {{ facture.numero }} pour la quantité restant à facturer.
+  </p>
+  {% if livraisons %}
+  <form method="post">
+    {% csrf_token %}
+    <table class="w-full text-left mb-4">
+      <thead><tr><th class="py-2"></th><th>Bon de livraison</th><th>Date</th><th>Commande</th><th>Reste à facturer</th></tr></thead>
+      <tbody>
+      {% for livraison, lignes in livraisons %}
+        <tr class="border-t border-base-200">
+          <td class="py-2"><input type="checkbox" name="livraisons" value="{{ livraison.pk }}" id="bl-{{ forloop.counter }}"></td>
+          <td class="font-semibold"><label for="bl-{{ forloop.counter }}">{{ livraison.numero }}</label></td>
+          <td>{{ livraison.date_livraison|date:"d/m/Y" }}</td>
+          <td>{{ livraison.commande.numero }}{% if livraison.commande.reference_client %} ({{ livraison.commande.reference_client }}){% endif %}</td>
+          <td>{% for ligne, quantite in lignes %}{{ ligne.commande_ligne.article.reference }} × {{ quantite|floatformat:"-3" }}{% if not forloop.last %}, {% endif %}{% endfor %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <button type="submit" class="bg-primary-600 text-white font-semibold px-3 py-1 rounded-default">Importer dans la facture</button>
+  </form>
+  {% else %}
+  <p class="mb-4">Aucun bon de livraison à facturer pour ce client : tout ce qui a été livré est déjà facturé.</p>
+  {% endif %}
+  <p class="mt-4"><a href="{{ retour }}">Retour à la facture</a></p>
+</div>
+{% endblock %}

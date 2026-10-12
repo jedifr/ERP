@@ -5,15 +5,18 @@ TVA intracommunautaire), du client (adresse, SIRET, TVA), désignation, quantit�
 taux, total HT et TTC, échéance, conditions d'escompte, pénalités de retard et indemnité forfaitaire de 40 €, mention
 d'exonération de TVA selon le régime du client, coordonnées bancaires."""
 
+from types import SimpleNamespace
+
 from chiffrage.documents import (
     DocumentError,
-    _bloc_facturation_livraison,
+    _adresse_ou_principale,
+    _bloc_adresse,
     _cadre_signature,
     _titre_et_references,
 )
 from comptes.models import Societe
 from comptes.montants import ZERO, D0, arrondir, arrondir_prix, pourcent
-from comptes.pdf import Paragraph, Spacer, Table, TableStyle, GRIS, construire_pdf, echapper, entete_societe, montant, mm, quantite, styles, tableau_lignes
+from comptes.pdf import Paragraph, Spacer, Table, TableStyle, GRIS, GRIS_CLAIR, construire_pdf, echapper, entete_societe, montant, mm, quantite, styles, tableau_lignes
 from commercial.models import Tiers
 
 MENTIONS_PAR_DEFAUT = (
@@ -28,12 +31,61 @@ MENTIONS_TVA = {
 
 
 def _designation(ligne):
-    cl = ligne.commande_ligne
-    texte = f"<b>{echapper(cl.article.reference)}</b>"
-    libelle = cl.designation or cl.article.libelle
+    article = ligne.article_facture
+    libelle = ligne.libelle
+    if article is None:
+        return echapper(libelle)
+    texte = f"<b>{echapper(article.reference)}</b>"
     if libelle:
         texte += f"<br/>{echapper(libelle)}"
     return texte
+
+
+def sections_livraison(lignes_calculees):
+    """Regroupe les lignes calculées par bon de livraison importé, dans l'ordre de première apparition :
+    [(livraison ou None, [lignes], total HT)]. Les lignes sans BL forment leurs propres groupes (livraison None)."""
+    sections = []
+    for c in lignes_calculees:
+        livraison = c["ligne"].livraison if c["ligne"].livraison_id else None
+        section = next((s for s in sections if livraison is not None and s[0] is not None and s[0].pk == livraison.pk), None)
+        if section is None:
+            if livraison is None and sections and sections[-1][0] is None:
+                section = sections[-1]
+            else:
+                section = [livraison, [], ZERO]
+                sections.append(section)
+        section[1].append(c)
+        section[2] += c["total_ht"]
+    return [tuple(s) for s in sections]
+
+
+def titre_section_livraison(livraison):
+    """« Bon de livraison BL-1 du 20/01/2026 — Commande CDE-1 (votre réf. PO-12) »."""
+    commande = livraison.commande
+    texte = f"Bon de livraison {livraison.numero} du {livraison.date_livraison:%d/%m/%Y} — Commande {commande.numero}"
+    if commande.reference_client:
+        texte += f" (votre réf. {commande.reference_client})"
+    return texte
+
+
+def dates_livraison(facture):
+    """Dates des livraisons couvertes : bons de livraison importés sur les lignes, sinon livraisons de la commande."""
+    dates = [l.livraison.date_livraison for l in facture.lignes.select_related("livraison") if l.livraison_id]
+    if not dates and facture.commande_id:
+        dates = [l.date_livraison for l in facture.commande.livraisons.all() if getattr(l, "date_livraison", None)]
+    return dates
+
+
+def _bloc_client(facture, largeur=174):
+    """« Facturé à » : nom et adresse tels que saisis sur la facture ; « Livré à » : adresse de livraison de la commande (ou
+    principale du client)."""
+    client = facture.client
+    facture_a = _bloc_adresse("Facturé à", SimpleNamespace(raison_sociale=facture.nom_client_imprime), facture.adresse_imprimee)
+    livraison = facture.commande.adresse_livraison if facture.commande_id else None
+    livre_a = _bloc_adresse("Livré à", client, _adresse_ou_principale(client, livraison, "est_livraison"))
+    table = Table([[facture_a, livre_a]], colWidths=[largeur / 2 * mm, largeur / 2 * mm])
+    table.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 0)]))
+    return table
 
 
 def _identite_client(client):
@@ -60,10 +112,10 @@ def calculer_facture(facture):
     **par taux** sur la base HT totale puis arrondie (règle de la norme EN 16931), pas ligne à ligne.
     Retourne un dictionnaire : lignes [{ligne, designation, quantite, prix, taux, categorie, total_ht}], groupes
     [{taux, categorie, base, tva}], total_ht, total_tva, total_ttc."""
-    client = facture.commande.client
+    client = facture.client
     lignes = []
     bases = {}
-    for ligne in facture.lignes.select_related("commande_ligne__article", "commande_ligne__taux_tva").all():
+    for ligne in facture.lignes.select_related("commande_ligne__article", "commande_ligne__taux_tva", "article", "livraison__commande").all():
         taux = D0(ligne._taux())
         categorie = categorie_tva(client, taux)
         total = abs(ligne.montant_ht)
@@ -84,8 +136,8 @@ def generer_pdf_facture(facture, police_embarquee=False):
     st = styles()
     societe = Societe.charger()
     commande = facture.commande
-    client = commande.client
-    lignes_facture = list(facture.lignes.select_related("commande_ligne__article", "commande_ligne__taux_tva").all())
+    client = facture.client
+    lignes_facture = list(facture.lignes.select_related("commande_ligne__article", "commande_ligne__taux_tva", "article", "livraison__commande").all())
     if not lignes_facture:
         raise DocumentError("Cette facture n'a aucune ligne : ajoutez-les (ou préparez-la depuis les livraisons) avant de l'imprimer.")
     ecart = facture.ecart_avec_les_lignes
@@ -97,13 +149,17 @@ def generer_pdf_facture(facture, police_embarquee=False):
     titre = f"{'AVOIR' if avoir else 'FACTURE'} {facture.numero}"
 
     references = [f"Date : {facture.date_facturation:%d/%m/%Y}"]
-    livraisons = [l.date_livraison for l in commande.livraisons.all() if getattr(l, "date_livraison", None)] if hasattr(commande, "livraisons") else []
+    livraisons = dates_livraison(facture)
     references.append(f"Date de livraison / d'exécution : {max(livraisons):%d/%m/%Y}" if livraisons else f"Date de livraison / d'exécution : {facture.date_facturation:%d/%m/%Y}")
     if not avoir and facture.date_echeance:
         references.append(f"Échéance : {facture.date_echeance:%d/%m/%Y}")
-    references.append(f"Commande : {commande.numero}")
-    if commande.reference_client:
-        references.append(f"Votre référence : {commande.reference_client}")
+    if commande is not None:
+        references.append(f"Commande : {commande.numero}")
+        if commande.reference_client:
+            references.append(f"Votre référence : {commande.reference_client}")
+    bons = sorted({l.livraison_id for l in lignes_facture if l.livraison_id})
+    if bons:
+        references.append(f"Bon(s) de livraison : {', '.join(bons)}")
     if avoir and facture.facture_origine_id:
         references.append(f"Avoir sur la facture {facture.facture_origine_id} du {facture.facture_origine.date_facturation:%d/%m/%Y}")
         if facture.motif:
@@ -112,17 +168,32 @@ def generer_pdf_facture(facture, police_embarquee=False):
     calcul = calculer_facture(facture)
     signe = -1 if avoir else 1  # le PDF montre un avoir en négatif ; le XML Factur-X, lui, reste en positif (type 381)
     lignes = []
-    for c in calcul["lignes"]:
-        lignes.append([
-            Paragraph(_designation(c["ligne"]), st["normal"]),
-            Paragraph(quantite(c["ligne"].quantite), st["droite"]),
-            Paragraph(montant(c["prix"]), st["droite"]),
-            Paragraph(f"{pourcent(c['taux'])} %".replace(".", ","), st["droite"]),
-            Paragraph(montant(signe * c["total_ht"]), st["droite"]),
-        ])
+    styles_sections = []  # une section par bon de livraison importé : rappel du BL et de la commande, puis total du BL
+    for livraison, lignes_section, total_section in sections_livraison(calcul["lignes"]):
+        if livraison is not None:
+            rang = len(lignes) + 1  # +1 : ligne d'en-tête du tableau
+            lignes.append([Paragraph(f"<b>{echapper(titre_section_livraison(livraison))}</b>", st["normal"]), "", "", "", ""])
+            styles_sections += [("SPAN", (0, rang), (-1, rang)), ("BACKGROUND", (0, rang), (-1, rang), GRIS_CLAIR)]
+        for c in lignes_section:
+            lignes.append([
+                Paragraph(_designation(c["ligne"]), st["normal"]),
+                Paragraph(quantite(c["ligne"].quantite), st["droite"]),
+                Paragraph(montant(c["prix"]), st["droite"]),
+                Paragraph(f"{pourcent(c['taux'])} %".replace(".", ","), st["droite"]),
+                Paragraph(montant(signe * c["total_ht"]), st["droite"]),
+            ])
+        if livraison is not None:
+            rang = len(lignes) + 1
+            lignes.append([
+                Paragraph(f"<b>Total {echapper(livraison.numero)}</b>", st["droite"]), "", "", "",
+                Paragraph(f"<b>{montant(signe * arrondir(total_section))}</b>", st["droite"]),
+            ])
+            styles_sections.append(("SPAN", (0, rang), (3, rang)))
     table = tableau_lignes(
         ["Désignation", "Qté", "PU HT", "TVA", "Total HT"], lignes, [80 * mm, 20 * mm, 28 * mm, 16 * mm, 30 * mm], alignements_droite=(1, 2, 3, 4),
     )
+    if styles_sections:
+        table.setStyle(TableStyle(styles_sections))
 
     totaux = [["Total HT", montant(signe * calcul["total_ht"])]]
     for g in calcul["groupes"]:
@@ -151,7 +222,7 @@ def generer_pdf_facture(facture, police_embarquee=False):
     if mention_tva and not any(t for t in par_taux if t):
         conditions.append(echapper(mention_tva))
 
-    client_table = _bloc_facturation_livraison(client, commande.adresse_facturation, commande.adresse_livraison)
+    client_table = _bloc_client(facture)
     identite = _identite_client(client)
     elements = [
         entete_societe(societe, st), Spacer(1, 8 * mm),
@@ -185,9 +256,8 @@ def generer_pdf_relance(facture, niveau=None):
         raise DocumentError(str(exc))
     st = styles()
     societe = Societe.charger()
-    commande = facture.commande
-    adresse = commande.adresse_facturation
-    destinataire = [f"<b>{echapper(commande.client.raison_sociale)}</b>"]
+    adresse = facture.adresse_imprimee
+    destinataire = [f"<b>{echapper(facture.nom_client_imprime)}</b>"]
     if adresse:
         destinataire += [echapper(adresse.adresse), echapper(f"{adresse.code_postal} {adresse.ville}")]
     import datetime

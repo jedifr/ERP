@@ -1104,3 +1104,269 @@ class FicheFactureDeuxColonnesTests(_FixtureLignes, TestCase):
         page = self.client.get("/admin/facturation/facture/add/")
         self.assertEqual(page.status_code, 200)
         self.assertContains(page, "fiche-recap")
+
+
+class FactureDirecteTests(_FixtureLignes, TestCase):
+    """Facture créée de zéro (client choisi, sans commande) : lignes article ou libres, nom et adresse modifiables, import de BL."""
+
+    def _facture_directe(self, numero="FAC-DIR", **kw):
+        kw.setdefault("date_facturation", datetime.date(2026, 2, 1))
+        return Facture.objects.create(numero=numero, client=self.tiers, **kw)
+
+    def _ligne(self, facture, **kw):
+        ligne = FactureLigne(facture=facture, **kw)
+        ligne.full_clean()
+        ligne.save()
+        return ligne
+
+    def test_client_obligatoire_sans_commande(self):
+        from django.core.exceptions import ValidationError
+
+        facture = Facture(numero="FAC-SANS-CLIENT", date_facturation=datetime.date(2026, 2, 1))
+        with self.assertRaises(ValidationError) as ctx:
+            facture.full_clean()
+        self.assertIn("client", ctx.exception.message_dict)
+
+    def test_client_repris_de_la_commande_et_controle(self):
+        facture = self._facture()
+        self.assertEqual(facture.client_id, self.tiers.pk)
+        autre = Tiers.objects.create(code="CLI-AUTRE", raison_sociale="Autre", type_tiers=Tiers.TypeTiers.CLIENT)
+        facture.client = autre
+        from django.core.exceptions import ValidationError
+
+        with self.assertRaises(ValidationError) as ctx:
+            facture.full_clean()
+        self.assertIn("commande", ctx.exception.message_dict)
+
+    def test_nom_et_adresse_repris_de_la_fiche_puis_modifiables(self):
+        facture = self._facture_directe()
+        self.assertEqual((facture.nom_client, facture.adresse_client, facture.code_postal_client, facture.ville_client),
+                         ("Client Facture", "1 rue", "75000", "Paris"))
+        facture.nom_client, facture.adresse_client, facture.ville_client = "Client Facture — Agence Lyon", "5 quai", "Lyon"
+        facture.save()
+        facture.refresh_from_db()
+        self.assertEqual(facture.nom_client_imprime, "Client Facture — Agence Lyon")
+        self.assertEqual(facture.adresse_imprimee.ville, "Lyon")
+        self.tiers.raison_sociale = "Nouveau nom"
+        self.tiers.save()
+        facture.save()
+        facture.refresh_from_db()
+        self.assertEqual(facture.nom_client, "Client Facture — Agence Lyon")  # jamais écrasé
+
+    def test_nom_et_adresse_figes_une_fois_emise(self):
+        from django.core.exceptions import ValidationError
+
+        facture = self._facture_directe()
+        self._ligne(facture, designation="Forfait", quantite=1, prix_unitaire_ht=50)
+        Facture.objects.filter(pk=facture.pk).update(reference_tiime="T-1")
+        facture.refresh_from_db()
+        facture.nom_client = "Autre nom"
+        with self.assertRaises(ValidationError):
+            facture.full_clean()
+        with self.assertRaises(FactureVerrouilleeError):
+            facture.save()
+
+    def test_ligne_libre_et_ligne_article(self):
+        facture = self._facture_directe()
+        libre = self._ligne(facture, designation="Frais de port", quantite=1, prix_unitaire_ht=Decimal("25"))
+        article = self._ligne(facture, article=self.article, quantite=3, prix_unitaire_ht=Decimal("10"))
+        defaut = TauxTVA.objects.filter(est_defaut=True).first()
+        self.assertEqual(libre.taux_tva, defaut.taux if defaut else Decimal("0"))  # taux par défaut du référentiel
+        self.assertEqual(article.libelle_court, str(self.article))
+        self.assertEqual(article.montant_ht, Decimal("30.00"))
+        facture.remplir_montants_depuis_les_lignes()
+        facture.refresh_from_db()
+        self.assertEqual(facture.montant_ht, Decimal("55.00"))
+
+    def test_ligne_directe_sans_prix_ni_designation_refusee(self):
+        from django.core.exceptions import ValidationError
+
+        facture = self._facture_directe()
+        with self.assertRaises(ValidationError) as ctx:
+            FactureLigne(facture=facture, quantite=1, prix_unitaire_ht=10).full_clean()
+        self.assertIn("designation", ctx.exception.message_dict)
+        with self.assertRaises(ValidationError) as ctx:
+            FactureLigne(facture=facture, designation="X", quantite=1).full_clean()
+        self.assertIn("prix_unitaire_ht", ctx.exception.message_dict)
+
+    def test_tva_ligne_article_selon_regime_du_client(self):
+        self.tiers.regime_fiscal = Tiers.RegimeFiscal.INTRA_UE
+        self.tiers.save()
+        TauxTVA.objects.create(nom="Zéro facture", taux=0)
+        self.article.taux_tva = self.tva
+        self.article.save()
+        facture = self._facture_directe()
+        ligne = self._ligne(facture, article=self.article, quantite=1, prix_unitaire_ht=10)
+        self.assertEqual(ligne.taux_tva, Decimal("0"))
+
+    def test_ligne_d_une_commande_d_un_autre_client_refusee(self):
+        from django.core.exceptions import ValidationError
+
+        autre = Tiers.objects.create(code="CLI-AUTRE2", raison_sociale="Autre", type_tiers=Tiers.TypeTiers.CLIENT)
+        facture = Facture.objects.create(numero="FAC-AUTRE", client=autre, date_facturation=datetime.date(2026, 2, 1))
+        with self.assertRaises(ValidationError) as ctx:
+            FactureLigne(facture=facture, commande_ligne=self.ligne, quantite=1).full_clean()
+        self.assertIn("commande_ligne", ctx.exception.message_dict)
+
+    def test_pdf_et_facturx_d_une_facture_directe(self):
+        from comptes.models import Societe
+
+        from .documents import generer_pdf_facture
+        from .facturx import construire_xml
+        from .documents import calculer_facture
+
+        facture = self._facture_directe()
+        self._ligne(facture, designation="Prestation de découpe", quantite=2, prix_unitaire_ht=Decimal("40"), taux_tva=20)
+        self._ligne(facture, article=self.article, quantite=1, prix_unitaire_ht=Decimal("10"), taux_tva=20)
+        from commercial.models import Pays
+
+        facture.nom_client = "Nom modifié SARL"
+        facture.pays_client = Pays.objects.get_or_create(code="FR", defaults={"nom": "France", "est_ue": True})[0]
+        facture.save()
+        facture.remplir_montants_depuis_les_lignes()
+        facture.refresh_from_db()
+        self.assertTrue(bytes(generer_pdf_facture(facture)).startswith(b"%PDF"))
+        xml = construire_xml(facture, Societe.charger(), facture.client, facture.adresse_imprimee, calculer_facture(facture)).decode()
+        self.assertIn("Nom modifié SARL", xml)
+        self.assertIn("Prestation de découpe", xml)
+        self.assertNotIn("BuyerOrderReferencedDocument", xml)
+
+    def test_ecriture_comptable_d_une_ligne_libre(self):
+        from comptabilite.generation import generer_ecriture_facture
+        from comptabilite.pcg import importer_pcg
+
+        importer_pcg()
+        facture = self._facture_directe()
+        self._ligne(facture, designation="Forfait", quantite=1, prix_unitaire_ht=Decimal("100"), taux_tva=20)
+        facture.remplir_montants_depuis_les_lignes()
+        ecriture, _ = generer_ecriture_facture(facture)
+        self.assertTrue(ecriture.est_equilibree)
+        self.assertAlmostEqual(float(ecriture.total_debit), 120)
+
+    def test_avoir_sur_facture_directe(self):
+        from .services import creer_avoir
+
+        facture = self._facture_directe(nom_client="Nom spécial")
+        self._ligne(facture, designation="Forfait", quantite=2, prix_unitaire_ht=Decimal("50"), taux_tva=20)
+        facture.remplir_montants_depuis_les_lignes()
+        Facture.objects.filter(pk=facture.pk).update(reference_tiime="T-2")
+        facture.refresh_from_db()
+        avoir = creer_avoir(facture, "Geste commercial")
+        self.assertEqual(avoir.montant_ht, Decimal("-100.00"))
+        self.assertEqual(avoir.nom_client, "Nom spécial")
+        self.assertIsNone(avoir.commande_id)
+
+    def test_import_de_bl(self):
+        from .services import importer_livraisons, livraisons_a_facturer
+
+        bl = Livraison.objects.get()  # 6 livrées par la fixture
+        bl2 = self._livrer(2, "BL-F-2")
+        facture = self._facture_directe()
+        self.assertEqual([l for l, _ in livraisons_a_facturer(self.tiers)], [bl, bl2])
+        self.assertEqual(importer_livraisons(facture, [bl, bl2]), 2)
+        facture.refresh_from_db()
+        self.assertEqual(facture.commande_id, self.commande.pk)
+        self.assertEqual(facture.montant_ht, Decimal("80.00"))
+        self.assertEqual(sorted(facture.lignes.values_list("livraison_id", "quantite")), [("BL-F-1", 6.0), ("BL-F-2", 2.0)])
+        self.assertEqual(livraisons_a_facturer(self.tiers), [])
+        with self.assertRaises(FacturationError):
+            importer_livraisons(facture, [bl])  # déjà importé
+
+    def test_import_de_bl_ne_refacture_pas_le_deja_facture(self):
+        from .services import importer_livraisons, livraisons_a_facturer
+
+        self._facturer(4, "FAC-PART")
+        bl = Livraison.objects.get()
+        facture = self._facture_directe()
+        self.assertEqual(livraisons_a_facturer(self.tiers)[0][1][0][1], 2)
+        importer_livraisons(facture, [bl])
+        self.assertEqual(facture.lignes.get().quantite, 2)
+
+    def test_import_de_bl_d_un_autre_client_refuse(self):
+        from .services import importer_livraisons
+
+        autre = Tiers.objects.create(code="CLI-AUTRE3", raison_sociale="Autre", type_tiers=Tiers.TypeTiers.CLIENT)
+        facture = Facture.objects.create(numero="FAC-AUTRE3", client=autre, date_facturation=datetime.date(2026, 2, 1))
+        with self.assertRaises(FacturationError):
+            importer_livraisons(facture, [Livraison.objects.get()])
+
+    def test_import_garde_un_montant_saisi_different(self):
+        from .services import importer_livraisons
+
+        facture = self._facture_directe()
+        self._ligne(facture, designation="Forfait", quantite=1, prix_unitaire_ht=Decimal("100"), taux_tva=20)
+        facture.montant_ht, facture.montant_ttc = Decimal("90"), Decimal("108")  # remise saisie dans Tiime
+        facture.save()
+        importer_livraisons(facture, [Livraison.objects.get()])
+        facture.refresh_from_db()
+        self.assertEqual(facture.montant_ht, Decimal("90.00"))
+
+    def test_creation_de_zero_dans_l_admin(self):
+        reponse = self.client.post("/admin/facturation/facture/add/", {
+            "numero": "FAC-ADMIN", "client": self.tiers.pk, "date_facturation": "01/02/2026", "type_document": "facture",
+            "statut_paiement": "a_payer", "mode_creation": "manuel", "version_verrou": "",
+            "lignes-TOTAL_FORMS": "2", "lignes-INITIAL_FORMS": "0",
+            "lignes-0-designation": "Frais de port", "lignes-0-quantite": "1", "lignes-0-prix_unitaire_ht": "15", "lignes-0-taux_tva": "20",
+            "lignes-1-article": self.article.pk, "lignes-1-quantite": "2", "lignes-1-prix_unitaire_ht": "10", "lignes-1-taux_tva": "20",
+            "relances-TOTAL_FORMS": "0", "relances-INITIAL_FORMS": "0",
+        })
+        if reponse.status_code != 302:
+            self.fail(reponse.context["adminform"].form.errors if reponse.context else reponse.content[:500])
+        facture = Facture.objects.get(pk="FAC-ADMIN")
+        self.assertEqual(facture.lignes.count(), 2)
+        self.assertEqual(facture.nom_client, "Client Facture")
+        self.assertEqual(facture.montant_ht, Decimal("35.00"))
+        self.assertEqual(facture.montant_ttc, Decimal("42.00"))
+        page = self.client.get(f"/admin/facturation/facture/{facture.pk}/change/")
+        for attendu in ("Client tel qu&#x27;imprimé sur la facture", "Importer un bon de livraison", "id_nom_client"):
+            self.assertContains(page, attendu)
+
+    def test_page_import_bl(self):
+        facture = self._facture_directe()
+        url = f"/admin/facturation/facture/{facture.pk}/importer-bl/"
+        self.assertContains(self.client.get(url), "BL-F-1")
+        reponse = self.client.post(url, {"livraisons": ["BL-F-1"]})
+        self.assertRedirects(reponse, f"/admin/facturation/facture/{facture.pk}/change/", fetch_redirect_response=False)
+        self.assertEqual(facture.lignes.count(), 1)
+
+
+class NumeroTvaTiersTests(TestCase):
+    def test_numero_tva_dans_la_fiche_tiers_et_sur_la_facture(self):
+        user = get_user_model().objects.create_superuser("tva-admin", "t@example.com", "pass1234")
+        self.client.force_login(user)
+        tiers = Tiers.objects.create(code="CLI-TVA", raison_sociale="Client TVA", type_tiers=Tiers.TypeTiers.CLIENT)
+        self.assertContains(self.client.get(f"/admin/commercial/tiers/{tiers.pk}/change/"), 'name="numero_tva"')
+        tiers.numero_tva = "fr 40 303 265 045"
+        tiers.full_clean()
+        self.assertEqual(tiers.numero_tva, "FR40303265045")
+
+        from .documents import _identite_client
+
+        self.assertIn("TVA FR40303265045", _identite_client(tiers))
+
+
+class SectionsBonLivraisonTests(_FixtureLignes, TestCase):
+    """Facture avec BL importés : une section par BL rappelant son n°, la commande d'origine et le total du BL."""
+
+    def test_sections_dans_le_pdf_et_la_fiche(self):
+        import io
+
+        from pypdf import PdfReader
+
+        from .documents import generer_pdf_facture
+        from .services import importer_livraisons
+
+        self._livrer(2, "BL-F-2")
+        facture = Facture.objects.create(numero="FAC-SEC", client=self.tiers, date_facturation=datetime.date(2026, 2, 1))
+        libre = FactureLigne(facture=facture, designation="Frais de port", quantite=1, prix_unitaire_ht=Decimal("15"), taux_tva=20)
+        libre.full_clean()
+        libre.save()
+        importer_livraisons(facture, list(Livraison.objects.order_by("numero")))
+        facture.refresh_from_db()
+        texte = "".join(page.extract_text() for page in PdfReader(io.BytesIO(bytes(generer_pdf_facture(facture)))).pages)
+        for attendu in ("Bon de livraison BL-F-1 du 20/01/2026", "Commande CDE-FACT (votre réf. PO)", "Total BL-F-1", "60,00",
+                        "Bon de livraison BL-F-2", "Total BL-F-2", "20,00", "Frais de port"):
+            self.assertIn(attendu, texte)
+        page = self.client.get(f"/admin/facturation/facture/{facture.pk}/change/")
+        self.assertContains(page, "Bons de livraison importés")
+        self.assertContains(page, "Bon de livraison BL-F-1 du 20/01/2026 — Commande CDE-FACT (votre réf. PO)</a> : 60 € HT")

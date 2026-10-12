@@ -85,7 +85,7 @@ def _factures_a_payer():
 
 
 def _n_factures_retard():
-    return sum(1 for f in _factures_a_payer().select_related("commande__client__conditions_paiement") if f.est_en_retard)
+    return sum(1 for f in _factures_a_payer().select_related("client__conditions_paiement") if f.est_en_retard)
 
 
 def _n_factures_a_payer():

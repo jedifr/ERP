@@ -31,7 +31,7 @@ def construire():
             f
             for f in Facture.objects.filter(type_document=Facture.TypeDocument.FACTURE)
             .exclude(statut_paiement=Facture.StatutPaiement.PAYE)
-            .select_related("commande__client__conditions_paiement")
+            .select_related("client__conditions_paiement")
             if f.est_en_retard
         ),
         key=lambda f: f.date_echeance,
@@ -41,7 +41,7 @@ def construire():
         lignes = [f"{len(en_retard)} facture(s) en retard, {_euros(total)} TTC à encaisser :"]
         for f in en_retard[:15]:
             jours = (aujourdhui - f.date_echeance).days
-            lignes.append(f"  - {f.numero} — {f.commande.client.raison_sociale} — {_euros(f.montant_ttc or 0)} — {jours} j de retard")
+            lignes.append(f"  - {f.numero} — {f.client.raison_sociale} — {_euros(f.montant_ttc or 0)} — {jours} j de retard")
         if len(en_retard) > 15:
             lignes.append(f"  … et {len(en_retard) - 15} autre(s).")
         sections["Factures en retard de paiement"] = lignes

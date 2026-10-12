@@ -162,8 +162,20 @@
         if (champSiret && siretSiege) {
             champSiret.value = siretSiege;
         }
+        proposerNumeroTva(resultat.siren || (siretSiege || "").slice(0, 9));
 
         proposerAdresseSiege(resultat.siege);
+    }
+
+    // Numéro de TVA intracommunautaire français déduit du SIREN (FR + clé + SIREN, clé = (12 + 3 × (SIREN mod 97)) mod 97),
+    // seulement si le champ est encore vide.
+    function proposerNumeroTva(siren) {
+        const champTva = document.querySelector("#id_numero_tva");
+        if (!champTva || champTva.value.trim() || !/^\d{9}$/.test(siren || "")) {
+            return;
+        }
+        const cle = (12 + 3 * (Number(siren) % 97)) % 97;
+        champTva.value = `FR${String(cle).padStart(2, "0")}${siren}`;
     }
 
     // N'ajoute une ligne au tableau Adresses que s'il est encore vide : une

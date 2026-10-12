@@ -25,7 +25,7 @@ DOCUMENTS = [
     ("chiffrage.Commande", "shopping_cart", lambda o: f"{o.client} · {o.get_statut_display()}"),
     ("chiffrage.Livraison", "local_shipping", lambda o: f"Commande {o.commande_id} · {o.get_statut_display()}"),
     ("chiffrage.OrdreFabrication", "build", lambda o: f"{o.article_id} × {o.quantite:g} · commande {o.commande_id}"),
-    ("facturation.Facture", "receipt_long", lambda o: f"{o.get_type_document_display()} · commande {o.commande_id} · {o.get_statut_paiement_display()}"),
+    ("facturation.Facture", "receipt_long", lambda o: f"{o.get_type_document_display()} · " + (f"commande {o.commande_id}" if o.commande_id else (o.nom_client or str(o.client_id or ""))) + f" · {o.get_statut_paiement_display()}"),
     ("technique.Article", "category", lambda o: o.libelle or o.get_nature_display()),
     ("commercial.Tiers", "handshake", lambda o: o.get_type_tiers_display()),
     ("achats.CommandeFournisseur", "local_shipping", lambda o: f"{o.fournisseur} · commande fournisseur"),

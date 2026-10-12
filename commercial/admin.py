@@ -156,10 +156,10 @@ class TiersAdmin(ImportTableauMixin, ModificationParLotsMixin, ExportCsvMixin, C
 
     list_display = ["code", "raison_sociale", "type_tiers", "regime_fiscal", "devise", "siret"]
     list_filter = ["type_tiers", "regime_fiscal"]
-    search_fields = ["code", "raison_sociale", "siret"]
+    search_fields = ["code", "raison_sociale", "siret", "numero_tva"]
     autocomplete_fields = ["conditions_paiement", "devise"]
     fieldsets = [
-        (None, {"fields": ["code", "raison_sociale", "type_tiers", "siret"]}),
+        (None, {"fields": ["code", "raison_sociale", "type_tiers", "siret", "numero_tva"]}),
         ("Coordonnées bancaires", {"fields": ["iban", "bic"], "classes": ["tab"]}),
         ("Commercial", {"fields": ["regime_fiscal", "devise", "conditions_paiement"]}),
     ]

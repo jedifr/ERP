@@ -170,6 +170,8 @@ class Tiers(models.Model):
         super().clean()
         if self.iban:
             valider_iban(self.iban)
+        if self.numero_tva:
+            self.numero_tva = self.numero_tva.replace(" ", "").replace(".", "").upper()
 
 
 class Adresse(models.Model):

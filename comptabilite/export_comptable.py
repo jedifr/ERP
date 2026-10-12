@@ -47,7 +47,7 @@ def _ecritures_de_journal(nature, debut, fin, parametres, code_journal):
     elements = parametres.elements("libelle_achats" if achats else "libelle_ventes")
     qs = (
         EcritureComptable.objects.filter(journal__nature=nature, date_ecriture__range=(debut, fin))
-        .select_related("facture__commande__client", "facture_fournisseur__commande_fournisseur__fournisseur")
+        .select_related("facture__client", "facture_fournisseur__commande_fournisseur__fournisseur")
         .prefetch_related("lignes__compte")
         .order_by("date_ecriture", "pk")
     )
@@ -56,7 +56,7 @@ def _ecritures_de_journal(nature, debut, fin, parametres, code_journal):
         facture = e.facture_fournisseur if achats else e.facture
         tiers = None
         if facture is not None:
-            tiers = facture.commande_fournisseur.fournisseur if achats else facture.commande.client
+            tiers = facture.commande_fournisseur.fournisseur if achats else facture.client
         numero = facture.numero if facture is not None else e.piece
         valeurs = {
             "code_facture": numero, "nom_tiers": tiers.raison_sociale if tiers else "",
@@ -137,10 +137,10 @@ def ecritures_banque(debut, fin, parametres):
 
     for f in Facture.objects.filter(
         type_document=Facture.TypeDocument.FACTURE, statut_paiement=Facture.StatutPaiement.PAYE, date_paiement__range=(debut, fin)
-    ).select_related("commande__client"):
+    ).select_related("client"):
         montant = montant_du(f, "ecriture_comptable", "debit")
         if montant:
-            ajouter(f.date_paiement, f.numero, f.commande.client, "", montant, True)
+            ajouter(f.date_paiement, f.numero, f.client, "", montant, True)
     for f in FactureFournisseur.objects.filter(date_paiement__range=(debut, fin)).select_related("commande_fournisseur__fournisseur"):
         montant = montant_du(f, "ecriture_comptable", "credit")
         if montant:

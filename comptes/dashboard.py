@@ -55,7 +55,7 @@ def dashboard_callback(request, context):
         f
         for f in Facture.objects.filter(type_document=Facture.TypeDocument.FACTURE)
         .exclude(statut_paiement=Facture.StatutPaiement.PAYE)
-        .select_related("commande__client__conditions_paiement")
+        .select_related("client__conditions_paiement")
         if f.est_en_retard
     ]
     montant_en_retard = sum(f.montant_ttc or 0 for f in factures_en_retard)
