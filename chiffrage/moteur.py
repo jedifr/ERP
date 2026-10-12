@@ -262,16 +262,45 @@ def calculer_ligne(devis, ligne):
     ligne.cout_matiere_calcule = cout_matiere_article(ligne.article, ligne.quantite, devis=devis)
     taux = _taux_marge_matiere(devis, ligne)
     ligne.taux_marge_matiere_applique = taux
-    if ligne.prix_vente_unitaire_force is not None:
-        ligne.prix_vente_matiere = arrondir(D(ligne.prix_vente_unitaire_force) * D(ligne.quantite))
-    else:
-        ligne.prix_vente_matiere = _vendu(ligne.cout_matiere_calcule, taux)
+    ligne.prix_vente_matiere = _vendu(ligne.cout_matiere_calcule, taux)
     ligne.save()
 
     if ligne.article.nature == Article.Nature.FABRIQUE:
         _synchroniser_operations_ligne(devis, ligne)
     else:
         ligne.operations.all().delete()
+    if ligne.prix_vente_unitaire_force is not None:
+        _appliquer_prix_force(ligne)
+
+
+def _repartir(cible, parts):
+    """Répartit `cible` au prorata de `parts` (au centime) ; le premier montant absorbe l'écart d'arrondi."""
+    total = sum(parts, ZERO)
+    if total <= 0:
+        return [cible] + [ZERO] * (len(parts) - 1)
+    reparties = [arrondir(p * cible / total) for p in parts]
+    reparties[0] += cible - sum(reparties, ZERO)
+    return reparties
+
+
+def _appliquer_prix_force(ligne):
+    """Prix de vente unitaire forcé : il remplace le prix unitaire de la ligne (matière + opérations). Le prix de vente total
+    (quantité × prix forcé) est réparti entre la matière et chaque opération au prorata du prix calculé, pour que tous les
+    totaux (devis, commande, marge prévue) restent cohérents."""
+    cible = arrondir(D(ligne.prix_vente_unitaire_force) * D(ligne.quantite))
+    operations = list(ligne.operations.all())
+    parts = [D0(ligne.prix_vente_matiere)] + [D0(op.prix_vente) for op in operations]
+    calcule = sum(parts, ZERO)
+    reparties = _repartir(cible, parts)
+    ligne.prix_vente_matiere = reparties[0]
+    for op, montant in zip(operations, reparties[1:]):
+        op.prix_vente = montant
+        op.save(update_fields=["prix_vente"])
+    if calcule > 0:  # les réglages (information) suivent la même proportion
+        for champ in ("prix_vente_reglage", "prix_vente_reglage_operations"):
+            if getattr(ligne, champ) is not None:
+                setattr(ligne, champ, arrondir(D(getattr(ligne, champ)) * cible / calcule))
+    ligne.save(update_fields=["prix_vente_matiere", "prix_vente_reglage", "prix_vente_reglage_operations"])
 
 
 def calculer_devis(devis):
@@ -304,12 +333,10 @@ def previsualiser_ligne(
     cout_matiere = cout_matiere_article(article, quantite, devis=devis)
     taux = _taux_marge_matiere(devis, ligne_apercu)
 
-    if prix_vente_unitaire_force is not None:
-        prix_vente_matiere = arrondir(D(prix_vente_unitaire_force) * D(quantite))
-    else:
-        prix_vente_matiere = _vendu(cout_matiere, taux)
+    prix_vente_matiere = _vendu(cout_matiere, taux)
 
     prix_vente_operations = ZERO
+    cout_operations = ZERO
     if article.nature == Article.Nature.FABRIQUE:
         from .reglage import part_ligne
 
@@ -322,17 +349,26 @@ def previsualiser_ligne(
                 decoupe_vue = True
             taux_operation = _taux_marge_operation(devis, etape.poste, None)
             prix_vente_operations += _vendu(cout_etape, taux_operation)
+            cout_operations += cout_etape
 
+    if prix_vente_unitaire_force is not None:  # remplace le prix unitaire (matière + opérations) : voir _appliquer_prix_force
+        prix_vente_matiere, prix_vente_operations = _repartir(
+            arrondir(D(prix_vente_unitaire_force) * D(quantite)), [prix_vente_matiere, prix_vente_operations]
+        )
     prix_vente_total = prix_vente_matiere + prix_vente_operations
     taux_tva_valeur = D(taux_tva.taux) if taux_tva is not None else ZERO
 
     return {
+        "cout_total": D(cout_matiere) + cout_operations,
         "cout_matiere_calcule": cout_matiere,
         "taux_marge_matiere_applique": taux,
         "prix_vente_matiere": prix_vente_matiere,
         "prix_vente_operations": prix_vente_operations,
         "prix_vente_total": prix_vente_total,
-        "prix_vente_unitaire": arrondir_prix_vente(prix_vente_total / D(quantite)) if quantite else None,
+        "prix_vente_unitaire": (
+            D(prix_vente_unitaire_force) if prix_vente_unitaire_force is not None
+            else arrondir_prix_vente(prix_vente_total / D(quantite)) if quantite else None
+        ),
         "prix_vente_ttc": arrondir(prix_vente_total * (1 + taux_tva_valeur / 100)),
     }
 

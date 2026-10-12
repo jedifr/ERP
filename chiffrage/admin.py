@@ -152,10 +152,21 @@ class DevisLigneInline(TabularInline):
         "prix_vente_matiere",
         "prix_vente_operations",
         "reglages",
-        "prix_vente_total",
+        "prix_sans_marge",
         "prix_vente_unitaire",
-        "prix_vente_ttc",
+        "prix_vente_total",
     ]
+
+    @admin.display(description="Prix sans marge (HT)")
+    def prix_sans_marge(self, obj):
+        """Coût de revient de la ligne (matière + opérations au coût) : le prix de vente qu'elle aurait sans aucune marge."""
+        cout = obj.cout_total if obj is not None and obj.pk else None
+        return "—" if cout is None else arrondir(cout)
+
+    @admin.display(description="Prix de vente HT (avec marge)")
+    def prix_vente_total(self, obj):
+        total = obj.prix_vente_total if obj is not None and obj.pk else None
+        return "—" if total is None else total
 
     @admin.display(description="dont réglages (HT)")
     def reglages(self, obj):

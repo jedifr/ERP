@@ -116,6 +116,33 @@ class GammeEditeurVueTests(TestCase):
         self.assertEqual(erreur.status_code, 400)
         self.assertIn("temps", erreur.json()["detail"])
 
+    def test_depuis_un_devis_plus_ancien_l_operation_ajoutee_compte_dans_son_prix(self):
+        # Régression : une opération ajoutée à la main depuis la fiche d'un devis daté d'avant aujourd'hui était datée du jour,
+        # donc ignorée par le chiffrage de ce devis (gamme active à sa date) : le prix pièce ne bougeait pas.
+        from chiffrage.models import Devis, DevisLigne
+        from chiffrage.moteur import calculer_ligne
+        from commercial.models import Tiers
+
+        self.client.force_login(get_user_model().objects.create_superuser("adm-gd", "a@x.fr", "pass-mot-de-passe-20"))
+        il_y_a_un_mois = datetime.date.today() - datetime.timedelta(days=30)
+        client = Tiers.objects.create(code="CLI-GD", raison_sociale="Client GD", type_tiers=Tiers.TypeTiers.CLIENT)
+        devis = Devis.objects.create(numero="DEV-GD", client=client, date_creation=il_y_a_un_mois, statut=Devis.Statut.BROUILLON)
+        ligne = DevisLigne.objects.create(devis=devis, article=self.article, quantite=30)
+        # une version de la gamme enregistrée aujourd'hui par erreur (ancien comportement) est remplacée
+        Gamme.objects.create(article=self.article, poste=self.poste, ordre=1, temps_fixe=1, temps_variable=1, date_debut=datetime.date.today())
+        self.assertEqual(self.client.get(self.url, {"devis": devis.pk}).json()["etapes"], [])  # gamme vue à la date du devis
+        reponse = self.client.post(self.url, {"action": "enregistrer", "devis": devis.pk,
+                                              "etapes": [{"id": None, "poste": self.poste.pk, "temps_fixe": 3, "temps_variable": 0.2}]},
+                                   content_type="application/json")
+        self.assertEqual(reponse.status_code, 200, reponse.content)
+        self.assertEqual(len(reponse.json()["etapes"]), 1)
+        etape = Gamme.objects.get(article=self.article)
+        self.assertEqual((etape.date_debut, etape.date_fin, etape.temps_fixe), (il_y_a_un_mois, None, 3))
+        calculer_ligne(devis, ligne)
+        # (3 + 0,2 × 30) min à 50 €/h = 7,50 € de coût, sans marge de poste
+        self.assertAlmostEqual(float(ligne.prix_vente_operations), 7.5)
+        self.assertEqual(len(self.client.get(self.url).json()["etapes"]), 1)  # et elle vaut aussi pour les devis suivants
+
     def test_sans_droit_interdit(self):
         self.client.force_login(get_user_model().objects.create_user("lambda-ge", password="pass-mot-de-passe-20", is_staff=True))
         self.assertEqual(self.client.get(self.url).status_code, 403)

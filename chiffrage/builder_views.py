@@ -97,7 +97,7 @@ def _traiter_ajout_ligne(request, devis):
             ligne.refresh_from_db()
             resultat_apercu = {
                 "ok": True, "apercu": True, "article": article.reference, "quantite": ligne.quantite,
-                "cout_matiere_calcule": ligne.cout_matiere_calcule, "prix_vente_matiere": ligne.prix_vente_matiere,
+                "cout_matiere_calcule": ligne.cout_matiere_calcule, "cout_total": ligne.cout_total, "prix_vente_matiere": ligne.prix_vente_matiere,
                 "prix_vente_operations": ligne.prix_vente_operations, "prix_vente_total": ligne.prix_vente_total,
                 "prix_vente_unitaire": ligne.prix_vente_unitaire, "prix_vente_ttc": ligne.prix_vente_ttc,
             } if apercu else None
@@ -270,6 +270,7 @@ def recalculer_ligne_view(request, numero, ligne_id):
         {
             "ok": True,
             "cout_matiere_calcule": ligne.cout_matiere_calcule,
+            "cout_total": ligne.cout_total,
             "prix_vente_matiere": ligne.prix_vente_matiere,
             "taux_marge_matiere_applique": ligne.taux_marge_matiere_applique,
             "prix_vente_operations": ligne.prix_vente_operations,

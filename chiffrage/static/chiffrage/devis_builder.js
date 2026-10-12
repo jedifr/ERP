@@ -342,7 +342,7 @@ function demarrerConstructeur() {
                     const e = (x) => (x === null || x === undefined ? "—" : Number(x).toFixed(2).replace(".", ",") + " €");
                     zoneApercu.hidden = false;
                     zoneApercu.innerHTML = "";
-                    [["Matière", data.prix_vente_matiere], ["Opérations", data.prix_vente_operations], ["Prix unitaire HT", data.prix_vente_unitaire], ["Total HT", data.prix_vente_total], ["Total TTC", data.prix_vente_ttc]].forEach(([titre, valeur]) => {
+                    [["Matière", data.prix_vente_matiere], ["Opérations", data.prix_vente_operations], ["Sans marge HT", data.cout_total], ["Prix unitaire HT", data.prix_vente_unitaire], ["Total HT", data.prix_vente_total]].forEach(([titre, valeur]) => {
                         const bloc = document.createElement("div");
                         const petit = document.createElement("small");
                         petit.textContent = titre;
