@@ -10,7 +10,7 @@ from decimal import Decimal
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
-from comptes.montants import pourcent
+from comptes.montants import arrondir_prix_vente, pourcent
 from technique.models import Article, PosteTravail
 
 from .models import (
@@ -24,6 +24,16 @@ from .planning_sync import tenter_synchronisation
 # d'eux est tracé dans CommandeLigneModification par les ModelAdmin
 # (chiffrage/admin.py, qui a accès à request.user).
 CHAMPS_SUIVIS_COMMANDE_LIGNE = ("quantite_commandee", "prix_vente_unitaire", "taux_tva", "designation")
+
+
+def prix_unitaire_commande(ligne_devis):
+    """Prix unitaire HT repris sur la commande : celui de la ligne de devis (remise de ligne déduite), diminué de la remise
+    globale du devis au prorata, pour que la commande (et ses factures) totalise le montant HT du devis."""
+    prix = ligne_devis.prix_vente_unitaire
+    devis = ligne_devis.devis
+    if prix is None or not devis.remise_globale:
+        return prix
+    return arrondir_prix_vente(prix * devis.coefficient_remise_globale)
 
 
 def _texte_valeur(valeur):
@@ -235,7 +245,7 @@ def _creer_commande_et_ordres(devis):
             quantite_commandee=ligne.quantite,
             devis_ligne=ligne,
             designation=ligne.designation,
-            prix_vente_unitaire=ligne.prix_vente_unitaire,
+            prix_vente_unitaire=prix_unitaire_commande(ligne),
             taux_tva=ligne.taux_tva,
         )
 
@@ -287,7 +297,7 @@ def synchroniser_lignes_commande(commande):
                 quantite_commandee=ligne.quantite,
                 devis_ligne=ligne,
                 designation=ligne.designation,
-                prix_vente_unitaire=ligne.prix_vente_unitaire,
+                prix_vente_unitaire=prix_unitaire_commande(ligne),
                 taux_tva=ligne.taux_tva,
             )
         )
@@ -331,6 +341,8 @@ def reviser_devis(devis, motif=""):
             date_creation=timezone.localdate(),
             statut=Devis.Statut.BROUILLON,
             taux_marge_globale=devis.taux_marge_globale,
+            remise_globale=devis.remise_globale,
+            remise_globale_type=devis.remise_globale_type,
             delai=devis.delai,
             devis_origine=devis,
             revision=revision,
@@ -345,6 +357,7 @@ def reviser_devis(devis, motif=""):
                 quantite=ligne.quantite,
                 taux_marge_matiere_applique=ligne.taux_marge_matiere_applique,
                 prix_vente_unitaire_force=ligne.prix_vente_unitaire_force,
+                remise_pct=ligne.remise_pct,
                 taux_tva=ligne.taux_tva,
             )
         devis.issue = Devis.Issue.REMPLACE

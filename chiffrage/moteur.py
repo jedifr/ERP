@@ -269,8 +269,18 @@ def calculer_ligne(devis, ligne):
         _synchroniser_operations_ligne(devis, ligne)
     else:
         ligne.operations.all().delete()
+    operations = list(DevisLigneOperation.objects.filter(devis_ligne=ligne).order_by("ordre"))
+    calcule = D0(ligne.prix_vente_matiere) + sum((D0(op.prix_vente) for op in operations), ZERO)
+    avant_remise = calcule
     if ligne.prix_vente_unitaire_force is not None:
-        _appliquer_prix_force(ligne)
+        avant_remise = arrondir(D(ligne.prix_vente_unitaire_force) * D(ligne.quantite))
+    cible = avant_remise
+    if ligne.remise_pct:
+        cible = arrondir(avant_remise * (1 - D(ligne.remise_pct) / 100))
+    ligne.prix_vente_avant_remise = avant_remise
+    if cible != calcule:
+        _ajuster_prix(ligne, operations, calcule, cible)
+    ligne.save(update_fields=["prix_vente_avant_remise"])
 
 
 def _repartir(cible, parts):
@@ -283,14 +293,11 @@ def _repartir(cible, parts):
     return reparties
 
 
-def _appliquer_prix_force(ligne):
-    """Prix de vente unitaire forcé : il remplace le prix unitaire de la ligne (matière + opérations). Le prix de vente total
-    (quantité × prix forcé) est réparti entre la matière et chaque opération au prorata du prix calculé, pour que tous les
-    totaux (devis, commande, marge prévue) restent cohérents."""
-    cible = arrondir(D(ligne.prix_vente_unitaire_force) * D(ligne.quantite))
-    operations = list(ligne.operations.all())
+def _ajuster_prix(ligne, operations, calcule, cible):
+    """Ramène le prix de vente de la ligne (matière + opérations) à `cible` — prix unitaire forcé, puis remise de ligne. La
+    cible est répartie entre la matière et chaque opération au prorata du prix calculé, pour que tous les totaux (devis,
+    commande, marge prévue) restent cohérents."""
     parts = [D0(ligne.prix_vente_matiere)] + [D0(op.prix_vente) for op in operations]
-    calcule = sum(parts, ZERO)
     reparties = _repartir(cible, parts)
     ligne.prix_vente_matiere = reparties[0]
     for op, montant in zip(operations, reparties[1:]):
@@ -319,6 +326,7 @@ def previsualiser_ligne(
     taux_marge_matiere_applique=None,
     prix_vente_unitaire_force=None,
     taux_tva=None,
+    remise_pct=None,
 ):
     """Aperçu du coût/prix d'une ligne pas encore enregistrée (ligne tout juste
     ajoutée dans l'inline de la fiche Devis, ou dans le constructeur), en
@@ -351,10 +359,13 @@ def previsualiser_ligne(
             prix_vente_operations += _vendu(cout_etape, taux_operation)
             cout_operations += cout_etape
 
-    if prix_vente_unitaire_force is not None:  # remplace le prix unitaire (matière + opérations) : voir _appliquer_prix_force
-        prix_vente_matiere, prix_vente_operations = _repartir(
-            arrondir(D(prix_vente_unitaire_force) * D(quantite)), [prix_vente_matiere, prix_vente_operations]
-        )
+    # Prix forcé puis remise de ligne : mêmes règles que calculer_ligne (voir _ajuster_prix).
+    avant_remise = prix_vente_matiere + prix_vente_operations
+    if prix_vente_unitaire_force is not None:
+        avant_remise = arrondir(D(prix_vente_unitaire_force) * D(quantite))
+    cible = arrondir(avant_remise * (1 - D(remise_pct) / 100)) if remise_pct else avant_remise
+    if cible != prix_vente_matiere + prix_vente_operations:
+        prix_vente_matiere, prix_vente_operations = _repartir(cible, [prix_vente_matiere, prix_vente_operations])
     prix_vente_total = prix_vente_matiere + prix_vente_operations
     taux_tva_valeur = D(taux_tva.taux) if taux_tva is not None else ZERO
 
@@ -365,8 +376,9 @@ def previsualiser_ligne(
         "prix_vente_matiere": prix_vente_matiere,
         "prix_vente_operations": prix_vente_operations,
         "prix_vente_total": prix_vente_total,
+        "prix_vente_avant_remise": avant_remise,
         "prix_vente_unitaire": (
-            D(prix_vente_unitaire_force) if prix_vente_unitaire_force is not None
+            D(prix_vente_unitaire_force) if prix_vente_unitaire_force is not None and not remise_pct
             else arrondir_prix_vente(prix_vente_total / D(quantite)) if quantite else None
         ),
         "prix_vente_ttc": arrondir(prix_vente_total * (1 + taux_tva_valeur / 100)),

@@ -5,6 +5,7 @@ from urllib.parse import quote
 from django import forms
 from django.conf import settings
 from django.contrib import admin, messages
+from django.contrib.admin.utils import flatten_fieldsets
 from django.core.exceptions import PermissionDenied
 from django.http import HttpResponse, HttpResponseRedirect
 from django.shortcuts import get_object_or_404
@@ -163,7 +164,7 @@ class DevisLigneInline(TabularInline):
         cout = obj.cout_total if obj is not None and obj.pk else None
         return "—" if cout is None else arrondir(cout)
 
-    @admin.display(description="Prix de vente HT (avec marge)")
+    @admin.display(description="Prix de vente HT (avec marge, remise déduite)")
     def prix_vente_total(self, obj):
         total = obj.prix_vente_total if obj is not None and obj.pk else None
         return "—" if total is None else total
@@ -432,6 +433,7 @@ class DevisAdmin(ProchaineActionMixin, DateDuJourMixin, ChronologieMixin, PucesM
     readonly_fields = [
         "montant_matiere_ht_display",
         "montant_operations_ht_display",
+        "montant_remise_globale_display",
         "montant_total_ht_display",
         "montant_total_ttc_display",
         "indices_display",
@@ -520,12 +522,27 @@ class DevisAdmin(ProchaineActionMixin, DateDuJourMixin, ChronologieMixin, PucesM
 
     # Fiche en deux colonnes : saisie à gauche, récapitulatif (montants, indices) à droite — voir fiche_deux_colonnes.css.
     CHAMPS_RECAPITULATIF = [
-        "montant_matiere_ht_display", "montant_operations_ht_display", "montant_total_ht_display",
-        "montant_total_ttc_display", "indices_display", "comparaison_display",
+        "montant_matiere_ht_display", "montant_operations_ht_display", "montant_remise_globale_display",
+        "montant_total_ht_display", "montant_total_ttc_display", "indices_display", "comparaison_display",
     ]
+    # Remise globale : saisie dans le récapitulatif de l'onglet « Lignes du devis » (_recap_lignes.html), pas dans « Général ».
+    CHAMPS_REMISE_GLOBALE = ["remise_globale", "remise_globale_type"]
+
+    def get_form(self, request, obj=None, **kwargs):
+        # La fiche construit son formulaire à partir des fieldsets (fields=…), qui n'affichent pas la remise globale :
+        # on l'y ajoute pour qu'elle soit saisie et enregistrée avec le devis. fields=None (get_fields) : tous les champs.
+        if "fields" not in kwargs:
+            kwargs["fields"] = flatten_fieldsets(self.get_fieldsets(request, obj))
+        if kwargs["fields"] is not None:
+            lecture_seule = self.get_readonly_fields(request, obj)
+            kwargs["fields"] = list(kwargs["fields"]) + [
+                c for c in self.CHAMPS_REMISE_GLOBALE if c not in kwargs["fields"] and c not in lecture_seule
+            ]
+        return super().get_form(request, obj, **kwargs)
 
     def get_fieldsets(self, request, obj=None):
-        saisie = [c for c in self.get_fields(request, obj) if c not in self.CHAMPS_RECAPITULATIF]
+        exclus = self.CHAMPS_RECAPITULATIF + self.CHAMPS_REMISE_GLOBALE
+        saisie = [c for c in self.get_fields(request, obj) if c not in exclus]
         return [
             (None, {"fields": saisie, "classes": ["fiche-saisie"]}),
             ("Récapitulatif", {"fields": self.CHAMPS_RECAPITULATIF, "classes": ["fiche-recap"]}),
@@ -545,6 +562,10 @@ class DevisAdmin(ProchaineActionMixin, DateDuJourMixin, ChronologieMixin, PucesM
     @admin.display(description="Montant opérations HT (temps machine / main d'œuvre)")
     def montant_operations_ht_display(self, obj):
         return format_html('<span id="montant-operations-ht">{}</span>', obj.montant_operations_ht)
+
+    @admin.display(description="Remise globale HT")
+    def montant_remise_globale_display(self, obj):
+        return format_html('<span id="montant-remise-globale">{}</span>', obj.montant_remise_globale)
 
     @admin.display(description="Montant total HT")
     def montant_total_ht_display(self, obj):

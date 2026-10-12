@@ -481,6 +481,32 @@ libellé, sur la fiche Devis comme sur la page Constructeur. Les montants
 "Montant matière/opérations/total HT" du haut de la fiche Devis l'indiquaient
 déjà.
 
+## Remises sur un devis (par ligne et globale)
+
+**Remise par ligne** (`DevisLigne.remise_pct`, 0 à 100 %) : déduite du prix
+de vente de la ligne, après un éventuel prix unitaire forcé (marge incluse).
+Le moteur (`calculer_ligne`) garde le prix avant remise
+(`prix_vente_avant_remise`) et répartit le prix remisé au prorata de la
+matière et des opérations, comme le prix forcé : toutes les sommes (devis,
+commande, pilotage) restent cohérentes.
+
+**Remise globale** (`Devis.remise_globale` + `remise_globale_type`, en % ou
+en € HT) : appliquée au total des lignes, plafonnée à ce total. La TVA de
+chaque taux porte sur sa base remisée (`Devis.ventilation_tva()`). Sur la
+commande, elle est reportée dans le prix unitaire de chaque ligne
+(`prix_unitaire_commande`), donc l'AR et la facture tombent sur le même
+total HT.
+
+**Fiche devis** : la colonne « Remise (%) » est dans le tableau des lignes
+(recalcul en direct) ; un récapitulatif sous le tableau (onglet « Lignes du
+devis ») donne le total sans marge, le total avant remises, les remises, la
+remise globale (saisie là, enregistrée avec le devis), le total HT, la marge,
+la TVA et le TTC. **PDF** : colonne « Remise » si une ligne est remisée (le
+PU HT est alors le prix avant remise), puis « Total des lignes HT » et
+« Remise globale » avant le total HT. Les modèles HTML personnalisés
+disposent des variables `ligne.remise`, `avec_remise`, `totaux.lignes_ht`,
+`totaux.remise_globale` et `totaux.remise_globale_libelle`.
+
 ## En-têtes de colonnes sur 2 lignes (fiche Devis)
 
 Le tableau des lignes de devis (admin) partait en scroll horizontal : Unfold

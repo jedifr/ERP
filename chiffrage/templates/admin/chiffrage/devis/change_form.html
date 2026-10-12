@@ -33,6 +33,7 @@
     {{ block.super }}
     {% include "admin/chiffrage/devis/panneau_pieces.html" %}
     {% if not original %}<div id="devis-nouveau" hidden></div>{% endif %}
+    {% include "admin/chiffrage/devis/_recap_lignes.html" %}
     {% include "admin/chiffrage/devis/_lignes_detail.html" %}
     {% include "admin/chiffrage/devis/_constructeur.html" %}
     {% include "admin/_chronologie.html" %}

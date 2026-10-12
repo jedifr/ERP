@@ -15,6 +15,7 @@ function initOnglets() {
     var chrono = conteneur.querySelector(":scope > #chronologie-affaire");
     var constructeur = conteneur.querySelector(":scope > #lignes-constructeur");
     var detail = conteneur.querySelector(":scope > #lignes-detail");
+    var recapLignes = conteneur.querySelector(":scope > #lignes-recap");
     // Devis pas encore enregistré : « Pièces et matière » et « Lignes du devis » enregistrent le devis puis s'ouvrent.
     var nouveau = !!document.getElementById("devis-nouveau");
 
@@ -26,7 +27,7 @@ function initOnglets() {
     if (pieces && !nouveau) onglets.push({ cle: "pieces", titre: "Pièces et matière", icone: "content_cut", elements: [pieces], compte: function () {
         return pieces.querySelectorAll("#dp-cartes > *, #dp-profils > *").length;
     } });
-    if (lignes && !nouveau) onglets.push({ cle: "lignes", titre: "Lignes du devis", icone: "list_alt", elements: [lignes, detail, constructeur], compte: function () {
+    if (lignes && !nouveau) onglets.push({ cle: "lignes", titre: "Lignes du devis", icone: "list_alt", elements: [lignes, recapLignes, detail, constructeur], compte: function () {
         var n = 0;
         lignes.querySelectorAll("input[name$='-id']").forEach(function (i) { if (i.value && !/__prefix__/.test(i.name)) n++; });
         return n;

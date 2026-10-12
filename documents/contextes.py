@@ -114,6 +114,9 @@ def _totaux(lignes_ht_ttc_taux):
         "ht": montant(arrondir(total_ht)), "ttc": montant(arrondir(total_ttc)),
         "tva": [{"taux": f"{pourcent(t)} %".replace(".", ","), "montant": montant(par_taux[t])} for t in sorted(par_taux)],
         "tva_totale": montant(arrondir(total_ttc - total_ht)),
+        # Remise globale (devis seulement, voir contexte_devis) : vides ici, la partie du bloc « Totaux » qui les affiche
+        # (data-if="totaux.remise_globale") reste masquée.
+        "lignes_ht": "", "remise_globale": "", "remise_globale_libelle": "",
     }
 
 
@@ -149,20 +152,39 @@ def contexte_devis(devis):
     contexte = _base(f"DEVIS {devis.numero}", devis.numero, f"{devis.date_creation:%d/%m/%Y}", references, filigrane)
 
     lignes, calcul = [], []
+    avec_remise = any(l.remise_pct for l in lignes_devis)
     for ligne in lignes_devis:
         ht, ttc = arrondir(ligne.prix_vente_total), ligne.prix_vente_ttc
         taux = D0(ligne.taux_tva.taux) if ligne.taux_tva_id else ZERO
         calcul.append((ht, ttc, taux))
-        pu = arrondir_prix(ligne.prix_vente_unitaire) if ligne.prix_vente_unitaire is not None else ZERO
+        if ligne.remise_pct and ligne.prix_vente_avant_remise is not None and ligne.quantite:
+            pu = arrondir_prix(D0(ligne.prix_vente_avant_remise) / D0(ligne.quantite))  # PU avant remise
+        else:
+            pu = arrondir_prix(ligne.prix_vente_unitaire) if ligne.prix_vente_unitaire is not None else ZERO
         lignes.append({
             **_designation(ligne.article, ligne.designation), "quantite": quantite(ligne.quantite), "pu_ht": montant(pu),
+            "remise": f"{pourcent(ligne.remise_pct)} %".replace(".", ",") if ligne.remise_pct else "",
             "tva": f"{pourcent(taux)} %".replace(".", ","), "total_ht": montant(ht),
+        })
+    totaux = _totaux(calcul)
+    remise_globale = devis.montant_remise_globale
+    if remise_globale:
+        # Remise globale : imprimée avant le total HT ; la TVA de chaque taux porte sur sa base remisée.
+        libelle = "Remise globale"
+        if devis.remise_globale_type == devis.TypeRemise.POURCENTAGE:
+            libelle += f" ({pourcent(devis.remise_globale)} %)".replace(".", ",")
+        ventilation = devis.ventilation_tva()
+        total_ht, total_ttc = devis.montant_total_ht, devis.montant_total_ttc
+        totaux.update({
+            "lignes_ht": totaux["ht"], "remise_globale": montant(remise_globale), "remise_globale_libelle": libelle,
+            "ht": montant(total_ht), "ttc": montant(total_ttc), "tva_totale": montant(total_ttc - total_ht),
+            "tva": [{"taux": f"{pourcent(t)} %".replace(".", ","), "montant": montant(tva)} for t, _b, tva in ventilation],
         })
     paiement = getattr(devis.client, "conditions_paiement", None)
     contexte.update({
         "facturation": _bloc(devis.client, _adresse_ou_principale(devis.client, devis.adresse_facturation, "est_facturation"), devis.contact),
         "livraison": _bloc(devis.client, _adresse_ou_principale(devis.client, devis.adresse_livraison, "est_livraison")),
-        "lignes": lignes, "totaux": _totaux(calcul),
+        "lignes": lignes, "totaux": totaux, "avec_remise": "1" if avec_remise else "",
         "delai": devis.delai, "reglement": paiement.libelle if paiement else "",
         "mentions": contexte["societe"]["mentions_devis"],
         "indice": devis.indice, "validite": _date(devis.date_validite),
@@ -357,14 +379,19 @@ _CLIENT = ("Client", [
 ])
 _COMMANDE = ("Commande", [("commande.numero", "N° de commande"), ("commande.reference_client", "Référence du client")])
 _TOTAUX = ("Totaux", [("totaux.ht", "Total HT"), ("totaux.tva_totale", "Total TVA"), ("totaux.ttc", "Total TTC")])
+_REMISES_DEVIS = ("Remises", [
+    ("totaux.lignes_ht", "Total des lignes HT (avant remise globale)"), ("totaux.remise_globale", "Remise globale HT"),
+    ("totaux.remise_globale_libelle", "Libellé de la remise globale"), ("avec_remise", "Une ligne au moins est remisée"),
+])
 
 VARIABLES = {
-    T.DEVIS: [_SOCIETE, _DOCUMENT, _CLIENT, _TOTAUX, ("Conditions", [
+    T.DEVIS: [_SOCIETE, _DOCUMENT, _CLIENT, _TOTAUX, _REMISES_DEVIS, ("Conditions", [
         ("delai", "Délai"), ("reglement", "Conditions de règlement"), ("mentions", "Mentions légales du devis"),
         ("indice", "Indice"), ("validite", "Valable jusqu'au")]),
         ("Ligne (dans un tableau répété sur « lignes »)", [
             ("ligne.designation_html", "Désignation"), ("ligne.reference", "Référence"), ("ligne.libelle", "Libellé"),
-            ("ligne.quantite", "Quantité"), ("ligne.pu_ht", "PU HT"), ("ligne.tva", "TVA"), ("ligne.total_ht", "Total HT")])],
+            ("ligne.quantite", "Quantité"), ("ligne.pu_ht", "PU HT (avant remise)"), ("ligne.remise", "Remise"),
+            ("ligne.tva", "TVA"), ("ligne.total_ht", "Total HT")])],
     T.AR_COMMANDE: [_SOCIETE, _DOCUMENT, _CLIENT, _COMMANDE, _TOTAUX, ("Conditions", [
         ("reglement", "Conditions de règlement"), ("mentions", "Mentions sur les AR")]),
         ("Ligne (répété sur « lignes »)", [

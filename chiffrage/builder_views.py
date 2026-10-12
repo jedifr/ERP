@@ -122,8 +122,7 @@ def _traiter_ajout_ligne(request, devis):
             "prix_vente_total": ligne.prix_vente_total,
             "prix_vente_unitaire": ligne.prix_vente_unitaire,
             "prix_vente_ttc": ligne.prix_vente_ttc,
-            "montant_total_ht": devis.montant_total_ht,
-            "montant_total_ttc": devis.montant_total_ttc,
+            **recapitulatif_json(devis),
         }
     )
 
@@ -246,6 +245,10 @@ def recalculer_ligne_view(request, numero, ligne_id):
         if fourni:
             ligne.prix_vente_unitaire_force = prix_force
 
+        remise, fourni = _parse_float_optionnel(payload, "remise_pct", "Remise invalide.")
+        if fourni:
+            ligne.remise_pct = remise
+
         taux_tva, fourni = _parse_fk_optionnel(
             payload, "taux_tva", TauxTVA.objects.all(), "Taux de TVA introuvable."
         )
@@ -279,10 +282,29 @@ def recalculer_ligne_view(request, numero, ligne_id):
             "prix_vente_ttc": ligne.prix_vente_ttc,
             "montant_matiere_ht": devis.montant_matiere_ht,
             "montant_operations_ht": devis.montant_operations_ht,
-            "montant_total_ht": devis.montant_total_ht,
-            "montant_total_ttc": devis.montant_total_ttc,
+            **recapitulatif_json(devis),
         }
     )
+
+
+def recapitulatif_json(devis):
+    """Montants du récapitulatif de l'onglet « Lignes du devis » (mis à jour en direct par devis_admin_live.js)."""
+    devis = Devis.objects.get(pk=devis.pk)  # sans cache de lignes : montants à jour
+    return {
+        "montant_matiere_ht": devis.montant_matiere_ht,
+        "montant_operations_ht": devis.montant_operations_ht,
+        "montant_sans_marge_ht": devis.montant_sans_marge_ht,
+        "montant_avant_remises_ht": devis.montant_avant_remises_ht,
+        "montant_remises_lignes": devis.montant_remises_lignes_ht,
+        "montant_lignes_ht": devis.montant_lignes_ht,
+        # TVA des lignes avant remise globale : base du recalcul en direct quand on modifie la remise globale.
+        "montant_tva_lignes": devis.tva_lignes_ht,
+        "montant_remise_globale": devis.montant_remise_globale,
+        "montant_total_ht": devis.montant_total_ht,
+        "montant_marge_ht": devis.montant_marge_ht,
+        "montant_tva": devis.montant_tva,
+        "montant_total_ttc": devis.montant_total_ttc,
+    }
 
 
 def _lire_payload_previsualisation(payload):
@@ -308,8 +330,11 @@ def _lire_payload_previsualisation(payload):
         payload, "prix_vente_unitaire_force", "Prix unitaire forcé invalide."
     )
     taux_tva, _fourni = _parse_fk_optionnel(payload, "taux_tva", TauxTVA.objects.all(), "Taux de TVA introuvable.")
+    remise, _fourni = _parse_float_optionnel(payload, "remise_pct", "Remise invalide.")
+    if remise is not None and not 0 <= remise <= 100:
+        raise _ValeurInvalide("La remise doit être comprise entre 0 et 100 %.")
 
-    return article, quantite, taux, prix_force, taux_tva
+    return article, quantite, taux, prix_force, taux_tva, remise
 
 
 @staff_member_required
@@ -328,7 +353,7 @@ def previsualiser_ligne_view(request, numero):
         return JsonResponse({"detail": "JSON invalide."}, status=400)
 
     try:
-        article, quantite, taux, prix_force, taux_tva = _lire_payload_previsualisation(payload)
+        article, quantite, taux, prix_force, taux_tva, remise = _lire_payload_previsualisation(payload)
     except _ValeurInvalide as exc:
         return JsonResponse({"detail": exc.message}, status=400)
 
@@ -340,6 +365,7 @@ def previsualiser_ligne_view(request, numero):
             taux_marge_matiere_applique=taux,
             prix_vente_unitaire_force=prix_force,
             taux_tva=taux_tva,
+            remise_pct=remise,
         )
     except ChiffrageError as exc:
         return JsonResponse({"detail": str(exc)}, status=400)
@@ -417,7 +443,7 @@ def previsualiser_ligne_nouveau_devis_view(request):
         return JsonResponse({"detail": "JSON invalide."}, status=400)
 
     try:
-        article, quantite, taux, prix_force, taux_tva = _lire_payload_previsualisation(payload)
+        article, quantite, taux, prix_force, taux_tva, remise = _lire_payload_previsualisation(payload)
     except _ValeurInvalide as exc:
         return JsonResponse({"detail": exc.message}, status=400)
 
@@ -451,6 +477,7 @@ def previsualiser_ligne_nouveau_devis_view(request):
             taux_marge_matiere_applique=taux,
             prix_vente_unitaire_force=prix_force,
             taux_tva=taux_tva,
+            remise_pct=remise,
         )
     except ChiffrageError as exc:
         return JsonResponse({"detail": str(exc)}, status=400)
