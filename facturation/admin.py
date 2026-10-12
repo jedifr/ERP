@@ -175,14 +175,14 @@ class FactureAdmin(ProchaineActionMixin, DateDuJourMixin, ChronologieMixin, Puce
     actions_list = ["action_preparer_facture"]
     actions_detail = ["action_importer_bl", "action_pdf", "action_facturx_pdf", "action_relance_pdf", "action_creer_avoir"]
     readonly_fields = [
-        "montants_calcules_display", "echeance_recap", "ecart_recap", "relances_recap", "avoirs_recap", "ecriture_recap",
+        "bons_livraison_recap", "montants_calcules_display", "echeance_recap", "ecart_recap", "relances_recap", "avoirs_recap", "ecriture_recap",
     ]
     inlines = [FactureLigneInline, RelanceFactureInline]
 
     # Fiche en deux colonnes : saisie à gauche, récapitulatif (échéance, écart, relances, avoirs, écriture) à droite
     # — voir comptes/static/comptes/fiche_deux_colonnes.css.
     CHAMPS_RECAPITULATIF = [
-        "echeance_recap", "montants_calcules_display", "ecart_recap", "relances_recap", "avoirs_recap", "ecriture_recap",
+        "bons_livraison_recap", "echeance_recap", "montants_calcules_display", "ecart_recap", "relances_recap", "avoirs_recap", "ecriture_recap",
     ]
 
     # Nom et adresse imprimés : repris de la fiche du client à l'enregistrement s'ils sont vides, modifiables ensuite.
@@ -208,6 +208,26 @@ class FactureAdmin(ProchaineActionMixin, DateDuJourMixin, ChronologieMixin, Puce
     @admin.display(description="Client", ordering="client__raison_sociale")
     def client_display(self, obj):
         return obj.nom_client_imprime or "—"
+
+    @admin.display(description="Bons de livraison importés")
+    def bons_livraison_recap(self, obj):
+        """Un rappel par BL importé : n° de BL, commande d'origine et total HT facturé pour ce BL."""
+        from .documents import sections_livraison, titre_section_livraison
+
+        if obj is None or not obj.pk:
+            return "—"
+        lignes = [
+            {"ligne": l, "total_ht": abs(l.montant_ht)}
+            for l in obj.lignes.select_related("livraison__commande", "commande_ligne").filter(livraison__isnull=False)
+        ]
+        recap = [
+            format_html(
+                "<a href='{}'>{}</a> : {} € HT", reverse("admin:chiffrage_livraison_change", args=[livraison.pk]),
+                titre_section_livraison(livraison), pourcent(arrondir(total)),
+            )
+            for livraison, _, total in sections_livraison(lignes)
+        ]
+        return mark_safe("<br>".join(recap)) if recap else "—"
 
     @admin.display(description="Échéance")
     def echeance_recap(self, obj):

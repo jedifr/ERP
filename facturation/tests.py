@@ -1343,3 +1343,30 @@ class NumeroTvaTiersTests(TestCase):
         from .documents import _identite_client
 
         self.assertIn("TVA FR40303265045", _identite_client(tiers))
+
+
+class SectionsBonLivraisonTests(_FixtureLignes, TestCase):
+    """Facture avec BL importés : une section par BL rappelant son n°, la commande d'origine et le total du BL."""
+
+    def test_sections_dans_le_pdf_et_la_fiche(self):
+        import io
+
+        from pypdf import PdfReader
+
+        from .documents import generer_pdf_facture
+        from .services import importer_livraisons
+
+        self._livrer(2, "BL-F-2")
+        facture = Facture.objects.create(numero="FAC-SEC", client=self.tiers, date_facturation=datetime.date(2026, 2, 1))
+        libre = FactureLigne(facture=facture, designation="Frais de port", quantite=1, prix_unitaire_ht=Decimal("15"), taux_tva=20)
+        libre.full_clean()
+        libre.save()
+        importer_livraisons(facture, list(Livraison.objects.order_by("numero")))
+        facture.refresh_from_db()
+        texte = "".join(page.extract_text() for page in PdfReader(io.BytesIO(bytes(generer_pdf_facture(facture)))).pages)
+        for attendu in ("Bon de livraison BL-F-1 du 20/01/2026", "Commande CDE-FACT (votre réf. PO)", "Total BL-F-1", "60,00",
+                        "Bon de livraison BL-F-2", "Total BL-F-2", "20,00", "Frais de port"):
+            self.assertIn(attendu, texte)
+        page = self.client.get(f"/admin/facturation/facture/{facture.pk}/change/")
+        self.assertContains(page, "Bons de livraison importés")
+        self.assertContains(page, "Bon de livraison BL-F-1 du 20/01/2026 — Commande CDE-FACT (votre réf. PO)</a> : 60 € HT")

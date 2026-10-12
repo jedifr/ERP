@@ -16,7 +16,7 @@ from chiffrage.documents import (
 )
 from comptes.models import Societe
 from comptes.montants import ZERO, D0, arrondir, arrondir_prix, pourcent
-from comptes.pdf import Paragraph, Spacer, Table, TableStyle, GRIS, construire_pdf, echapper, entete_societe, montant, mm, quantite, styles, tableau_lignes
+from comptes.pdf import Paragraph, Spacer, Table, TableStyle, GRIS, GRIS_CLAIR, construire_pdf, echapper, entete_societe, montant, mm, quantite, styles, tableau_lignes
 from commercial.models import Tiers
 
 MENTIONS_PAR_DEFAUT = (
@@ -38,8 +38,33 @@ def _designation(ligne):
     texte = f"<b>{echapper(article.reference)}</b>"
     if libelle:
         texte += f"<br/>{echapper(libelle)}"
-    if ligne.livraison_id:
-        texte += f"<br/><font size=7>BL {echapper(ligne.livraison_id)}</font>"
+    return texte
+
+
+def sections_livraison(lignes_calculees):
+    """Regroupe les lignes calculées par bon de livraison importé, dans l'ordre de première apparition :
+    [(livraison ou None, [lignes], total HT)]. Les lignes sans BL forment leurs propres groupes (livraison None)."""
+    sections = []
+    for c in lignes_calculees:
+        livraison = c["ligne"].livraison if c["ligne"].livraison_id else None
+        section = next((s for s in sections if livraison is not None and s[0] is not None and s[0].pk == livraison.pk), None)
+        if section is None:
+            if livraison is None and sections and sections[-1][0] is None:
+                section = sections[-1]
+            else:
+                section = [livraison, [], ZERO]
+                sections.append(section)
+        section[1].append(c)
+        section[2] += c["total_ht"]
+    return [tuple(s) for s in sections]
+
+
+def titre_section_livraison(livraison):
+    """« Bon de livraison BL-1 du 20/01/2026 — Commande CDE-1 (votre réf. PO-12) »."""
+    commande = livraison.commande
+    texte = f"Bon de livraison {livraison.numero} du {livraison.date_livraison:%d/%m/%Y} — Commande {commande.numero}"
+    if commande.reference_client:
+        texte += f" (votre réf. {commande.reference_client})"
     return texte
 
 
@@ -90,7 +115,7 @@ def calculer_facture(facture):
     client = facture.client
     lignes = []
     bases = {}
-    for ligne in facture.lignes.select_related("commande_ligne__article", "commande_ligne__taux_tva", "article", "livraison").all():
+    for ligne in facture.lignes.select_related("commande_ligne__article", "commande_ligne__taux_tva", "article", "livraison__commande").all():
         taux = D0(ligne._taux())
         categorie = categorie_tva(client, taux)
         total = abs(ligne.montant_ht)
@@ -112,7 +137,7 @@ def generer_pdf_facture(facture, police_embarquee=False):
     societe = Societe.charger()
     commande = facture.commande
     client = facture.client
-    lignes_facture = list(facture.lignes.select_related("commande_ligne__article", "commande_ligne__taux_tva", "article").all())
+    lignes_facture = list(facture.lignes.select_related("commande_ligne__article", "commande_ligne__taux_tva", "article", "livraison__commande").all())
     if not lignes_facture:
         raise DocumentError("Cette facture n'a aucune ligne : ajoutez-les (ou préparez-la depuis les livraisons) avant de l'imprimer.")
     ecart = facture.ecart_avec_les_lignes
@@ -143,17 +168,32 @@ def generer_pdf_facture(facture, police_embarquee=False):
     calcul = calculer_facture(facture)
     signe = -1 if avoir else 1  # le PDF montre un avoir en négatif ; le XML Factur-X, lui, reste en positif (type 381)
     lignes = []
-    for c in calcul["lignes"]:
-        lignes.append([
-            Paragraph(_designation(c["ligne"]), st["normal"]),
-            Paragraph(quantite(c["ligne"].quantite), st["droite"]),
-            Paragraph(montant(c["prix"]), st["droite"]),
-            Paragraph(f"{pourcent(c['taux'])} %".replace(".", ","), st["droite"]),
-            Paragraph(montant(signe * c["total_ht"]), st["droite"]),
-        ])
+    styles_sections = []  # une section par bon de livraison importé : rappel du BL et de la commande, puis total du BL
+    for livraison, lignes_section, total_section in sections_livraison(calcul["lignes"]):
+        if livraison is not None:
+            rang = len(lignes) + 1  # +1 : ligne d'en-tête du tableau
+            lignes.append([Paragraph(f"<b>{echapper(titre_section_livraison(livraison))}</b>", st["normal"]), "", "", "", ""])
+            styles_sections += [("SPAN", (0, rang), (-1, rang)), ("BACKGROUND", (0, rang), (-1, rang), GRIS_CLAIR)]
+        for c in lignes_section:
+            lignes.append([
+                Paragraph(_designation(c["ligne"]), st["normal"]),
+                Paragraph(quantite(c["ligne"].quantite), st["droite"]),
+                Paragraph(montant(c["prix"]), st["droite"]),
+                Paragraph(f"{pourcent(c['taux'])} %".replace(".", ","), st["droite"]),
+                Paragraph(montant(signe * c["total_ht"]), st["droite"]),
+            ])
+        if livraison is not None:
+            rang = len(lignes) + 1
+            lignes.append([
+                Paragraph(f"<b>Total {echapper(livraison.numero)}</b>", st["droite"]), "", "", "",
+                Paragraph(f"<b>{montant(signe * arrondir(total_section))}</b>", st["droite"]),
+            ])
+            styles_sections.append(("SPAN", (0, rang), (3, rang)))
     table = tableau_lignes(
         ["Désignation", "Qté", "PU HT", "TVA", "Total HT"], lignes, [80 * mm, 20 * mm, 28 * mm, 16 * mm, 30 * mm], alignements_droite=(1, 2, 3, 4),
     )
+    if styles_sections:
+        table.setStyle(TableStyle(styles_sections))
 
     totaux = [["Total HT", montant(signe * calcul["total_ht"])]]
     for g in calcul["groupes"]:
