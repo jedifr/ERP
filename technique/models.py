@@ -480,9 +480,10 @@ class PosteTravail(models.Model):
         "nombre de machines", default=1, help_text="Capacité agrégée (usage planning)"
     )
     temps_mise_en_place_min = models.FloatField(
-        "mise en place d'une tôle (min)", null=True, blank=True,
-        help_text="Machines de découpe (laser, jet d'eau) : temps de réglage appliqué UNE fois par tôle posée sur la machine, quel que soit le "
-                  "nombre de pièces qu'elle contient. Peut être précisé par épaisseur dans les paramètres de coupe.",
+        "temps de réglage par défaut (min)", null=True, blank=True,
+        help_text="Temps de réglage proposé quand on ajoute une opération de ce poste à une gamme (modifiable sur l'opération). "
+                  "Machines de découpe (laser, jet d'eau) : appliqué UNE fois par tôle posée sur la machine, quel que soit le "
+                  "nombre de pièces qu'elle contient ; peut être précisé par épaisseur dans les paramètres de coupe.",
     )
     taux_marge_defaut = ChampDecimal(
         "taux de marge par défaut (%)",

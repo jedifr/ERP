@@ -38,6 +38,19 @@ class GammeEditeurTests(TestCase):
         self.assertEqual(float(etapes[2].cout_forfaitaire), 3.2)
         self.assertEqual(etapes[1].origine, "manuelle")
 
+    def test_reglage_par_defaut_du_poste(self):
+        PosteTravail.objects.filter(pk=self.pliage.pk).update(temps_mise_en_place_min=15)
+        PosteTravail.objects.filter(pk=self.laser.pk).update(temps_mise_en_place_min=8)
+        postes = {p["id"]: p["reglage"] for p in ge.etat(self.article)["postes"]}
+        self.assertEqual(postes[self.pliage.pk], 15)  # proposé par l'éditeur à l'ajout d'une opération
+        self.assertIsNone(postes[self.traitement.pk])
+        ge.enregistrer(self.article, self._lignes(
+            {"id": None, "poste": self.pliage.pk, "temps_fixe": "", "temps_variable": "2"},  # réglage laissé vide : défaut du poste
+            {"id": None, "poste": self.pliage.pk, "temps_fixe": "4", "temps_variable": "1"},  # saisi : il prime
+        ))
+        etapes = ge.etapes_actives(self.article)
+        self.assertEqual([e.temps_fixe for e in etapes], [0, 15, 4])  # la découpe garde un réglage compté par tôle
+
     def test_la_decoupe_garde_son_origine_et_son_temps(self):
         ge.enregistrer(self.article, [{"id": self.decoupe.pk, "poste": self.pliage.pk, "temps_fixe": "5", "temps_variable": "99"}])
         etape = ge.etapes_actives(self.article)[0]

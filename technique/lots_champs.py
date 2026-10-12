@@ -104,7 +104,7 @@ def champs_matiere():
 def champs_poste():
     return [
         ChampLot("taux_marge_defaut", "Taux de marge par défaut (%)"),
-        ChampLot("temps_mise_en_place_min", "Mise en place d'une tôle (min)"),
+        ChampLot("temps_mise_en_place_min", "Temps de réglage par défaut (min)"),
         ChampLot("nombre_machines", "Nombre de machines", modes=("fixe", "ajout")),
     ]
 

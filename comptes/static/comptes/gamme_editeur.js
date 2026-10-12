@@ -66,13 +66,23 @@
             zoneErreur.hidden = !texte;
         }
 
+        // Temps de réglage par défaut du poste (min), proposé sur une nouvelle opération ; null si non renseigné.
+        function reglageDefaut(id) {
+            const p = etat.postes.find((x) => x.id === id);
+            return p && p.reglage !== null && p.reglage !== undefined ? p.reglage : null;
+        }
+
         function ligneTable(l, i) {
             const decoupe = l.origine === "decoupe";
             const horaire = l.mode === "horaire";
             const poste = el("select", { disabled: decoupe || !editable }, etat.postes.map((p) => el("option", { value: p.id, selected: p.id === l.poste }, p.nom)));
             poste.addEventListener("change", () => {
+                const ancien = reglageDefaut(l.poste);
                 l.poste = poste.value; // la clé d'un poste est son nom (texte), pas un nombre
                 l.mode = (etat.postes.find((p) => p.id === l.poste) || {}).mode || "horaire";
+                // Réglage vide ou encore égal au défaut de l'ancien poste : on propose celui du nouveau poste.
+                const saisi = String(l.temps_fixe ?? "").trim();
+                if (!saisi || saisi === "0" || parseFloat(saisi.replace(",", ".")) === ancien) l.temps_fixe = reglageDefaut(l.poste) ?? l.temps_fixe;
                 modifie = true; dessiner();
             });
             const champ = (cle, valeur, desactive) => {
@@ -128,7 +138,7 @@
                 ajouter.addEventListener("click", () => {
                     const premier = etat.postes[0];
                     if (!premier) { erreur("Créez d'abord un poste de travail (Paramétrage > Atelier)."); return; }
-                    lignes.push({ id: null, poste: premier.id, mode: premier.mode, origine: "manuelle", temps_fixe: 0, temps_variable: 0, cout_forfaitaire: null });
+                    lignes.push({ id: null, poste: premier.id, mode: premier.mode, origine: "manuelle", temps_fixe: premier.reglage ?? 0, temps_variable: 0, cout_forfaitaire: null });
                     modifie = true; dessiner();
                 });
                 barre.append(ajouter);
@@ -173,7 +183,7 @@
         const charge = brouillon
             ? fetch(racine.dataset.urlOptions, { credentials: "same-origin" }).then((r) => r.json().then((j) => { if (!r.ok) throw new Error(j.detail || "Erreur " + r.status); return { ...j, etapes: [], total_minutes_par_piece: 0, total_cout_par_piece: 0 }; }))
             : appeler(null);
-        charge.then((d) => { charger(d); if (brouillon && d.postes.length) { lignes.push({ id: null, poste: d.postes[0].id, mode: d.postes[0].mode, origine: "manuelle", temps_fixe: null, temps_variable: null, cout_forfaitaire: null }); dessiner(); } }).catch((e) => racine.replaceChildren(el("p", { class: "ge-aide" }, "Opérations indisponibles : " + e.message)));
+        charge.then((d) => { charger(d); if (brouillon && d.postes.length) { lignes.push({ id: null, poste: d.postes[0].id, mode: d.postes[0].mode, origine: "manuelle", temps_fixe: d.postes[0].reglage ?? null, temps_variable: null, cout_forfaitaire: null }); dessiner(); } }).catch((e) => racine.replaceChildren(el("p", { class: "ge-aide" }, "Opérations indisponibles : " + e.message)));
     }
 
     function tout() { document.querySelectorAll(".gamme-editeur[data-url], .gamme-editeur[data-url-options]").forEach(init); }
