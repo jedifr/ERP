@@ -1,0 +1,38 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<div class="max-w-5xl">
+  <p class="mb-4">Reprend les <strong>débits de profilés</strong> chiffrés dans un devis (à leur quantité), dans une commande (quantité de chaque ligne
+    dont l'article est un débit, sinon les débits de son devis) ou dans un OF (débit dont l'article est celui de l'OF, à sa quantité).
+    Les coupes en biais sont reprises en onglet convergent : 45° / 45° devient 45° / -45°.</p>
+  <form method="get" class="mb-6 flex flex-wrap gap-3 items-end">
+    <label><span class="font-semibold">Source</span><br>
+      <select name="source" class="border border-base-300 rounded-default px-2 py-1">
+        {% for code, libelle in sources %}<option value="{{ code }}" {% if code == source %}selected{% endif %}>{{ libelle }}</option>{% endfor %}
+      </select></label>
+    <label><span class="font-semibold">Numéro</span><br>
+      <input type="text" name="valeur" value="{{ valeur }}" placeholder="DV-2026-0107, CC-2026-0042…" class="border border-base-300 rounded-default px-2 py-1" style="min-width:16rem"></label>
+    <button type="submit" class="border border-base-300 px-4 py-1.5 rounded-default font-semibold">Chercher les débits</button>
+    <a href="{{ retour }}" class="px-4 py-1.5">Retour</a>
+  </form>
+  {% if cible %}
+    {% if lignes %}
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="source" value="{{ source }}"><input type="hidden" name="valeur" value="{{ valeur }}">
+      <table class="w-full mb-4" style="border-collapse:collapse">
+        <thead><tr style="text-align:left;border-bottom:1px solid rgba(127,127,127,.4)"><th></th><th>Débit</th><th>Section</th><th style="text-align:right">Longueur</th><th style="text-align:right">Angles</th><th style="text-align:right">Quantité</th></tr></thead>
+        <tbody>{% for l in lignes %}
+          <tr style="border-bottom:1px solid rgba(127,127,127,.2)">
+            <td><input type="checkbox" name="choisi-{{ l.index }}" checked aria-label="Importer {{ l.piece }}"></td>
+            <td>{{ l.piece.nom }}</td><td>{{ l.piece.section }}</td>
+            <td style="text-align:right">{{ l.piece.longueur_mm|floatformat:"-1" }} mm</td>
+            <td style="text-align:right">{{ l.angle_g|floatformat:"-1" }}° / {{ l.angle_d|floatformat:"-1" }}°</td>
+            <td style="text-align:right"><input type="number" min="0" step="1" name="quantite-{{ l.index }}" value="{{ l.quantite|floatformat:0 }}" class="border border-base-300 rounded-default px-2 py-1" style="width:6rem;text-align:right"></td>
+          </tr>{% endfor %}</tbody>
+      </table>
+      <button type="submit" name="importer" value="1" class="bg-primary-600 text-white font-semibold px-4 py-2 rounded-default">Ajouter les débits cochés</button>
+    </form>
+    {% else %}<p><em>{{ cible }} ne contient aucun débit de profilé.</em></p>{% endif %}
+  {% endif %}
+</div>
+{% endblock %}

@@ -80,7 +80,7 @@ _MAGASINIER = [
 _METHODES = [
     *_crud("technique", "Matiere", "Article", "PosteTravail", "TarifPoste", "Nomenclature", "Gamme"),
     *_crud("decoupe", "PieceDecoupe", "ImbricationJob", "ImbricationLigne", "ImbricationPlacement",
-           "ProfilImportDecoupe", "RegleProfilImportDecoupe"),
+           "ProfilImportDecoupe", "RegleProfilImportDecoupe", "OptimisationSciage", "DebitSciage"),
     *_crud("commercial", "TauxTVA", actions=("view",)),
 ]
 
@@ -131,6 +131,8 @@ GROUPES_PAR_DEFAUT = {
         "technique.view_article", "technique.view_postetravail",
         "chiffrage.view_commande", "chiffrage.view_commandeligne",
         "chiffrage.view_ordrefabrication", "chiffrage.change_ordrefabrication", "chiffrage.add_ordrefabrication",
+        # Optimisation de sciage : listes de débits des tubes et profilés.
+        *_crud("decoupe", "OptimisationSciage", "DebitSciage"), "technique.view_profilesection",
         "chiffrage.view_operationof", "chiffrage.change_operationof", "chiffrage.view_composantof",
         "stock.view_lot", "stock.view_emplacement",
     ],

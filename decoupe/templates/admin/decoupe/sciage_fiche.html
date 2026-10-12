@@ -1,0 +1,8 @@
+{% url "admin:decoupe_optimisationsciage_previsualiser" as url_apercu %}
+<fieldset class="module border border-base-200 dark:border-base-800 mb-8 rounded-default shadow-xs" style="padding:1rem 1.25rem">
+  <h2 class="font-semibold mb-3 text-font-important-light dark:text-font-important-dark">Plan de coupe</h2>
+  <div id="sciage-plan" data-url="{{ url_apercu }}">
+    {% if plan_sciage %}{% include "admin/decoupe/sciage_plan.html" with plan=plan_sciage seuil=optimisation_sciage.chute_reutilisable_mm %}
+    {% else %}<p>Saisissez les débits : le plan de coupe se calcule pendant la saisie.</p>{% endif %}
+  </div>
+</fieldset>

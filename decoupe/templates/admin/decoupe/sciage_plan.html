@@ -1,0 +1,45 @@
+{# Plan de coupe d'une optimisation de sciage : synthèse puis, par section, les barres regroupées quand elles sont identiques. #}
+<style>
+  .sc-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(11rem,1fr));gap:.75rem;margin-bottom:1rem}
+  .sc-kpi{border:1px solid rgb(var(--color-base-200,229 231 235));border-radius:.5rem;padding:.6rem .8rem}
+  .dark .sc-kpi{border-color:rgb(var(--color-base-700,55 65 81))}
+  .sc-kpi small{display:block;font-size:.75rem;opacity:.7}
+  .sc-kpi b{font-size:1.35rem;font-weight:600;font-variant-numeric:tabular-nums}
+  .sc-kpi em{display:block;font-style:normal;font-size:.75rem;opacity:.7}
+  .sc-section h3{font-weight:600;margin:.75rem 0 .4rem}
+  .sc-section h3 span{font-weight:400;font-size:.8rem;opacity:.7;margin-left:.5rem}
+  .sc-table{width:100%;border-collapse:collapse;min-width:44rem}
+  .sc-table th{font-size:.75rem;text-align:left;opacity:.7;padding:.3rem .4rem;border-bottom:1px solid rgb(var(--color-base-300,209 213 219))}
+  .sc-table td{padding:.45rem .4rem;border-bottom:1px solid rgb(var(--color-base-200,229 231 235));vertical-align:top}
+  .dark .sc-table td{border-color:rgb(var(--color-base-700,55 65 81))}
+  .sc-seq{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.75rem;margin-bottom:.25rem;word-break:break-word}
+  .sc-pill{display:inline-block;font-size:.7rem;font-weight:600;padding:0 .45rem;border-radius:99px;background:#dcfce7;color:#15803d;margin-left:.3rem;white-space:nowrap}
+  .sc-pill.sc-src{background:#fef3c7;color:#b45309}
+  .sc-err{color:#b91c1c;font-weight:600}
+</style>
+{% if not plan.sections %}
+  <p class="sc-vide">Ajoutez des débits (longueur, quantité et section) : le plan de coupe s'affiche ici.</p>
+{% else %}
+  <div class="sc-kpis">
+    <div class="sc-kpi"><small>Barres neuves</small><b>{{ plan.nb_neuves }}</b><em>{{ plan.barres_par_section }}{% if plan.nb_chutes_stock %} + {{ plan.nb_chutes_stock }} chute(s) du stock{% endif %}</em></div>
+    <div class="sc-kpi"><small>Utilisation matière</small><b style="color:#15803d">{{ plan.taux_utilisation|floatformat:1 }} %</b><em>{{ plan.nb_debits }} débits</em></div>
+    <div class="sc-kpi"><small>Chute totale</small><b>{{ plan.chute_totale|floatformat:"0g" }} mm</b><em>dont {{ plan.longueur_reutilisable|floatformat:"0g" }} mm réutilisables ({{ plan.nb_reutilisables }} chute{{ plan.nb_reutilisables|pluralize }} ≥ {{ seuil|floatformat:"0g" }} mm)</em></div>
+    <div class="sc-kpi"><small>Matière consommée</small><b>{% if plan.cout is not None %}{{ plan.cout|floatformat:"2g" }} €{% else %}—{% endif %}</b><em>{{ plan.masse_kg|floatformat:1 }} kg (acier){% if plan.cout is None %} · prix inconnu{% endif %}</em></div>
+  </div>
+  {% for s in plan.sections %}
+    <div class="sc-section">
+      <h3>{{ s.section.designation }}{% if s.resultat %}<span>{{ s.resultat.nb_neuves }} barre{{ s.resultat.nb_neuves|pluralize }} de {{ s.resultat.longueur_barre|floatformat:"0g" }} mm · {{ s.resultat.taux_utilisation|floatformat:1 }} % · {{ s.nb_coupes }} coupes</span>{% endif %}</h3>
+      {% if s.erreur %}<p class="sc-err">{{ s.erreur }}</p>{% else %}
+      {% if s.erreur_prix %}<p style="font-size:.8rem;opacity:.75">{{ s.erreur_prix }}</p>{% endif %}
+      <div style="overflow-x:auto"><table class="sc-table">
+        <thead><tr><th>N°</th><th>Qté</th><th>Barre</th><th style="width:100%">Débits</th><th style="text-align:right">Chute</th></tr></thead>
+        <tbody>{% for g in s.groupes %}
+          <tr><td>{{ forloop.counter }}</td><td style="font-weight:700">{{ g.nombre }}</td>
+            <td style="white-space:nowrap">{{ g.barre.longueur|floatformat:"0g" }}{% if g.barre.origine == "chute" %}<span class="sc-pill sc-src">chute stock</span>{% endif %}</td>
+            <td><div class="sc-seq">{{ g.sequence }}</div>{{ g.svg|safe }}</td>
+            <td style="text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums">{{ g.chute|floatformat:"0g" }}{% if g.reutilisable %}<span class="sc-pill">→ stock</span>{% endif %}</td></tr>
+        {% endfor %}</tbody>
+      </table></div>{% endif %}
+    </div>
+  {% endfor %}
+{% endif %}

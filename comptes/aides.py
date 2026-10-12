@@ -37,6 +37,18 @@ AIDES = {
         "etapes": ["Ouvrez une simulation pour revoir les feuilles et les pourcentages de chutes."],
         "bon_a_savoir": ["Le chiffrage d'un devis se fait dans l'onglet « Pièces et matière » du devis, pas ici."],
     },
+    "decoupe.optimisationsciage": {
+        "resume": "Répartit les débits de tubes et profilés dans les barres avec le moins de chute, et imprime la liste de débits pour la scie.",
+        "etapes": [
+            "Créez une optimisation, réglez la longueur de barre, la largeur de lame et la chute initiale.",
+            "Saisissez les débits (repère, longueur, quantité, angles, section) ou importez-les d'un devis, d'une commande ou d'un OF.",
+            "Le plan de coupe se recalcule à chaque modification ; « Liste de débits (PDF) » l'imprime pour l'atelier.",
+        ],
+        "bon_a_savoir": [
+            "Angles mesurés depuis la coupe droite (0°) ; le signe donne le sens de l'onglet. Deux coupes au même angle sont imbriquées tête-bêche : un seul trait de scie.",
+            "Les chutes au-dessus du seuil sont signalées « → stock » ; cochez « Utiliser d'abord des chutes » pour les reprendre au calcul suivant.",
+        ],
+    },
     # ------------------------------------------------------------------ formes
     "decoupe.normecote": {
         "resume": "Les cotes normalisées de la bibliothèque de formes (brides, platines…). Elles alimentent les formes paramétriques des devis.",
