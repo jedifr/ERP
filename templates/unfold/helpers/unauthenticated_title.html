@@ -1,7 +1,13 @@
 {% load i18n %}
 
-{# Surcharge d'Unfold : titre des pages hors connexion (connexion, déconnexion, mot de passe) avec le logo de la barre latérale (UNFOLD["SITE_SYMBOL"]). #}
+{# Surcharge d'Unfold : titre des pages hors connexion (connexion, déconnexion, mot de passe) avec le logo de la barre latérale (UNFOLD["SITE_SYMBOL"]), précédé du logo choisi dans la fiche Société (comptes.layout.page_connexion). #}
 <div class="border-b border-base-200 mb-8 pb-6 dark:border-base-800">
+    {% if logo_connexion_url %}
+        <div class="flex justify-center mb-6">
+            <img src="{{ logo_connexion_url }}" alt="{{ nom_societe }}" style="max-height: 96px; max-width: 100%;">
+        </div>
+    {% endif %}
+
     <div class="flex gap-4 items-center">
         <span class="bg-primary-600 flex items-center justify-center rounded-default shrink-0 text-white" style="height: 56px; width: 56px;">
             <span class="material-symbols-outlined" style="font-size: 32px;">{% if site_symbol %}{{ site_symbol }}{% else %}settings{% endif %}</span>

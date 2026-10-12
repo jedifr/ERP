@@ -23,7 +23,7 @@ from comptes.a_completer import a_completer_view
 from comptes.colonnes import mes_colonnes
 from comptes.navigation import navigation_view
 from comptes.parametrage import parametrage_view
-from comptes.views import media_protege
+from comptes.views import logo_connexion, media_protege
 from technique.nomenclature_editeur import nomenclature_editeur_view
 from technique.gamme_editeur import gamme_editeur_options_view, gamme_editeur_view
 
@@ -35,6 +35,7 @@ urlpatterns = [
     path("admin/gamme-editeur-options/", admin.site.admin_view(gamme_editeur_options_view), name="gamme_editeur_options"),
     path("admin/gamme-editeur/<str:reference>/", admin.site.admin_view(gamme_editeur_view), name="gamme_editeur"),
     path("admin/parametrage/", admin.site.admin_view(parametrage_view), name="parametrage"),
+    path("connexion/logo/", logo_connexion, name="logo_connexion"),
     path("admin/", admin.site.urls),
     path("api/v1/", include("technique.urls")),
     path("api/v1/", include("decoupe.urls")),

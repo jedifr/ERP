@@ -1,0 +1,7 @@
+{% extends "admin/login.html" %}
+
+{# Surcharge de la page de connexion d'Unfold (le extends ci-dessus vise le gabarit d'Unfold) : mention de l'entreprise et de l'année en bas. #}
+{% block login_after %}
+    {{ block.super }}
+    <p class="mt-8 text-center text-subtle text-xs">{{ nom_societe|default:"Découpe H2O" }} - {% now "Y" %}</p>
+{% endblock %}

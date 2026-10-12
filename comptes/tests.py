@@ -284,6 +284,31 @@ class ConnexionDirecteTests(TestCase):
         self.assertNotContains(r, "Welcome back")
         self.assertContains(r, settings.UNFOLD["SITE_SYMBOL"])
 
+    def test_page_de_connexion_logo_de_la_societe_et_pied_de_page(self):
+        import tempfile
+
+        from django.core.files.base import ContentFile
+        from django.utils import timezone as tz
+
+        from comptes.models import Societe
+
+        with tempfile.TemporaryDirectory() as dossier, override_settings(MEDIA_ROOT=dossier):
+            societe = Societe.charger()
+            societe.raison_sociale = "Découpe H2O"
+            societe.save()
+            r = self.client.get("/admin/login/")
+            self.assertContains(r, f"Découpe H2O - {tz.now().year}")
+            self.assertNotContains(r, "/connexion/logo/")
+            self.assertEqual(self.client.get("/connexion/logo/").status_code, 404)
+
+            societe.logo.save("doc.png", ContentFile(b"LOGO DOCUMENTS"))
+            self.assertEqual(b"".join(self.client.get("/connexion/logo/").streaming_content), b"LOGO DOCUMENTS")
+            societe.logo_connexion.save("connexion.png", ContentFile(b"LOGO CONNEXION"))
+            self.assertContains(self.client.get("/admin/login/"), "/connexion/logo/?v=")
+            r = self.client.get("/connexion/logo/")  # sans être connecté
+            self.assertEqual(r.status_code, 200)
+            self.assertEqual(b"".join(r.streaming_content), b"LOGO CONNEXION")
+
 
 class ApiSecuriseeParDefautTests(TestCase):
     """D-AD-02 : aucune route d'API ne doit répondre à un compte sans permission."""
