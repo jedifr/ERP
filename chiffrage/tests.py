@@ -5687,6 +5687,7 @@ class RemisesDevisTests(_FixtureModuleA, TestCase):
         self.assertContains(page, 'id="lignes-recap"')
         self.assertContains(page, 'name="remise_globale"')
         self.assertContains(page, "Total des lignes avant remise HT")
+        self.assertContains(page, "chiffrage/devis_colonnes")  # largeurs de colonnes réglables à la souris
         reponse = self.client.post(
             f"/admin/chiffrage/devis/{self.devis.pk}/change/",
             {"numero": "DEV-REC-A", "client": self.tiers.pk, "date_creation": "2026-01-01", "statut": "brouillon",

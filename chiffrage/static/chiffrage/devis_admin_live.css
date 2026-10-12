@@ -12,6 +12,33 @@
     line-height: 1.2;
 }
 
+/* Largeurs par défaut (réglables à la souris, voir devis_colonnes.js) : colonnes de saisie courtes étroites, libellé large.
+   Les champs suivent la largeur de leur colonne au lieu d'imposer la leur. */
+#lignes-data td.field-tabular input {
+    min-width: 0;
+    width: 100%;
+}
+#lignes-data th.column-designation { width: 260px; min-width: 260px; }
+#lignes-data th.column-quantite,
+#lignes-data th.column-taux_marge_matiere_applique,
+#lignes-data th.column-remise_pct { width: 80px; max-width: 80px; }
+#lignes-data th.colonne-reglable { position: relative; }
+#lignes-data .colonne-poignee {
+    position: absolute;
+    top: 0;
+    right: -3px;
+    bottom: 0;
+    width: 7px;
+    cursor: col-resize;
+    z-index: 1;
+    touch-action: none;
+}
+#lignes-data .colonne-poignee:hover,
+.colonne-en-reglage #lignes-data .colonne-poignee:active {
+    background: rgb(var(--color-primary-500, 249 115 22) / 0.5);
+}
+.colonne-en-reglage { cursor: col-resize; user-select: none; }
+
 /* Récapitulatif de l'onglet « Lignes du devis » (_recap_lignes.html) : totaux et remise globale, sous le tableau. */
 .lignes-recap {
     max-width: 30rem;

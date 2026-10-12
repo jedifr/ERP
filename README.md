@@ -507,6 +507,14 @@ PU HT est alors le prix avant remise), puis « Total des lignes HT » et
 disposent des variables `ligne.remise`, `avec_remise`, `totaux.lignes_ht`,
 `totaux.remise_globale` et `totaux.remise_globale_libelle`.
 
+## Largeur des colonnes du tableau des lignes (fiche Devis)
+
+Par défaut, Quantité, Taux de marge et Remise sont étroites et Libellé est
+large (`devis_admin_live.css`). Chaque en-tête a une poignée sur son bord
+droit (`devis_colonnes.js`) : on la tire pour régler la largeur, un double-clic
+rend la largeur par défaut. Les largeurs sont mémorisées dans le navigateur
+(localStorage) et valent pour tous les devis.
+
 ## En-têtes de colonnes sur 2 lignes (fiche Devis)
 
 Le tableau des lignes de devis (admin) partait en scroll horizontal : Unfold
