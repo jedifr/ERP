@@ -345,6 +345,7 @@ NAVIGATION = [
             _menu_b("Ordres de fabrication", "build", "chiffrage", "ordrefabrication", badge="comptes.accueil.badge_of"),
             _menu("Pièces à découper", "content_cut", "decoupe", "piecedecoupe"),
             _menu("Imbrications", "grid_view", "decoupe", "imbricationjob"),
+            _menu("Optimisation de sciage", "carpenter", "decoupe", "optimisationsciage"),
             _menu("Envois sous-traitance", "outbound", "soustraitance", "envoisoustraitance"),
             _menu("Retours sous-traitance", "keyboard_return", "soustraitance", "retoursoustraitance"),
         ],

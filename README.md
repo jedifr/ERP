@@ -3066,6 +3066,17 @@ Sous la zone de dépôt du panneau « Pièces à découper » d'un devis, la **B
 - Les débits d'une même section s'**imbriquent dans les barres** (longueur de barre de la section, trait de scie, chute de tête, chute récupérable), dessinées à l'horizontale avec la chute de bout en rouge ; bilan : barres complètes − chute de bout = **longueur consommée**, × prix au mètre. Le coût est réparti entre les débits au prorata de leur longueur et suit la quantité de la ligne du devis. Pas de temps de sciage pour l'instant (matière seule).
 - Catalogue : *Production > Sections de profilés* (cornières à ailes égales, UPN, tubes carrés, rectangulaires et ronds), **livré non vérifié** ; les masses des tubes sont calculées (angles vifs), à remplacer par votre base. Le **prix d'achat** vient de l'article rattaché à la section (au mètre, au kilo avec poids linéique, ou à la barre) ; l'action « Créer les articles d'achat manquants » les génère, il ne reste qu'à saisir le coût.
 
+## Optimisation de sciage (tubes et profilés)
+
+Menu *Atelier > Optimisation de sciage* : l'équivalent de CuttingOptimization pour préparer la scie.
+
+- **Saisie** : repère, couleur, longueur hors tout, quantité par ensemble (× « quantité d'ensembles »), angles gauche et droit, section du catalogue. Les angles se mesurent depuis la coupe droite (0°), le signe donne le sens de l'onglet (45° / -45° : trapèze). « Importer des débits » reprend les débits de profilés d'un devis, d'une commande ou d'un OF (coupes en biais reprises en onglet convergent).
+- **Réglages** : longueur de barre imposée ou celle de chaque section, largeur de lame, chute initiale, seuil de chute réutilisable, chutes du stock à utiliser d'abord.
+- **Calcul** (`decoupe/services/sciage.py`) : premier et meilleur ajustement décroissants puis ordres perturbés à graine fixe (même projet, même plan). Critères : le moins de barres neuves, puis de chutes du stock, puis la chute la plus concentrée. Deux coupes au même angle sont **imbriquées tête-bêche** (un seul trait de scie, la hauteur du tube gagnée à chaque paire) ; le trait de scie d'une coupe en biais compte sa longueur dans l'axe de la barre.
+- **Fiche** : croquis coté de chaque débit, plan de coupe recalculé pendant la saisie (barres identiques regroupées, chutes ≥ seuil marquées « → stock »), utilisation, masse et coût matière (prix de l'article d'achat de la section, chutes rendues au stock déduites).
+- **Liste de débits (PDF)** : par section, le récapitulatif avec croquis et la synthèse, puis la liste des découpes barre par barre.
+- Pas encore de mouvement de stock : les barres et les chutes se sortent et se rentrent à la main (menu Lots et mouvements).
+
 ## Corrections
 
 - **Champs invisibles** : « Délai » des devis (widget sans le style Unfold : vide, le champ disparaissait), listes « Taux de TVA » des lignes et adresse associée des contacts. Un test parcourt toutes les fiches d'ajout et échoue si un champ saisissable n'a pas le style Unfold.

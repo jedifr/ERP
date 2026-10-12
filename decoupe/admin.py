@@ -15,7 +15,7 @@ from comptes.lots import ChampLot
 from comptes.lots_admin import ModificationParLotsMixin
 from technique.models import FamilleMatiere, Matiere
 
-from .admin_views import analyser_fichier_view, previsualiser_imbrication_view
+from .admin_views import analyser_fichier_view, previsualiser_imbrication_view, previsualiser_sciage_view
 from .models import (
     ReglageImbrication,
     FormatTole,
@@ -23,6 +23,8 @@ from .models import (
     ImbricationLigne,
     ImbricationPlacement,
     NormeCote,
+    DebitSciage,
+    OptimisationSciage,
     ParametreCoupe,
     ReglageProcede,
     PieceDecoupe,
@@ -859,3 +861,146 @@ class NormeCoteAdmin(ModelAdmin):
         self.message_user(request, f"{n} ligne(s) marquée(s) comme vérifiée(s).", messages.SUCCESS)
 
 
+
+
+# ------------------------------------------------------------------ optimisation de sciage
+class DebitSciageForm(forms.ModelForm):
+    class Meta:
+        model = DebitSciage
+        fields = "__all__"
+        widgets = {"couleur": forms.TextInput(attrs={"type": "color", "class": "border border-base-200 rounded-default", "style": "width:3rem;height:2rem;padding:1px"})}
+
+
+class DebitSciageInline(TabularInline):
+    model = DebitSciage
+    form = DebitSciageForm
+    extra = 0
+    fields = ["repere", "couleur", "longueur_mm", "quantite", "angle_gauche_deg", "angle_droit_deg", "croquis", "section"]
+    readonly_fields = ["croquis"]
+    autocomplete_fields = ["section"]  # plus de 700 sections au catalogue
+    verbose_name_plural = "Débits"
+
+    @admin.display(description="Croquis")
+    def croquis(self, obj):
+        from .services.sciage import svg_piece
+
+        if not obj or obj.pk is None or obj.longueur_mm is None:
+            return mark_safe('<span class="sc-croquis"></span>')
+        return mark_safe(f'<span class="sc-croquis">{svg_piece(obj.longueur_mm, obj.angle_gauche_deg, obj.angle_droit_deg, obj.couleur)}</span>')
+
+
+@admin.register(OptimisationSciage)
+class OptimisationSciageAdmin(ModelAdmin):
+    list_display = ["numero", "intitule", "commande", "ordre_fabrication", "date", "nb_debits"]
+    list_display_links = ["numero", "intitule"]
+    search_fields = ["numero", "intitule", "commande__numero", "ordre_fabrication__numero"]
+    list_filter = ["date"]
+    autocomplete_fields = ["commande", "ordre_fabrication", "poste"]
+    readonly_fields = ["numero"]
+    fieldsets = [
+        ("Projet", {"fields": ["intitule", "numero", ("commande", "ordre_fabrication"), ("date", "execute_par"), ("quantite_ensembles", "traitement")]}),
+        ("Barres et machine", {"fields": [("longueur_barre", "longueur_barre_mm"), ("poste", "largeur_lame_mm"), ("chute_initiale_mm", "chute_reutilisable_mm"),
+                                          ("utiliser_chutes", "chutes_disponibles")]}),
+    ]
+    inlines = [DebitSciageInline]
+    change_form_after_template = "admin/decoupe/sciage_fiche.html"
+    actions_detail = ["action_pdf", "action_importer"]
+
+    class Media:
+        js = ["decoupe/optimisationsciage_admin.js"]
+
+    @admin.display(description="Débits")
+    def nb_debits(self, obj):
+        return obj.debits.count()
+
+    def get_urls(self):
+        urls = [path("previsualiser/", self.admin_site.admin_view(previsualiser_sciage_view), name="decoupe_optimisationsciage_previsualiser")]
+        return urls + super().get_urls()
+
+    def changeform_view(self, request, object_id=None, form_url="", extra_context=None):
+        from .services.sciage import calculer_plan, lignes_de
+
+        extra_context = extra_context or {}
+        obj = self.get_object(request, object_id) if object_id else None
+        if obj is not None:
+            extra_context["plan_sciage"] = calculer_plan(obj, lignes_de(obj))
+            extra_context["optimisation_sciage"] = obj
+        return super().changeform_view(request, object_id, form_url, extra_context)
+
+    def save_formset(self, request, form, formset, change):
+        if formset.model is DebitSciage:
+            instances = formset.save(commit=False)
+            ordre = max((d.ordre for d in form.instance.debits.all()), default=0)
+            for d in instances:
+                if not d.pk:
+                    ordre += 1
+                    d.ordre = ordre
+                d.save()
+            for d in formset.deleted_objects:
+                d.delete()
+            formset.save_m2m()
+            return
+        super().save_formset(request, form, formset, change)
+
+    @unfold_action(description="Liste de débits (PDF)", icon="picture_as_pdf", url_path="pdf")
+    def action_pdf(self, request, object_id):
+        from django.http import HttpResponse
+
+        from .services.sciage_pdf import generer_pdf_liste_debits
+
+        obj = get_object_or_404(OptimisationSciage, pk=object_id)
+        if not self.has_view_permission(request, obj):
+            raise PermissionDenied
+        if not obj.debits.exists():
+            self.message_user(request, "Ajoutez au moins un débit avant d'imprimer la liste.", level=messages.WARNING)
+            return redirect(reverse("admin:decoupe_optimisationsciage_change", args=[obj.pk]))
+        reponse = HttpResponse(generer_pdf_liste_debits(obj), content_type="application/pdf")
+        reponse["Content-Disposition"] = f'inline; filename="liste-debits-{obj.numero}.pdf"'
+        return reponse
+
+    @unfold_action(description="Importer des débits", icon="download", url_path="importer")
+    def action_importer(self, request, object_id):
+        """Reprend les débits de profilés d'un devis, d'une commande ou d'un OF : on choisit la source, puis les lignes à ajouter."""
+        from chiffrage.models import Commande, Devis, OrdreFabrication
+
+        from .services.sciage import angles_depuis_piece_profile, debits_a_importer, importer
+
+        obj = get_object_or_404(OptimisationSciage, pk=object_id)
+        if not self.has_change_permission(request, obj):
+            raise PermissionDenied
+        retour = reverse("admin:decoupe_optimisationsciage_change", args=[obj.pk])
+        donnees = request.POST if request.method == "POST" else request.GET
+        source = donnees.get("source") or ("of" if obj.ordre_fabrication_id else "commande" if obj.commande_id else "devis")
+        valeur = donnees.get("valeur") or (obj.ordre_fabrication_id if source == "of" else obj.commande_id if source == "commande" else "") or ""
+        cible = None
+        if valeur:
+            modele = {"devis": Devis, "commande": Commande, "of": OrdreFabrication}[source]
+            cible = modele.objects.filter(pk=valeur).first()
+            if cible is None:
+                self.message_user(request, f"« {valeur} » est introuvable.", level=messages.ERROR)
+        elements = []
+        if cible is not None:
+            cle = {"devis": "devis", "commande": "commande", "of": "ordre_fabrication"}[source]
+            elements = debits_a_importer(**{cle: cible})
+        if request.method == "POST" and donnees.get("importer"):
+            choisis = []
+            for i, (piece, quantite) in enumerate(elements):
+                if donnees.get(f"choisi-{i}"):
+                    try:
+                        quantite = float(donnees.get(f"quantite-{i}", quantite) or 0)
+                    except ValueError:
+                        pass
+                    choisis.append((piece, quantite))
+            n = importer(obj, choisis)
+            self.message_user(request, f"{n} débit(s) importé(s) de {cible}." if n else "Aucun débit importé.", level=messages.SUCCESS if n else messages.WARNING)
+            return redirect(retour)
+        lignes = []
+        for i, (piece, quantite) in enumerate(elements):
+            g, d = angles_depuis_piece_profile(piece)
+            lignes.append({"index": i, "piece": piece, "quantite": quantite, "angle_g": g, "angle_d": d})
+        contexte = {
+            **self.admin_site.each_context(request), "title": f"Importer des débits dans {obj.numero}", "optimisation": obj, "retour": retour,
+            "source": source, "valeur": valeur, "cible": cible, "lignes": lignes, "opts": self.model._meta,
+            "sources": [("devis", "Devis"), ("commande", "Commande"), ("of", "Ordre de fabrication")],
+        }
+        return TemplateResponse(request, "admin/decoupe/sciage_importer.html", contexte)

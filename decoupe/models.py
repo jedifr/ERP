@@ -820,3 +820,104 @@ class PieceProfile(models.Model):
     @property
     def masse_kg(self):
         return self.longueur_mm / 1000 * self.section.masse_lineique
+
+
+class OptimisationSciage(models.Model):
+    """Projet de sciage : débits de tubes et profilés à répartir dans des barres, avec la liste de débits imprimable
+    (calcul dans services/sciage.py)."""
+
+    class LongueurBarre(models.TextChoices):
+        IMPOSEE = "imposee", "Imposée"
+        SECTION = "section", "Celle de chaque section"
+
+    numero = models.CharField("numéro", max_length=30, unique=True, blank=True, help_text="Attribué à l'enregistrement : OS-AAAA-NNNN.")
+    intitule = models.CharField("intitulé", max_length=200)
+    commande = models.ForeignKey("chiffrage.Commande", verbose_name="commande", on_delete=models.SET_NULL, null=True, blank=True, related_name="optimisations_sciage")
+    ordre_fabrication = models.ForeignKey("chiffrage.OrdreFabrication", verbose_name="OF", on_delete=models.SET_NULL, null=True, blank=True, related_name="optimisations_sciage")
+    date = models.DateField("date", default=timezone.localdate)
+    execute_par = models.CharField("exécuté par", max_length=100, blank=True)
+    quantite_ensembles = models.PositiveIntegerField("quantité d'ensembles", default=1, help_text="Multiplie la quantité de chaque débit.")
+    traitement = models.CharField("traitement", max_length=100, blank=True, help_text="Galvanisation, thermolaquage… (imprimé sur la liste).")
+    longueur_barre = models.CharField("longueur de barre", max_length=10, choices=LongueurBarre.choices, default=LongueurBarre.IMPOSEE)
+    longueur_barre_mm = models.FloatField("longueur imposée (mm)", default=6000)
+    poste = models.ForeignKey("technique.PosteTravail", verbose_name="scie", on_delete=models.SET_NULL, null=True, blank=True, related_name="optimisations_sciage")
+    largeur_lame_mm = models.FloatField("largeur de lame (mm)", default=3)
+    chute_initiale_mm = models.FloatField("chute initiale (mm)", default=20, help_text="Longueur dressée en bout de barre avant la première coupe.")
+    chute_reutilisable_mm = models.FloatField("chute réutilisable dès (mm)", default=300, help_text="Les chutes plus longues sont signalées « à remettre au stock ».")
+    utiliser_chutes = models.BooleanField("utiliser d'abord des chutes", default=False)
+    chutes_disponibles = models.CharField(
+        "chutes disponibles (mm)", max_length=300, blank=True, help_text="Longueurs séparées par des virgules, essayées avant les barres neuves (toutes sections).",
+    )
+    date_creation = models.DateTimeField("créé le", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Optimisation de sciage"
+        verbose_name_plural = "Optimisations de sciage"
+        ordering = ["-date", "-pk"]
+
+    def __str__(self):
+        return f"{self.numero} – {self.intitule}" if self.numero else self.intitule
+
+    def clean(self):
+        for nom in ("longueur_barre_mm", "largeur_lame_mm", "chute_initiale_mm", "chute_reutilisable_mm"):
+            if (getattr(self, nom) or 0) < 0:
+                raise ValidationError({nom: "La valeur ne peut pas être négative."})
+        if self.longueur_barre == self.LongueurBarre.IMPOSEE and self.longueur_barre_mm <= self.chute_initiale_mm:
+            raise ValidationError({"longueur_barre_mm": "La barre doit être plus longue que la chute initiale."})
+        try:
+            self.liste_chutes()
+        except ValueError:
+            raise ValidationError({"chutes_disponibles": "Des longueurs en mm séparées par des virgules, par exemple « 2500, 2000 »."})
+
+    def save(self, *args, **kwargs):
+        if not self.numero:
+            annee = (self.date or timezone.localdate()).year
+            prefixe = f"OS-{annee}-"
+            derniers = OptimisationSciage.objects.filter(numero__startswith=prefixe).values_list("numero", flat=True)
+            suivant = max((int(n[len(prefixe):]) for n in derniers if n[len(prefixe):].isdigit()), default=0) + 1
+            self.numero = f"{prefixe}{suivant:04d}"
+        super().save(*args, **kwargs)
+
+    def liste_chutes(self):
+        """Longueurs des chutes à utiliser d'abord (liste vide si l'option est décochée). ValueError si le texte est invalide."""
+        if not self.utiliser_chutes:
+            return []
+        morceaux = [m for m in self.chutes_disponibles.replace(";", ",").replace(" ", ",").split(",") if m.strip()]
+        valeurs = [float(m.replace(" ", "")) for m in morceaux]
+        if any(v <= 0 for v in valeurs):
+            raise ValueError
+        return valeurs
+
+
+class DebitSciage(models.Model):
+    """Un débit d'une optimisation de sciage : longueur hors tout, quantité par ensemble et angles de coupe (0 = droite)."""
+
+    optimisation = models.ForeignKey(OptimisationSciage, verbose_name="optimisation", on_delete=models.CASCADE, related_name="debits")
+    repere = models.CharField("repère", max_length=20)
+    couleur = models.CharField("couleur", max_length=7, default="#d4d4d4")
+    longueur_mm = models.FloatField("longueur (mm)")
+    quantite = models.PositiveIntegerField("qté / ensemble", default=1)
+    angle_gauche_deg = models.FloatField("angle G (°)", default=0, help_text="Depuis la coupe droite (0) ; le signe donne le sens de l'onglet.")
+    angle_droit_deg = models.FloatField("angle D (°)", default=0)
+    section = models.ForeignKey(ProfileSection, verbose_name="section", on_delete=models.PROTECT, related_name="debits_sciage")
+    piece_profile = models.ForeignKey(PieceProfile, verbose_name="débit de devis", on_delete=models.SET_NULL, null=True, blank=True, related_name="debits_sciage")
+    ordre = models.PositiveIntegerField("ordre", default=0)
+
+    class Meta:
+        verbose_name = "Débit"
+        verbose_name_plural = "Débits"
+        ordering = ["ordre", "pk"]
+
+    def __str__(self):
+        return f"{self.repere} – {self.longueur_mm:g} mm × {self.quantite}"
+
+    def clean(self):
+        from .services.sciage import ANGLE_MAX
+
+        if self.longueur_mm is not None and self.longueur_mm <= 0:
+            raise ValidationError({"longueur_mm": "La longueur doit être positive."})
+        for nom in ("angle_gauche_deg", "angle_droit_deg"):
+            if abs(getattr(self, nom) or 0) > ANGLE_MAX:
+                raise ValidationError({nom: f"Entre -{ANGLE_MAX:g}° et {ANGLE_MAX:g}° (0 = coupe droite)."})
+        if self.couleur and not (len(self.couleur) == 7 and self.couleur.startswith("#")):
+            raise ValidationError({"couleur": "Une couleur au format #rrggbb."})

@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8"><title>Liste de débits {{ o.numero }}</title>
+<style>
+  @page { size: A4; margin: 30mm 12mm 14mm 12mm;
+    @top-center { content: element(entete); width: 100%; }
+    @bottom-right { content: "Page " counter(page) "/" counter(pages); font: 8pt sans-serif; }
+    @bottom-left { content: "{{ o.numero }}"; font: 8pt sans-serif; color: #555; } }
+  body { font-family: "DejaVu Sans", Arial, sans-serif; font-size: 9.5pt; color: #000; }
+  .entete { position: running(entete); width: 100%; }
+  .ph { width: 100%; border-collapse: collapse; }
+  .ph td { border: 1px solid #000; padding: 1.5mm 2mm; font-size: 9.5pt; }
+  .ph .t { font-size: 12pt; font-weight: bold; }
+  .box { border: 1.5pt solid #000; margin-bottom: 6mm; page-break-inside: auto; }
+  .bh { width: 100%; border-collapse: collapse; }
+  .bh td { padding: 1.5mm 2.5mm; vertical-align: top; }
+  .bh .tab { border-right: 1px solid #000; border-bottom: 1px solid #000; width: 28mm; }
+  .bh .info { background: #e6e6e6; border-left: 1px solid #000; border-bottom: 1px solid #000; }
+  h4 { font-weight: normal; font-size: 10.5pt; margin: 4mm 0 1mm 7mm; }
+  table.pt { border-collapse: collapse; margin: 0 5mm; width: calc(100% - 10mm); }
+  table.pt th { border: 1px solid #000; font-weight: normal; padding: 1mm; }
+  table.pt td { border-left: 1px solid #000; border-right: 1px solid #000; border-bottom: 0.5pt solid #9ca3af; padding: 1mm; text-align: center; }
+  table.pt tbody tr:last-child td { border-bottom: 1px solid #000; }
+  table.pt tr { page-break-inside: avoid; }
+  td.rep { position: relative; }
+  .coin { position: absolute; left: 0; top: 0; width: 0; height: 0; border-style: solid; border-width: 3mm 3mm 0 0; }
+  table.pt td.l { text-align: left; }
+  .seq { font-size: 9pt; margin-bottom: 1mm; }
+  .psum { margin: 2mm 5mm 4mm; width: calc(100% - 10mm); border-collapse: collapse; }
+  .psum td { border: 1px solid #000; padding: 1.2mm 2mm; width: 33%; }
+  .psum small { display: block; font-size: 7.5pt; color: #444; }
+  .psum b { font-size: 10.5pt; }
+  .ptot { text-align: right; margin: 2mm 6mm 3mm; font-size: 11pt; }
+  .stock { font-size: 7.5pt; font-weight: bold; color: #15803d; display: block; }
+  .legende { font-size: 7.5pt; font-style: italic; border-top: 1px solid #000; padding-top: 1mm; margin-top: 2mm; }
+  .saut { page-break-before: always; }
+  .err { color: #b91c1c; font-weight: bold; margin: 4mm 6mm; }
+</style></head>
+<body>
+<div class="entete"><table class="ph">
+  <tr><td colspan="2" class="t">Liste de débits – {{ o.numero }} – {{ o.intitule }}</td><td>Date : {{ o.date|date:"D j F Y" }}</td></tr>
+  <tr><td>Affaire : {% if o.commande_id %}{{ o.commande_id }}{% endif %}{% if o.ordre_fabrication_id %} · OF {{ o.ordre_fabrication_id }}{% endif %}</td>
+      <td>Opérateur : {{ o.execute_par }}</td><td>Scie : {{ o.poste|default:"" }}</td></tr>
+</table></div>
+
+{% for s in plan.sections %}
+  <div class="box{% if not forloop.first %} saut{% endif %}">
+    <table class="bh"><tr><td class="tab">Section {{ forloop.counter }}/{{ plan.sections|length }}</td><td></td>
+      <td class="info">Section : {{ s.section.designation }}{% if s.resultat %} · barre {{ s.resultat.longueur_barre|floatformat:"0g" }} mm{% endif %}<br>Traitement : {{ o.traitement }}</td></tr></table>
+    {% if s.erreur %}<p class="err">{{ s.erreur }}</p>{% else %}
+    <h4>Récapitulatif des débits</h4>
+    <table class="pt">
+      <thead><tr><th style="width:14mm">Rep.</th><th style="width:18mm">Long.</th><th style="width:15mm">Qté</th><th style="width:17mm">Angle[G]</th><th style="width:17mm">Angle[D]</th><th>Pièce</th></tr></thead>
+      <tbody>{% for l in s.lignes %}
+        <tr><td class="rep"><span class="coin" style="border-color: {{ l.couleur }} transparent transparent transparent"></span>{{ l.repere }}</td>
+          <td>{{ l.longueur|floatformat:"-1g" }}</td><td>{{ l.quantite }}</td><td>{{ l.angle_g|floatformat:"-1" }}</td><td>{{ l.angle_d|floatformat:"-1" }}</td>
+          <td>{{ l.croquis|safe }}</td></tr>{% endfor %}</tbody>
+    </table>
+    <h4>Synthèse</h4>
+    <table class="psum"><tr>
+      <td><small>Barres</small><b>{{ s.resultat.nb_neuves }} × {{ s.resultat.longueur_barre|floatformat:"0g" }} mm</b>{% if s.resultat.nb_chutes_stock %} + {{ s.resultat.nb_chutes_stock }} chute(s) du stock{% endif %}</td>
+      <td><small>Débits</small><b>{{ s.resultat.nb_debits }}</b> pour {{ s.resultat.longueur_debits|floatformat:"0g" }} mm</td>
+      <td><small>Coupes</small><b>{{ s.nb_coupes }}</b> (lame {{ s.lame|floatformat:"-1" }} mm)</td></tr><tr>
+      <td><small>Utilisation</small><b>{{ s.resultat.taux_utilisation|floatformat:1 }} %</b></td>
+      <td><small>Chute totale</small><b>{{ s.resultat.chute_totale|floatformat:"0g" }} mm</b></td>
+      <td><small>Chutes à remettre au stock (≥ {{ s.seuil|floatformat:"0g" }} mm)</small><b>{% for c in s.chutes_reutilisables %}{{ c|floatformat:"0g" }}{% if not forloop.last %}, {% endif %}{% empty %}aucune{% endfor %}</b></td>
+    </tr></table>
+    {% endif %}
+  </div>
+  {% if s.resultat %}
+  <div class="box saut">
+    <table class="bh"><tr><td class="tab">Section {{ forloop.counter }}/{{ plan.sections|length }}</td><td></td>
+      <td class="info">Section : {{ s.section.designation }} · {{ s.resultat.nb_neuves }} longueur(s) de {{ s.resultat.longueur_barre|floatformat:"0g" }} mm<br>Traitement : {{ o.traitement }}</td></tr></table>
+    <h4>Liste des découpes</h4>
+    <table class="pt">
+      <thead><tr><th style="width:9mm">N°</th><th style="width:10mm">Qté</th><th>Débit</th><th style="width:16mm">Chute</th></tr></thead>
+      <tbody>{% for g in s.groupes_pdf %}
+        <tr><td>{{ forloop.counter }}</td><td><b>{{ g.nombre }}</b></td>
+          <td class="l"><div class="seq">{{ g.sequence }}{% if g.barre.origine == "chute" %} <i>(chute de {{ g.barre.longueur|floatformat:"0g" }})</i>{% endif %}</div>{{ g.svg|safe }}</td>
+          <td>{{ g.chute|floatformat:"0g" }}{% if g.reutilisable %}<span class="stock">→ stock</span>{% endif %}</td></tr>{% endfor %}</tbody>
+    </table>
+    <div class="ptot">Chute totale <b>{{ s.resultat.chute_totale|floatformat:"0g" }}</b></div>
+  </div>
+  {% endif %}
+{% endfor %}
+<p class="legende">•(3)12x522[-45°↔60°] : repère 3, 12 débits de 522 mm, première coupe à -45°, seconde à 60°. Angles mesurés depuis la coupe droite (0°). Zone hachurée : chute.</p>
+</body></html>

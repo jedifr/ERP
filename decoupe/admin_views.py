@@ -250,3 +250,53 @@ def previsualiser_imbrication_view(request):
             "feuilles": feuilles,
         }
     )
+
+
+@staff_member_required
+@require_http_methods(["POST"])
+def previsualiser_sciage_view(request):
+    """Plan de coupe recalculé à partir de l'état courant de la fiche OptimisationSciage (réglages et lignes de débits), sans rien
+    enregistrer : le JS de la fiche l'appelle à chaque modification. Renvoie le HTML du plan et le croquis de chaque ligne."""
+    from django.template.loader import render_to_string
+
+    from technique.models import ProfileSection
+
+    from .models import OptimisationSciage
+    from .services.sciage import calculer_plan, svg_piece
+
+    def nombre(nom, defaut=0.0):
+        try:
+            return float(str(request.POST.get(nom, "")).replace(",", ".").replace(" ", "").replace(" ", "") or defaut)
+        except ValueError:
+            return defaut
+
+    opt = OptimisationSciage(
+        quantite_ensembles=max(int(nombre("quantite_ensembles", 1)), 1),
+        longueur_barre=request.POST.get("longueur_barre") or OptimisationSciage.LongueurBarre.IMPOSEE,
+        longueur_barre_mm=nombre("longueur_barre_mm", 6000), largeur_lame_mm=max(nombre("largeur_lame_mm", 3), 0),
+        chute_initiale_mm=max(nombre("chute_initiale_mm", 0), 0), chute_reutilisable_mm=nombre("chute_reutilisable_mm", 0),
+        utiliser_chutes=request.POST.get("utiliser_chutes") in ("on", "true", "1"), chutes_disponibles=request.POST.get("chutes_disponibles", ""),
+    )
+    try:
+        total = int(request.POST.get("debits-TOTAL_FORMS") or 0)
+    except ValueError:
+        total = 0
+    brutes, croquis = [], {}
+    for i in range(min(total, 500)):
+        prefixe = f"debits-{i}-"
+        if request.POST.get(prefixe + "DELETE") in ("on", "true", "1"):
+            continue
+        ligne = {
+            "repere": request.POST.get(prefixe + "repere", ""), "couleur": request.POST.get(prefixe + "couleur") or "#d4d4d4",
+            "longueur_mm": nombre(prefixe + "longueur_mm"), "quantite": int(nombre(prefixe + "quantite")),
+            "angle_gauche_deg": max(min(nombre(prefixe + "angle_gauche_deg"), 70), -70), "angle_droit_deg": max(min(nombre(prefixe + "angle_droit_deg"), 70), -70),
+            "section_id": request.POST.get(prefixe + "section"),
+        }
+        if ligne["longueur_mm"] > 0:
+            croquis[i] = svg_piece(ligne["longueur_mm"], ligne["angle_gauche_deg"], ligne["angle_droit_deg"], ligne["couleur"])
+        brutes.append(ligne)
+    sections = ProfileSection.objects.select_related("article").in_bulk([l["section_id"] for l in brutes if (l["section_id"] or "").isdigit()])
+    lignes = [{**l, "section": sections.get(int(l["section_id"]))} for l in brutes if (l["section_id"] or "").isdigit()]
+    plan = calculer_plan(opt, lignes)
+    html = render_to_string("admin/decoupe/sciage_plan.html", {"plan": plan, "seuil": opt.chute_reutilisable_mm}, request=request)
+    return JsonResponse({"html": html, "croquis": croquis})
