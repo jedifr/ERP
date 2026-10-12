@@ -1,0 +1,24 @@
+{% load i18n admin_urls %}
+
+{% comment %}
+Barre d'actions des fiches : « Historique » réduit à son icône (libellé au survol) pour laisser la place
+aux actions métier. Remplace le gabarit d'Unfold du même nom.
+{% endcomment %}
+{% block object-tools-items %}
+    {% if show_history %}
+        {% url opts|admin_urlname:'history' original.pk|admin_urlquote as history_url %}
+        {% add_preserved_filters history_url as link %}
+        <li class="border border-base-200 select-none max-lg:-mt-px max-lg:first:rounded-t-default max-lg:last:rounded-b-default min-lg:-ml-px min-lg:first:rounded-l-default min-lg:last:rounded-r-default hover:text-primary-600 dark:border-base-700 dark:hover:text-primary-500">
+            <a href="{{ link }}" title="{% trans 'History' %}" aria-label="{% trans 'History' %}"
+               class="cursor-pointer flex grow items-center gap-2 px-3 py-2 text-left whitespace-nowrap">
+                <span class="material-symbols-outlined">history</span>
+                <span class="lg:hidden">{% trans 'History' %}</span>
+            </a>
+        </li>
+    {% endif %}
+
+    {% if has_absolute_url and show_view_on_site %}
+        {% trans 'View on site' as title %}
+        {% include "unfold/helpers/tab_action.html" with title=title link=absolute_url blank=1 icon="open_in_new" %}
+    {% endif %}
+{% endblock %}

@@ -173,7 +173,10 @@ class FactureAdmin(ProchaineActionMixin, DateDuJourMixin, ChronologieMixin, Puce
     autocomplete_fields = ["commande", "client", "pays_client"]
     actions = ["action_generer_ecriture", "action_relancer", "action_recalculer_montants"]
     actions_list = ["action_preparer_facture"]
-    actions_detail = ["action_importer_bl", "action_pdf", "action_facturx_pdf", "action_relance_pdf", "action_creer_avoir"]
+    actions_detail = [
+        {"title": "Documents", "icon": "description", "items": ["action_pdf", "action_facturx_pdf", "action_relance_pdf"]},
+        {"title": "Actions", "icon": "more_horiz", "items": ["action_importer_bl", "action_creer_avoir"]},
+    ]
     readonly_fields = [
         "bons_livraison_recap", "montants_calcules_display", "echeance_recap", "ecart_recap", "relances_recap", "avoirs_recap", "ecriture_recap",
     ]
@@ -476,7 +479,7 @@ class FactureAdmin(ProchaineActionMixin, DateDuJourMixin, ChronologieMixin, Puce
         reponse["Content-Disposition"] = f'inline; filename="{nom}-{facture.pk}.pdf"'
         return reponse
 
-    @unfold_action(description="Importer un bon de livraison", permissions=["change"], url_path="importer-bl")
+    @unfold_action(description="Importer un bon de livraison", icon="local_shipping", permissions=["change"], url_path="importer-bl")
     def action_importer_bl(self, request, object_id):
         return HttpResponseRedirect(reverse("admin:facturation_facture_importer_bl", args=[object_id]))
 
@@ -518,26 +521,26 @@ class FactureAdmin(ProchaineActionMixin, DateDuJourMixin, ChronologieMixin, Puce
             },
         )
 
-    @unfold_action(description="PDF de la facture", url_path="pdf")
+    @unfold_action(description="Facture", icon="picture_as_pdf", url_path="pdf")
     def action_pdf(self, request, object_id):
         from .documents import generer_pdf_facture
 
         return self._reponse_pdf(request, object_id, generer_pdf_facture, "facture")
 
-    @unfold_action(description="Facture Factur-X (PDF + XML)", url_path="facturx-pdf")
+    @unfold_action(description="Factur-X (PDF + XML)", icon="picture_as_pdf", url_path="facturx-pdf")
     def action_facturx_pdf(self, request, object_id):
         from .facturx import generer_facturx
 
         return self._reponse_pdf(request, object_id, generer_facturx, "facturx")
 
-    @unfold_action(description="Lettre de relance (PDF)", url_path="relance-pdf")
+    @unfold_action(description="Lettre de relance", icon="picture_as_pdf", url_path="relance-pdf")
     def action_relance_pdf(self, request, object_id):
         from .documents import generer_pdf_relance
 
         niveau = request.GET.get("niveau")
         return self._reponse_pdf(request, object_id, generer_pdf_relance, "relance", niveau=int(niveau) if niveau and niveau.isdigit() else None)
 
-    @unfold_action(description="Créer un avoir", permissions=["creer_avoir"], url_path="creer-avoir")
+    @unfold_action(description="Créer un avoir", icon="undo", permissions=["creer_avoir"], url_path="creer-avoir")
     def action_creer_avoir(self, request, object_id):
         return HttpResponseRedirect(reverse("admin:facturation_facture_avoir", args=[object_id]))
 

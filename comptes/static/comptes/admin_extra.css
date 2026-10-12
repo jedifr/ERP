@@ -1,2 +1,6 @@
 /* Champ caché de version (verrouillage optimiste, voir comptes/concurrence.py) : pas de ligne vide. */
 .field-version_verrou { display: none !important; }
+
+/* Menus déroulants de la barre d'actions (Documents, Actions) : la largeur suit le libellé le plus long
+   au lieu de couper « Créer les ordres de fabrication ». */
+body > nav.w-52 { width: max-content; min-width: 13rem; }

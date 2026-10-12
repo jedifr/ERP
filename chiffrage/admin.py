@@ -1,5 +1,6 @@
 import dataclasses
 import datetime
+import functools
 from urllib.parse import quote
 
 from django import forms
@@ -233,7 +234,11 @@ class EtapeSuivanteMixin:
             if a.action_name.endswith("action_etape_suivante"):
                 if etape is None:  # rien à faire : pas de bouton
                     continue
-                a = dataclasses.replace(a, description=f"Étape suivante : {etape.libelle}")
+                # Libellé court (« Préparer la facture ») pour gagner de la place ; le titre complet
+                # « Étape suivante : … » reste au survol.
+                methode = functools.wraps(a.method)(functools.partial(a.method))
+                methode.attrs = {**getattr(a.method, "attrs", {}), "title": f"Étape suivante : {etape.libelle}"}
+                a = dataclasses.replace(a, description=etape.libelle, method=methode)
             resultat.append(a)
         return resultat
 
@@ -730,7 +735,7 @@ class DevisAdmin(ProchaineActionMixin, DateDuJourMixin, ChronologieMixin, PucesM
             return HttpResponseRedirect(reverse("admin:chiffrage_commande_change", args=[creees[0].pk]))
 
 
-    @unfold_action(description="PDF du devis", url_path="pdf")
+    @unfold_action(description="PDF du devis", icon="picture_as_pdf", url_path="pdf")
     def action_pdf(self, request, object_id):
         devis = Devis.objects.get(pk=object_id)
         if not self.has_view_permission(request, devis):
@@ -1012,7 +1017,11 @@ class CommandeAdmin(ProchaineActionMixin, DateDuJourMixin, ChronologieMixin, Puc
             obj.factures.order_by("date_facturation", "numero"), "admin:facturation_facture_change",
             lambda f: f"{f.numero} — {f.date_facturation:%d/%m/%Y}" + (" (avoir)" if f.est_avoir else ""),
         )
-    actions_detail = ["action_etape_suivante", "action_importer_devis", "action_creer_ordres", "action_fiches_fabrication_pdf", "action_ar_pdf", "action_bon_preparation_pdf"]
+    actions_detail = [
+        "action_etape_suivante",
+        {"title": "Documents", "icon": "description", "items": ["action_ar_pdf", "action_bon_preparation_pdf", "action_fiches_fabrication_pdf"]},
+        {"title": "Actions", "icon": "more_horiz", "items": ["action_importer_devis", "action_creer_ordres"]},
+    ]
     actions_submit_line = ["action_enregistrer_valider"]
     url_pdf = "admin:chiffrage_commande_action_ar_pdf"
     libelle_valider = "Enregistrer et ouvrir l'AR (PDF)"
@@ -1060,15 +1069,15 @@ class CommandeAdmin(ProchaineActionMixin, DateDuJourMixin, ChronologieMixin, Puc
         reponse["Content-Disposition"] = f'inline; filename="{prefixe}-{commande.pk}.pdf"'
         return reponse
 
-    @unfold_action(description="AR de commande (PDF)", url_path="ar-pdf")
+    @unfold_action(description="AR de commande", icon="picture_as_pdf", url_path="ar-pdf")
     def action_ar_pdf(self, request, object_id):
         return self._pdf_commande(request, object_id, generer_pdf_ar_commande, "ar")
 
-    @unfold_action(description="Bon de préparation (PDF)", url_path="bon-preparation-pdf")
+    @unfold_action(description="Bon de préparation", icon="picture_as_pdf", url_path="bon-preparation-pdf")
     def action_bon_preparation_pdf(self, request, object_id):
         return self._pdf_commande(request, object_id, generer_pdf_bon_preparation, "preparation")
 
-    @unfold_action(description="Fiches de fabrication (PDF)", url_path="fiches-fabrication-pdf")
+    @unfold_action(description="Fiches de fabrication", icon="picture_as_pdf", url_path="fiches-fabrication-pdf")
     def action_fiches_fabrication_pdf(self, request, object_id):
         """Toutes les fiches de fabrication de la commande en un seul PDF (ou celles de `?ofs=A,B`)."""
         commande = get_object_or_404(Commande, pk=object_id)
@@ -1087,7 +1096,7 @@ class CommandeAdmin(ProchaineActionMixin, DateDuJourMixin, ChronologieMixin, Puc
         reponse["Content-Disposition"] = f'inline; filename="fiches-fabrication-{commande.pk}.pdf"'
         return reponse
 
-    @unfold_action(description="Créer les ordres de fabrication", permissions=["creer_ordres"], url_path="ordres-fabrication")
+    @unfold_action(description="Créer les ordres de fabrication", icon="precision_manufacturing", permissions=["creer_ordres"], url_path="ordres-fabrication")
     def action_creer_ordres(self, request, object_id):
         commande = get_object_or_404(Commande, pk=object_id)
         retour = reverse("admin:chiffrage_commande_change", args=[commande.pk])
@@ -1135,7 +1144,7 @@ class CommandeAdmin(ProchaineActionMixin, DateDuJourMixin, ChronologieMixin, Puc
     def has_creer_ordres_permission(self, request, obj=None):
         return request.user.has_perm("chiffrage.add_ordrefabrication")
 
-    @unfold_action(description="Importer des lignes de devis", permissions=["importer_devis"], url_path="importer-devis")
+    @unfold_action(description="Importer des lignes de devis", icon="playlist_add", permissions=["importer_devis"], url_path="importer-devis")
     def action_importer_devis(self, request, object_id):
         """Reprend sur la commande des lignes choisies dans un ou plusieurs devis validés du client, ajoutées à la
         suite des lignes existantes dans l'ordre affiché (réordonnables ensuite par glisser-déposer)."""
@@ -1434,7 +1443,7 @@ class LivraisonAdmin(ProchaineActionMixin, ColonnesPersonnalisablesMixin, Pastil
         qui = f" par {obj.utilisateur_annulation}" if obj.utilisateur_annulation_id else ""
         return f"Annulée le {quand}{qui}" + (f" : {obj.motif_annulation}" if obj.motif_annulation else "")
 
-    @unfold_action(description="Bon de livraison (PDF)", url_path="pdf")
+    @unfold_action(description="Bon de livraison (PDF)", icon="picture_as_pdf", url_path="pdf")
     def action_pdf(self, request, object_id):
         livraison = Livraison.objects.get(pk=object_id)
         if not self.has_view_permission(request, livraison):
@@ -1661,7 +1670,7 @@ class OrdreFabricationAdmin(ColonnesPersonnalisablesMixin, PastillesMixin, Enreg
         lignes = obj.lignes_commande.select_related("article")
         return ", ".join(f"{l.article} × {l.quantite_commandee:g}" for l in lignes) or "—"
 
-    @unfold_action(description="Fiche de fabrication (PDF)", url_path="pdf")
+    @unfold_action(description="Fiche de fabrication (PDF)", icon="picture_as_pdf", url_path="pdf")
     def action_pdf(self, request, object_id):
         of = get_object_or_404(OrdreFabrication, pk=object_id)
         if not self.has_view_permission(request, of):
