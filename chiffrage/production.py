@@ -232,7 +232,7 @@ def _creer_commande_et_ordres(devis):
     devis._change_reason = f"Commande {commande.numero} créée"[:100]
     devis.save(update_fields=["issue"])
 
-    for ligne in devis.lignes.select_related("article").all():
+    for ordre, ligne in enumerate(devis.lignes.select_related("article").all()):
         # Une ligne de commande par ligne de devis, quelle que soit la nature
         # de l'article : c'est elle qui porte le suivi de livraison (partielle,
         # article par article) — indépendant des ordres de fabrication, qui ne
@@ -247,6 +247,7 @@ def _creer_commande_et_ordres(devis):
             designation=ligne.designation,
             prix_vente_unitaire=prix_unitaire_commande(ligne),
             taux_tva=ligne.taux_tva,
+            ordre=ordre,
         )
 
     return commande
@@ -287,6 +288,7 @@ def synchroniser_lignes_commande(commande):
 
     articles_presents = set(commande.lignes.values_list("article_id", flat=True))
     lignes_creees = []
+    ordre = CommandeLigne.prochain_ordre(commande)
     for ligne in commande.devis.lignes.select_related("article").all():
         if ligne.article_id in articles_presents:
             continue
@@ -299,9 +301,74 @@ def synchroniser_lignes_commande(commande):
                 designation=ligne.designation,
                 prix_vente_unitaire=prix_unitaire_commande(ligne),
                 taux_tva=ligne.taux_tva,
+                ordre=ordre,
             )
         )
+        ordre += 1
     return lignes_creees
+
+
+def devis_importables(commande):
+    """Devis du client de la commande dont on peut reprendre des lignes : validés (prix engagé auprès du client),
+    ni refusés ni remplacés par une révision. Les offres expirées restent listées mais sont refusées à l'import
+    (voir importer_lignes_devis), comme pour le lancement en production."""
+    return (
+        Devis.objects.filter(
+            client=commande.client,
+            statut=Devis.Statut.VALIDE,
+            issue__in=[Devis.Issue.EN_ATTENTE, Devis.Issue.ACCEPTE],
+        )
+        .prefetch_related("lignes__article", "lignes__taux_tva")
+        .order_by("-date_creation", "-numero")
+    )
+
+
+def importer_lignes_devis(commande, lignes_devis):
+    """Ajoute à la commande une ligne par ligne de devis choisie (dans l'ordre reçu), à la suite des lignes
+    existantes, avec les mêmes valeurs de départ qu'au lancement en production. Les devis encore en attente de
+    réponse passent à « Accepté ». Une même ligne de devis peut être reprise plusieurs fois (commande en plusieurs
+    fois) : c'est à l'utilisateur de décocher les lignes déjà présentes."""
+    if commande.statut == Commande.Statut.ANNULEE:
+        raise ChiffrageError(f"La commande « {commande} » est annulée : on ne peut plus y ajouter de lignes.")
+    autorises = {d.pk: d for d in devis_importables(commande)}
+    for ligne in lignes_devis:
+        devis = autorises.get(ligne.devis_id)
+        if devis is None:
+            raise ChiffrageError(
+                f"Le devis « {ligne.devis} » ne peut pas être repris sur cette commande "
+                "(autre client, pas validé, refusé ou remplacé par une révision)."
+            )
+        if devis.est_expire:
+            raise ChiffrageError(
+                f"L'offre « {devis} » a expiré le {devis.date_validite:%d/%m/%Y} : prolongez sa date de "
+                "validité (si le client confirme) avant d'en reprendre les lignes."
+            )
+
+    creees = []
+    with transaction.atomic():
+        ordre = CommandeLigne.prochain_ordre(commande)
+        for ligne in lignes_devis:
+            creees.append(
+                CommandeLigne.objects.create(
+                    commande=commande,
+                    article=ligne.article,
+                    quantite_commandee=ligne.quantite,
+                    devis_ligne=ligne,
+                    designation=ligne.designation,
+                    prix_vente_unitaire=prix_unitaire_commande(ligne),
+                    taux_tva=ligne.taux_tva,
+                    ordre=ordre,
+                )
+            )
+            ordre += 1
+        for devis_id in {ligne.devis_id for ligne in lignes_devis}:
+            devis = autorises[devis_id]
+            if devis.issue == Devis.Issue.EN_ATTENTE:
+                devis.issue = Devis.Issue.ACCEPTE
+                devis._change_reason = f"Lignes reprises sur la commande {commande.numero}"[:100]
+                devis.save(update_fields=["issue"])
+        commande.mettre_a_jour_statut_livraison()
+    return creees
 
 
 def reviser_devis(devis, motif=""):
