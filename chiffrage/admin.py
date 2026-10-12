@@ -517,7 +517,7 @@ class DevisAdmin(ProchaineActionMixin, DateDuJourMixin, ChronologieMixin, PucesM
                 messages.error(request, f"{devis} : validation refusée, le devis reste en brouillon. {raison}")
 
     class Media:
-        js = ["chiffrage/devis_admin_live.js", "chiffrage/devisligne_reorder.js", "chiffrage/devis_pieces.js"]
+        js = ["chiffrage/devis_admin_live.js", "chiffrage/devisligne_reorder.js", "chiffrage/devis_pieces.js", "chiffrage/devis_colonnes.js"]
         css = {"all": ["chiffrage/devis_admin_live.css", "chiffrage/devis_pieces.css"]}
 
     # Fiche en deux colonnes : saisie à gauche, récapitulatif (montants, indices) à droite — voir fiche_deux_colonnes.css.
