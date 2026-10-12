@@ -89,6 +89,7 @@ INSTALLED_APPS = [
     "facturation",
     "comptabilite",
     "achats",
+    "tresorerie",
     "soustraitance",
     "pilotage",
 ]
@@ -358,6 +359,17 @@ NAVIGATION = [
             _menu("Lots et mouvements", "inventory_2", "stock", "lot"),
             _menu_b("Alertes de stock", "warning", "stock", "alertestock", badge="comptes.accueil.badge_alertes_stock"),
             _menu("Inventaires", "fact_check", "stock", "inventaire"),
+        ],
+    },
+    {
+        "title": "Trésorerie",
+        "separator": True,
+        "items": [
+            _menu("Échéancier clients", "call_received", "tresorerie", "echeanceclient"),
+            _menu("Relances envoyées", "mark_email_unread", "facturation", "relancefacture", url="admin:facturation_relancefacture_changelist"),
+            _menu("Échéancier fournisseurs", "call_made", "tresorerie", "echeancefournisseur"),
+            _menu("Lots de virements", "account_balance", "tresorerie", "lotvirement"),
+            _menu("Règlements", "payments", "tresorerie", "reglement"),
         ],
     },
     {

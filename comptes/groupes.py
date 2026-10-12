@@ -59,6 +59,8 @@ _FACTURATION = [
     "facturation.delete_factureligne",
     "facturation.view_relancefacture", "facturation.relancer_facture",
     "comptabilite.view_ecriturecomptable", "comptabilite.view_ligneecriture",
+    # Suivi des encaissements : échéancier client et saisie des règlements reçus.
+    "tresorerie.view_echeanceclient", "tresorerie.view_reglement", "tresorerie.add_reglement",
 ]
 
 _MAGASINIER = [
@@ -94,7 +96,16 @@ _ACHATS = [
     "comptabilite.view_postegestion", "comptabilite.view_codeanalytique",
 ]
 
+_TRESORERIE = [
+    *_crud("tresorerie", "Reglement", "LotVirement", "LigneLotVirement"),
+    "tresorerie.executer_lotvirement",
+    "tresorerie.view_echeanceclient", "tresorerie.view_echeancefournisseur",
+    "facturation.view_relancefacture", "facturation.relancer_facture",
+    "facturation.view_facture", "achats.view_facturefournisseur",
+]
+
 _COMPTABILITE = [
+    *_TRESORERIE,
     *_crud("comptabilite", "CompteComptable", "CodeAnalytique", "JournalComptable", "EcritureComptable",
            "LigneEcriture", "PosteGestion", "ArticleCompteVente",
            "ArticleCompteAchat", "TiersCompteComptable", "ParametresComptables"),
@@ -113,6 +124,8 @@ GROUPES_PAR_DEFAUT = {
         "stock.view_lot", "stock.view_mouvementstock", "stock.view_inventaire", "stock.view_transfert",
         "stock.view_emplacement",
         "facturation.view_facture", "facturation.view_factureligne",
+        "tresorerie.view_echeanceclient", "tresorerie.view_echeancefournisseur", "tresorerie.view_reglement",
+        "tresorerie.view_lotvirement", "tresorerie.view_lignelotvirement",
     ],
     "Atelier": [
         "technique.view_article", "technique.view_postetravail",

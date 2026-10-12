@@ -207,6 +207,13 @@ App `chiffrage`, plus un socle minimal de l'app `commercial` (Tiers, Adresse
   correspondante (retours partiels cumulables) ; une fois la quantité
   envoyée intégralement retournée, l'opération passe au statut `terminee`
   et l'OF peut être considéré comme prêt pour l'étape suivante.
+- **tresorerie** : `Reglement` (encaissement client ou décaissement
+  fournisseur, rattaché à une facture : la somme des règlements fait le
+  statut et la date de paiement de la facture), échéanciers clients et
+  fournisseurs (relances de paiement depuis l'échéancier client, historique
+  des relances), `LotVirement` / `LigneLotVirement` : lot de virements
+  fournisseurs exporté en XML SEPA (pain.001.001.03, `tresorerie/sepa.py`)
+  pour la banque ; « Marquer comme exécuté » enregistre les règlements.
 - **pilotage** : aucune nouvelle table (cahier des charges) — fonctions de
   service dans `pilotage/services.py`, exposées en lecture seule via l'API :
   - `marge_reelle_ordre_fabrication(of)` — recalcule le coût réel à partir
