@@ -78,10 +78,13 @@ from .planning_sync import resynchroniser
 from .validation import verifier_validation_devis
 from .production import (
     CHAMPS_SUIVIS_COMMANDE_LIGNE,
+    devis_importables,
     enregistrer_modification_ligne,
+    importer_lignes_devis,
     lancer_en_production,
     lancer_ligne_en_production,
     comparer_indices,
+    prix_unitaire_commande,
     creer_ordres_fabrication,
     planifier_ordres_fabrication,
     reviser_devis,
@@ -822,6 +825,20 @@ class CommandeLigneForm(forms.ModelForm):
         fields = "__all__"
 
 
+class CommandeLigneInlineForm(CommandeLigneForm):
+    # Rempli en JS (devisligne_reorder.js, le même que sur le devis) au glisser-déposer d'une ligne. Sans JS, une
+    # ligne existante garde son ordre et une nouvelle ligne se place en fin de commande.
+    ordre = forms.IntegerField(required=False, min_value=0, widget=forms.HiddenInput())
+
+    def clean_ordre(self):
+        ordre = self.cleaned_data.get("ordre")
+        if ordre is not None:
+            return ordre
+        if self.instance.pk:
+            return self.instance.ordre
+        return CommandeLigne.prochain_ordre(self.instance.commande_id) if self.instance.commande_id else 0
+
+
 def date_livraison_possible_display(obj):
     # Unfold n'applique le format localisé (jj/mm/aaaa) qu'aux vrais champs
     # de modèle : une propriété readonly comme date_livraison_possible passe
@@ -871,11 +888,12 @@ class CommandeLigneInline(ColonnesPersonnalisablesMixin, TabularInline):
         "reliquat", "entierement_livree", "quantite_facturee", "reste_a_facturer",
     ]
     model = CommandeLigne
-    form = CommandeLigneForm
+    form = CommandeLigneInlineForm
     extra = 0
     can_delete = False
     autocomplete_fields = ["article"]
     fields = [
+        "ordre",
         "article",
         "designation",
         "quantite_commandee",
@@ -994,7 +1012,7 @@ class CommandeAdmin(ProchaineActionMixin, DateDuJourMixin, ChronologieMixin, Puc
             obj.factures.order_by("date_facturation", "numero"), "admin:facturation_facture_change",
             lambda f: f"{f.numero} — {f.date_facturation:%d/%m/%Y}" + (" (avoir)" if f.est_avoir else ""),
         )
-    actions_detail = ["action_etape_suivante", "action_creer_ordres", "action_fiches_fabrication_pdf", "action_ar_pdf", "action_bon_preparation_pdf"]
+    actions_detail = ["action_etape_suivante", "action_importer_devis", "action_creer_ordres", "action_fiches_fabrication_pdf", "action_ar_pdf", "action_bon_preparation_pdf"]
     actions_submit_line = ["action_enregistrer_valider"]
     url_pdf = "admin:chiffrage_commande_action_ar_pdf"
     libelle_valider = "Enregistrer et ouvrir l'AR (PDF)"
@@ -1006,7 +1024,7 @@ class CommandeAdmin(ProchaineActionMixin, DateDuJourMixin, ChronologieMixin, Puc
         return self._suite_commande(request, commande, etape)
 
     class Media:
-        js = ["chiffrage/commande_admin_live.js"]
+        js = ["chiffrage/commande_admin_live.js", "chiffrage/devisligne_reorder.js"]
 
     def get_urls(self):
         urls = [
@@ -1116,6 +1134,51 @@ class CommandeAdmin(ProchaineActionMixin, DateDuJourMixin, ChronologieMixin, Puc
 
     def has_creer_ordres_permission(self, request, obj=None):
         return request.user.has_perm("chiffrage.add_ordrefabrication")
+
+    @unfold_action(description="Importer des lignes de devis", permissions=["importer_devis"], url_path="importer-devis")
+    def action_importer_devis(self, request, object_id):
+        """Reprend sur la commande des lignes choisies dans un ou plusieurs devis validés du client, ajoutées à la
+        suite des lignes existantes dans l'ordre affiché (réordonnables ensuite par glisser-déposer)."""
+        commande = get_object_or_404(Commande, pk=object_id)
+        retour = reverse("admin:chiffrage_commande_change", args=[commande.pk])
+        if commande.statut == Commande.Statut.ANNULEE:
+            self.message_user(request, f"La commande « {commande} » est annulée : on ne peut plus y ajouter de lignes.", level=messages.ERROR)
+            return HttpResponseRedirect(retour)
+        devis_liste = list(devis_importables(commande))
+        if request.method == "POST":
+            choisies = {int(i) for i in request.POST.getlist("lignes") if i.isdigit()}
+            lignes = [l for d in devis_liste for l in d.lignes.all() if l.pk in choisies]
+            if not lignes:
+                self.message_user(request, "Aucune ligne cochée : rien n'a été ajouté.", level=messages.WARNING)
+                return HttpResponseRedirect(request.get_full_path())
+            try:
+                creees = importer_lignes_devis(commande, lignes)
+            except ChiffrageError as exc:
+                self.message_user(request, message_erreur("", exc), level=messages.ERROR)
+                return HttpResponseRedirect(request.get_full_path())
+            self.message_user(
+                request,
+                f"{len(creees)} ligne(s) ajoutée(s) en fin de commande depuis "
+                f"{', '.join(sorted({l.devis_id for l in lignes}))}. Glissez-les pour changer leur ordre.",
+                level=messages.SUCCESS,
+            )
+            return HttpResponseRedirect(retour)
+        deja_reprises = set(commande.lignes.exclude(devis_ligne=None).values_list("devis_ligne_id", flat=True))
+        for devis in devis_liste:
+            for ligne in devis.lignes.all():
+                ligne.prix_commande = prix_unitaire_commande(ligne)
+        return TemplateResponse(
+            request,
+            "admin/chiffrage/importer_lignes_devis.html",
+            {
+                **self.admin_site.each_context(request),
+                "title": f"Importer des lignes de devis dans {commande}",
+                "commande": commande, "devis_liste": devis_liste, "deja_reprises": deja_reprises, "retour": retour,
+            },
+        )
+
+    def has_importer_devis_permission(self, request, obj=None):
+        return request.user.has_perm("chiffrage.add_commandeligne")
 
     @admin.action(description="Synchroniser les lignes depuis le devis")
     def action_synchroniser_lignes(self, request, queryset):

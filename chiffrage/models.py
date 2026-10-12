@@ -652,6 +652,11 @@ class CommandeLigne(models.Model):
             "ajoutée directement sur la commande, sans devis correspondant."
         ),
     )
+    ordre = models.PositiveIntegerField(
+        "ordre",
+        default=0,
+        help_text="Ordre d'affichage (glisser-déposer sur la fiche commande), repris sur l'AR, le BL et la facture.",
+    )
     designation = models.CharField(
         "désignation",
         max_length=255,
@@ -688,10 +693,16 @@ class CommandeLigne(models.Model):
     class Meta:
         verbose_name = "Ligne de commande"
         verbose_name_plural = "Lignes de commande"
-        ordering = ["commande", "id"]
+        ordering = ["commande", "ordre", "id"]
 
     def __str__(self):
         return f"{self.commande} — {self.article} × {self.quantite_commandee}"
+
+    @staticmethod
+    def prochain_ordre(commande):
+        """Ordre d'une ligne ajoutée en fin de commande."""
+        dernier = CommandeLigne.objects.filter(commande=commande).aggregate(m=models.Max("ordre"))["m"]
+        return 0 if dernier is None else dernier + 1
 
     def clean(self):
         super().clean()
