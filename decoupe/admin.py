@@ -868,7 +868,7 @@ class DebitSciageForm(forms.ModelForm):
     class Meta:
         model = DebitSciage
         fields = "__all__"
-        widgets = {"couleur": forms.TextInput(attrs={"type": "color", "style": "width:3rem;height:2rem;padding:1px"})}
+        widgets = {"couleur": forms.TextInput(attrs={"type": "color", "class": "border border-base-200 rounded-default", "style": "width:3rem;height:2rem;padding:1px"})}
 
 
 class DebitSciageInline(TabularInline):
