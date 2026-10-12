@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from django.urls import reverse
@@ -276,6 +277,12 @@ class ConnexionDirecteTests(TestCase):
         get_user_model().objects.create_superuser("direct", "d@example.com", "pass1234")
         r = self.client.post("/admin/login/", {"username": "direct", "password": "pass1234"})
         self.assertRedirects(r, "/admin/", fetch_redirect_response=False)
+
+    def test_page_de_connexion_en_francais_avec_logo(self):
+        r = self.client.get("/admin/login/")
+        self.assertContains(r, "Bienvenue sur")
+        self.assertNotContains(r, "Welcome back")
+        self.assertContains(r, settings.UNFOLD["SITE_SYMBOL"])
 
 
 class ApiSecuriseeParDefautTests(TestCase):
