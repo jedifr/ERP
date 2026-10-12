@@ -69,7 +69,7 @@ def etat(article, quantite=1, jour=None):
     minutes = [e["minutes_par_piece"] for e in etapes if e["minutes_par_piece"] is not None]
     return {
         "article": article.pk, "quantite": quantite, "etapes": etapes,
-        "postes": [{"id": p.pk, "nom": p.nom, "mode": p.mode_calcul} for p in PosteTravail.objects.order_by("nom")],
+        "postes": [{"id": p.pk, "nom": p.nom, "mode": p.mode_calcul, "reglage": p.temps_mise_en_place_min} for p in PosteTravail.objects.order_by("nom")],
         "types": [{"id": t.pk, "nom": t.nom, "description": t.description, "etapes": t.etapes.count()} for t in GammeType.objects.order_by("nom")],
         "total_minutes_par_piece": round(sum(minutes), 2), "total_cout_par_piece": round(sum(couts) / quantite, 2) if couts else 0,
         "total_cout": round(sum(couts), 2),
@@ -80,6 +80,8 @@ def _valeurs(ligne, poste):
     horaire = poste.mode_calcul == PosteTravail.ModeCalcul.HORAIRE
     if horaire:
         fixe, variable = _nombre(ligne.get("temps_fixe")), _nombre(ligne.get("temps_variable"))
+        if fixe is None:
+            fixe = poste.temps_mise_en_place_min  # réglage laissé vide : temps de réglage par défaut du poste
         if fixe is None and variable is None:
             raise ErreurGamme(f"{poste} : saisissez un temps de réglage et/ou un temps par pièce.")
         return {"temps_fixe": fixe or 0.0, "temps_variable": variable or 0.0, "cout_forfaitaire": None}
@@ -216,7 +218,7 @@ def gamme_editeur_options_view(request):
     if not request.user.has_perm("technique.view_gamme"):
         raise PermissionDenied
     return JsonResponse({
-        "postes": [{"id": p.pk, "nom": p.nom, "mode": p.mode_calcul} for p in PosteTravail.objects.order_by("nom")],
+        "postes": [{"id": p.pk, "nom": p.nom, "mode": p.mode_calcul, "reglage": p.temps_mise_en_place_min} for p in PosteTravail.objects.order_by("nom")],
         "types": [{
             "id": t.pk, "nom": t.nom, "description": t.description, "etapes": t.etapes.count(),
             "lignes": [{"poste": e.poste_id, "mode": e.poste.mode_calcul, "temps_fixe": e.temps_fixe, "temps_variable": e.temps_variable,
