@@ -8,6 +8,7 @@ from decimal import Decimal
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.test import TestCase
+from django.urls import reverse
 
 from achats.generation import generer_ecriture_achat
 from achats.models import CommandeFournisseur, FactureFournisseur, LigneCommandeFournisseur
@@ -178,6 +179,14 @@ class ExportComptableTests(TestCase):
         self.assertTrue(z.read("vente_01-2026.txt").startswith(b"VER   02000008550\r\nDOS"))
         self.assertContains(self.client.get("/admin/comptabilite/ecriturecomptable/export-comptable/?mois=pas-un-mois", follow=True), "Choisissez un mois")
         self.assertContains(self.client.get("/admin/comptabilite/parametresexportcomptable/", follow=True), "Code du journal des ventes")
+
+    def test_menu_transfert_en_compta(self):
+        """L'export se trouve directement dans le menu (Gestion → Transfert en compta), pas seulement derrière la liste des écritures."""
+        user = get_user_model().objects.create_superuser("export-menu", "m@example.com", "pass-mot-de-passe-19")
+        self.client.force_login(user)
+        url = "/admin/comptabilite/ecriturecomptable/export-comptable/"
+        self.assertEqual(reverse("admin:comptabilite_ecriturecomptable_action_exporter_comptable"), url)
+        self.assertContains(self.client.get("/admin/"), f'href="{url}"')
 
     def test_commande_de_gestion(self):
         import tempfile

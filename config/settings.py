@@ -382,6 +382,8 @@ NAVIGATION = [
             _menu("Sections de profilés", "straighten", "technique", "profilesection"),
             _menu("Nomenclatures", "account_tree", "technique", "nomenclature"),
             _menu("Écritures comptables", "list_alt", "comptabilite", "ecriturecomptable"),
+            _menu("Transfert en compta", "outbox", "comptabilite", "ecriturecomptable",
+                  url="admin:comptabilite_ecriturecomptable_action_exporter_comptable"),
         ],
     },
     {
