@@ -94,7 +94,8 @@ gzip -dc "$BASE_SAUVEGARDE" | $DOCKER_CMD exec -T db psql -U "$DB_USER" -d "$DB_
 
 if [ -n "$MEDIA_SAUVEGARDE" ]; then
     echo "==> Restauration des fichiers déposés..."
-    $DOCKER_CMD start web
+    # `up` plutôt que `start` : sur un NAS neuf, le conteneur web peut ne pas encore exister.
+    $DOCKER_CMD up -d web
     gzip -dc "$MEDIA_SAUVEGARDE" | $DOCKER_CMD exec -T web tar -C /app -x
     $DOCKER_CMD stop web
 fi

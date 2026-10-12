@@ -40,6 +40,8 @@ du cahier des charges.
 Un `Dockerfile` + `docker-compose.yml` sont fournis pour tester l'ERP
 directement sur le NAS via Container Manager. Voir le guide détaillé :
 [`docs/DEPLOIEMENT_SYNOLOGY.md`](docs/DEPLOIEMENT_SYNOLOGY.md).
+Sur le UGREEN NASync (UGOS Pro), avec le transfert des données depuis le Synology :
+[`docs/DEPLOIEMENT_UGREEN.md`](docs/DEPLOIEMENT_UGREEN.md).
 
 Résumé express (en SSH sur le NAS, depuis le dossier du projet) :
 
