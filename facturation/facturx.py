@@ -20,7 +20,7 @@ from comptes.models import Societe
 from comptes.montants import arrondir
 from commercial.models import Tiers
 
-from .documents import MENTIONS_TVA, calculer_facture, generer_pdf_facture
+from .documents import MENTIONS_TVA, calculer_facture, dates_livraison, generer_pdf_facture
 
 PROFIL = "urn:cen.eu:en16931:2017"
 RAISONS_EXONERATION = {
@@ -61,9 +61,12 @@ def _controler(facture, societe, client, adresse, calcul):
         manques.append((f"Le numéro de TVA intracommunautaire de la société est absent ou invalide (« {societe.tva_intracommunautaire} »).", page_societe))
     page_client = (reverse("admin:commercial_tiers_change", args=[client.pk]), "Compléter la fiche du client")
     if adresse is None or not (adresse.adresse and adresse.code_postal and adresse.ville):
-        manques.append(("L'adresse de facturation du client (rue, code postal, ville) est absente sur la commande.", page_client))
+        manques.append(("L'adresse de facturation du client (rue, code postal, ville) est absente sur la facture.", page_client))
     elif adresse.pays_id is None:
         manques.append(("Le pays de l'adresse de facturation du client n'est pas renseigné.", page_client))
+    page_facture = (reverse("admin:facturation_facture_change", args=[facture.pk]), "Ouvrir la facture")
+    if any(c["ligne"].article_facture is None and not c["ligne"].libelle for c in calcul["lignes"]):
+        manques.append(("Une ligne de la facture n'a ni article ni désignation.", page_facture))
     france = adresse is not None and adresse.pays_id == "FR"
     if france and not controle_siret.is_valid(_chiffres(client.siret)):
         manques.append((f"Le SIRET du client est absent ou invalide (« {client.siret} ») : il est obligatoire sur une facture entre assujettis français.", page_client))
@@ -100,12 +103,13 @@ def construire_xml(facture, societe, client, adresse, calcul):
     lignes = ""
     for numero, c in enumerate(calcul["lignes"], start=1):
         ligne = c["ligne"]
-        article = ligne.commande_ligne.article
-        libelle = ligne.commande_ligne.designation or article.libelle or article.reference
+        article = ligne.article_facture
+        libelle = ligne.libelle or (article.reference if article is not None else "")
+        identifiant = f"<ram:SellerAssignedID>{escape(article.reference)}</ram:SellerAssignedID>" if article is not None else ""
         lignes += (
             "<ram:IncludedSupplyChainTradeLineItem>"
             f"<ram:AssociatedDocumentLineDocument><ram:LineID>{numero}</ram:LineID></ram:AssociatedDocumentLineDocument>"
-            f"<ram:SpecifiedTradeProduct><ram:SellerAssignedID>{escape(article.reference)}</ram:SellerAssignedID><ram:Name>{escape(libelle)}</ram:Name></ram:SpecifiedTradeProduct>"
+            f"<ram:SpecifiedTradeProduct>{identifiant}<ram:Name>{escape(libelle)}</ram:Name></ram:SpecifiedTradeProduct>"
             f"<ram:SpecifiedLineTradeAgreement><ram:NetPriceProductTradePrice><ram:ChargeAmount>{_decimal(c['prix'], 4)}</ram:ChargeAmount></ram:NetPriceProductTradePrice></ram:SpecifiedLineTradeAgreement>"
             f'<ram:SpecifiedLineTradeDelivery><ram:BilledQuantity unitCode="C62">{_decimal(c["quantite"], 4)}</ram:BilledQuantity></ram:SpecifiedLineTradeDelivery>'
             "<ram:SpecifiedLineTradeSettlement><ram:ApplicableTradeTax><ram:TypeCode>VAT</ram:TypeCode>"
@@ -115,13 +119,16 @@ def construire_xml(facture, societe, client, adresse, calcul):
         )
 
     vendeur = _partie("SellerTradeParty", societe.raison_sociale, societe.siret, societe.adresse.replace("\n", ", "), societe.code_postal, societe.ville, "FR", societe.tva_intracommunautaire)
-    acheteur = _partie("BuyerTradeParty", client.raison_sociale, client.siret, adresse.adresse.replace("\n", ", "), adresse.code_postal, adresse.ville, adresse.pays_id, client.numero_tva)
-    reference_commande = commande.reference_client or commande.numero
-    accord = (
-        f"<ram:ApplicableHeaderTradeAgreement><ram:BuyerReference>{escape(commande.reference_client or commande.numero)}</ram:BuyerReference>{vendeur}{acheteur}"
-        f"<ram:BuyerOrderReferencedDocument><ram:IssuerAssignedID>{escape(reference_commande)}</ram:IssuerAssignedID></ram:BuyerOrderReferencedDocument></ram:ApplicableHeaderTradeAgreement>"
-    )
-    livraisons = [l.date_livraison for l in commande.livraisons.all() if getattr(l, "date_livraison", None)]
+    acheteur = _partie("BuyerTradeParty", facture.nom_client_imprime, client.siret, adresse.adresse.replace("\n", ", "), adresse.code_postal, adresse.ville, adresse.pays_id, client.numero_tva)
+    if commande is not None:
+        reference_commande = commande.reference_client or commande.numero
+        accord = (
+            f"<ram:ApplicableHeaderTradeAgreement><ram:BuyerReference>{escape(reference_commande)}</ram:BuyerReference>{vendeur}{acheteur}"
+            f"<ram:BuyerOrderReferencedDocument><ram:IssuerAssignedID>{escape(reference_commande)}</ram:IssuerAssignedID></ram:BuyerOrderReferencedDocument></ram:ApplicableHeaderTradeAgreement>"
+        )
+    else:
+        accord = f"<ram:ApplicableHeaderTradeAgreement>{vendeur}{acheteur}</ram:ApplicableHeaderTradeAgreement>"
+    livraisons = dates_livraison(facture)
     date_livraison = max(livraisons) if livraisons else facture.date_facturation
     livraison = (
         "<ram:ApplicableHeaderTradeDelivery><ram:ActualDeliverySupplyChainEvent><ram:OccurrenceDateTime>"
@@ -215,8 +222,8 @@ def generer_facturx(facture):
     from facturx import generate_from_binary
 
     societe = Societe.charger()
-    client = facture.commande.client
-    adresse = facture.commande.adresse_facturation
+    client = facture.client
+    adresse = facture.adresse_imprimee
     if not facture.lignes.exists():
         raise DocumentError("Cette facture n'a aucune ligne : ajoutez-les avant de générer le Factur-X.")
     calcul = calculer_facture(facture)

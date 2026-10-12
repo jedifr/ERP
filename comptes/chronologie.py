@@ -63,7 +63,7 @@ def _racine(objet):
         return objet, None
     commande = objet
     if isinstance(objet, (Livraison, OrdreFabrication, Facture)):
-        commande = objet.commande
+        commande = objet.commande  # None pour une facture créée sans commande
     if isinstance(commande, Commande):
         return (commande.devis.racine if commande.devis_id else None), commande
     return None, None

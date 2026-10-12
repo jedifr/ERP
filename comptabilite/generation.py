@@ -48,7 +48,7 @@ def _repartition_lignes(facture, parametres):
     paramètres. Repli sur les montants globaux de la facture (compte par
     défaut, sans détail par article) si la commande n'a aucune ligne
     chiffrée (ex. facture ancienne, ou lignes sans prix renseigné)."""
-    regime_fiscal = facture.commande.client.regime_fiscal
+    regime_fiscal = facture.client.regime_fiscal
     groupes = {}
     # Facture avec ses propres lignes (ce qu'elle facture réellement, signé pour un
     # avoir) : on s'appuie sur elles. Sinon — facture ancienne sans lignes — repli
@@ -59,14 +59,17 @@ def _repartition_lignes(facture, parametres):
             "commande_ligne__article__compte_vente_override__code_analytique",
             "commande_ligne__article__compte_vente_override__poste_gestion",
             "commande_ligne__taux_tva",
+            "article__compte_vente_override__compte_vente",
+            "article__compte_vente_override__code_analytique",
+            "article__compte_vente_override__poste_gestion",
         )
     )
     if lignes_facture:
         sources = [
-            (ligne.commande_ligne.article, ligne._taux(), ligne.montant_ht, ligne.montant_ttc)
+            (ligne.article_facture, ligne._taux(), ligne.montant_ht, ligne.montant_ttc)
             for ligne in lignes_facture
         ]
-    else:
+    elif facture.commande_id:
         sources = [
             (ligne.article, ligne.taux_tva.taux if ligne.taux_tva_id else 0, ligne.montant_ht, ligne.montant_ttc)
             for ligne in facture.commande.lignes.select_related(
@@ -77,8 +80,11 @@ def _repartition_lignes(facture, parametres):
             )
             if ligne.montant_ht is not None and ligne.montant_ttc is not None
         ]
+    else:
+        sources = []
     for article, taux, montant_ht, montant_ttc in sources:
-        override = getattr(article, "compte_vente_override", None)
+        # Désignation libre (sans article) : compte de vente par défaut.
+        override = getattr(article, "compte_vente_override", None) if article is not None else None
         if override is not None:
             compte_vente = override.resoudre_compte_vente(regime_fiscal)
             if compte_vente is None:
@@ -155,7 +161,7 @@ def generer_ecriture_facture(facture):
     avoir = total_ttc < 0
     sens_client, sens_vente = ("credit", "debit") if avoir else ("debit", "credit")
 
-    client = facture.commande.client
+    client = facture.client
     comptes_client = getattr(client, "comptes_comptables", None)
     compte_client = (
         comptes_client.compte_client

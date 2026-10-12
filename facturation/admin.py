@@ -1,6 +1,6 @@
 from django.contrib import admin, messages
 from django.contrib.admin.views.decorators import staff_member_required
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.http import HttpResponse, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.template.response import TemplateResponse
@@ -29,7 +29,14 @@ from comptes.historique import HistoriqueLectureSeule
 
 from .models import CHAMPS_FIGES, Facture, FactureLigne, RelanceFacture, facture_verrouillee
 from .relances import RelanceError, relancer_facture
-from .services import FacturationError, creer_avoir, lignes_a_facturer, preparer_facture
+from .services import (
+    FacturationError,
+    creer_avoir,
+    importer_livraisons,
+    lignes_a_facturer,
+    livraisons_a_facturer,
+    preparer_facture,
+)
 
 
 @staff_member_required
@@ -58,13 +65,17 @@ def montants_calcules_commande_view(request, numero):
 
 
 class FactureLigneInline(TabularInline):
-    """Lignes de la facture : ce qui est réellement facturé (quantité d'une ligne de
-    commande). Figées dès que la facture est émise ou comptabilisée."""
+    """Lignes de la facture : ce qui est réellement facturé — une quantité d'une ligne de commande, ou une ligne directe
+    (article du référentiel ou désignation libre, avec son prix). Figées dès que la facture est émise ou comptabilisée."""
 
     model = FactureLigne
     extra = 0
-    fields = ["commande_ligne", "quantite", "prix_unitaire_ht", "taux_tva", "montant_ht_display", "montant_ttc_display"]
-    readonly_fields = ["montant_ht_display", "montant_ttc_display"]
+    fields = [
+        "commande_ligne", "article", "designation", "quantite", "prix_unitaire_ht", "taux_tva", "livraison",
+        "montant_ht_display", "montant_ttc_display",
+    ]
+    readonly_fields = ["livraison", "montant_ht_display", "montant_ttc_display"]
+    autocomplete_fields = ["article"]
 
     @admin.display(description="Montant HT")
     def montant_ht_display(self, obj):
@@ -75,12 +86,16 @@ class FactureLigneInline(TabularInline):
         return f"{pourcent(obj.montant_ttc)}" if obj and obj.pk else "—"
 
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
-        # Seules les lignes de la commande de la facture sont proposées (une fois la
-        # facture enregistrée ; sur l'ajout la commande n'est pas encore connue).
+        # Seules les lignes de la commande de la facture (sinon des commandes de son client) sont proposées, une fois la
+        # facture enregistrée ; sur l'ajout, ni la commande ni le client ne sont encore connus.
         if db_field.name == "commande_ligne":
             facture = getattr(request, "_facture_en_cours", None)
-            if facture is not None:
+            if facture is not None and facture.commande_id:
                 kwargs["queryset"] = CommandeLigne.objects.filter(commande_id=facture.commande_id).select_related("article")
+            elif facture is not None and facture.client_id:
+                kwargs["queryset"] = CommandeLigne.objects.filter(commande__client_id=facture.client_id).select_related("article")
+            else:
+                kwargs["queryset"] = CommandeLigne.objects.none()
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
     def has_add_permission(self, request, obj=None):
@@ -139,6 +154,7 @@ class FactureAdmin(ProchaineActionMixin, DateDuJourMixin, ChronologieMixin, Puce
     }
     list_display = [
         "numero",
+        "client_display",
         "commande",
         "date_facturation",
         "date_echeance_display",
@@ -153,11 +169,11 @@ class FactureAdmin(ProchaineActionMixin, DateDuJourMixin, ChronologieMixin, Puce
         "mode_creation",
     ]
     list_filter = ["type_document", "mode_creation", "statut_paiement", RetardFilter]
-    search_fields = ["numero", "reference_tiime", "commande__numero"]
-    autocomplete_fields = ["commande"]
+    search_fields = ["numero", "reference_tiime", "commande__numero", "client__code", "client__raison_sociale", "nom_client"]
+    autocomplete_fields = ["commande", "client", "pays_client"]
     actions = ["action_generer_ecriture", "action_relancer", "action_recalculer_montants"]
     actions_list = ["action_preparer_facture"]
-    actions_detail = ["action_pdf", "action_facturx_pdf", "action_relance_pdf", "action_creer_avoir"]
+    actions_detail = ["action_importer_bl", "action_pdf", "action_facturx_pdf", "action_relance_pdf", "action_creer_avoir"]
     readonly_fields = [
         "montants_calcules_display", "echeance_recap", "ecart_recap", "relances_recap", "avoirs_recap", "ecriture_recap",
     ]
@@ -169,12 +185,29 @@ class FactureAdmin(ProchaineActionMixin, DateDuJourMixin, ChronologieMixin, Puce
         "echeance_recap", "montants_calcules_display", "ecart_recap", "relances_recap", "avoirs_recap", "ecriture_recap",
     ]
 
+    # Nom et adresse imprimés : repris de la fiche du client à l'enregistrement s'ils sont vides, modifiables ensuite.
+    CHAMPS_CLIENT_IMPRIME = ["nom_client", "adresse_client", "code_postal_client", "ville_client", "pays_client"]
+
     def get_fieldsets(self, request, obj=None):
-        saisie = [c for c in self.get_fields(request, obj) if c not in self.CHAMPS_RECAPITULATIF]
+        saisie = [
+            c for c in self.get_fields(request, obj) if c not in self.CHAMPS_RECAPITULATIF and c not in self.CHAMPS_CLIENT_IMPRIME
+        ]
         return [
             (None, {"fields": saisie, "classes": ["fiche-saisie"]}),
             ("Récapitulatif", {"fields": self.CHAMPS_RECAPITULATIF, "classes": ["fiche-recap"]}),
+            (
+                "Client tel qu'imprimé sur la facture",
+                {
+                    "fields": self.CHAMPS_CLIENT_IMPRIME,
+                    "description": "Repris de la fiche du client (adresse de facturation de la commande, sinon l'adresse de "
+                    "facturation principale) quand ces champs sont vides ; modifiables tant que la facture n'est pas émise.",
+                },
+            ),
         ]
+
+    @admin.display(description="Client", ordering="client__raison_sociale")
+    def client_display(self, obj):
+        return obj.nom_client_imprime or "—"
 
     @admin.display(description="Échéance")
     def echeance_recap(self, obj):
@@ -230,10 +263,19 @@ class FactureAdmin(ProchaineActionMixin, DateDuJourMixin, ChronologieMixin, Puce
         request._facture_en_cours = obj
         return super().get_formsets_with_inlines(request, obj)
 
+    def save_model(self, request, obj, form, change):
+        # Client changé sur un brouillon sans retoucher nom ni adresse : on reprend ceux du nouveau client.
+        if change and "client" in form.changed_data and not set(self.CHAMPS_CLIENT_IMPRIME) & set(form.changed_data):
+            obj.nom_client = obj.adresse_client = obj.code_postal_client = obj.ville_client = ""
+            obj.pays_client = None
+        super().save_model(request, obj, form, change)
+
     def save_related(self, request, form, formsets, change):
+        # Montants vides ou égaux au total des lignes : ils suivent les lignes ; un montant saisi différent (remise Tiime)
+        # n'est jamais écrasé.
+        suivait = form.instance.montants_suivent_les_lignes
         super().save_related(request, form, formsets, change)
-        # Montants laissés vides : repris du total des lignes (jamais écrasés s'ils sont saisis).
-        form.instance.remplir_montants_depuis_les_lignes()
+        form.instance.suivre_montants_des_lignes(suivait)
 
     def get_readonly_fields(self, request, obj=None):
         champs = list(super().get_readonly_fields(request, obj))
@@ -343,6 +385,9 @@ class FactureAdmin(ProchaineActionMixin, DateDuJourMixin, ChronologieMixin, Puce
             ),
             path("preparer/", self.admin_site.admin_view(self.preparer_view), name="facturation_facture_preparer"),
             path("<str:numero>/avoir/", self.admin_site.admin_view(self.avoir_view), name="facturation_facture_avoir"),
+            path(
+                "<str:numero>/importer-bl/", self.admin_site.admin_view(self.importer_bl_view), name="facturation_facture_importer_bl",
+            ),
         ]
         return urls + super().get_urls()
 
@@ -410,6 +455,48 @@ class FactureAdmin(ProchaineActionMixin, DateDuJourMixin, ChronologieMixin, Puce
         reponse = HttpResponse(contenu, content_type="application/pdf")
         reponse["Content-Disposition"] = f'inline; filename="{nom}-{facture.pk}.pdf"'
         return reponse
+
+    @unfold_action(description="Importer un bon de livraison", permissions=["change"], url_path="importer-bl")
+    def action_importer_bl(self, request, object_id):
+        return HttpResponseRedirect(reverse("admin:facturation_facture_importer_bl", args=[object_id]))
+
+    def importer_bl_view(self, request, numero):
+        from chiffrage.models import Livraison
+
+        facture = get_object_or_404(Facture, pk=numero)
+        retour = reverse("admin:facturation_facture_change", args=[facture.pk])
+        if not self.has_change_permission(request, facture):
+            raise PermissionDenied
+        if facture.est_avoir or facture_verrouillee(facture):
+            self.message_user(
+                request, "On n'importe un bon de livraison que dans une facture brouillon (ni émise, ni comptabilisée, ni avoir).",
+                level=messages.ERROR,
+            )
+            return HttpResponseRedirect(retour)
+        if request.method == "POST":
+            numeros = request.POST.getlist("livraisons")
+            livraisons = sorted(Livraison.objects.filter(pk__in=numeros).select_related("commande"), key=lambda l: (l.date_livraison, l.numero))
+            try:
+                ajoutees = importer_livraisons(facture, livraisons)
+            except (FacturationError, ValidationError) as exc:
+                texte = "; ".join(exc.messages) if isinstance(exc, ValidationError) else str(exc)
+                self.message_user(request, texte, level=messages.ERROR)
+                return HttpResponseRedirect(reverse("admin:facturation_facture_importer_bl", args=[facture.pk]))
+            self.message_user(
+                request, f"{ajoutees} ligne(s) importée(s) de {', '.join(l.numero for l in livraisons)}.", level=messages.SUCCESS,
+            )
+            return HttpResponseRedirect(retour)
+        return TemplateResponse(
+            request,
+            "admin/facturation/importer_bl.html",
+            {
+                **self.admin_site.each_context(request),
+                "title": f"Importer un bon de livraison dans {facture}",
+                "facture": facture,
+                "livraisons": livraisons_a_facturer(facture.client) if facture.client_id else [],
+                "retour": retour,
+            },
+        )
 
     @unfold_action(description="PDF de la facture", url_path="pdf")
     def action_pdf(self, request, object_id):

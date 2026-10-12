@@ -20,7 +20,16 @@ class FactureVerrouilleeError(Exception):
 CHAMPS_FIGES = (
     "commande_id", "montant_ht", "montant_ttc", "date_facturation", "reference_tiime", "mode_creation",
     "type_document", "facture_origine_id", "anticipee", "motif",
+    "client_id", "nom_client", "adresse_client", "code_postal_client", "ville_client", "pays_client_id",
 )
+
+
+class AdresseFacture:
+    """Adresse imprimée sur la facture (mêmes attributs qu'une commercial.Adresse, pour les blocs PDF et Factur-X)."""
+
+    def __init__(self, adresse, code_postal, ville, pays):
+        self.adresse, self.code_postal, self.ville, self.pays = adresse, code_postal, ville, pays
+        self.pays_id = pays.pk if pays is not None else None
 
 
 def facture_verrouillee(facture):
@@ -49,7 +58,23 @@ class Facture(models.Model):
 
     numero = models.CharField("numéro", max_length=50, primary_key=True)
     commande = models.ForeignKey(
-        Commande, verbose_name="commande", on_delete=models.PROTECT, related_name="factures"
+        Commande, verbose_name="commande", on_delete=models.PROTECT, related_name="factures", null=True, blank=True,
+        help_text="Optionnelle : une facture peut être créée directement pour un client, sans commande.",
+    )
+    client = models.ForeignKey(
+        "commercial.Tiers", verbose_name="client", on_delete=models.PROTECT, related_name="factures", null=True, blank=True,
+        help_text="Repris de la commande si laissé vide.",
+    )
+    # Nom et adresse imprimés sur la facture : repris de la fiche du client (adresse de facturation de la commande, sinon
+    # l'adresse de facturation principale) à la création, modifiables tant que la facture n'est pas émise.
+    nom_client = models.CharField(
+        "nom du client", max_length=200, blank=True, help_text="Tel qu'imprimé sur la facture. Vide : raison sociale du client.",
+    )
+    adresse_client = models.CharField("adresse", max_length=255, blank=True)
+    code_postal_client = models.CharField("code postal", max_length=20, blank=True)
+    ville_client = models.CharField("ville", max_length=100, blank=True)
+    pays_client = models.ForeignKey(
+        "commercial.Pays", verbose_name="pays", on_delete=models.PROTECT, null=True, blank=True, related_name="+",
     )
     reference_tiime = models.CharField("référence Tiime", max_length=100, blank=True)
     class TypeDocument(models.TextChoices):
@@ -115,6 +140,12 @@ class Facture(models.Model):
 
     def clean(self):
         super().clean()
+        if self.commande_id and not self.client_id:
+            self.client_id = self.commande.client_id
+        if not self.client_id:
+            raise ValidationError({"client": "Choisissez le client (ou une commande)."})
+        if self.commande_id and self.commande.client_id != self.client_id:
+            raise ValidationError({"commande": "Cette commande n'est pas une commande de ce client."})
         if self.commande_id and self.date_facturation:
             if self.date_facturation < self.commande.date_commande:
                 raise ValidationError(
@@ -159,8 +190,8 @@ class Facture(models.Model):
         origine = self.facture_origine
         if origine.type_document != self.TypeDocument.FACTURE:
             raise ValidationError({"facture_origine": "On ne fait pas d'avoir sur un avoir."})
-        if origine.commande_id != self.commande_id:
-            raise ValidationError({"facture_origine": "La facture d'origine doit porter sur la même commande."})
+        if origine.commande_id != self.commande_id or origine.client_id != self.client_id:
+            raise ValidationError({"facture_origine": "La facture d'origine doit porter sur la même commande et le même client."})
         if self.date_facturation and self.date_facturation < origine.date_facturation:
             raise ValidationError({"date_facturation": "Un avoir ne peut pas précéder sa facture d'origine."})
         if self.montant_ht is not None and origine.montant_ht is not None:
@@ -194,7 +225,47 @@ class Facture(models.Model):
             return None
         return arrondir(D(self.montant_ht) - self.montant_ht_calcule)
 
+    def adresse_facturation_client(self):
+        """Adresse de facturation de la fiche : celle de la commande, sinon l'adresse de facturation principale du client."""
+        from commercial.models import Adresse
+
+        if self.commande_id and self.commande.adresse_facturation_id:
+            return self.commande.adresse_facturation
+        if not self.client_id:
+            return None
+        return Adresse.objects.filter(tiers_id=self.client_id, est_facturation=True).order_by("-est_principale", "id").first()
+
+    def _reprendre_identite_client(self):
+        """Pré-remplit nom et adresse imprimés depuis la fiche du client, seulement s'ils sont vides."""
+        if not self.client_id:
+            return
+        if not self.nom_client:
+            # Relu en base sans garnir le cache de self.client (une fiche modifiée ensuite doit être relue à jour).
+            from commercial.models import Tiers
+
+            self.nom_client = Tiers.objects.filter(pk=self.client_id).values_list("raison_sociale", flat=True).first() or ""
+        if not (self.adresse_client or self.code_postal_client or self.ville_client):
+            adresse = self.adresse_facturation_client()
+            if adresse is not None:
+                self.adresse_client, self.code_postal_client = adresse.adresse, adresse.code_postal
+                self.ville_client, self.pays_client_id = adresse.ville, adresse.pays_id
+
+    @property
+    def nom_client_imprime(self):
+        return self.nom_client or (self.client.raison_sociale if self.client_id else "")
+
+    @property
+    def adresse_imprimee(self):
+        """Adresse imprimée sur la facture (saisie sur la facture, sinon celle de la fiche) ; None si aucune."""
+        if self.adresse_client or self.code_postal_client or self.ville_client:
+            return AdresseFacture(self.adresse_client, self.code_postal_client, self.ville_client, self.pays_client)
+        return self.adresse_facturation_client()
+
     def save(self, *args, **kwargs):
+        if self.commande_id and not self.client_id:
+            self.client_id = self.commande.client_id
+        if self.pk is None or not facture_verrouillee(self):
+            self._reprendre_identite_client()
         if self.montant_ht is not None:
             self.montant_ht = arrondir(self.montant_ht)
         if self.montant_ttc is not None:
@@ -222,7 +293,7 @@ class Facture(models.Model):
         client (délai en jours, éventuellement reporté en fin de mois).
         None si le client n'a pas de conditions de paiement renseignées, ou
         si celles-ci sont purement descriptives (pas de délai chiffré)."""
-        conditions = self.commande.client.conditions_paiement
+        conditions = self.client.conditions_paiement if self.client_id else None
         if conditions is None:
             return None
         return conditions.calculer_echeance(self.date_facturation)
@@ -240,6 +311,8 @@ class Facture(models.Model):
         lignes = self._lignes_pour_montants()
         if lignes:
             return arrondir(somme(ligne.montant_ht for ligne in lignes))
+        if not self.commande_id:
+            return None
         montants = [l.montant_ht for l in self.commande.lignes.all() if l.montant_ht is not None]
         return arrondir(somme(montants)) if montants else None
 
@@ -257,6 +330,8 @@ class Facture(models.Model):
             total_tva = arrondir(sum((arrondir(base * taux / 100) for taux, base in bases.items()), ZERO))
             ttc = arrondir(total_ht + total_tva)
             return -ttc if self.est_avoir else ttc
+        if not self.commande_id:
+            return None
         montants = [l.montant_ttc for l in self.commande.lignes.all() if l.montant_ttc is not None]
         return arrondir(somme(montants)) if montants else None
 
@@ -275,25 +350,63 @@ class Facture(models.Model):
             self.save()
         return modifie
 
+    def suivre_montants_des_lignes(self, suivait):
+        """Après un ajout ou une modification de lignes : si les montants étaient vides ou égaux au total des lignes
+        (`suivait`, mesuré avant), ils suivent le nouveau total ; un montant saisi différent (remise Tiime) n'est jamais écrasé."""
+        if facture_verrouillee(self) or not self._lignes_pour_montants():
+            return False
+        if suivait and (self.montant_ht, self.montant_ttc) != (self.montant_ht_calcule, self.montant_ttc_calcule):
+            self.montant_ht, self.montant_ttc = self.montant_ht_calcule, self.montant_ttc_calcule
+            self.save()
+            return True
+        return self.remplir_montants_depuis_les_lignes()
+
+    @property
+    def montants_suivent_les_lignes(self):
+        """Vrai si les montants sont vides ou égaux au total des lignes (à mesurer avant de toucher aux lignes)."""
+        if self.montant_ht is None or self.montant_ttc is None:
+            return True
+        if not self._lignes_pour_montants():
+            return False
+        return (D(self.montant_ht), D(self.montant_ttc)) == (self.montant_ht_calcule, self.montant_ttc_calcule)
+
 
 class FactureLigne(models.Model):
-    """Ce qu'une facture (ou un avoir) porte réellement : une quantité d'une ligne
-    de commande, au prix et à la TVA du moment. C'est ce qui permet de savoir ce
-    qui a été facturé (donc ce qui reste à facturer), d'empêcher de facturer deux
-    fois ou plus que livré, et de passer des écritures comptables justes pour une
-    facturation partielle. La quantité est toujours positive ; sur un avoir, les
-    montants sont comptés en négatif."""
+    """Ce qu'une facture (ou un avoir) porte réellement. Deux sortes de lignes :
+
+    - une quantité d'une ligne de commande (préparée depuis le livré ou importée d'un bon de livraison), au prix et à la TVA
+      du moment : c'est ce qui permet de savoir ce qui a été facturé (donc ce qui reste à facturer), d'empêcher de facturer
+      deux fois ou plus que livré, et de passer des écritures comptables justes pour une facturation partielle ;
+    - une ligne directe, sans commande : un article du référentiel ou une simple désignation libre, avec son prix.
+
+    La quantité est toujours positive ; sur un avoir, les montants sont comptés en négatif."""
 
     facture = models.ForeignKey(Facture, verbose_name="facture", on_delete=models.CASCADE, related_name="lignes")
     commande_ligne = models.ForeignKey(
-        "chiffrage.CommandeLigne", verbose_name="ligne de commande", on_delete=models.PROTECT, related_name="lignes_facture"
+        "chiffrage.CommandeLigne", verbose_name="ligne de commande", on_delete=models.PROTECT, related_name="lignes_facture",
+        null=True, blank=True, help_text="Vide pour une ligne directe (article ou désignation libre).",
+    )
+    article = models.ForeignKey(
+        "technique.Article", verbose_name="article", on_delete=models.PROTECT, null=True, blank=True,
+        related_name="lignes_facture", help_text="Ligne directe : article facturé (repris de la commande sinon).",
+    )
+    designation = models.CharField(
+        "désignation", max_length=255, blank=True,
+        help_text="Texte imprimé ; vide : désignation de la ligne de commande ou libellé de l'article.",
+    )
+    livraison = models.ForeignKey(
+        "chiffrage.Livraison", verbose_name="bon de livraison", on_delete=models.PROTECT, null=True, blank=True,
+        related_name="lignes_facture", help_text="Bon de livraison d'où la ligne a été importée.",
     )
     quantite = models.FloatField("quantité", validators=[MinValueValidator(0, message="Ne peut pas être négatif.")])
     prix_unitaire_ht = ChampDecimal(
         "prix unitaire HT", null=True, blank=True, validators=[MinValueValidator(0, message="Ne peut pas être négatif.")],
-        help_text="Repris de la ligne de commande si laissé vide.", **PRIX_VENTE,
+        help_text="Repris de la ligne de commande si laissé vide (obligatoire pour une ligne directe).", **PRIX_VENTE,
     )
-    taux_tva = ChampDecimal("taux de TVA (%)", null=True, blank=True, help_text="Repris de la ligne de commande si laissé vide.", **TAUX)
+    taux_tva = ChampDecimal(
+        "taux de TVA (%)", null=True, blank=True,
+        help_text="Repris de la ligne de commande, ou de l'article et du régime du client, si laissé vide.", **TAUX,
+    )
 
     class Meta:
         verbose_name = "Ligne de facture"
@@ -301,7 +414,29 @@ class FactureLigne(models.Model):
         ordering = ["facture", "id"]
 
     def __str__(self):
-        return f"{self.facture} — {self.commande_ligne.article} × {self.quantite:g}"
+        return f"{self.facture} — {self.libelle_court} × {self.quantite:g}"
+
+    @property
+    def article_facture(self):
+        """Article de la ligne : celui de la ligne de commande, sinon celui saisi (None pour une désignation libre)."""
+        if self.commande_ligne_id:
+            return self.commande_ligne.article
+        return self.article
+
+    @property
+    def libelle(self):
+        """Désignation imprimée : celle saisie, sinon celle de la ligne de commande, sinon le libellé de l'article."""
+        if self.designation:
+            return self.designation
+        if self.commande_ligne_id and self.commande_ligne.designation:
+            return self.commande_ligne.designation
+        article = self.article_facture
+        return (article.libelle or "") if article is not None else ""
+
+    @property
+    def libelle_court(self):
+        article = self.article_facture
+        return str(article) if article is not None else (self.designation or "ligne libre")
 
     @staticmethod
     def cumul_facture(commande_ligne, exclure_pk=None):
@@ -318,13 +453,34 @@ class FactureLigne(models.Model):
     def _prix(self):
         if self.prix_unitaire_ht is not None:
             return self.prix_unitaire_ht
+        if not self.commande_ligne_id:
+            return 0
         return self.commande_ligne.prix_vente_unitaire or 0
 
     def _taux(self):
         if self.taux_tva is not None:
             return self.taux_tva
         cl = self.commande_ligne
+        if cl is None:
+            return self._taux_ligne_directe()
         return cl.taux_tva.taux if cl.taux_tva_id else 0
+
+    def _taux_ligne_directe(self):
+        """TVA d'une ligne directe laissée vide : selon l'article et le régime fiscal du client (0 % hors TVA française),
+        sinon le taux par défaut du référentiel."""
+        from chiffrage.moteur import resoudre_taux_tva
+        from commercial.models import TauxTVA, Tiers
+
+        client = self.facture.client if self.facture_id else None
+        if client is not None and self.article_id:
+            try:
+                return resoudre_taux_tva(self.article, client).taux
+            except Exception:  # référentiel incomplet : on retombe sur le défaut ci-dessous
+                pass
+        if client is not None and client.regime_fiscal != Tiers.RegimeFiscal.FRANCE:
+            return 0
+        defaut = TauxTVA.objects.filter(est_defaut=True).first()
+        return defaut.taux if defaut else 0
 
     @property
     def montant_ht(self):
@@ -338,19 +494,37 @@ class FactureLigne(models.Model):
 
     def clean(self):
         super().clean()
-        if not self.facture_id or not self.commande_ligne_id or self.quantite is None:
+        if not self.facture_id or self.quantite is None:
             return
         if self.quantite <= 0:
             raise ValidationError({"quantite": "La quantité doit être strictement positive."})
         facture = self.facture
-        if self.commande_ligne.commande_id != facture.commande_id:
-            raise ValidationError({"commande_ligne": "Cette ligne n'appartient pas à la commande de la facture."})
         if facture_verrouillee(facture):
             raise ValidationError("Cette facture est émise ou comptabilisée : ses lignes ne se modifient plus.")
+        if not self.commande_ligne_id:
+            self._clean_ligne_directe()
+            return
+        commande = self.commande_ligne.commande
+        if facture.commande_id and commande.pk != facture.commande_id and not self.livraison_id:
+            raise ValidationError({"commande_ligne": "Cette ligne n'appartient pas à la commande de la facture."})
+        if facture.client_id and commande.client_id != facture.client_id:
+            raise ValidationError({"commande_ligne": "Cette ligne n'appartient pas à une commande de ce client."})
+        if self.livraison_id and self.livraison.commande_id != commande.pk:
+            raise ValidationError({"livraison": "Ce bon de livraison ne porte pas sur la commande de cette ligne."})
+        if self.article_id and self.article_id != self.commande_ligne.article_id:
+            raise ValidationError({"article": "L'article est celui de la ligne de commande : laissez ce champ vide."})
         if facture.est_avoir:
             self._clean_avoir(facture)
         else:
             self._clean_facture()
+
+    def _clean_ligne_directe(self):
+        if self.livraison_id:
+            raise ValidationError({"commande_ligne": "Une ligne importée d'un bon de livraison porte sa ligne de commande."})
+        if not self.article_id and not self.designation.strip():
+            raise ValidationError({"designation": "Choisissez un article, une ligne de commande, ou saisissez une désignation."})
+        if self.prix_unitaire_ht is None:
+            raise ValidationError({"prix_unitaire_ht": "Indiquez le prix unitaire HT de cette ligne."})
 
     def _clean_facture(self):
         cl = self.commande_ligne
@@ -386,7 +560,7 @@ class FactureLigne(models.Model):
     def save(self, *args, **kwargs):
         if self.pk is not None and facture_verrouillee(self.facture):
             raise FactureVerrouilleeError("Facture émise ou comptabilisée : ses lignes ne se modifient plus.")
-        if self.prix_unitaire_ht is None:
+        if self.prix_unitaire_ht is None and self.commande_ligne_id:
             self.prix_unitaire_ht = self.commande_ligne.prix_vente_unitaire
         if self.taux_tva is None:
             self.taux_tva = self._taux()

@@ -101,9 +101,9 @@ def relancer_facture(facture, utilisateur=None):
             f"« {facture} » a déjà été relancée le {timezone.localtime(derniere.date_envoi):%d/%m/%Y} : "
             f"attendez {delai.days} jours entre deux relances."
         )
-    contact = choisir_destinataire(facture.commande.client)
+    contact = choisir_destinataire(facture.client)
     if contact is None:
-        raise RelanceError(f"Aucun contact avec une adresse e-mail pour le client « {facture.commande.client} ».")
+        raise RelanceError(f"Aucun contact avec une adresse e-mail pour le client « {facture.client} ».")
 
     niveau = niveau_suivant(facture)
     objet, corps = composer(facture, niveau)
