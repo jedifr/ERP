@@ -271,8 +271,8 @@ class DevisLigne(models.Model):
         blank=True,
         validators=[positif_ou_nul],
         help_text=(
-            "Si renseigné, remplace le calcul automatique (coût matière × marge) : "
-            "prix de vente matière de la ligne = quantité × ce prix unitaire."
+            "Si renseigné, remplace le prix de vente unitaire calculé (matière + opérations) : "
+            "prix de vente de la ligne = quantité × ce prix, réparti entre matière et opérations au prorata."
         ), **PRIX,
     )
     prix_vente_reglage = ChampDecimal(
@@ -334,6 +334,8 @@ class DevisLigne(models.Model):
         None tant que le chiffrage n'a pas été calculé, ou si quantite est nulle."""
         if self.prix_vente_total is None or not self.quantite:
             return None
+        if self.prix_vente_unitaire_force is not None:
+            return D(self.prix_vente_unitaire_force)
         return arrondir_prix_vente(self.prix_vente_total / D(self.quantite))
 
     prix_vente_unitaire.fget.short_description = "Prix de vente unitaire (HT)"
@@ -358,7 +360,7 @@ class DevisLigne(models.Model):
             return None
         return D(self.cout_matiere_calcule) + somme(op.cout_calcule for op in self.operations.all())
 
-    cout_total.fget.short_description = "Coût total"
+    cout_total.fget.short_description = "Prix sans marge (coût de revient, HT)"
 
     @property
     def vente_sous_le_cout(self):

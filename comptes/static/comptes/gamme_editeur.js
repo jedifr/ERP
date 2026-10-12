@@ -26,10 +26,12 @@
         let etat = null, modifie = false, lignes = [];
 
         async function appeler(corps) {
-            const url = racine.dataset.url + (corps ? "" : "?quantite=" + (racine.dataset.quantite || 1));
+            // Depuis la fiche d'un devis : la gamme est lue et modifiée à la date de ce devis (celle avec laquelle il est chiffré).
+            const devis = racine.dataset.devis || "";
+            const url = racine.dataset.url + (corps ? "" : "?quantite=" + (racine.dataset.quantite || 1) + (devis ? "&devis=" + encodeURIComponent(devis) : ""));
             const reponse = await fetch(url, corps ? {
                 method: "POST", credentials: "same-origin", headers: { "X-CSRFToken": csrf(), "Content-Type": "application/json" },
-                body: JSON.stringify({ ...corps, quantite: racine.dataset.quantite || 1 }),
+                body: JSON.stringify({ ...corps, quantite: racine.dataset.quantite || 1, devis: devis || null }),
             } : { credentials: "same-origin" });
             let json = {};
             try { json = await reponse.json(); } catch (e) { /* non JSON */ }
@@ -98,7 +100,7 @@
             }
             return el("tr", { class: decoupe ? "ge-decoupe" : "" },
                 el("td", {}, String(i + 1)), el("td", {}, poste), ...cellules,
-                el("td", {}, l.probleme ? el("span", { class: "ge-ko", title: l.probleme }, "tarif manquant") : euros(l.cout_unitaire)),
+                el("td", {}, l.probleme ? el("span", { class: "ge-ko", title: l.probleme }, "tarif manquant") : euros(l.cout_total !== null && l.cout_total !== undefined && etat.quantite ? l.cout_total / etat.quantite : l.cout_unitaire)),
                 el("td", {}, el("span", { class: "ge-pastille " + (decoupe ? "ge-auto" : "ge-main") }, decoupe ? "calculée" : "à la main")),
                 boutons);
         }
@@ -156,7 +158,7 @@
                 }
                 details.append(barre);
             }
-            if (!brouillon) details.append(el("p", { class: "ge-note" }, "Ces opérations font partie de la gamme de l'article " + (racine.dataset.libelle || "") + " : elles seront reprises dans les prochains devis de cette pièce. Les devis déjà établis gardent leurs anciens temps (historique par date)."));
+            if (!brouillon) details.append(el("p", { class: "ge-note" }, "Ces opérations font partie de la gamme de l'article " + (racine.dataset.libelle || "") + " : elles seront reprises dans les prochains devis de cette pièce. Les devis déjà établis gardent leurs anciens temps (historique par date)." + (racine.dataset.devis ? " Enregistrez le devis pour mettre ses prix à jour." : "")));
             racine.append(details);
         }
 

@@ -16,7 +16,7 @@
     {% endif %}{% endwith %}
     <div class="ge-cols">
       <div class="nomenclature-editeur" data-url="{% url 'nomenclature_editeur' l.article_id %}" data-editable="{{ editable_detail|yesno:'1,0' }}" data-libelle="{{ l.article_id }}"></div>
-      <div class="gamme-editeur" data-url="{% url 'gamme_editeur' l.article_id %}" data-quantite="{{ l.quantite|floatformat:'0' }}" data-editable="{{ editable_detail|yesno:'1,0' }}" data-libelle="{{ l.article_id }}"></div>
+      <div class="gamme-editeur" data-url="{% url 'gamme_editeur' l.article_id %}" data-quantite="{{ l.quantite|floatformat:'0' }}" data-devis="{{ l.devis_id }}" data-editable="{{ editable_detail|yesno:'1,0' }}" data-libelle="{{ l.article_id }}"></div>
     </div>
   </details>
   {% endfor %}

@@ -266,10 +266,16 @@ class CalculerDevisTests(TestCase):
         self.ligne.save()
         calculer_devis(self.devis)
         self.ligne.refresh_from_db()
-        # quantite=3 * prix forcé 50 = 150, au lieu de 111.426 * 1.2 = 133.7112
-        self.assertEqual(self.ligne.prix_vente_matiere, 150)
-        # le coût matière reste calculé normalement (juste le prix de vente est forcé)
+        # Le prix forcé remplace le prix UNITAIRE de la ligne (matière + opérations), pas seulement la matière :
+        # total = 3 × 50 = 150, réparti au prorata de matière 133,71 € et opérations 23,96 €.
+        self.assertEqual(self.ligne.prix_vente_unitaire, 50)
+        self.assertEqual(self.ligne.prix_vente_total, 150)
+        self.assertEqual(self.ligne.prix_vente_operations, Decimal("22.79"))
+        self.assertEqual(self.ligne.prix_vente_matiere, Decimal("127.21"))
+        self.assertEqual(self.devis.montant_total_ht, 150)
+        # le coût reste calculé normalement (seul le prix de vente est forcé) : c'est le prix sans marge
         self.assertAlmostEqual(float(self.ligne.cout_matiere_calcule), 111.426, places=3)
+        self.assertAlmostEqual(float(self.ligne.cout_total), 111.426 + 25 / 60 * 50, places=2)
 
     def test_prix_vente_total_ligne_integre_les_operations(self):
         calculer_devis(self.devis)

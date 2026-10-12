@@ -196,7 +196,7 @@
             operationsCell: row.querySelector(".field-prix_vente_operations .readonly"),
             totalCell: row.querySelector(".field-prix_vente_total .readonly"),
             unitaireCell: row.querySelector(".field-prix_vente_unitaire .readonly"),
-            ttcCell: row.querySelector(".field-prix_vente_ttc .readonly"),
+            sansMargeCell: row.querySelector(".field-prix_sans_marge .readonly"),
         };
     }
 
@@ -219,8 +219,8 @@
         if (cells.unitaireCell) {
             cells.unitaireCell.textContent = data.prix_vente_unitaire != null ? data.prix_vente_unitaire : "-";
         }
-        if (cells.ttcCell) {
-            cells.ttcCell.textContent = data.prix_vente_ttc != null ? data.prix_vente_ttc : "-";
+        if (cells.sansMargeCell) {
+            cells.sansMargeCell.textContent = data.cout_total != null ? Number(data.cout_total).toFixed(2) : "-";
         }
     }
 

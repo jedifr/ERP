@@ -98,12 +98,22 @@ def _sauver(etape):
     return etape
 
 
+def _reprendre_a_partir_de(article, jour):
+    """Modification datée du passé (gamme d'un devis plus ancien) : elle vaut à partir de `jour` et jusqu'à nouvel ordre. Les
+    versions commencées après `jour` sont remplacées, et celles qui avaient été closes depuis redeviennent ouvertes."""
+    if jour >= datetime.date.today():
+        return
+    Gamme.objects.filter(article=article, date_debut__gt=jour).delete()
+    Gamme.objects.filter(article=article, date_fin__gte=jour).update(date_fin=None)
+
+
 @transaction.atomic
 def enregistrer(article, lignes, jour=None):
     """Remplace la gamme active par `lignes` (dans l'ordre affiché) en conservant l'historique."""
     jour = jour or datetime.date.today()
     if article.nature != Article.Nature.FABRIQUE:
         raise ErreurGamme("Seul un article fabriqué porte une gamme.")
+    _reprendre_a_partir_de(article, jour)
     actives = {e.pk: e for e in etapes_actives(article, jour)}
     vus = set()
     for position, ligne in enumerate(lignes, start=1):
@@ -153,6 +163,7 @@ def ajouter_gamme_type(article, gamme_type, jour=None):
     jour = jour or datetime.date.today()
     if article.nature != Article.Nature.FABRIQUE:
         raise ErreurGamme("Seul un article fabriqué porte une gamme.")
+    _reprendre_a_partir_de(article, jour)
     ordre = max([e.ordre for e in etapes_actives(article, jour)] or [0])
     for modele in gamme_type.etapes.select_related("poste").order_by("ordre"):
         ordre += 1
@@ -166,6 +177,7 @@ def reprendre_gamme(article, source, jour=None):
     jour = jour or datetime.date.today()
     if article.pk == source.pk:
         raise ErreurGamme("Choisissez une autre pièce.")
+    _reprendre_a_partir_de(article, jour)
     ordre = max([e.ordre for e in etapes_actives(article, jour)] or [0])
     copiees = 0
     for e in etapes_actives(source, jour):
@@ -187,7 +199,7 @@ def gamme_editeur_view(request, reference):
     if not user.has_perm("technique.view_gamme"):
         raise PermissionDenied
     if request.method == "GET":
-        return JsonResponse(etat(article, request.GET.get("quantite") or 1))
+        return JsonResponse(etat(article, request.GET.get("quantite") or 1, _jour_du_devis(request.GET.get("devis"))))
     if not (user.has_perm("technique.add_gamme") and user.has_perm("technique.change_gamme")):
         raise PermissionDenied
     try:
@@ -195,19 +207,31 @@ def gamme_editeur_view(request, reference):
     except ValueError:
         return JsonResponse({"detail": "Requête illisible."}, status=400)
     action = donnees.get("action")
+    jour = _jour_du_devis(donnees.get("devis"))
     try:
         if action == "enregistrer":
-            enregistrer(article, donnees.get("etapes") or [])
+            enregistrer(article, donnees.get("etapes") or [], jour)
         elif action == "type":
-            ajouter_gamme_type(article, get_object_or_404(GammeType, pk=donnees.get("type")))
+            ajouter_gamme_type(article, get_object_or_404(GammeType, pk=donnees.get("type")), jour)
         elif action == "reprendre":
             ajouter = get_object_or_404(Article, pk=donnees.get("source"))
-            reprendre_gamme(article, ajouter)
+            reprendre_gamme(article, ajouter, jour)
         else:
             return JsonResponse({"detail": "Action inconnue."}, status=400)
     except ErreurGamme as exc:
         return JsonResponse({"detail": str(exc)}, status=400)
-    return JsonResponse(etat(article, donnees.get("quantite") or 1))
+    return JsonResponse(etat(article, donnees.get("quantite") or 1, jour))
+
+
+def _jour_du_devis(numero):
+    """Date à laquelle lire et modifier la gamme depuis la fiche d'un devis : celle du devis s'il est antérieur à aujourd'hui, car
+    il est chiffré avec la gamme active à sa date (chiffrage.moteur.gamme_active). Une étape datée du jour n'y compterait pas.
+    Même règle que l'étape de découpe calculée (decoupe.services.devis_pieces._date_gamme). Sans devis : aujourd'hui."""
+    from chiffrage.models import Devis
+
+    devis = Devis.objects.filter(pk=numero).only("date_creation").first() if numero else None
+    aujourdhui = datetime.date.today()
+    return min(aujourdhui, devis.date_creation) if devis is not None and devis.date_creation else aujourdhui
 
 
 @require_http_methods(["GET"])
