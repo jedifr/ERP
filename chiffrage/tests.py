@@ -5262,6 +5262,17 @@ class EtapeSuivanteCommandeTests(_FixtureOrdresCommande, TestCase):
             f"/admin/facturation/facture/preparer/?commande={self.commande.pk}", fetch_redirect_response=False,
         )
 
+    def test_barre_d_actions_compacte(self):
+        """Étape suivante en bouton court (titre complet au survol), PDF et actions secondaires en menus,
+        Historique réduit à son icône."""
+        page = self.client.get(f"/admin/chiffrage/commande/{self.commande.pk}/change/")
+        self.assertContains(page, 'title="Étape suivante : Créer les ordres de fabrication"')
+        for menu in ("Documents", "Actions"):
+            self.assertContains(page, f"{menu}\n")
+        for lien in ("ar-pdf/", "bon-preparation-pdf/", "fiches-fabrication-pdf/", "importer-devis/", "ordres-fabrication/"):
+            self.assertContains(page, f"/admin/chiffrage/commande/{self.commande.pk}/{lien}")
+        self.assertContains(page, 'aria-label="Historique"')
+
     def test_commande_annulee_pas_d_etape(self):
         self.commande.annuler()
         self.assertNotContains(self.client.get(f"/admin/chiffrage/commande/{self.commande.pk}/change/"), "Étape suivante")

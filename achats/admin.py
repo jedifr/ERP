@@ -114,7 +114,7 @@ class CommandeFournisseurAdmin(ExportCsvMixin, CodificationInitialeMixin, ModelA
             ("Récapitulatif", {"fields": self.CHAMPS_RECAPITULATIF, "classes": ["fiche-recap"]}),
         ]
 
-    @unfold_action(description="Bon de commande (PDF)", url_path="pdf")
+    @unfold_action(description="Bon de commande (PDF)", icon="picture_as_pdf", url_path="pdf")
     def action_pdf(self, request, object_id):
         from chiffrage.documents import DocumentError
 
