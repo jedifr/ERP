@@ -538,7 +538,17 @@ class DevisAdmin(ProchaineActionMixin, DateDuJourMixin, ChronologieMixin, PucesM
             kwargs["fields"] = list(kwargs["fields"]) + [
                 c for c in self.CHAMPS_REMISE_GLOBALE if c not in kwargs["fields"] and c not in lecture_seule
             ]
-        return super().get_form(request, obj, **kwargs)
+        form = super().get_form(request, obj, **kwargs)
+        if "remise_globale_type" not in form.base_fields:
+            return form
+
+        class DevisFormRemise(form):
+            # Facultatif à la saisie (un enregistrement qui ne l'envoie pas garde le défaut %).
+            def clean_remise_globale_type(self):
+                return self.cleaned_data.get("remise_globale_type") or Devis.TypeRemise.POURCENTAGE
+
+        DevisFormRemise.base_fields["remise_globale_type"].required = False
+        return DevisFormRemise
 
     def get_fieldsets(self, request, obj=None):
         exclus = self.CHAMPS_RECAPITULATIF + self.CHAMPS_REMISE_GLOBALE

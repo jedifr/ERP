@@ -425,14 +425,16 @@ def contexte_exemple(type_document):
               "adresse_html": "4 zone industrielle<br>69800 Saint-Priest",
               "bloc_html": "<b>Métallerie Durand — Atelier</b><br>4 zone industrielle<br>69800 Saint-Priest"}
     ligne = {"designation_html": "<b>FLASQUE-100</b><br>Flasque de pompe", "reference": "FLASQUE-100", "libelle": "Flasque de pompe",
-             "quantite": "10", "pu_ht": "45,00 €", "tva": "20 %", "total_ht": "450,00 €", "livraison_prevue": "15/12/2026",
+             "quantite": "10", "pu_ht": "45,00 €", "remise": "", "tva": "20 %", "total_ht": "450,00 €", "livraison_prevue": "15/12/2026",
              "a_livrer": "10", "origine": "OF-CDE-0001-1", "livre": "6", "commande": "10", "reliquat": "4", "coulees": "C-2026-0412"}
     contexte = _base(f"{ModeleDocument.Type(type_document).label.upper()} EXEMPLE-0001", "EXEMPLE-0001", "03/10/2026",
                      ["Date : 03/10/2026", "Votre référence : BC-7788"])
     contexte["societe"] = societe
     contexte.update({
         "facturation": bloc_f, "livraison": bloc_l, "lignes": [ligne, {**ligne, "designation_html": "<b>SUPPORT-20</b><br>Support moteur", "total_ht": "180,00 €"}],
-        "totaux": {"ht": "630,00 €", "ttc": "756,00 €", "tva_totale": "126,00 €", "tva": [{"taux": "20 %", "montant": "126,00 €"}]},
+        "totaux": {"ht": "630,00 €", "ttc": "756,00 €", "tva_totale": "126,00 €", "tva": [{"taux": "20 %", "montant": "126,00 €"}],
+                   "lignes_ht": "", "remise_globale": "", "remise_globale_libelle": ""},
+        "avec_remise": "",
         "delai": "6 semaines", "reglement": "30 jours net", "mentions": "Mentions légales de l'exemple.",
         "indice": "A", "validite": "02/11/2026", "commande": {"numero": "CDE-0001", "reference_client": "BC-7788"},
         "of": {"numero": "OF-CDE-0001-1", "reference": "FLASQUE-100", "libelle": "Flasque de pompe", "quantite": "10",

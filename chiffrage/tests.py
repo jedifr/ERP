@@ -5687,6 +5687,17 @@ class RemisesDevisTests(_FixtureModuleA, TestCase):
         self.assertContains(page, 'id="lignes-recap"')
         self.assertContains(page, 'name="remise_globale"')
         self.assertContains(page, "Total des lignes avant remise HT")
+        reponse = self.client.post(
+            f"/admin/chiffrage/devis/{self.devis.pk}/change/",
+            {"numero": "DEV-REC-A", "client": self.tiers.pk, "date_creation": "2026-01-01", "statut": "brouillon",
+             "issue": "en_attente", "remise_globale": "7", "remise_globale_type": "eur",
+             "lignes-TOTAL_FORMS": "0", "lignes-INITIAL_FORMS": "0", "version_verrou": ""},
+        )
+        erreurs = reponse.context["adminform"].form.errors if reponse.context else None
+        self.assertEqual(reponse.status_code, 302, erreurs)
+        self._recharger()
+        self.assertEqual((self.devis.remise_globale, self.devis.remise_globale_type), (7, "eur"))
+        self.assertEqual(self.devis.montant_total_ht, Decimal("26.00"))
 
     def test_pdf_avec_remises(self):
         from .documents import generer_pdf_devis
