@@ -86,12 +86,13 @@ SAUT_DE_PAGE = '<div class="doc-saut-de-page"></div>'
 
 
 def _tableau(entetes, cellules, liste="lignes", alias="ligne", classe="doc-lignes"):
-    """entetes: [(libellé, numérique)] ; cellules: [expression ou texte] (même longueur)."""
-    def cls(num):
-        return ' class="num"' if num else ""
+    """entetes: [(libellé, numérique)] ou [(libellé, numérique, condition)] : la colonne n'apparaît que si la condition
+    (chemin `data-if`) est non vide ; cellules: [expression ou texte] (même longueur)."""
+    def attrs(num, condition=None):
+        return (' class="num"' if num else "") + (f' data-if="{condition}"' if condition else "")
 
-    tete = "".join(f"<th{cls(num)}>{libelle}</th>" for libelle, num in entetes)
-    corps = "".join(f"<td{cls(num)}>{valeur}</td>" for (_, num), valeur in zip(entetes, cellules))
+    tete = "".join(f"<th{attrs(*e[1:])}>{e[0]}</th>" for e in entetes)
+    corps = "".join(f"<td{attrs(*e[1:])}>{valeur}</td>" for e, valeur in zip(entetes, cellules))
     return (
         f'<table class="{classe}"><thead><tr>{tete}</tr></thead>'
         f'<tbody><tr data-repeat="{liste}" data-as="{alias}">{corps}</tr></tbody></table>'
@@ -99,8 +100,9 @@ def _tableau(entetes, cellules, liste="lignes", alias="ligne", classe="doc-ligne
 
 
 LIGNES_DEVIS = _tableau(
-    [("Désignation", False), ("Qté", True), ("PU HT", True), ("TVA", True), ("Total HT", True)],
-    ["{{ ligne.designation_html }}", "{{ ligne.quantite }}", "{{ ligne.pu_ht }}", "{{ ligne.tva }}", "{{ ligne.total_ht }}"],
+    [("Désignation", False), ("Qté", True), ("PU HT", True), ("Remise", True, "avec_remise"), ("TVA", True), ("Total HT", True)],
+    ["{{ ligne.designation_html }}", "{{ ligne.quantite }}", "{{ ligne.pu_ht }}", "{{ ligne.remise }}", "{{ ligne.tva }}",
+     "{{ ligne.total_ht }}"],
 )
 LIGNES_AR = _tableau(
     [("Désignation", False), ("Qté", True), ("PU HT", True), ("TVA", True), ("Total HT", True), ("Livraison prévue", True)],
@@ -128,6 +130,9 @@ OPERATIONS = _tableau(
 )
 TOTAUX = (
     '<table class="doc-totaux"><tbody>'
+    '<tr data-if="totaux.remise_globale"><td>Total des lignes HT</td><td class="num">{{ totaux.lignes_ht }}</td></tr>'
+    '<tr data-if="totaux.remise_globale"><td>{{ totaux.remise_globale_libelle }}</td>'
+    '<td class="num">− {{ totaux.remise_globale }}</td></tr>'
     '<tr><td>Total HT</td><td class="num">{{ totaux.ht }}</td></tr>'
     '<tr data-repeat="totaux.tva" data-as="t"><td>TVA {{ t.taux }}</td><td class="num">{{ t.montant }}</td></tr>'
     '<tr class="doc-total-ttc"><td>Total TTC</td><td class="num">{{ totaux.ttc }}</td></tr></tbody></table>'

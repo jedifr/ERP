@@ -5572,3 +5572,170 @@ class ConstructeurDroitsTests(TestCase):
         self.utilisateur("tout-droit", ["change_devis", "add_devisligne", "add_article", "add_nomenclature", "add_gamme"])
         Devis.objects.filter(pk=self.devis.pk).update(statut=Devis.Statut.VALIDE)
         self.assertEqual(self.poster().status_code, 409)
+
+
+class RemisesDevisTests(_FixtureModuleA, TestCase):
+    """Remise par ligne (%) et remise globale (% ou €) : prix des lignes, totaux, commande, révision, PDF."""
+
+    def setUp(self):
+        super().setUp()
+        calculer_devis(self.devis)  # coût 3 × 10 = 30 ; marge 10 % -> 33,00 HT
+
+    def _recharger(self):
+        self.devis = Devis.objects.get(pk=self.devis.pk)
+        self.ligne.refresh_from_db()
+
+    def test_remise_de_ligne(self):
+        DevisLigne.objects.filter(pk=self.ligne.pk).update(remise_pct=10)
+        calculer_devis(self.devis)
+        self._recharger()
+        self.assertEqual(self.ligne.prix_vente_avant_remise, Decimal("33.00"))
+        self.assertEqual(self.ligne.prix_vente_total, Decimal("29.70"))
+        self.assertEqual(self.ligne.prix_vente_unitaire, Decimal("9.90"))
+        self.assertEqual(self.devis.montant_avant_remises_ht, Decimal("33.00"))
+        self.assertEqual(self.devis.montant_remises_lignes_ht, Decimal("3.30"))
+        self.assertEqual(self.devis.montant_total_ht, Decimal("29.70"))
+        DevisLigne.objects.filter(pk=self.ligne.pk).update(remise_pct=None)
+        calculer_devis(self.devis)
+        self._recharger()
+        self.assertEqual(self.ligne.prix_vente_total, Decimal("33.00"))
+
+    def test_remise_appliquee_apres_le_prix_force(self):
+        DevisLigne.objects.filter(pk=self.ligne.pk).update(prix_vente_unitaire_force=20, remise_pct=10)
+        calculer_devis(self.devis)
+        self._recharger()
+        self.assertEqual(self.ligne.prix_vente_avant_remise, Decimal("60.00"))
+        self.assertEqual(self.ligne.prix_vente_total, Decimal("54.00"))
+        self.assertEqual(self.ligne.prix_vente_unitaire, Decimal("18"))
+
+    def test_remise_de_ligne_bornee(self):
+        for valeur in (-1, 101):
+            ligne = DevisLigne(devis=self.devis, article=self.article, quantite=1, remise_pct=valeur)
+            with self.assertRaises(ValidationError):
+                ligne.full_clean()
+
+    def test_remise_globale_en_pourcentage(self):
+        Devis.objects.filter(pk=self.devis.pk).update(remise_globale=10, remise_globale_type="pct")
+        self._recharger()
+        self.assertEqual(self.devis.montant_lignes_ht, Decimal("33.00"))
+        self.assertEqual(self.devis.montant_remise_globale, Decimal("3.30"))
+        self.assertEqual(self.devis.montant_total_ht, Decimal("29.70"))
+        ventilation = self.devis.ventilation_tva()
+        self.assertEqual(sum(base for _, base, _ in ventilation), Decimal("29.70"))
+        tva = sum(t for _, _, t in ventilation)
+        self.assertEqual(self.devis.montant_total_ttc, Decimal("29.70") + tva)
+        self.assertEqual(self.devis.montant_marge_ht, Decimal("-0.30"))  # 29,70 vendu pour 30 de coût
+
+    def test_remise_globale_en_euros_plafonnee_au_total(self):
+        Devis.objects.filter(pk=self.devis.pk).update(remise_globale=5, remise_globale_type="eur")
+        self._recharger()
+        self.assertEqual(self.devis.montant_total_ht, Decimal("28.00"))
+        Devis.objects.filter(pk=self.devis.pk).update(remise_globale=500)
+        self._recharger()
+        self.assertEqual(self.devis.montant_remise_globale, Decimal("33.00"))
+        self.assertEqual(self.devis.montant_total_ht, 0)
+        self.assertEqual(self.devis.montant_total_ttc, 0)
+
+    def test_remise_globale_reportee_sur_la_commande(self):
+        Devis.objects.filter(pk=self.devis.pk).update(remise_globale=10, remise_globale_type="pct")
+        self._recharger()
+        self._valider()
+        commande = lancer_en_production(self.devis)
+        ligne_commande = commande.lignes.get()
+        self.assertEqual(ligne_commande.prix_vente_unitaire, Decimal("9.9"))
+        self.assertEqual(ligne_commande.montant_ht, Decimal("29.70"))
+
+    def test_revision_reprend_les_remises(self):
+        from .production import reviser_devis
+
+        DevisLigne.objects.filter(pk=self.ligne.pk).update(remise_pct=5)
+        Devis.objects.filter(pk=self.devis.pk).update(remise_globale=12, remise_globale_type="eur")
+        self._recharger()
+        self._valider()
+        revision = reviser_devis(self.devis, "Remises reprises")
+        self.assertEqual((revision.remise_globale, revision.remise_globale_type), (12, "eur"))
+        self.assertEqual(revision.lignes.get().remise_pct, 5)
+
+    def test_recalcul_en_direct_avec_remise_et_recapitulatif(self):
+        Devis.objects.filter(pk=self.devis.pk).update(remise_globale=10, remise_globale_type="pct")
+        response = self.client.post(
+            f"/admin/chiffrage/devis/{self.devis.pk}/lignes/{self.ligne.id}/recalculer/",
+            data={"quantite": 3, "remise_pct": "10"}, content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        data = response.json()
+        self.assertEqual(Decimal(str(data["prix_vente_total"])), Decimal("29.70"))
+        self.assertEqual(Decimal(str(data["montant_remises_lignes"])), Decimal("3.30"))
+        self.assertEqual(Decimal(str(data["montant_remise_globale"])), Decimal("2.97"))
+        self.assertEqual(Decimal(str(data["montant_total_ht"])), Decimal("26.73"))
+        refus = self.client.post(
+            f"/admin/chiffrage/devis/{self.devis.pk}/lignes/{self.ligne.id}/recalculer/",
+            data={"quantite": 3, "remise_pct": "150"}, content_type="application/json",
+        )
+        self.assertEqual(refus.status_code, 400)
+
+    def test_apercu_avec_remise(self):
+        response = self.client.post(
+            f"/admin/chiffrage/devis/{self.devis.pk}/lignes/previsualiser/",
+            data={"article": self.article.pk, "quantite": 3, "remise_pct": "10"}, content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(Decimal(str(response.json()["prix_vente_total"])), Decimal("29.70"))
+
+    def test_fiche_affiche_le_recapitulatif_et_enregistre_la_remise_globale(self):
+        page = self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/change/")
+        self.assertContains(page, 'id="lignes-recap"')
+        self.assertContains(page, 'name="remise_globale"')
+        self.assertContains(page, "Total des lignes avant remise HT")
+        reponse = self.client.post(
+            f"/admin/chiffrage/devis/{self.devis.pk}/change/",
+            {"numero": "DEV-REC-A", "client": self.tiers.pk, "date_creation": "2026-01-01", "statut": "brouillon",
+             "issue": "en_attente", "remise_globale": "7", "remise_globale_type": "eur",
+             "lignes-TOTAL_FORMS": "0", "lignes-INITIAL_FORMS": "0", "version_verrou": ""},
+        )
+        erreurs = reponse.context["adminform"].form.errors if reponse.context else None
+        self.assertEqual(reponse.status_code, 302, erreurs)
+        self._recharger()
+        self.assertEqual((self.devis.remise_globale, self.devis.remise_globale_type), (7, "eur"))
+        self.assertEqual(self.devis.montant_total_ht, Decimal("26.00"))
+
+    def test_pdf_avec_remises(self):
+        from .documents import generer_pdf_devis
+
+        DevisLigne.objects.filter(pk=self.ligne.pk).update(remise_pct=10)
+        calculer_devis(self.devis)
+        Devis.objects.filter(pk=self.devis.pk).update(remise_globale=10, remise_globale_type="pct")
+        self._recharger()
+        texte = generer_pdf_devis(self.devis).decode("latin-1")
+        for attendu in ("Remise", "10 %", "Total des lignes HT", r"Remise globale \(10 %\)", "29,70", "26,73", "11,00"):
+            self.assertIn(attendu, texte, attendu)
+
+    def test_pdf_sans_remise_inchange(self):
+        from .documents import generer_pdf_devis
+
+        texte = generer_pdf_devis(self.devis).decode("latin-1")
+        self.assertNotIn("Remise", texte)
+        self.assertNotIn("Total des lignes HT", texte)
+
+    def test_modele_html_avec_remises(self):
+        from documents import moteur
+        from documents.contextes import contexte_devis
+        from documents.defaults import LIGNES_DEVIS, TOTAUX
+
+        DevisLigne.objects.filter(pk=self.ligne.pk).update(remise_pct=10)
+        calculer_devis(self.devis)
+        Devis.objects.filter(pk=self.devis.pk).update(remise_globale=10, remise_globale_type="pct")
+        self._recharger()
+        contexte = contexte_devis(self.devis)
+        html, inconnues = moteur.appliquer(LIGNES_DEVIS + TOTAUX, contexte)
+        self.assertEqual(inconnues, [])
+        for attendu in ("<th class=\"num\">Remise</th>", "11,00 €", "10 %", "Total des lignes HT", "29,70 €",
+                        "Remise globale (10 %)", "− 2,97 €", "26,73 €"):
+            self.assertIn(attendu, html, attendu)
+        Devis.objects.filter(pk=self.devis.pk).update(remise_globale=None)
+        DevisLigne.objects.filter(pk=self.ligne.pk).update(remise_pct=None)
+        calculer_devis(self.devis)
+        self._recharger()
+        html, _ = moteur.appliquer(LIGNES_DEVIS + TOTAUX, contexte_devis(self.devis))
+        self.assertNotIn("Remise", html)
+        self.assertNotIn("Total des lignes HT", html)

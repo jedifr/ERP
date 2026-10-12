@@ -3,7 +3,7 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.core.validators import MinValueValidator
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models, transaction
 from django.db.models.signals import post_delete
 from django.dispatch import receiver
@@ -25,6 +25,7 @@ def _strictement_positif(valeur):
 
 
 positif_ou_nul = MinValueValidator(0, message="Ne peut pas être négatif.")
+au_plus_100 = MaxValueValidator(100, message="Une remise ne peut pas dépasser %(limit_value)s %%.")
 
 
 def _taux_tva_par_defaut():
@@ -107,6 +108,20 @@ class Devis(models.Model):
         blank=True,
         validators=[positif_ou_nul],
         help_text="Optionnel, écrase les marges par défaut", **TAUX,
+    )
+    class TypeRemise(models.TextChoices):
+        POURCENTAGE = "pct", "%"
+        MONTANT = "eur", "€"
+
+    remise_globale = ChampDecimal(
+        "remise globale",
+        null=True,
+        blank=True,
+        validators=[positif_ou_nul],
+        help_text="Facultatif : remise sur le total HT des lignes, en % ou en € HT. Imprimée sur le devis avant le total HT.", **PRIX,
+    )
+    remise_globale_type = models.CharField(
+        "type de remise globale", max_length=3, choices=TypeRemise.choices, default=TypeRemise.POURCENTAGE,
     )
     delai = models.CharField(
         "délai",
@@ -223,19 +238,98 @@ class Devis(models.Model):
     montant_operations_ht.fget.short_description = "Montant opérations HT (temps machine / main d'œuvre)"
 
     @property
-    def montant_total_ht(self):
+    def montant_lignes_ht(self):
+        """Total HT des lignes (remises de ligne déduites), avant la remise globale."""
         return arrondir(self.montant_matiere_ht + self.montant_operations_ht)
+
+    montant_lignes_ht.fget.short_description = "Total des lignes HT"
+
+    @property
+    def montant_avant_remises_ht(self):
+        """Total HT des lignes avant leurs remises (prix forcé compris) : base de la ligne « Remises sur les lignes »."""
+        return arrondir(somme(
+            ligne.prix_vente_avant_remise if ligne.prix_vente_avant_remise is not None else ligne.prix_vente_total
+            for ligne in self.lignes.all()
+        ))
+
+    montant_avant_remises_ht.fget.short_description = "Total des lignes avant remise HT"
+
+    @property
+    def montant_remise_globale(self):
+        """Montant HT de la remise globale (0 sans remise), plafonné au total des lignes."""
+        lignes = self.montant_lignes_ht
+        if not self.remise_globale:
+            return ZERO
+        if self.remise_globale_type == self.TypeRemise.MONTANT:
+            return min(arrondir(D(self.remise_globale)), lignes)
+        return min(arrondir(lignes * D(self.remise_globale) / 100), lignes)
+
+    montant_remise_globale.fget.short_description = "Remise globale HT"
+
+    @property
+    def coefficient_remise_globale(self):
+        """Part du total des lignes qui reste après la remise globale (1 sans remise)."""
+        lignes = self.montant_lignes_ht
+        return (lignes - self.montant_remise_globale) / lignes if lignes else Decimal(1)
+
+    @property
+    def montant_total_ht(self):
+        return self.montant_lignes_ht - self.montant_remise_globale
 
     montant_total_ht.fget.short_description = "Montant total HT"
 
+    def ventilation_tva(self):
+        """[(taux, base HT, TVA)] par taux de TVA, la remise globale répartie sur chaque base au prorata. La somme des bases
+        vaut montant_total_ht (le premier taux absorbe l'écart d'arrondi)."""
+        bases = {}
+        for ligne in self.lignes.all():
+            taux = D0(ligne.taux_tva.taux) if ligne.taux_tva_id else ZERO
+            bases[taux] = bases.get(taux, ZERO) + arrondir(D0(ligne.prix_vente_total))
+        coef = self.coefficient_remise_globale
+        resultat = [[taux, arrondir(base * coef)] for taux, base in sorted(bases.items())]
+        if resultat:
+            resultat[0][1] += self.montant_total_ht - sum((b for _, b in resultat), ZERO)
+        return [(taux, base, arrondir(base * taux / 100)) for taux, base in resultat]
+
     @property
     def montant_total_ttc(self):
-        """Somme des prix TTC de chaque ligne (chacune avec son propre taux de
-        TVA et arrondie au centime) — reflète donc correctement un devis à taux
-        de TVA mixtes, et correspond à ce que la facture affichera."""
-        return arrondir(somme(ligne.prix_vente_ttc for ligne in self.lignes.all()))
+        """Sans remise globale : somme des prix TTC de chaque ligne (chacune avec son taux de TVA, arrondie au centime), comme la
+        facture. Avec une remise globale : total HT plus la TVA de chaque taux calculée sur sa base remisée."""
+        if not self.montant_remise_globale:
+            return arrondir(somme(ligne.prix_vente_ttc for ligne in self.lignes.all()))
+        return self.montant_total_ht + sum((tva for _, _, tva in self.ventilation_tva()), ZERO)
 
     montant_total_ttc.fget.short_description = "Montant total TTC"
+
+    @property
+    def montant_remises_lignes_ht(self):
+        return self.montant_avant_remises_ht - self.montant_lignes_ht
+
+    @property
+    def tva_lignes_ht(self):
+        """TVA des lignes avant la remise globale (somme des TTC de chaque ligne moins leur HT)."""
+        return arrondir(somme(ligne.prix_vente_ttc for ligne in self.lignes.all())) - self.montant_lignes_ht
+
+    @property
+    def montant_tva(self):
+        return self.montant_total_ttc - self.montant_total_ht
+
+    @property
+    def montant_marge_ht(self):
+        return self.montant_total_ht - self.montant_sans_marge_ht
+
+    @property
+    def taux_marge_ht(self):
+        """Marge en % du total HT (None si le total est nul)."""
+        total = self.montant_total_ht
+        return arrondir(self.montant_marge_ht / total * 100) if total else None
+
+    @property
+    def montant_sans_marge_ht(self):
+        """Coût de revient de toutes les lignes (matière + opérations au coût) : le prix sans aucune marge."""
+        return arrondir(somme(ligne.cout_total for ligne in self.lignes.all()))
+
+    montant_sans_marge_ht.fget.short_description = "Total sans marge HT"
 
 
 class DevisLigne(models.Model):
@@ -274,6 +368,16 @@ class DevisLigne(models.Model):
             "Si renseigné, remplace le prix de vente unitaire calculé (matière + opérations) : "
             "prix de vente de la ligne = quantité × ce prix, réparti entre matière et opérations au prorata."
         ), **PRIX,
+    )
+    remise_pct = ChampDecimal(
+        "remise (%)",
+        null=True,
+        blank=True,
+        validators=[positif_ou_nul, au_plus_100],
+        help_text="Facultatif : remise en % déduite du prix de vente de la ligne (après un éventuel prix forcé).", **TAUX,
+    )
+    prix_vente_avant_remise = ChampDecimal(
+        "prix de vente avant remise (HT)", null=True, blank=True, editable=False, **MONTANT,
     )
     prix_vente_reglage = ChampDecimal(
         "dont réglage de tôle (HT)", null=True, blank=True, editable=False,
@@ -334,7 +438,7 @@ class DevisLigne(models.Model):
         None tant que le chiffrage n'a pas été calculé, ou si quantite est nulle."""
         if self.prix_vente_total is None or not self.quantite:
             return None
-        if self.prix_vente_unitaire_force is not None:
+        if self.prix_vente_unitaire_force is not None and not self.remise_pct:
             return D(self.prix_vente_unitaire_force)
         return arrondir_prix_vente(self.prix_vente_total / D(self.quantite))
 

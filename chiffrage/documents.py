@@ -5,7 +5,7 @@ La facture, l'avoir et la relance sont dans facturation/documents.py ; le bon de
 from functools import wraps
 
 from comptes.models import Societe
-from comptes.montants import ZERO, D0, arrondir, arrondir_prix, pourcent, somme
+from comptes.montants import ZERO, D, D0, arrondir, arrondir_prix, pourcent, somme
 from comptes.pdf import (
     GRIS,
     PageBreak,
@@ -182,6 +182,8 @@ def generer_pdf_devis(devis):
     par_taux = {}
     total_ht = total_ttc = ZERO
     miniatures = _miniatures_devis(devis)
+    # Colonne « Remise » seulement si une ligne au moins est remisée : le PU HT est alors le prix avant remise.
+    avec_remise = any(l.remise_pct for l in lignes_devis)
     for ligne in lignes_devis:
         ht = arrondir(ligne.prix_vente_total)
         ttc = ligne.prix_vente_ttc
@@ -193,7 +195,10 @@ def generer_pdf_devis(devis):
         libelle = ligne.designation or ligne.article.libelle
         if libelle:
             designation += f"<br/>{echapper(libelle)}"
-        pu = arrondir_prix(ligne.prix_vente_unitaire) if ligne.prix_vente_unitaire is not None else ZERO
+        if ligne.remise_pct and ligne.prix_vente_avant_remise is not None and ligne.quantite:
+            pu = arrondir_prix(D(ligne.prix_vente_avant_remise) / D(ligne.quantite))
+        else:
+            pu = arrondir_prix(ligne.prix_vente_unitaire) if ligne.prix_vente_unitaire is not None else ZERO
         cellules = [
             Paragraph(designation, st["normal"]),
             Paragraph(quantite(ligne.quantite), st["droite"]),
@@ -201,24 +206,46 @@ def generer_pdf_devis(devis):
             Paragraph(f"{pourcent(taux)} %".replace(".", ","), st["droite"]),
             Paragraph(montant(ht), st["droite"]),
         ]
+        if avec_remise:
+            remise = f"{pourcent(ligne.remise_pct)} %".replace(".", ",") if ligne.remise_pct else ""
+            cellules.insert(3, Paragraph(remise, st["droite"]))
         if miniatures:
             cellules.insert(0, miniatures.get(ligne.article_id, ""))
         lignes.append(cellules)
+    en_tetes = ["Désignation", "Qté", "PU HT", "TVA", "Total HT"]
+    largeurs = [80 * mm, 20 * mm, 28 * mm, 16 * mm, 30 * mm]
+    if avec_remise:
+        en_tetes.insert(3, "Remise")
+        largeurs[0] -= 16 * mm
+        largeurs.insert(3, 16 * mm)
     if miniatures:  # colonne de miniatures des pièces, seulement si le devis en contient
-        table = tableau_lignes(
-            ["", "Désignation", "Qté", "PU HT", "TVA", "Total HT"], lignes,
-            [22 * mm, 62 * mm, 18 * mm, 26 * mm, 16 * mm, 30 * mm], alignements_droite=(2, 3, 4, 5),
-        )
-    else:
-        table = tableau_lignes(
-            ["Désignation", "Qté", "PU HT", "TVA", "Total HT"], lignes,
-            [80 * mm, 20 * mm, 28 * mm, 16 * mm, 30 * mm], alignements_droite=(1, 2, 3, 4),
-        )
+        en_tetes.insert(0, "")
+        largeurs[0] -= 18 * mm
+        largeurs[1] -= 2 * mm
+        largeurs[2] -= 2 * mm
+        largeurs.insert(0, 22 * mm)
+    debut = 1 if miniatures else 0
+    table = tableau_lignes(en_tetes, lignes, largeurs, alignements_droite=tuple(range(debut + 1, len(en_tetes))))
 
-    totaux = [["Total HT", montant(arrondir(total_ht))]]
-    for taux in sorted(par_taux):
-        totaux.append([f"TVA {pourcent(taux)} %".replace(".", ","), montant(par_taux[taux])])
-    totaux.append(["Total TTC", montant(arrondir(total_ttc))])
+    remise_globale = devis.montant_remise_globale
+    if remise_globale:
+        # Remise globale : imprimée avant le total HT ; la TVA de chaque taux porte sur sa base remisée.
+        libelle_remise = "Remise globale"
+        if devis.remise_globale_type == devis.TypeRemise.POURCENTAGE:
+            libelle_remise += f" ({pourcent(devis.remise_globale)} %)".replace(".", ",")
+        totaux = [
+            ["Total des lignes HT", montant(arrondir(total_ht))],
+            [libelle_remise, "-" + montant(remise_globale)],
+            ["Total HT", montant(devis.montant_total_ht)],
+        ]
+        for taux, _base, tva in devis.ventilation_tva():
+            totaux.append([f"TVA {pourcent(taux)} %".replace(".", ","), montant(tva)])
+        totaux.append(["Total TTC", montant(devis.montant_total_ttc)])
+    else:
+        totaux = [["Total HT", montant(arrondir(total_ht))]]
+        for taux in sorted(par_taux):
+            totaux.append([f"TVA {pourcent(taux)} %".replace(".", ","), montant(par_taux[taux])])
+        totaux.append(["Total TTC", montant(arrondir(total_ttc))])
     table_totaux = Table(totaux, colWidths=[40 * mm, 34 * mm])
     table_totaux.hAlign = "RIGHT"
     table_totaux.setStyle(TableStyle([

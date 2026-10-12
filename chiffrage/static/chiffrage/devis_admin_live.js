@@ -56,6 +56,7 @@
     function init() {
         wireClientDefaults();
         wireContactParAdresseLivraison();
+        wireRecap();
 
         const numero = devisNumeroFromUrl();
         if (numero) {
@@ -179,6 +180,7 @@
         const map = {
             montant_matiere_ht: "#montant-matiere-ht",
             montant_operations_ht: "#montant-operations-ht",
+            montant_remise_globale: "#montant-remise-globale",
             montant_total_ht: "#montant-total-ht",
             montant_total_ttc: "#montant-total-ttc",
         };
@@ -187,6 +189,71 @@
             const el = document.querySelector(map[key]);
             if (el) el.textContent = data[key];
         });
+        const recap = document.getElementById("lignes-recap");
+        if (!recap) return;
+        if (data.montant_lignes_ht != null) recap.dataset.lignesHt = data.montant_lignes_ht;
+        if (data.montant_sans_marge_ht != null) recap.dataset.sansMargeHt = data.montant_sans_marge_ht;
+        if (data.montant_tva_lignes != null) recap.dataset.tvaLignes = data.montant_tva_lignes;
+        if (data.montant_avant_remises_ht != null) {
+            ecrire("#recap-avant-remises", euros(data.montant_avant_remises_ht));
+        }
+        if (data.montant_remises_lignes != null) {
+            ecrire("#recap-remises-lignes", "− " + euros(data.montant_remises_lignes));
+        }
+        majRecap();
+    }
+
+    // Récapitulatif de l'onglet « Lignes du devis » (_recap_lignes.html) : recalculé dans le navigateur à partir du total
+    // des lignes et de la TVA des lignes (renvoyés par le serveur), pour suivre la remise globale avant même l'enregistrement.
+    // Même règle que Devis.montant_remise_globale : % du total des lignes ou montant en €, plafonnée au total. Le montant
+    // exact (TVA ventilée par taux) est recalculé par le serveur à l'enregistrement.
+    function euros(valeur) {
+        const n = Number(valeur);
+        if (!isFinite(n)) return "—";
+        return n.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
+    }
+
+    function ecrire(selecteur, texte) {
+        const el = document.querySelector(selecteur);
+        if (el) el.textContent = texte;
+    }
+
+    function arrondi(n) {
+        return Math.round(n * 100) / 100;
+    }
+
+    function majRecap() {
+        const recap = document.getElementById("lignes-recap");
+        if (!recap) return;
+        const lignes = Number(recap.dataset.lignesHt) || 0;
+        const sansMarge = Number(recap.dataset.sansMargeHt) || 0;
+        const tvaLignes = Number(recap.dataset.tvaLignes) || 0;
+        const valeurInput = document.getElementById("id_remise_globale");
+        const typeSelect = document.getElementById("id_remise_globale_type");
+        let remise = 0;
+        if (valeurInput) {
+            const v = Math.max(parseFloat(String(valeurInput.value).replace(",", ".")) || 0, 0);
+            remise = typeSelect && typeSelect.value === "eur" ? arrondi(v) : arrondi((lignes * v) / 100);
+            remise = Math.min(remise, lignes);
+        } else {
+            return; // remise globale non modifiable ici : les montants affichés par le serveur font foi
+        }
+        const ht = arrondi(lignes - remise);
+        const tva = arrondi(lignes ? (tvaLignes * ht) / lignes : 0);
+        const marge = arrondi(ht - sansMarge);
+        ecrire("#recap-remise-globale", "− " + euros(remise));
+        ecrire("#recap-total-ht", euros(ht));
+        ecrire("#recap-marge", euros(marge) + (ht ? " (" + ((marge / ht) * 100).toLocaleString("fr-FR", { maximumFractionDigits: 1 }) + " %)" : ""));
+        ecrire("#recap-tva", euros(tva));
+        ecrire("#recap-total-ttc", euros(ht + tva));
+        ecrire("#recap-sans-marge", euros(sansMarge));
+    }
+
+    function wireRecap() {
+        const valeurInput = document.getElementById("id_remise_globale");
+        const typeSelect = document.getElementById("id_remise_globale_type");
+        if (valeurInput) valeurInput.addEventListener("input", majRecap);
+        if (typeSelect) typeSelect.addEventListener("change", majRecap);
     }
 
     function ligneCells(row) {
@@ -259,6 +326,7 @@
         const quantiteInput = row.querySelector('input[name$="-quantite"]');
         const tauxInput = row.querySelector('input[name$="-taux_marge_matiere_applique"]');
         const prixForceInput = row.querySelector('input[name$="-prix_vente_unitaire_force"]');
+        const remiseInput = row.querySelector('input[name$="-remise_pct"]');
         const tauxTvaSelect = row.querySelector('select[name$="-taux_tva"]');
 
         if (!quantiteInput || quantiteInput.name.indexOf("__prefix__") !== -1) {
@@ -273,7 +341,7 @@
 
         row.dataset.liveWired = "1";
 
-        const champs = { quantiteInput, tauxInput, prixForceInput, tauxTvaSelect };
+        const champs = { quantiteInput, tauxInput, prixForceInput, remiseInput, tauxTvaSelect };
 
         if (idInput && idInput.value) {
             wireRowExistante(row, numero, idInput.value, champs);
@@ -291,7 +359,7 @@
     // retouché un champ, ce qui donne l'impression que le calcul en direct ne
     // fonctionne pas du tout.
     function wireRowExistante(row, numero, ligneId, champs) {
-        const { quantiteInput, tauxInput, prixForceInput, tauxTvaSelect } = champs;
+        const { quantiteInput, tauxInput, prixForceInput, remiseInput, tauxTvaSelect } = champs;
         const url = `/admin/chiffrage/devis/${encodeURIComponent(numero)}/lignes/${ligneId}/recalculer/`;
 
         const executer = () => {
@@ -299,6 +367,7 @@
                 quantite: quantiteInput.value,
                 taux_marge_matiere_applique: tauxInput ? tauxInput.value : null,
                 prix_vente_unitaire_force: prixForceInput ? prixForceInput.value : null,
+                remise_pct: remiseInput ? remiseInput.value : null,
                 taux_tva: tauxTvaSelect ? tauxTvaSelect.value : null,
             };
 
@@ -343,6 +412,9 @@
         if (prixForceInput) {
             prixForceInput.addEventListener("input", recalculer);
         }
+        if (remiseInput) {
+            remiseInput.addEventListener("input", recalculer);
+        }
         if (tauxTvaSelect) {
             tauxTvaSelect.addEventListener("change", recalculer);
         }
@@ -354,7 +426,7 @@
     // qui ne persiste rien et ne touche donc pas les totaux du devis — ceux-ci
     // ne reflètent que les lignes réellement enregistrées.
     function wireRowNouvelle(row, numero, champs) {
-        const { quantiteInput, tauxInput, prixForceInput, tauxTvaSelect } = champs;
+        const { quantiteInput, tauxInput, prixForceInput, remiseInput, tauxTvaSelect } = champs;
         const articleSelect = row.querySelector('select[name$="-article"]');
         if (!articleSelect) {
             return;
@@ -374,6 +446,7 @@
                 quantite: quantite,
                 taux_marge_matiere_applique: tauxInput ? tauxInput.value : null,
                 prix_vente_unitaire_force: prixForceInput ? prixForceInput.value : null,
+                remise_pct: remiseInput ? remiseInput.value : null,
                 taux_tva: tauxTvaSelect ? tauxTvaSelect.value : null,
             };
 
@@ -415,6 +488,9 @@
         if (prixForceInput) {
             prixForceInput.addEventListener("input", previsualiser);
         }
+        if (remiseInput) {
+            remiseInput.addEventListener("input", previsualiser);
+        }
         if (tauxTvaSelect) {
             tauxTvaSelect.addEventListener("change", previsualiser);
         }
@@ -452,6 +528,7 @@
 
         const tauxInput = row.querySelector('input[name$="-taux_marge_matiere_applique"]');
         const prixForceInput = row.querySelector('input[name$="-prix_vente_unitaire_force"]');
+        const remiseInput = row.querySelector('input[name$="-remise_pct"]');
         const tauxTvaSelect = row.querySelector('select[name$="-taux_tva"]');
 
         const url = "/admin/chiffrage/devis/nouveau-devis/previsualiser-ligne/";
@@ -473,6 +550,7 @@
                 taux_marge_globale: tauxGlobalInput ? tauxGlobalInput.value : null,
                 taux_marge_matiere_applique: tauxInput ? tauxInput.value : null,
                 prix_vente_unitaire_force: prixForceInput ? prixForceInput.value : null,
+                remise_pct: remiseInput ? remiseInput.value : null,
                 taux_tva: tauxTvaSelect ? tauxTvaSelect.value : null,
             };
 
@@ -513,6 +591,9 @@
         }
         if (prixForceInput) {
             prixForceInput.addEventListener("input", previsualiser);
+        }
+        if (remiseInput) {
+            remiseInput.addEventListener("input", previsualiser);
         }
         if (tauxTvaSelect) {
             tauxTvaSelect.addEventListener("change", previsualiser);

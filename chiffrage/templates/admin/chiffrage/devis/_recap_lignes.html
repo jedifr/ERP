@@ -1,0 +1,32 @@
+{% comment %}Récapitulatif de l'onglet « Lignes du devis » : totaux du devis et remise globale (champs du formulaire du devis, enregistrés avec lui).
+Mis à jour en direct par devis_admin_live.js (identifiants recap-*) ; les montants exacts sont recalculés à l'enregistrement.{% endcomment %}
+{% if original %}
+{% with d=original form=adminform.form %}
+<aside class="lignes-recap" id="lignes-recap" aria-label="Récapitulatif du devis"
+       data-lignes-ht="{{ d.montant_lignes_ht|stringformat:'s' }}"
+       data-sans-marge-ht="{{ d.montant_sans_marge_ht|stringformat:'s' }}"
+       data-tva-lignes="{{ d.tva_lignes_ht|stringformat:'s' }}">
+  <h2 class="chrono-titre">Récapitulatif</h2>
+  <dl>
+    <dt>Total sans marge HT</dt><dd id="recap-sans-marge">{{ d.montant_sans_marge_ht|floatformat:2 }} €</dd>
+    <dt>Total des lignes avant remise HT</dt><dd id="recap-avant-remises">{{ d.montant_avant_remises_ht|floatformat:2 }} €</dd>
+    <dt>Remises sur les lignes</dt><dd id="recap-remises-lignes">− {{ d.montant_remises_lignes_ht|floatformat:2 }} €</dd>
+    <dt><label for="id_remise_globale">Remise globale</label></dt>
+    <dd>
+      {% if "remise_globale" in form.fields %}
+        <span class="recap-remise-globale">{{ form.remise_globale }}{{ form.remise_globale_type }}</span>
+        {% if form.remise_globale.errors %}<span class="errornote">{{ form.remise_globale.errors|join:" " }}</span>{% endif %}
+      {% elif d.remise_globale %}
+        {{ d.remise_globale|floatformat:"-2" }} {{ d.get_remise_globale_type_display }}
+      {% else %}—{% endif %}
+    </dd>
+    <dt></dt><dd id="recap-remise-globale">− {{ d.montant_remise_globale|floatformat:2 }} €</dd>
+    <dt class="recap-total">Total HT</dt><dd class="recap-total" id="recap-total-ht">{{ d.montant_total_ht|floatformat:2 }} €</dd>
+    <dt>Marge</dt><dd id="recap-marge">{{ d.montant_marge_ht|floatformat:2 }} €{% if d.taux_marge_ht is not None %} ({{ d.taux_marge_ht|floatformat:1 }} %){% endif %}</dd>
+    <dt>TVA</dt><dd id="recap-tva">{{ d.montant_tva|floatformat:2 }} €</dd>
+    <dt>Total TTC</dt><dd id="recap-total-ttc">{{ d.montant_total_ttc|floatformat:2 }} €</dd>
+  </dl>
+  <p class="recap-aide">La remise globale s'enregistre avec le devis (bouton « Enregistrer ») et s'imprime sur le PDF juste avant le total HT.</p>
+</aside>
+{% endwith %}
+{% endif %}
