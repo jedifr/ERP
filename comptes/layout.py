@@ -18,7 +18,8 @@ def global_callback(request):
     # (devis, commandes...) sont larges et gagnent à profiter de tout
     # l'écran plutôt que de scroller horizontalement dans un espace réduit.
     contexte = {"is_fullwidth": "1", "menu_nouveau": menu_nouveau(request)}
-    if not request.user.is_authenticated:
+    utilisateur = getattr(request, "user", None)
+    if utilisateur is not None and not utilisateur.is_authenticated:
         contexte.update(page_connexion())
     return contexte
 
