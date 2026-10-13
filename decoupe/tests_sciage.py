@@ -127,3 +127,21 @@ class OptimisationSciageTests(TestCase):
         self.client.post(url, {"source": "devis", "valeur": "DEV-SCIE", "importer": "1", "choisi-0": "on", "quantite-0": "6"})
         d = self.opt.debits.get(longueur_mm=800)
         self.assertEqual((d.quantite, d.angle_gauche_deg, d.angle_droit_deg, d.repere), (6, 45, 0, "6"))
+
+    def test_nouvelle_ligne_grise_recoit_une_couleur_libre(self):
+        """Sans le script de la fiche, une ligne ajoutée garde le gris par défaut : l'enregistrement lui donne la première couleur libre."""
+        url = reverse("admin:decoupe_optimisationsciage_change", args=[self.opt.pk])
+        donnees = {
+            "intitule": self.opt.intitule, "date": "2026-10-13", "quantite_ensembles": "12", "longueur_barre": "imposee", "longueur_barre_mm": "6000",
+            "largeur_lame_mm": "3", "chute_initiale_mm": "20", "chute_reutilisable_mm": "300", "chutes_disponibles": "",
+            "debits-TOTAL_FORMS": "6", "debits-INITIAL_FORMS": "5", "debits-MIN_NUM_FORMS": "0", "debits-MAX_NUM_FORMS": "1000",
+        }
+        for i, d in enumerate(self.opt.debits.all()):
+            donnees.update({f"debits-{i}-id": d.pk, f"debits-{i}-optimisation": self.opt.pk, f"debits-{i}-repere": d.repere, f"debits-{i}-couleur": "#d4d4d4",
+                            f"debits-{i}-longueur_mm": d.longueur_mm, f"debits-{i}-quantite": d.quantite, f"debits-{i}-angle_gauche_deg": d.angle_gauche_deg,
+                            f"debits-{i}-angle_droit_deg": d.angle_droit_deg, f"debits-{i}-section": self.section.pk})
+        donnees.update({"debits-5-repere": "6", "debits-5-couleur": "#d4d4d4", "debits-5-longueur_mm": "500", "debits-5-quantite": "1",
+                        "debits-5-angle_gauche_deg": "0", "debits-5-angle_droit_deg": "0", "debits-5-section": self.section.pk})
+        r = self.client.post(url, donnees)
+        self.assertEqual(r.status_code, 302, r.content[:2000])
+        self.assertEqual(self.opt.debits.get(repere="6").couleur, "#fdf26b")
