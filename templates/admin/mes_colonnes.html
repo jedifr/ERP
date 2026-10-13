@@ -5,6 +5,12 @@
     Choisissez les colonnes que vous voulez voir dans les listes et dans les tableaux de lignes des fiches.
     Ce réglage est <strong>personnel</strong> : il ne change rien pour les autres utilisateurs.
   </p>
+  <p class="mb-6">
+    Sur chaque liste et chaque tableau de lignes de l'ERP, la petite icône
+    <span class="material-symbols-outlined align-middle text-base">view_column</span> au-dessus du tableau permet aussi de
+    choisir les colonnes affichées, et on règle la largeur d'une colonne en tirant le bord droit de son en-tête
+    (double-clic : largeur par défaut). « Rétablir les colonnes par défaut » ne touche pas aux largeurs.
+  </p>
   <form method="post">
     {% csrf_token %}
     <div class="colonnes-grille">

@@ -5573,7 +5573,7 @@ class MesColonnesTests(_FixtureOrdresCommande, TestCase):
         self.assertRedirects(reponse, "/admin/mes-colonnes/", fetch_redirect_response=False)
         fiche = self.client.get(self.fiche)
         self.assertNotContains(fiche, "Statut d&#x27;approvisionnement")
-        self.assertNotContains(fiche, "Date de livraison possible")
+        self.assertNotContains(fiche, 'class="column-date_livraison_possible_display')
         self.assertContains(fiche, "Reliquat")
         self.assertContains(fiche, "Prix de vente unitaire")  # colonnes indispensables toujours là
         liste = self.client.get("/admin/chiffrage/commande/")
@@ -5597,7 +5597,7 @@ class MesColonnesTests(_FixtureOrdresCommande, TestCase):
         fiche = self.client.get(self.fiche)
         self.assertContains(fiche, "Montant HT")  # non masquable : ignoré
         self.assertContains(fiche, "Article")
-        self.assertNotContains(fiche, "Reliquat")
+        self.assertNotContains(fiche, 'class="column-reliquat')
         reponse = self.client.post("/admin/mes-colonnes/", {"defaut": "1"})
         self.assertEqual(reponse.status_code, 302)
         self.assertFalse(PreferenceColonnes.objects.filter(utilisateur=self.admin).exists())
@@ -5609,6 +5609,62 @@ class MesColonnesTests(_FixtureOrdresCommande, TestCase):
         self.assertEqual(fiche.status_code, 200)
         formset = fiche.context["inline_admin_formsets"][0].formset
         self.assertNotIn("designation", formset.empty_form.fields)
+
+
+    # --- Icône « colonnes » au-dessus des tableaux (comptes/static/comptes/tableaux.js) ---------------------------------
+    def _preferences(self, donnees):
+        return self.client.post("/admin/preferences-tableau/", data=donnees, content_type="application/json")
+
+    def test_fiche_annonce_ses_tableaux_a_l_icone_colonnes(self):
+        import json
+
+        fiche = self.client.get(self.fiche)
+        self.assertContains(fiche, 'id="tableaux-config"')
+        self.assertContains(fiche, "comptes/tableaux.")
+        config = json.loads(fiche.content.decode().split('id="tableaux-config" type="application/json">')[1].split("</script>")[0])
+        reglage = next(r for r in config["tableaux"].values() if r["ecran"] == "chiffrage.commande:commandeligne")
+        self.assertIn("reliquat", reglage["masquables"])
+        self.assertNotIn("article", reglage["masquables"])  # indispensable aux calculs : jamais proposée
+
+    def test_icone_masque_une_colonne_et_regle_les_largeurs(self):
+        from comptes.models import PreferenceColonnes
+
+        self.assertEqual(self._preferences({"ecran": "chiffrage.commande:commandeligne", "masquees": ["reliquat"]}).status_code, 200)
+        self.assertEqual(self._preferences({"ecran": "chiffrage.commande:commandeligne", "largeurs": {"designation": 300, "article": 5}}).status_code, 200)
+        preference = PreferenceColonnes.objects.get(utilisateur=self.admin, ecran="chiffrage.commande:commandeligne")
+        self.assertEqual(preference.masquees, ["reliquat"])
+        self.assertEqual(preference.largeurs, {"designation": 300, "article": 40})  # largeur minimale
+        fiche = self.client.get(self.fiche)
+        self.assertNotContains(fiche, 'class="column-reliquat')
+        self.assertContains(fiche, '"designation": 300')
+        # « Mes colonnes » montre le même choix ; revenir aux colonnes par défaut garde les largeurs.
+        self.assertNotContains(self.client.get("/admin/mes-colonnes/"), 'name="chiffrage.commande:commandeligne|reliquat" checked')
+        self.client.post("/admin/mes-colonnes/", {"defaut": "1"})
+        preference.refresh_from_db()
+        self.assertIsNone(preference.masquees)
+        self.assertEqual(preference.largeurs, {"designation": 300, "article": 40})
+        self.assertContains(self.client.get(self.fiche), 'class="column-reliquat')
+
+    def test_icone_sur_une_liste_sans_colonnes_declarees(self):
+        from comptes.models import PreferenceColonnes
+
+        liste = self.client.get("/admin/commercial/tiers/")
+        self.assertContains(liste, '"ecran": "commercial.tiers"')
+        self._preferences({"ecran": "commercial.tiers", "masquees": ["siret"]})
+        self.assertEqual(PreferenceColonnes.objects.get(utilisateur=self.admin, ecran="commercial.tiers").masquees, ["siret"])
+        liste = self.client.get("/admin/commercial/tiers/")
+        self.assertContains(liste, '"masquees": ["siret"]')  # masquée à l'écran par tableaux.js
+
+    def test_preferences_tableau_refuse_les_donnees_invalides(self):
+        self.assertEqual(self.client.get("/admin/preferences-tableau/").status_code, 405)
+        for donnees in (
+            {"ecran": "../admin", "masquees": []},
+            {"ecran": "commercial.tiers", "masquees": "siret"},
+            {"ecran": "commercial.tiers", "largeurs": {"siret": True}},
+            {"ecran": "commercial.tiers", "largeurs": ["siret"]},
+        ):
+            self.assertEqual(self._preferences(donnees).status_code, 400, donnees)
+        self.assertEqual(self.client.post("/admin/preferences-tableau/", data="pas du json", content_type="application/json").status_code, 400)
 
 
 class ConstructeurDroitsTests(TestCase):
@@ -5764,7 +5820,7 @@ class RemisesDevisTests(_FixtureModuleA, TestCase):
         self.assertContains(page, 'id="lignes-recap"')
         self.assertContains(page, 'name="remise_globale"')
         self.assertContains(page, "Total des lignes avant remise HT")
-        self.assertContains(page, "chiffrage/devis_colonnes")  # largeurs de colonnes réglables à la souris
+        self.assertContains(page, 'id="tableaux-config"')  # colonnes et largeurs réglables (comptes/tableaux.js)
         reponse = self.client.post(
             f"/admin/chiffrage/devis/{self.devis.pk}/change/",
             {"numero": "DEV-REC-A", "client": self.tiers.pk, "date_creation": "2026-01-01", "statut": "brouillon",

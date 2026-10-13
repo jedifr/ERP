@@ -20,7 +20,7 @@ from django.contrib import admin
 from django.urls import include, path, re_path
 
 from comptes.a_completer import a_completer_view
-from comptes.colonnes import mes_colonnes
+from comptes.colonnes import mes_colonnes, preferences_tableau
 from comptes.navigation import navigation_view
 from comptes.parametrage import parametrage_view
 from comptes.views import logo_connexion, media_protege
@@ -29,6 +29,7 @@ from technique.gamme_editeur import gamme_editeur_options_view, gamme_editeur_vi
 
 urlpatterns = [
     path("admin/mes-colonnes/", admin.site.admin_view(mes_colonnes), name="mes_colonnes"),
+    path("admin/preferences-tableau/", admin.site.admin_view(preferences_tableau), name="preferences_tableau"),
     path("admin/navigation/<str:app>/<str:modele>/", admin.site.admin_view(navigation_view), name="navigation_documents"),
     path("admin/a-completer/", admin.site.admin_view(a_completer_view), name="a_completer"),
     path("admin/nomenclature-editeur/<str:reference>/", admin.site.admin_view(nomenclature_editeur_view), name="nomenclature_editeur"),
