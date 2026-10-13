@@ -410,6 +410,7 @@ UNFOLD = {
         lambda request: static("comptes/theme.css"),
         lambda request: static("comptes/navigation_documents.css"),
         lambda request: static("comptes/accueil.css"),
+        lambda request: static("comptes/tableaux.css"),
     ],
     "SCRIPTS": [
         lambda request: static("comptes/anti_double_clic.js"),
@@ -421,6 +422,7 @@ UNFOLD = {
         lambda request: static("comptes/gamme_editeur.js"),
         lambda request: static("comptes/nomenclature_editeur.js"),
         lambda request: static("chiffrage/devis_builder.js"),
+        lambda request: static("comptes/tableaux.js"),
     ],
     "SITE_TITLE": "ERP maison",
     "SITE_HEADER": "ERP maison",

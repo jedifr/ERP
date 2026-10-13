@@ -93,14 +93,17 @@ class Societe(models.Model):
 
 
 class PreferenceColonnes(models.Model):
-    """Colonnes que l'utilisateur a choisi de masquer sur un écran (liste d'un document ou tableau de lignes d'une
-    fiche). Réglage personnel : il ne change rien pour les autres utilisateurs. Voir comptes/colonnes.py."""
+    """Réglage d'un tableau pour un utilisateur (liste d'un écran ou tableau de lignes d'une fiche) : colonnes qu'il a
+    choisi de masquer et largeurs qu'il a données aux colonnes. Réglage personnel : il ne change rien pour les autres
+    utilisateurs. Voir comptes/colonnes.py et comptes/static/comptes/tableaux.js."""
 
     utilisateur = models.ForeignKey(
         "auth.User", verbose_name="utilisateur", on_delete=models.CASCADE, related_name="preferences_colonnes"
     )
     ecran = models.CharField("écran", max_length=150)
-    masquees = models.JSONField("colonnes masquées", default=list, blank=True)
+    # None : l'utilisateur n'a rien choisi, les colonnes par défaut de l'écran s'appliquent.
+    masquees = models.JSONField("colonnes masquées", null=True, default=None, blank=True)
+    largeurs = models.JSONField("largeurs des colonnes (px)", default=dict, blank=True)
 
     class Meta:
         verbose_name = "Préférence de colonnes"
