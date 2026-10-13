@@ -413,6 +413,7 @@ UNFOLD = {
     ],
     "SCRIPTS": [
         lambda request: static("comptes/anti_double_clic.js"),
+        lambda request: static("comptes/entree_champ_suivant.js"),
         lambda request: static("comptes/filtre_client.js"),
         lambda request: static("comptes/navigation_documents.js"),
         lambda request: static("comptes/pdf_nouvel_onglet.js"),
