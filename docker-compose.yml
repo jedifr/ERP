@@ -9,7 +9,9 @@ services:
     volumes:
       - erp_postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-erp_user} -d ${DB_NAME:-erp_db}"]
+      # -h 127.0.0.1 : pendant l'initialisation d'une base neuve, le serveur temporaire ne répond que sur le socket local ;
+      # on ne déclare la base prête qu'une fois le vrai serveur démarré.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ${DB_USER:-erp_user} -d ${DB_NAME:-erp_db}"]
       interval: 5s
       timeout: 5s
       retries: 10
