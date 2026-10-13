@@ -295,6 +295,11 @@ def previsualiser_sciage_view(request):
         if ligne["longueur_mm"] > 0:
             croquis[i] = svg_piece(ligne["longueur_mm"], ligne["angle_gauche_deg"], ligne["angle_droit_deg"], ligne["couleur"])
         brutes.append(ligne)
+    numeros = [int(l["repere"]) for l in brutes if l["repere"].strip().isdigit()]
+    for l in brutes:  # repère laissé vide : le numéro qu'il recevra à l'enregistrement
+        if not l["repere"].strip():
+            l["repere"] = str(max(numeros, default=0) + 1)
+            numeros.append(int(l["repere"]))
     sections = ProfileSection.objects.select_related("article").in_bulk([l["section_id"] for l in brutes if (l["section_id"] or "").isdigit()])
     lignes = [{**l, "section": sections.get(int(l["section_id"]))} for l in brutes if (l["section_id"] or "").isdigit()]
     plan = calculer_plan(opt, lignes)

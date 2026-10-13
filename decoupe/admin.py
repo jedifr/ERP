@@ -929,12 +929,23 @@ class OptimisationSciageAdmin(ModelAdmin):
 
     def save_formset(self, request, form, formset, change):
         if formset.model is DebitSciage:
+            from .services.sciage import COULEURS
+
             instances = formset.save(commit=False)
-            ordre = max((d.ordre for d in form.instance.debits.all()), default=0)
+            existants = list(form.instance.debits.all())
+            ordre = max((d.ordre for d in existants), default=0)
+            prises = {d.couleur.lower() for d in existants} | {d.couleur.lower() for d in instances if d.pk}
+            numeros = [int(d.repere) for d in [*existants, *instances] if (d.repere or "").isdigit()]
             for d in instances:
+                if not (d.repere or "").strip():  # repère laissé vide : numéro suivant
+                    d.repere = str(max(numeros, default=0) + 1)
+                    numeros.append(int(d.repere))
                 if not d.pk:
                     ordre += 1
                     d.ordre = ordre
+                    if d.couleur.lower() == "#d4d4d4" and d.couleur.lower() in prises:  # gris par défaut déjà pris (saisie sans script) : première couleur libre
+                        d.couleur = next((c for c in COULEURS if c not in prises), d.couleur)
+                    prises.add(d.couleur.lower())
                 d.save()
             for d in formset.deleted_objects:
                 d.delete()

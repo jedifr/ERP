@@ -10,7 +10,7 @@ def contexte_liste_debits(optimisation):
     plan = calculer_plan(optimisation, lignes_de(optimisation))
     for s in plan.sections:
         # dessin plus étroit que l'écran, hachures propres au document
-        s.groupes_pdf = [{**g, "svg": svg_barre(g["barre"], largeur=520, hauteur=22, hachure=f"pdf-h{s.section.pk}-{i}")} for i, g in enumerate(s.groupes)]
+        s.groupes_pdf = [{**g, "svg": svg_barre(g["barre"], largeur=520, hauteur=22, hachure=f"pdf-h{s.section.pk}-{i}", hauteur_section=s.section.hauteur_mm)} for i, g in enumerate(s.groupes)]
     return {"o": optimisation, "plan": plan}
 
 
