@@ -393,8 +393,8 @@ def valeurs_defaut_tiers_view(request, code):
     change l'adresse de livraison après coup, indépendamment du client."""
     tiers = get_object_or_404(Tiers, pk=code)
 
-    facturation = Adresse.objects.filter(tiers=tiers, est_facturation=True, est_principale=True).first()
-    livraison = Adresse.objects.filter(tiers=tiers, est_livraison=True, est_principale=True).first()
+    facturation = Adresse.par_defaut(tiers, "est_facturation")
+    livraison = Adresse.par_defaut(tiers, "est_livraison")
 
     contact = None
     if livraison is not None:

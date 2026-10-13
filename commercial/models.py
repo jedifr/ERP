@@ -222,6 +222,25 @@ class Adresse(models.Model):
 
     types_affiches.fget.short_description = "Type(s) d'adresse"
 
+    @classmethod
+    def par_defaut(cls, tiers, champ_type):
+        """Adresse à proposer d'office pour `tiers` (`champ_type` : "est_facturation" ou "est_livraison") :
+        l'adresse principale de ce type ; sinon la seule adresse de ce type ; sinon la seule adresse du tiers
+        (un client qui n'a qu'une adresse la voit servir aux deux). None s'il faut choisir."""
+        if tiers is None:
+            return None
+        adresses = cls.objects.filter(tiers=tiers)
+        principale = adresses.filter(**{champ_type: True}, est_principale=True).first()
+        if principale is not None:
+            return principale
+        for qs in (adresses.filter(**{champ_type: True}), adresses):
+            candidates = list(qs[:2])
+            if len(candidates) == 1:
+                return candidates[0]
+            if candidates:
+                return None
+        return None
+
     def clean(self):
         super().clean()
         if not self.est_livraison and not self.est_facturation:

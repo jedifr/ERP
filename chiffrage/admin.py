@@ -33,7 +33,7 @@ from unfold.admin import ModelAdmin, TabularInline
 
 from codification.mixins import CodificationInitialeMixin
 from codification.models import RegleCodification
-from commercial.models import TauxTVA
+from commercial.models import Adresse, TauxTVA, Tiers
 
 from .pieces_views import PiecesDevisMixin
 from .builder_views import (
@@ -88,6 +88,7 @@ from .production import (
     prix_unitaire_commande,
     creer_ordres_fabrication,
     planifier_ordres_fabrication,
+    repasser_devis_en_brouillon,
     reviser_devis,
     synchroniser_lignes_commande,
 )
@@ -362,6 +363,37 @@ class DevisAdminForm(forms.ModelForm):
                 champ.choices = [c for c in champ.choices if c[0] in (Devis.Issue.EN_ATTENTE, Devis.Issue.REFUSE)]
         elif champ is not None:
             champ.choices = [c for c in champ.choices if c[0] == Devis.Issue.EN_ATTENTE]
+        self._adresses_obligatoires()
+
+    def _adresses_obligatoires(self):
+        """Adresses de facturation et de livraison obligatoires. Laissées vides alors que le client n'a
+        qu'une adresse possible (voir Adresse.par_defaut), elles sont remplies d'office à l'enregistrement."""
+        champs = {
+            "adresse_facturation": ("est_facturation", "facturation"),
+            "adresse_livraison": ("est_livraison", "livraison"),
+        }
+        vides = []
+        for nom, (champ_type, libelle) in champs.items():
+            champ = self.fields.get(nom)
+            if champ is None:  # lecture seule (devis validé)
+                continue
+            champ.required = True
+            champ.error_messages["required"] = (
+                f"Choisissez l'adresse de {libelle} (s'il n'y en a aucune, ajoutez-la sur la fiche du client)."
+            )
+            if self.is_bound and not self.data.get(self.add_prefix(nom)):
+                vides.append((nom, champ_type))
+        if not vides:
+            return
+        code_client = self.data.get(self.add_prefix("client")) or self.instance.client_id
+        client = Tiers.objects.filter(pk=code_client).first() if code_client else None
+        if client is None:
+            return
+        self.data = self.data.copy()
+        for nom, champ_type in vides:
+            adresse = Adresse.par_defaut(client, champ_type)
+            if adresse is not None:
+                self.data[self.add_prefix(nom)] = str(adresse.pk)
 
     def clean(self):
         cleaned = super().clean()
@@ -449,7 +481,12 @@ class DevisAdmin(ProchaineActionMixin, DateDuJourMixin, ChronologieMixin, PucesM
     ]
     inlines = [DevisLigneInline]
     actions = ["action_recalculer", "action_lancer_en_production"]
-    actions_detail = ["action_etape_suivante", "action_pdf", "action_reviser"]
+    actions_detail = [
+        "action_etape_suivante",
+        "action_pdf",
+        # Un devis validé est figé : on le rouvre soit tel quel (même indice), soit en créant un nouvel indice.
+        {"title": "Modifier le devis", "icon": "edit", "items": ["action_modifier", "action_reviser"]},
+    ]
     actions_submit_line = ["action_enregistrer_valider"]
     url_pdf = "admin:chiffrage_devis_action_pdf"
     libelle_valider = "Enregistrer, valider et ouvrir le PDF"
@@ -748,6 +785,56 @@ class DevisAdmin(ProchaineActionMixin, DateDuJourMixin, ChronologieMixin, PucesM
         reponse = HttpResponse(contenu, content_type="application/pdf")
         reponse["Content-Disposition"] = f'inline; filename="devis-{devis.pk}.pdf"'
         return reponse
+
+    @unfold_action(description="Modifier sans indicer (même indice)", permissions=["modifier"], url_path="modifier")
+    def action_modifier(self, request, object_id):
+        devis = get_object_or_404(Devis, pk=object_id)
+        retour = reverse("admin:chiffrage_devis_change", args=[devis.pk])
+        if request.method == "POST":
+            try:
+                repasser_devis_en_brouillon(devis)
+            except ChiffrageError as exc:
+                self.message_user(request, message_erreur("", exc), level=messages.ERROR)
+                return HttpResponseRedirect(retour)
+            self.message_user(
+                request,
+                format_html(
+                    "{} (indice {}) est repassé en brouillon : modifiez-le, puis validez-le à nouveau.",
+                    devis, devis.indice,
+                ),
+                level=messages.SUCCESS,
+            )
+            return HttpResponseRedirect(retour)
+        if devis.statut != Devis.Statut.VALIDE:
+            avertissement = "Ce devis est déjà en brouillon : il se modifie directement."
+        elif devis.commandes.exists():
+            avertissement = "Une commande est déjà issue de ce devis : il ne se modifie plus."
+        elif devis.issue == Devis.Issue.REMPLACE:
+            avertissement = "Ce devis a été remplacé par un indice plus récent : modifiez ce dernier."
+        else:
+            avertissement = ""
+        return TemplateResponse(
+            request,
+            "admin/confirmer_avec_motif.html",
+            {
+                **self.admin_site.each_context(request),
+                "title": f"Modifier le devis {devis} sans l'indicer (indice {devis.indice})",
+                "explication": (
+                    f"Le devis {devis} repasse en brouillon avec le même numéro et le même indice ({devis.indice}), "
+                    "sans créer de nouvelle version (les changements restent visibles dans l'historique) : à utiliser "
+                    "pour corriger une offre que le client n'a pas encore prise en compte. Pour une offre déjà discutée avec le client, préférez « Nouvel "
+                    "indice ». Une fois modifié, le devis devra être validé à nouveau."
+                ),
+                "avertissement": avertissement,
+                "sans_motif": True,
+                "bouton": "Repasser en brouillon et modifier",
+                "retour": retour,
+            },
+        )
+
+    def has_modifier_permission(self, request, obj=None):
+        # Repasser un devis en brouillon revient à le « dévalider » : même droit que pour le valider.
+        return request.user.has_perm("chiffrage.change_devis") and request.user.has_perm("chiffrage.valider_devis")
 
     @unfold_action(description="Nouvel indice (réviser)", permissions=["reviser"], url_path="reviser")
     def action_reviser(self, request, object_id):
