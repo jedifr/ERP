@@ -13,6 +13,6 @@ commande enregistrée : sur le formulaire d'ajout, ce sont des boutons « Enregi
   <a href="{% url 'admin:chiffrage_commande_action_importer_devis' original.pk %}" class="lc-ouvrir inline-block">⤓ Importer des lignes de devis</a>
 </div>
 {% url 'admin:chiffrage_commande_constructeur' original.pk as url_ajout %}
-{% include "admin/chiffrage/_assistant_ligne.html" with libelle_bouton="Composer un article" titre="Nouvelle ligne de commande" libelle_quantite="ligne de commande" document="la commande" date_reference=original.date_commande onglet="" %}
+{% include "admin/chiffrage/_assistant_ligne.html" with libelle_bouton="Composer un article" titre="Nouvelle ligne de commande" libelle_quantite="ligne de commande" document="la commande" date_reference=original.date_commande onglet="lignes" %}
 {% endif %}
 {% endif %}
