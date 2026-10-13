@@ -52,6 +52,10 @@ def _bloc_groupe(groupe, choix, formats):
         tole = next((t for t in toles if t.pk == retenues.tole_id), None)
     if tole is None and len(toles) == 1:
         tole = toles[0]
+    # Tôles dont le format est connu : seuls leurs formats sont comparés, chacun chiffré avec sa tôle (plus de choix de tôle séparé).
+    formats_stock, toles_format = imb.toles_par_format(toles, preferee=tole)
+    if formats_stock:
+        formats = formats_stock
     # Bord de tôle : automatique (matière, épaisseur, procédé : voir matiere.bord_tole_mm) tant qu'il n'est pas imposé ou retenu.
     bord_auto = max((bord_tole_piece_mm(p) for p in pieces), default=5.0)
     retenue = retenues is not None and retenues.tole_id is not None
@@ -72,13 +76,22 @@ def _bloc_groupe(groupe, choix, formats):
     bloc = {
         "groupe": groupe, "cle": groupe.cle, "toles": toles, "tole": tole, "marge": marge, "marge_auto": marge_auto, "chute": taux, "forme": forme, "formats": formats,
         "erreur": "", "avertissement": "", "epaisseurs_toles": [] if toles else imb.epaisseurs_toles_existantes(groupe),
+        "par_tole": bool(formats_stock), "toles_format": toles_format, "toles_sans_format": [t for t in toles if t.format_tole_id is None] if formats_stock else [],
         "lien_creer_tole": "" if toles else reverse("admin:technique_article_add") + f"?nature=matiere_premiere&matiere={groupe.matiere.pk}&epaisseur={groupe.epaisseur:g}&unite_cout=surface", "sens": sens, "coin": coin, "sens_choix": PieceDecoupe.SensImbrication.choices,
         "coin_choix": PieceDecoupe.CoinDepart.choices,
     }
     if not pieces:
         bloc["erreur"] = "Aucune pièce réalisable dans ce groupe."
         return bloc
-    if tole is not None and formats:
+    toles_cout, sans_cout = None, {}
+    if formats_stock:
+        toles_cout = dict(toles_format)
+        for pk, t in toles_format.items():
+            try:
+                prix_au_mm2(t, t.format_tole.largeur_mm, t.format_tole.longueur_mm)
+            except ErreurMatiere as exc:
+                toles_cout[pk], sans_cout[pk] = None, str(exc)
+    elif tole is not None and formats:
         try:
             prix_au_mm2(tole, formats[0].largeur_mm, formats[0].longueur_mm)
         except ErreurMatiere as exc:
@@ -88,11 +101,11 @@ def _bloc_groupe(groupe, choix, formats):
     tout = _booleen(choix.get("tout"), False)
     obligatoires = {f.pk for f in formats if (retenues is not None and f.pk == retenues.format_tole_id) or str(f.pk) == str(choix.get("format"))}
     lignes, meilleur, non_calcules, message_paliers = imb.comparer_par_paliers(
-        groupe, formats, marge, taux, tole, forme=forme, sens=sens, coin=coin, tout=tout, obligatoires=obligatoires,
+        groupe, formats, marge, taux, tole, forme=forme, sens=sens, coin=coin, tout=tout, obligatoires=obligatoires, toles=toles_cout,
     )
     bloc.update({"non_calcules": non_calcules, "message_paliers": message_paliers, "tout": tout})
     if meilleur is None:
-        if formats and not imb.formats_pour_groupe(groupe, formats):
+        if formats and not formats_stock and not imb.formats_pour_groupe(groupe, formats):
             bloc["erreur"] = (
                 f"Aucun format de tôle n'est prévu pour {groupe.matiere.nom} : renseignez les familles ou nuances de vos formats "
                 "(menu Formats de tôle) ou laissez-les vides pour toutes les matières."
@@ -100,6 +113,9 @@ def _bloc_groupe(groupe, choix, formats):
         elif formats and not imb.formats_compatibles(groupe.procede, formats):
             nom = "le laser" if groupe.procede == "laser" else "le jet d'eau"
             bloc["erreur"] = (
+                f"Aucune tôle {groupe.matiere.nom} de {groupe.epaisseur:g} mm en matière première ne tient dans {nom} "
+                f"({reglage(groupe.procede).libelle_capacite}) : créez la tôle dans un format plus petit."
+            ) if formats_stock else (
                 f"Aucun format de tôle actif ne tient dans {nom} ({reglage(groupe.procede).libelle_capacite}). "
                 "Ajoutez un format plus petit dans le menu « Formats de tôle »."
             )
@@ -114,6 +130,11 @@ def _bloc_groupe(groupe, choix, formats):
     if resultat is None:
         format_choisi = meilleur
         resultat = next(r for f, r, _ in lignes if f.pk == meilleur.pk)
+    if formats_stock:
+        tole = bloc["tole"] = toles_format[format_choisi.pk]
+        if format_choisi.pk in sans_cout:
+            bloc["avertissement"] = f"{sans_cout[format_choisi.pk]} Le coût matière n'est pas calculé."
+            bloc["avertissement_lien"] = (reverse("admin:technique_article_change", args=[tole.pk]), "Renseigner le coût de la tôle")
     from .reglage import resume_groupe
 
     try:
@@ -136,7 +157,8 @@ def _bloc_groupe(groupe, choix, formats):
     if resultat.avertissement_coin:
         bloc["avertissement"] = (bloc["avertissement"] + " " + resultat.avertissement_coin).strip()
     bloc.update({
-        "lignes": [{"format": f, "resultat": r, "erreur": e, "meilleur": f.pk == meilleur.pk, "choisi": f.pk == format_choisi.pk} for f, r, e in lignes],
+        "lignes": [{"format": f, "tole": toles_format.get(f.pk), "resultat": r, "erreur": e, "meilleur": f.pk == meilleur.pk, "choisi": f.pk == format_choisi.pk}
+                   for f, r, e in lignes],
         "resultat": resultat, "format": format_choisi, "feuilles": feuilles,
         "feuilles_masquees": max(resultat.nb_feuilles - MAX_FEUILLES_AFFICHEES, 0),
         "legende": [(p, couleurs[p.pk]) for p in pieces],
@@ -566,13 +588,19 @@ class PiecesDevisMixin:
             return JsonResponse({"detail": "Groupe introuvable : rafraîchissez le panneau."}, status=404)
         from decoupe.models import FormatTole
 
-        format_tole = FormatTole.objects.filter(pk=donnees.get("format"), actif=True).first()
+        toles = imb.toles_possibles(groupe)
+        tole = next((t for t in toles if str(t.pk) == str(donnees.get("tole"))), None) if donnees.get("tole") else None
+        formats_stock, toles_format = imb.toles_par_format(toles, preferee=tole)
+        if formats_stock:  # formats des tôles en matière première : la tôle est celle du format
+            format_tole = next((f for f in formats_stock if str(f.pk) == str(donnees.get("format"))), None)
+            tole = toles_format.get(format_tole.pk) if format_tole is not None else None
+        else:
+            format_tole = FormatTole.objects.filter(pk=donnees.get("format"), actif=True).first()
         if format_tole is None:
             return JsonResponse({"detail": "Choisissez un format de tôle."}, status=400)
         compatible, motif = imb.format_compatible(format_tole, groupe.procede)
         if not compatible:
             return JsonResponse({"detail": f"{format_tole} : {motif}"}, status=400)
-        tole = next((t for t in imb.toles_possibles(groupe) if str(t.pk) == str(donnees.get("tole"))), None) if donnees.get("tole") else None
         marge = max(0.0, _nombre(donnees.get("marge"), 5))
         taux = max(0.0, min(100.0, _nombre(donnees.get("chute"), 0)))
         forme = _booleen(donnees.get("forme"), True)
@@ -616,6 +644,9 @@ class PiecesDevisMixin:
         from decoupe.models import FormatTole
 
         format_tole = FormatTole.objects.filter(pk=donnees.get("format"), actif=True).first() if donnees.get("format") else None
+        if format_tole is None:  # le format usuel le plus grand qui tient dans la machine : la tôle créée est aussitôt utilisable
+            possibles = imb.formats_compatibles(groupe.procede, imb.formats_pour_groupe(groupe, imb.formats_actifs()))
+            format_tole = min(possibles, key=lambda f: (f.priorite, -f.largeur_mm * f.longueur_mm), default=None)
         tole = regle.creer_tole(groupe.matiere, groupe.epaisseur, format_tole)
         return JsonResponse({"ok": True, "reference": tole.pk, "sans_cout": tole.cout_unitaire is None})
 

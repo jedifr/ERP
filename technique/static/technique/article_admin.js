@@ -8,12 +8,12 @@
     // Chaque nature n'affiche que les champs qui la concernent : un article fabriqué n'a ni type de profil, ni poids
     // linéique, ni coût d'achat (son coût est recalculé à chaque devis) ; un composant acheté n'a ni épaisseur, ni profil.
     const CHAMPS_MASQUES = {
-        fabrique: ["type_profil", "poids_lineique", "cout_unitaire", "unite_cout"],
-        composant: ["epaisseur", "type_profil", "poids_lineique"],
-        consommable: ["epaisseur", "type_profil", "poids_lineique"],
-        service_achete: ["epaisseur", "type_profil", "poids_lineique", "matiere"],
+        fabrique: ["format_tole", "type_profil", "poids_lineique", "cout_unitaire", "unite_cout"],
+        composant: ["epaisseur", "format_tole", "type_profil", "poids_lineique"],
+        consommable: ["epaisseur", "format_tole", "type_profil", "poids_lineique"],
+        service_achete: ["epaisseur", "format_tole", "type_profil", "poids_lineique", "matiere"],
     };
-    const TOUS_CHAMPS = ["epaisseur", "type_profil", "poids_lineique", "cout_unitaire", "unite_cout", "matiere"];
+    const TOUS_CHAMPS = ["epaisseur", "format_tole", "type_profil", "poids_lineique", "cout_unitaire", "unite_cout", "matiere"];
 
     function initChampsSelonNature() {
         const natureField = document.getElementById("id_nature");
