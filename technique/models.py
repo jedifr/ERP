@@ -1,3 +1,5 @@
+import re
+
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -100,6 +102,27 @@ class Matiere(models.Model):
         return self.famille.usinabilite if self.famille_id else None
 
 
+_NOMBRE = r"\d+(?:[.,]\d+)?"
+_COTES = re.compile(rf"{_NOMBRE}(?:\s*[x×X*]\s*{_NOMBRE})+")
+
+
+def format_tole_depuis_texte(*textes):
+    """Format de tôle (FormatTole) dont les dimensions « largeur x longueur » figurent dans l'un des textes (référence, libellé), dans un
+    sens ou dans l'autre ; None si aucun ne correspond. Dans « 1500 x 3000 x 3 » ou « 3x1500x3000 », l'épaisseur est ignorée."""
+    from decoupe.models import FormatTole
+
+    for texte in textes:
+        for cotes in _COTES.findall(texte or ""):
+            valeurs = [float(v.replace(",", ".")) for v in re.findall(_NOMBRE, cotes)]
+            for a, b in zip(valeurs, valeurs[1:]):
+                if min(a, b) < 100:  # épaisseur
+                    continue
+                trouve = FormatTole.objects.filter(models.Q(largeur_mm=a, longueur_mm=b) | models.Q(largeur_mm=b, longueur_mm=a)).first()
+                if trouve is not None:
+                    return trouve
+    return None
+
+
 class Article(models.Model):
     """Table unique portant deux natures : matière première ou fabriqué."""
 
@@ -145,6 +168,11 @@ class Article(models.Model):
         help_text="Comment le prix d'achat est exprimé. À l'unité, pour une tôle : prix de la feuille entière.",
     )
     epaisseur = models.FloatField("épaisseur", null=True, blank=True, help_text="Tôle")
+    format_tole = models.ForeignKey(
+        "decoupe.FormatTole", verbose_name="format de la tôle", on_delete=models.PROTECT, related_name="toles", null=True, blank=True,
+        help_text="Tôle : dimensions de la feuille achetée. L'imbrication des devis ne propose que les formats des tôles en matière première. "
+                  "Vide : déduit de la référence ou du libellé (« 1500x3000 ») s'il correspond à un format de tôle.",
+    )
     type_profil = models.CharField(
         "type de profil", max_length=20, choices=TypeProfil.choices, null=True, blank=True
     )
@@ -232,6 +260,8 @@ class Article(models.Model):
         return None
 
     def save(self, *args, **kwargs):
+        if self.format_tole_id is None and self.nature == self.Nature.MATIERE_PREMIERE and self.epaisseur:
+            self.format_tole = format_tole_depuis_texte(self.reference, self.libelle)
         if self.gere_en_stock is None:
             # Par défaut seule une matière première se gère en stock — et jamais si la société n'a pas de stock.
             self.gere_en_stock = bool(settings.STOCK_ACTIF and self.nature == self.Nature.MATIERE_PREMIERE)
@@ -364,7 +394,7 @@ class RegleCreationTole(models.Model):
         format = format or self.format_par_defaut(matiere)
         return Article.objects.create(
             reference=self.reference_pour(matiere, epaisseur, format), libelle=self.libelle_pour(matiere, epaisseur, format),
-            nature=Article.Nature.MATIERE_PREMIERE, matiere=matiere, epaisseur=float(epaisseur), unite_cout=self.unite_cout,
+            nature=Article.Nature.MATIERE_PREMIERE, matiere=matiere, epaisseur=float(epaisseur), format_tole=format, unite_cout=self.unite_cout,
             cout_unitaire=self.cout_unitaire, taux_tva=self.taux_tva, gere_en_stock=self.gere_en_stock,
             stock_mini=self.stock_mini, quantite_reappro=self.quantite_reappro,
         )

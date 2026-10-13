@@ -124,9 +124,23 @@ def toles_possibles(groupe):
     matieres = {groupe.matiere.pk}
     if groupe.matiere.famille_id:
         matieres |= set(groupe.matiere.famille.nuances.values_list("pk", flat=True))
-    candidates = Article.objects.filter(nature=Article.Nature.MATIERE_PREMIERE, epaisseur=groupe.epaisseur, matiere__in=matieres)
+    candidates = Article.objects.filter(nature=Article.Nature.MATIERE_PREMIERE, epaisseur=groupe.epaisseur, matiere__in=matieres).select_related("format_tole")
     exactes = [t for t in candidates.order_by("reference") if t.matiere_id == groupe.matiere.pk]
     return exactes or list(candidates.order_by("reference"))
+
+
+def toles_par_format(toles, preferee=None):
+    """(formats, {id du format: tôle}) des tôles dont le format est renseigné : chaque format disponible en matière première, avec sa
+    tôle (`preferee` si elle est de ce format, sinon la première de la liste). Formats triés comme les formats de tôle."""
+    par_format, formats = {}, {}
+    for t in toles:
+        if t.format_tole_id is None:
+            continue
+        formats.setdefault(t.format_tole_id, t.format_tole)
+        if t.format_tole_id not in par_format or (preferee is not None and t.pk == preferee.pk):
+            par_format[t.format_tole_id] = t
+    ordre = sorted(formats.values(), key=lambda f: (-f.longueur_mm, -f.largeur_mm))
+    return ordre, par_format
 
 
 def _empreinte(items, largeur, longueur, marge, espacement, forme, axe="y"):
@@ -272,20 +286,22 @@ def imbriquer_groupe(groupe, format_tole, marge_mm, taux_chute, tole=None, quant
     )
 
 
-def comparer_formats(groupe, formats, marge_mm, taux_chute, tole=None, forme=True, sens="longueur", coin="bas_gauche"):
+def comparer_formats(groupe, formats, marge_mm, taux_chute, tole=None, forme=True, sens="longueur", coin="bas_gauche", toles=None):
     """[(format, ResultatGroupe | None, message d'erreur)] pour chaque format ; le moins cher (à défaut le moins consommateur) est
-    marqué en tête par `meilleur`. Retourne (lignes, format_meilleur)."""
+    marqué en tête par `meilleur`. `toles` : {id du format: tôle de ce format}, qui remplace `tole` pour chiffrer chaque format.
+    Retourne (lignes, format_meilleur)."""
     lignes = []
     prechauffer(groupe, formats, marge_mm, forme=forme, sens=sens)  # les formats se calculent ensemble, sur plusieurs cœurs
     for f in formats:
+        tole_f = toles.get(f.pk, tole) if toles is not None else tole
         try:
-            lignes.append((f, imbriquer_groupe(groupe, f, marge_mm, taux_chute, tole, forme=forme, sens=sens, coin=coin), ""))
+            lignes.append((f, imbriquer_groupe(groupe, f, marge_mm, taux_chute, tole_f, forme=forme, sens=sens, coin=coin), ""))
         except ErreurMatiere as exc:
             lignes.append((f, None, str(exc)))
     valides = [r for _, r, _ in lignes if r is not None]
     if not valides:
         return lignes, None
-    meilleur = min(valides, key=lambda r: (r.cout_total if r.cout_total is not None else Decimal(0), r.surface_consommee_mm2, r.nb_feuilles))
+    meilleur = min(valides, key=lambda r: (r.cout_total is None, r.cout_total or Decimal(0), r.surface_consommee_mm2, r.nb_feuilles))
     return lignes, meilleur.format
 
 
@@ -302,19 +318,22 @@ def formats_pour_groupe(groupe, formats):
     return [f for f in formats if f.convient_a(groupe.matiere)]
 
 
-def comparer_par_paliers(groupe, formats, marge_mm, taux_chute, tole=None, forme=True, sens="longueur", coin="bas_gauche", seuil=None, tout=False, obligatoires=()):
+def comparer_par_paliers(groupe, formats, marge_mm, taux_chute, tole=None, forme=True, sens="longueur", coin="bas_gauche", seuil=None, tout=False, obligatoires=(),
+                         toles=None):
     """Comparaison des formats par niveaux de priorité : les formats de priorité 1 d'abord ; le niveau suivant n'est calculé que si le meilleur
     format du niveau a un taux de chutes entre pièces supérieur au seuil (ou si `tout`). `obligatoires` : identifiants de formats à calculer
-    quoi qu'il arrive (le format retenu). Retourne (lignes, meilleur, non_calcules, message) ; `lignes` = [(format, résultat | None, erreur)]."""
+    quoi qu'il arrive (le format retenu). `toles` : {id du format: tôle} quand les formats sont ceux des tôles en matière première (chacun
+    chiffré avec sa tôle, sans filtre par matière : la tôle existe). Retourne (lignes, meilleur, non_calcules, message) ;
+    `lignes` = [(format, résultat | None, erreur)]."""
     from decoupe.models import ReglageImbrication
 
     seuil = ReglageImbrication.charger().seuil_chutes_pct if seuil is None else seuil
-    candidats = formats_pour_groupe(groupe, formats)
+    candidats = list(formats) if toles is not None else formats_pour_groupe(groupe, formats)
     lignes, message = [], ""
     niveaux = sorted({f.priorite for f in candidats})
     for niveau in niveaux:
         du_niveau = [f for f in candidats if f.priorite == niveau]
-        l, meilleur_niveau = comparer_formats(groupe, du_niveau, marge_mm, taux_chute, tole, forme=forme, sens=sens, coin=coin)
+        l, meilleur_niveau = comparer_formats(groupe, du_niveau, marge_mm, taux_chute, tole, forme=forme, sens=sens, coin=coin, toles=toles)
         lignes += l
         if tout:
             continue
@@ -329,13 +348,13 @@ def comparer_par_paliers(groupe, formats, marge_mm, taux_chute, tole=None, forme
     deja = {f.pk for f, _, _ in lignes}
     for f in candidats:
         if f.pk in obligatoires and f.pk not in deja:
-            lignes += comparer_formats(groupe, [f], marge_mm, taux_chute, tole, forme=forme, sens=sens, coin=coin)[0]
+            lignes += comparer_formats(groupe, [f], marge_mm, taux_chute, tole, forme=forme, sens=sens, coin=coin, toles=toles)[0]
             deja.add(f.pk)
     non_calcules = [f for f in candidats if f.pk not in deja]
     valides = [(f, r) for f, r, _ in lignes if r is not None]
     meilleur = None
     if valides:
-        meilleur = min(valides, key=lambda fr: (fr[1].cout_total if fr[1].cout_total is not None else Decimal(0), fr[1].surface_consommee_mm2, fr[1].nb_feuilles))[0]
+        meilleur = min(valides, key=lambda fr: (fr[1].cout_total is None, fr[1].cout_total or Decimal(0), fr[1].surface_consommee_mm2, fr[1].nb_feuilles))[0]
     return lignes, meilleur, non_calcules, message
 
 

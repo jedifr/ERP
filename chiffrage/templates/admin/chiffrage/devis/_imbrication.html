@@ -5,12 +5,13 @@
   <h3 class="dp-groupe-titre">Imbrication — {{ b.groupe.libelle }} <span class="dp-groupe-nb">{{ b.groupe.pieces|length }} pièce{{ b.groupe.pieces|length|pluralize }}{% if b.groupe.exclues %} · {{ b.groupe.exclues|length }} exclue{{ b.groupe.exclues|length|pluralize }}{% endif %}</span></h3>
   {% if b.avertissement %}<div class="dp-message dp-message-ko">{{ b.avertissement }}{% if b.avertissement_lien %} <a class="dp-lien" href="{{ b.avertissement_lien.0 }}" target="_blank" rel="noopener">{{ b.avertissement_lien.1 }} ↗</a>{% endif %}</div>{% endif %}
   <div class="dp-barre">
-    <label>Tôle
+    {% if b.par_tole %}<span class="dp-tole-auto" title="La tôle suit le format choisi dans la comparaison ci-dessous : seuls les formats des tôles en matière première sont proposés.">Tôle<strong>{{ b.tole.reference }}</strong></span>
+    {% else %}<label>Tôle
       <select data-i="tole">
         <option value="">{% if b.toles %}— sans coût matière —{% else %}Aucune tôle correspondante{% endif %}</option>
         {% for t in b.toles %}<option value="{{ t.pk }}" {% if b.tole and t.pk == b.tole.pk %}selected{% endif %}>{{ t.reference }}{% if t.libelle %} — {{ t.libelle }}{% endif %}</option>{% endfor %}
       </select>
-    </label>
+    </label>{% endif %}
     <label title="Bande non découpée sur le pourtour de la tôle : selon la matière, l'épaisseur et le procédé (paramètres de coupe). Modifiez la valeur pour l'imposer ; videz le champ pour revenir au calcul automatique.">Bord de tôle (mm){% if b.marge_auto %} <em class="dp-auto">auto</em>{% endif %}<input type="text" inputmode="decimal" data-i="marge" data-auto="{% if b.marge_auto %}1{% else %}0{% endif %}" placeholder="auto" value="{{ b.marge|unlocalize }}"></label>
     <label>Chute récupérable (%)<input type="text" inputmode="decimal" data-i="chute" value="{{ b.chute|unlocalize }}"></label>
     <label>Remplissage
@@ -56,12 +57,12 @@
       <span><i style="background:#e5e7eb"></i>Chute entre les pièces (consommée)</span><span><i class="dp-hachure"></i>Chute de bout (non consommée)</span><span class="dp-legende-note">Format {{ b.format }} · {{ b.resultat.nb_feuilles }} feuille{{ b.resultat.nb_feuilles|pluralize }}</span>
     </div>
     <table class="dp-table">
-      <caption>Comparaison des formats de tôle</caption>
-      <thead><tr><th>Format</th><th class="n">Feuilles</th><th class="n">Utilisation</th><th class="n">Surface consommée</th><th class="n">Coût matière</th></tr></thead>
+      <caption>{% if b.par_tole %}Comparaison des tôles disponibles en matière première{% else %}Comparaison des formats de tôle{% endif %}</caption>
+      <thead><tr><th>{% if b.par_tole %}Tôle{% else %}Format{% endif %}</th><th class="n">Feuilles</th><th class="n">Utilisation</th><th class="n">Surface consommée</th><th class="n">Coût matière</th></tr></thead>
       <tbody>
       {% for l in b.lignes %}
         <tr class="dp-format {% if l.choisi %}dp-choisi{% endif %} {% if l.meilleur %}dp-meilleur{% endif %}" data-i="format" data-valeur="{{ l.format.pk }}" tabindex="0">
-          <td>{{ l.format }}{% if l.meilleur %} <span class="dp-etiquette">le moins cher</span>{% endif %}{% if l.choisi %} <span class="dp-etiquette dp-etiquette-choisi">affiché</span>{% endif %}</td>
+          <td>{% if l.tole %}{{ l.tole.reference }} <span class="dp-aide">({{ l.format }})</span>{% else %}{{ l.format }}{% endif %}{% if l.meilleur %} <span class="dp-etiquette">le moins cher</span>{% endif %}{% if l.choisi %} <span class="dp-etiquette dp-etiquette-choisi">affiché</span>{% endif %}</td>
           {% if l.resultat %}
             <td class="n">{{ l.resultat.nb_feuilles }}</td><td class="n">{{ l.resultat.taux_utilisation_pct|floatformat:0 }} %</td>
             <td class="n">{{ l.resultat.surface_consommee_m2|floatformat:2 }} m²</td>
@@ -74,6 +75,7 @@
       {% endfor %}
       </tbody>
     </table>
+    {% if b.toles_sans_format %}<p class="dp-aide">Tôle{{ b.toles_sans_format|length|pluralize }} sans format, non proposée{{ b.toles_sans_format|length|pluralize }} : {% for t in b.toles_sans_format %}<a class="dp-lien" href="{% url 'admin:technique_article_change' t.pk %}" target="_blank" rel="noopener">{{ t.reference }} ↗</a>{% if not forloop.last %}, {% endif %}{% endfor %} (renseignez le « format de la tôle » de l'article).</p>{% endif %}
     {% if b.message_paliers %}<p class="dp-aide dp-attention">{{ b.message_paliers }}</p>{% endif %}
     {% if b.non_calcules %}<p class="dp-aide"><button type="button" class="dp-tout-formats" data-cle="{{ b.cle }}">Calculer tous les formats</button> Les formats de priorité inférieure ne sont essayés que si les chutes entre pièces dépassent le seuil des réglages d'imbrication.</p>{% endif %}
     <table class="dp-table">
@@ -89,7 +91,7 @@
     </table>
     <div class="dp-pied">
       <span class="dp-aide">{% if b.retenu %}<strong class="dp-retenu">✓ Retenu</strong> : cette tôle et ce format serviront au chiffrage.{% else %}Le choix n'est enregistré que si vous le retenez.{% endif %}</span>
-      {% if editable and not b.retenu %}<button type="button" class="dp-retenir" data-format="{{ b.format.pk }}">Retenir « {{ b.format }} »</button>{% endif %}
+      {% if editable and not b.retenu %}<button type="button" class="dp-retenir" data-format="{{ b.format.pk }}">Retenir « {% if b.par_tole %}{{ b.tole.reference }}{% else %}{{ b.format }}{% endif %} »</button>{% endif %}
     </div>
   {% endif %}
   {% for p, raison in b.groupe.exclues %}<p class="dp-aide dp-exclue">Exclue de l'imbrication : <a class="dp-lien" href="#dp-piece-{{ p.pk }}"><strong>{{ p.nom }}</strong></a> — {{ raison }} <a class="dp-lien" href="{% url 'admin:decoupe_parametrecoupe_changelist' %}?procede={{ b.groupe.procede }}" target="_blank" rel="noopener">Voir les paramètres de coupe ↗</a></p>{% endfor %}
