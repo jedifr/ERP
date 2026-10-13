@@ -25,7 +25,9 @@ L'ERP tourne exactement comme sur le Synology : deux conteneurs (`web` = Django/
 3. **SSH** : Panneau de configuration → Terminal → activer **SSH** (port 22). Seuls les comptes
    administrateurs peuvent se connecter ; `root` est désactivé, on passe par `sudo`.
 4. **Dossiers partagés** : vérifier qu'un dossier `docker` existe sur le volume NVMe (l'appli Docker
-   le crée souvent ; sinon le créer), et créer `erp_sauvegardes` sur le volume IronWolf.
+   le crée souvent ; sinon le créer), et créer le dossier partagé `erp_sauvegardes` sur le volume
+   IronWolf (lecture/écriture pour votre compte). Sur UGOS, un `mkdir` à la racine d'un volume est
+   refusé : les dossiers de premier niveau se créent toujours depuis l'interface.
 
 ## Étape 1 — Vérifier le Ugreen en SSH
 
@@ -167,7 +169,7 @@ donc sur le NVMe). Pour qu'elles aillent sur les IronWolf sans rien changer aux 
 la sauvegarde automatique faite par `update-nas.sh`), on remplace ce dossier par un lien :
 
 ```bash
-mkdir -p /volume2/erp_sauvegardes
+ls -d /volume*/erp_sauvegardes    # chemin réel du dossier partagé créé à l'étape 0
 ln -s /volume2/erp_sauvegardes /volume1/docker/erp_sauvegardes
 ```
 
