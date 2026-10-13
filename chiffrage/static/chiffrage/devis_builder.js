@@ -12,6 +12,9 @@ function demarrerConstructeur() {
     const DEVIS_NUMERO = devisBuilderData.numero || null;
     const DEVIS_DATE_CREATION = devisBuilderData.date_creation || null;
     const URL_AJOUT = devisBuilderData.url;
+    // Même assistant sur la fiche Devis et sur la fiche Commande (« Composer un article ») : voir _assistant_ligne.html.
+    const DOCUMENT = devisBuilderData.document || "le devis";
+    const ONGLET = devisBuilderData.onglet || "";
 
     const matiereCache = {};
 
@@ -286,12 +289,18 @@ function demarrerConstructeur() {
         ouvrir.addEventListener("click", () => { panneau.hidden = !panneau.hidden; ouvrir.classList.toggle("lc-ouvert", !panneau.hidden); });
         const fermer = document.getElementById("fermer-constructeur");
         if (fermer) fermer.addEventListener("click", () => { panneau.hidden = true; ouvrir.classList.remove("lc-ouvert"); });
+        // Arrivée depuis « Enregistrer puis composer un article » (formulaire d'ajout de commande) : assistant déjà ouvert.
+        if (new URLSearchParams(window.location.search).get("composer") === "1") {
+            panneau.hidden = false;
+            ouvrir.classList.add("lc-ouvert");
+            panneau.scrollIntoView({ block: "center" });
+        }
     }
 
     function construireCharge() {
         const quantite = parseFloat(document.getElementById("ligne-quantite").value);
         if (!quantite) {
-            showMessage("La quantité de la ligne de devis est requise.", true);
+            showMessage("La quantité de la ligne est requise.", true);
             return null;
         }
         const nouveau = document.querySelector("input[name=mode-article]:checked").value === "nouveau";
@@ -324,7 +333,7 @@ function demarrerConstructeur() {
         const payload = construireCharge();
         if (!payload) return;
         if (apercu) payload.apercu = true;
-        else if (formulaireModifie && !window.confirm("Le devis a des modifications non enregistrées : l'ajout recharge la page et elles seront perdues. Continuer ?")) return;
+        else if (formulaireModifie && !window.confirm(`La fiche (${DOCUMENT}) a des modifications non enregistrées : l'ajout recharge la page et elles seront perdues. Continuer ?`)) return;
         const zoneApercu = document.getElementById("lc-apercu");
         fetch(URL_AJOUT, {
             method: "POST",
@@ -355,8 +364,13 @@ function demarrerConstructeur() {
                     return;
                 }
                 showMessage(`Ligne ajoutée (${data.article} × ${data.quantite}). Rechargement...`, false);
-                try { window.sessionStorage.setItem("devis-onglet-apres-rechargement", "lignes"); } catch (e) { /* ignoré */ }
-                setTimeout(() => { window.location.hash = "#onglet=lignes"; window.location.reload(); }, 800);
+                if (ONGLET) {
+                    try { window.sessionStorage.setItem("devis-onglet-apres-rechargement", ONGLET); } catch (e) { /* ignoré */ }
+                    setTimeout(() => { window.location.hash = `#onglet=${ONGLET}`; window.location.reload(); }, 800);
+                } else {
+                    // Recharge sans ?composer=1 (sinon l'assistant se rouvrirait).
+                    setTimeout(() => { window.location.replace(window.location.pathname); }, 800);
+                }
             })
             .catch(() => showMessage("Erreur réseau lors de l'envoi.", true));
     }

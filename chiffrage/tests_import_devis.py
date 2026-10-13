@@ -206,3 +206,93 @@ class ReordonnerLignesCommandeAdminTests(ImportLignesDevisBase):
         self.assertEqual(reponse.status_code, 302, getattr(reponse, "context", None) and reponse.context.get("errors"))
         derniere = list(self.commande.lignes.all())[-1]
         self.assertEqual((derniere.quantite_commandee, derniere.ordre), (4, 2))
+
+
+class OutilsLignesCommandeAdminTests(ImportLignesDevisBase):
+    """Boutons « Importer des lignes de devis » / « Composer un article » sous les lignes de la commande, et les
+    boutons « Enregistrer puis… » du formulaire d'ajout (avant, l'import n'était qu'une action du menu « Actions »,
+    absent du formulaire d'ajout)."""
+
+    def setUp(self):
+        super().setUp()
+        from commercial.models import TauxTVA
+        from technique.models import PosteTravail
+
+        TauxTVA.objects.get_or_create(taux=20, defaults={"nom": "Taux normal", "est_defaut": True})
+        TauxTVA.objects.filter(taux=20).update(est_defaut=True)
+        PosteTravail.objects.create(nom="Poste-Cde", mode_calcul=PosteTravail.ModeCalcul.FORFAITAIRE)
+        self.user = get_user_model().objects.create_superuser("outils-cde", "outils@example.com", "pass1234")
+        self.client.force_login(self.user)
+        self.url_fiche = reverse("admin:chiffrage_commande_change", args=[self.commande.pk])
+        self.url_composer = reverse("admin:chiffrage_commande_constructeur", args=[self.commande.pk])
+
+    def test_fiche_porte_les_deux_boutons(self):
+        reponse = self.client.get(self.url_fiche)
+        self.assertContains(reponse, reverse("admin:chiffrage_commande_action_importer_devis", args=[self.commande.pk]))
+        self.assertContains(reponse, 'id="lignes-constructeur"')
+        self.assertContains(reponse, "Composer un article")
+        self.assertContains(reponse, "/lignes/composer/")
+
+    def test_commande_annulee_sans_outils(self):
+        Commande.objects.filter(pk=self.commande.pk).update(statut=Commande.Statut.ANNULEE)
+        self.assertNotContains(self.client.get(self.url_fiche), 'id="lignes-constructeur"')
+
+    def test_formulaire_d_ajout_propose_enregistrer_puis(self):
+        reponse = self.client.get(reverse("admin:chiffrage_commande_add"))
+        self.assertContains(reponse, 'name="_puis" value="importer_devis"')
+        self.assertContains(reponse, 'name="_puis" value="composer"')
+        self.assertNotContains(reponse, 'id="lignes-constructeur"')
+
+    def test_enregistrer_puis_importer_redirige_vers_l_import_avec_lignes_du_devis_precochees(self):
+        donnees = {
+            "numero": "CDE-NOUVELLE", "devis": self.devis_1.pk, "client": self.client_tiers.pk, "reference_client": "PO-2",
+            "date_commande": "01/10/2026", "adresse_facturation": self.adresse.pk, "adresse_livraison": self.adresse.pk,
+            "lignes-TOTAL_FORMS": "0", "lignes-INITIAL_FORMS": "0", "lignes-MIN_NUM_FORMS": "0", "lignes-MAX_NUM_FORMS": "1000",
+            "_puis": "importer_devis",
+        }
+        reponse = self.client.post(reverse("admin:chiffrage_commande_add"), donnees)
+        self.assertEqual(reponse.status_code, 302, getattr(reponse, "context", None) and reponse.context.get("errors"))
+        commande = Commande.objects.get(reference_client="PO-2")
+        self.assertEqual(reponse.url, reverse("admin:chiffrage_commande_action_importer_devis", args=[commande.pk]))
+        page = self.client.get(reponse.url)
+        self.assertContains(page, f'id="ligne-{self.l1a.pk}" checked')
+        self.assertNotContains(page, f'id="ligne-{self.l2a.pk}" checked')
+
+    def test_composer_article_existant_ajoute_une_ligne_chiffree(self):
+        reponse = self.client.post(
+            self.url_composer, {"quantite": 4, "article_existant": "ART-IMP-B", "designation": "Tôle"}, content_type="application/json"
+        )
+        self.assertEqual(reponse.status_code, 200, reponse.content)
+        ligne = self.commande.lignes.get(pk=reponse.json()["ligne_id"])
+        self.assertEqual((ligne.article_id, ligne.quantite_commandee, ligne.designation, ligne.ordre), ("ART-IMP-B", 4, "Tôle", 1))
+        self.assertIsNone(ligne.devis_ligne)
+        self.assertEqual(ligne.prix_vente_unitaire, Decimal("2"))  # coût unitaire, sans marge par défaut
+        self.assertIsNotNone(ligne.taux_tva)
+
+    def test_composer_nouvel_article_et_apercu(self):
+        payload = {
+            "quantite": 3,
+            "nouvel_article": {
+                "reference": "PIECE-CDE", "taux_marge_defaut": 10,
+                "composants": [{"article_composant": "ART-IMP-A", "quantite": 5}],
+                "etapes": [{"poste": "Poste-Cde", "ordre": 1, "cout_forfaitaire": 50}],
+            },
+        }
+        apercu = self.client.post(self.url_composer, {**payload, "apercu": True}, content_type="application/json")
+        self.assertEqual(apercu.status_code, 200, apercu.content)
+        self.assertFalse(Article.objects.filter(pk="PIECE-CDE").exists())
+        self.assertEqual(self.commande.lignes.count(), 1)
+        # matière 3 × 5 × 1 = 15, +10 % = 16,5 ; opération forfaitaire 3 × 50 = 150
+        self.assertAlmostEqual(float(apercu.json()["prix_vente_total"]), 166.5, places=2)
+
+        reponse = self.client.post(self.url_composer, payload, content_type="application/json")
+        self.assertEqual(reponse.status_code, 200, reponse.content)
+        ligne = self.commande.lignes.get(pk=reponse.json()["ligne_id"])
+        self.assertEqual(ligne.article_id, "PIECE-CDE")
+        self.assertAlmostEqual(float(ligne.prix_vente_unitaire), 55.5, places=2)
+
+    def test_composer_refuse_sur_commande_annulee(self):
+        Commande.objects.filter(pk=self.commande.pk).update(statut=Commande.Statut.ANNULEE)
+        reponse = self.client.post(self.url_composer, {"quantite": 1, "article_existant": "ART-IMP-A"}, content_type="application/json")
+        self.assertEqual(reponse.status_code, 400)
+        self.assertEqual(self.commande.lignes.count(), 1)

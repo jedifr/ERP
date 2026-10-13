@@ -38,7 +38,7 @@
           {% for ligne in devis.lignes.all %}
           <tr class="border-b border-base-100">
             <td class="py-2 pr-2">
-              <input type="checkbox" name="lignes" value="{{ ligne.pk }}" data-devis="{{ devis.numero }}" id="ligne-{{ ligne.pk }}">
+              <input type="checkbox" name="lignes" value="{{ ligne.pk }}" data-devis="{{ devis.numero }}" id="ligne-{{ ligne.pk }}"{% if ligne.precochee %} checked{% endif %}>
             </td>
             <td class="pr-4"><label for="ligne-{{ ligne.pk }}"><strong>{{ ligne.article.reference }}</strong></label></td>
             <td class="pr-4">{{ ligne.designation|default:ligne.article.libelle }}</td>

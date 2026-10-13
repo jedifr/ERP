@@ -38,6 +38,7 @@ from commercial.models import TauxTVA
 from .pieces_views import PiecesDevisMixin
 from .builder_views import (
     contact_associe_adresse_view,
+    commande_constructeur_view,
     convertir_en_commande_view,
     devis_builder_view,
     previsualiser_ligne_commande_view,
@@ -936,7 +937,7 @@ class CommandeLigneInline(ColonnesPersonnalisablesMixin, TabularInline):
 class CommandeAdmin(ProchaineActionMixin, DateDuJourMixin, ChronologieMixin, PucesMixin, ColonnesPersonnalisablesMixin, PastillesMixin, EnregistrerEtValiderMixin, EtapeSuivanteMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
     fonction_prochaine_action = staticmethod(action_commande)
     champs_date_du_jour = ("date_commande",)
-    change_form_template = "admin/chronologie_change_form.html"
+    change_form_template = "admin/chiffrage/commande/change_form.html"
     puces = [('Toutes', ''), ('En cours', '?statut__exact=en_cours'), ('Soldées', '?statut__exact=soldee')]
     codification_entite = RegleCodification.Entite.COMMANDE
 
@@ -1053,8 +1054,25 @@ class CommandeAdmin(ProchaineActionMixin, DateDuJourMixin, ChronologieMixin, Puc
                 self.admin_site.admin_view(previsualiser_ligne_commande_view),
                 name="chiffrage_commandeligne_previsualiser",
             ),
+            path(
+                "<str:numero>/lignes/composer/",
+                self.admin_site.admin_view(commande_constructeur_view),
+                name="chiffrage_commande_constructeur",
+            ),
         ]
         return urls + super().get_urls()
+
+    # Boutons « Enregistrer puis importer des lignes de devis / composer un article » du formulaire d'ajout
+    # (admin/chiffrage/commande/_outils_lignes.html) : ces deux outils travaillent sur une commande enregistrée.
+    SUITES_AJOUT = {"importer_devis": "admin:chiffrage_commande_action_importer_devis", "composer": "admin:chiffrage_commande_change"}
+
+    def response_add(self, request, obj, post_url_continue=None):
+        suite = request.POST.get("_puis")
+        if suite not in self.SUITES_AJOUT:
+            return super().response_add(request, obj, post_url_continue)
+        self.message_user(request, f"Commande « {obj} » enregistrée.", level=messages.SUCCESS)
+        url = reverse(self.SUITES_AJOUT[suite], args=[obj.pk])
+        return HttpResponseRedirect(url + ("?composer=1" if suite == "composer" else ""))
 
     def _pdf_commande(self, request, object_id, generateur, prefixe):
         commande = get_object_or_404(Commande, pk=object_id)
@@ -1176,6 +1194,8 @@ class CommandeAdmin(ProchaineActionMixin, DateDuJourMixin, ChronologieMixin, Puc
         for devis in devis_liste:
             for ligne in devis.lignes.all():
                 ligne.prix_commande = prix_unitaire_commande(ligne)
+                # Les lignes du devis d'origine (champ « Devis » de la commande) pas encore reprises sont pré-cochées.
+                ligne.precochee = devis.pk == commande.devis_id and ligne.pk not in deja_reprises
         return TemplateResponse(
             request,
             "admin/chiffrage/importer_lignes_devis.html",

@@ -1,0 +1,18 @@
+{% comment %}Sous les lignes de la commande : « Importer des lignes de devis » (un ou plusieurs devis validés du client) et
+« Composer un article » (même assistant que « Ajouter une ligne » du devis, prix calculé). Les deux travaillent sur une
+commande enregistrée : sur le formulaire d'ajout, ce sont des boutons « Enregistrer puis… » (CommandeAdmin.response_add).{% endcomment %}
+{% if perms.chiffrage.add_commandeligne %}
+{% if not original %}
+<div class="lc flex flex-wrap items-center gap-3">
+  <button type="submit" name="_puis" value="importer_devis" class="lc-ouvrir">⤓ Enregistrer puis importer des lignes de devis</button>
+  <button type="submit" name="_puis" value="composer" class="lc-ouvrir">＋ Enregistrer puis composer un article</button>
+  <span class="text-xs opacity-70 mb-3">La commande doit d'abord être enregistrée (client, référence, adresses) pour y ajouter des lignes.</span>
+</div>
+{% elif original.statut != "annulee" %}
+<div class="lc">
+  <a href="{% url 'admin:chiffrage_commande_action_importer_devis' original.pk %}" class="lc-ouvrir inline-block">⤓ Importer des lignes de devis</a>
+</div>
+{% url 'admin:chiffrage_commande_constructeur' original.pk as url_ajout %}
+{% include "admin/chiffrage/_assistant_ligne.html" with libelle_bouton="Composer un article" titre="Nouvelle ligne de commande" libelle_quantite="ligne de commande" document="la commande" date_reference=original.date_commande onglet="" %}
+{% endif %}
+{% endif %}
