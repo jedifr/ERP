@@ -145,3 +145,28 @@ class OptimisationSciageTests(TestCase):
         r = self.client.post(url, donnees)
         self.assertEqual(r.status_code, 302, r.content[:2000])
         self.assertEqual(self.opt.debits.get(repere="6").couleur, "#fdf26b")
+
+    def test_repere_vide_numerote_a_l_enregistrement(self):
+        url = reverse("admin:decoupe_optimisationsciage_change", args=[self.opt.pk])
+        donnees = {
+            "intitule": self.opt.intitule, "date": "2026-10-13", "quantite_ensembles": "12", "longueur_barre": "imposee", "longueur_barre_mm": "6000",
+            "largeur_lame_mm": "3", "chute_initiale_mm": "20", "chute_reutilisable_mm": "300", "chutes_disponibles": "",
+            "debits-TOTAL_FORMS": "1", "debits-INITIAL_FORMS": "0", "debits-MIN_NUM_FORMS": "0", "debits-MAX_NUM_FORMS": "1000",
+            "debits-0-repere": "", "debits-0-couleur": "#123456", "debits-0-longueur_mm": "500", "debits-0-quantite": "1",
+            "debits-0-angle_gauche_deg": "0", "debits-0-angle_droit_deg": "0", "debits-0-section": self.section.pk,
+        }
+        self.assertEqual(self.client.post(url, donnees).status_code, 302)
+        self.assertEqual(self.opt.debits.get(longueur_mm=500).repere, "6")
+
+    def test_dessin_d_une_barre_sans_chevauchement(self):
+        """Un trapèze entre deux débits droits reste entre eux (les coupes en biais sont dessinées vers l'intérieur du débit)."""
+        import re
+
+        from .services.sciage import svg_barre
+
+        r = optimiser([Debit("1", 400), Debit("3", 226, 45, -45), Debit("4", 300)], 6000, 20, lame=3, chute_initiale=20)
+        svg = svg_barre(r.barres[0], hauteur_section=20)
+        polygones = [[float(x) for x in re.findall(r"([\d.]+),\d+", pts)] for pts in re.findall(r'<polygon points="([^"]+)"', svg)]
+        bornes = sorted((min(xs), max(xs)) for xs in polygones)
+        for (a1, b1), (a2, b2) in zip(bornes, bornes[1:]):
+            self.assertLessEqual(b1, a2 + 1e-6)

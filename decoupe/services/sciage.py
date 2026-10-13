@@ -276,8 +276,10 @@ def _attr(texte):
     return str(texte).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
 
-def svg_barre(barre, largeur=900, hauteur=26, hachure="sc-hachure"):
-    """Barre à l'échelle ; les onglets sont exagérés (biais de 5 px) pour rester lisibles. Chute hachurée."""
+def svg_barre(barre, largeur=900, hauteur=26, hachure="sc-hachure", hauteur_section=0.0):
+    """Barre à l'échelle ; chute hachurée. Chaque débit est dessiné entre les milieux de ses deux coupes (ils ne se chevauchent
+    jamais : au moins un trait de scie les sépare) et ses onglets, exagérés pour rester lisibles, restent dans cet intervalle :
+    deux débits imbriqués tête-bêche apparaissent côte à côte, séparés par un petit triangle."""
     s, k, y0, y1 = largeur / barre.longueur, 5, 2, hauteur - 2
     parties = [
         f'<svg viewBox="0 0 {largeur} {hauteur}" width="100%" height="{hauteur}" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">',
@@ -287,16 +289,20 @@ def svg_barre(barre, largeur=900, hauteur=26, hachure="sc-hachure"):
     ]
     if barre.chute > 0.5:
         parties.append(f'<rect x="{barre.fin * s:.1f}" y="{y0}" width="{max(barre.chute * s - 0.5, 0):.1f}" height="{y1 - y0}" fill="url(#{hachure})"/>')
+    demi = hauteur_section / 2
     for p in barre.places:
-        cxl, cxr = p.xl0 * s, p.xr0 * s
-        sl, sr = math.copysign(k, p.tl) if p.tl else 0, math.copysign(k, p.tr) if p.tr else 0
-        pts = [(cxl - sl / 2, y1), (cxr - sr / 2, y1), (cxr + sr / 2, y0), (cxl + sl / 2, y0)]
+        g, d = (p.xl0 + demi * p.tl) * s, (p.xr0 + demi * p.tr) * s
+        kk = min(k, max(d - g, 0) * 0.35)
+        # pied (y1, bas) et tête (y0, haut) de chaque coupe : le biais part vers l'intérieur du débit
+        g_bas, g_haut = (g, g + kk) if p.tl > 0 else (g + kk, g) if p.tl < 0 else (g, g)
+        d_bas, d_haut = (d - kk, d) if p.tr > 0 else (d, d - kk) if p.tr < 0 else (d, d)
+        pts = [(g_bas, y1), (d_bas, y1), (d_haut, y0), (g_haut, y0)]
         parties.append(
             f'<polygon points="{" ".join(f"{x:.1f},{y}" for x, y in pts)}" fill="{_attr(p.debit.couleur)}" stroke="#111827" stroke-width="0.8"/>'
         )
-        if cxr - cxl > 14:
+        if d - g > 14:
             parties.append(
-                f'<text x="{(cxl + cxr) / 2:.1f}" y="{(y0 + y1) / 2 + 4}" text-anchor="middle" font-size="10" font-weight="600" '
+                f'<text x="{(g + d) / 2:.1f}" y="{(y0 + y1) / 2 + 4}" text-anchor="middle" font-size="10" font-weight="600" '
                 f'font-family="sans-serif" fill="#111827">{_attr(p.debit.repere)}</text>'
             )
     parties.append("</svg>")
@@ -375,7 +381,7 @@ class PlanSection:
             return []
         return [
             {"nombre": g.nombre, "barre": g.barre, "sequence": g.barre.sequence(), "chute": g.barre.chute,
-             "reutilisable": g.barre.chute >= self.seuil and g.barre.chute > 0, "svg": svg_barre(g.barre, hachure=f"sc-h{self.section.pk}-{i}")}
+             "reutilisable": g.barre.chute >= self.seuil and g.barre.chute > 0, "svg": svg_barre(g.barre, hachure=f"sc-h{self.section.pk}-{i}", hauteur_section=self.section.hauteur_mm)}
             for i, g in enumerate(self.resultat.groupes)
         ]
 

@@ -893,7 +893,7 @@ class DebitSciage(models.Model):
     """Un débit d'une optimisation de sciage : longueur hors tout, quantité par ensemble et angles de coupe (0 = droite)."""
 
     optimisation = models.ForeignKey(OptimisationSciage, verbose_name="optimisation", on_delete=models.CASCADE, related_name="debits")
-    repere = models.CharField("repère", max_length=20)
+    repere = models.CharField("repère", max_length=20, blank=True, help_text="Numéroté automatiquement (1, 2, 3…) ; modifiable.")
     couleur = models.CharField("couleur", max_length=7, default="#d4d4d4")
     longueur_mm = models.FloatField("longueur (mm)")
     quantite = models.PositiveIntegerField("qté / ensemble", default=1)
