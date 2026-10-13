@@ -16,7 +16,7 @@ from technique.models import Article, PosteTravail
 from .models import (
     ComposantOF, Commande, CommandeLigne, CommandeLigneModification, Devis, OperationOF, OrdreFabrication, indice_pour,
 )
-from .moteur import ChiffrageError, gamme_active
+from .moteur import ChiffrageError, gamme_active, previsualiser_ligne_commande, resoudre_taux_tva
 from .planning_sync import tenter_synchronisation
 
 # Champs de CommandeLigne qui sont des surcharges du devis (valeur de départ
@@ -369,6 +369,28 @@ def importer_lignes_devis(commande, lignes_devis):
                 devis.save(update_fields=["issue"])
         commande.mettre_a_jour_statut_livraison()
     return creees
+
+
+def ajouter_ligne_commande(commande, article, quantite, designation=""):
+    """Ajoute en fin de commande une ligne sans devis d'origine (assistant « Composer un article » de la fiche
+    Commande) : prix calculé comme une ligne saisie à la main (nomenclature + gamme, marges par défaut de l'article
+    et des postes, voir previsualiser_ligne_commande) et TVA selon le régime du client."""
+    if commande.statut == Commande.Statut.ANNULEE:
+        raise ChiffrageError(f"La commande « {commande} » est annulée : on ne peut plus y ajouter de lignes.")
+    if not quantite or quantite <= 0:
+        raise ChiffrageError("La quantité doit être strictement positive.")
+    prix = previsualiser_ligne_commande(article, quantite, commande.date_commande)
+    ligne = CommandeLigne.objects.create(
+        commande=commande,
+        article=article,
+        quantite_commandee=quantite,
+        designation=designation,
+        prix_vente_unitaire=prix["prix_vente_unitaire"],
+        taux_tva=resoudre_taux_tva(article, commande.client),
+        ordre=CommandeLigne.prochain_ordre(commande),
+    )
+    commande.mettre_a_jour_statut_livraison()
+    return ligne
 
 
 def reviser_devis(devis, motif=""):

@@ -17,7 +17,7 @@ from technique.models import Article, PosteTravail
 from .builder import ajouter_ligne_devis, creer_article_fabrique, erreur_lisible
 from .models import Commande, CommandeLigne, Devis, DevisLigne
 from .moteur import ChiffrageError, calculer_ligne, previsualiser_ligne, previsualiser_ligne_commande, resoudre_taux_tva
-from .production import lancer_en_production
+from .production import ajouter_ligne_commande, lancer_en_production
 
 
 @staff_member_required
@@ -123,6 +123,55 @@ def _traiter_ajout_ligne(request, devis):
             "prix_vente_unitaire": ligne.prix_vente_unitaire,
             "prix_vente_ttc": ligne.prix_vente_ttc,
             **recapitulatif_json(devis),
+        }
+    )
+
+
+@staff_member_required
+@require_http_methods(["POST"])
+def commande_constructeur_view(request, numero):
+    """Assistant « Composer un article » de la fiche Commande : même formulaire que « Ajouter une ligne » du devis
+    (article existant, ou nouvel article fabriqué avec nomenclature et gamme), prix calculé comme une ligne de
+    commande saisie à la main. Tout ou rien ; avec `apercu`, calcule le prix puis annule tout."""
+    commande = get_object_or_404(Commande, pk=numero)
+    u = request.user
+    if not (u.has_perm("chiffrage.change_commande") and u.has_perm("chiffrage.add_commandeligne")):
+        return JsonResponse({"detail": "Vous n'avez pas la permission d'ajouter une ligne à cette commande."}, status=403)
+    try:
+        payload = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"detail": "JSON invalide."}, status=400)
+    try:
+        quantite = float(payload["quantite"])
+    except (KeyError, TypeError, ValueError):
+        return JsonResponse({"detail": "Quantité manquante ou invalide."}, status=400)
+
+    apercu = bool(payload.get("apercu"))
+    try:
+        with transaction.atomic():
+            if payload.get("nouvel_article"):
+                if not all(u.has_perm(f"technique.add_{m}") for m in ("article", "nomenclature", "gamme")):
+                    return JsonResponse({"detail": "Vous n'avez pas la permission de créer un article fabriqué (article, nomenclature, gamme)."}, status=403)
+                article = _creer_article_depuis_payload(payload["nouvel_article"], commande.date_commande)
+            else:
+                reference = payload.get("article_existant")
+                try:
+                    article = Article.objects.get(pk=reference)
+                except Article.DoesNotExist:
+                    raise ChiffrageError(f"Article « {reference} » introuvable.")
+            ligne = ajouter_ligne_commande(commande, article, quantite, designation=(payload.get("designation") or "").strip()[:255])
+            detail = previsualiser_ligne_commande(article, quantite, commande.date_commande)
+            if apercu:
+                transaction.set_rollback(True)
+    except ChiffrageError as exc:
+        return JsonResponse({"detail": str(exc)}, status=400)
+
+    return JsonResponse(
+        {
+            "ok": True, "apercu": apercu, "article": article.reference, "quantite": quantite,
+            **({} if apercu else {"ligne_id": ligne.id}),
+            **{k: detail[k] for k in ("prix_vente_matiere", "prix_vente_operations", "cout_total", "prix_vente_total")},
+            "prix_vente_unitaire": ligne.prix_vente_unitaire,
         }
     )
 

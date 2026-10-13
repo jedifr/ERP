@@ -419,13 +419,20 @@ def previsualiser_ligne_commande(article, quantite, date_reference):
     prix_matiere = _vendu(cout_matiere, article.taux_marge_defaut)
 
     prix_operations = ZERO
+    cout_operations = ZERO
     if article.nature == Article.Nature.FABRIQUE:
         for etape in gamme_active(article, date_reference):
             cout_etape = cout_etape_gamme(etape, quantite, date_reference)
             prix_operations += _vendu(cout_etape, etape.poste.taux_marge_defaut)
+            cout_operations += cout_etape
 
     prix_total = prix_matiere + prix_operations
     return {
         "prix_vente_unitaire": arrondir_prix_vente(prix_total / D(quantite)) if quantite else None,
         "montant_ht": prix_total,
+        # Détail affiché par l'aperçu de l'assistant « Composer un article » de la commande (mêmes clés que le devis).
+        "prix_vente_matiere": prix_matiere,
+        "prix_vente_operations": prix_operations,
+        "prix_vente_total": prix_total,
+        "cout_total": D(cout_matiere) + cout_operations,
     }

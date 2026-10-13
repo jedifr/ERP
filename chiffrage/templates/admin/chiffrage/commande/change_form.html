@@ -1,0 +1,5 @@
+{% extends "admin/chronologie_change_form.html" %}
+{% block after_related_objects %}
+  {% include "admin/chiffrage/commande/_outils_lignes.html" %}
+  {{ block.super }}
+{% endblock %}
