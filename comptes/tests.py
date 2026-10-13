@@ -857,6 +857,7 @@ class VerrouOptimisteTests(TestCase):
     def test_script_anti_double_clic_charge_sur_les_pages_admin(self):
         page = self.client_alice.get("/admin/")
         self.assertContains(page, "comptes/anti_double_clic")
+        self.assertContains(page, "comptes/entree_champ_suivant")
         self.assertContains(page, "comptes/admin_extra")
 
 
