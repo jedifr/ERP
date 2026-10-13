@@ -223,8 +223,10 @@ def _creer_commande_et_ordres(devis):
         devis=devis,
         client=devis.client,
         date_commande=timezone.now().date(),
-        adresse_facturation=_adresse_principale(devis.client, "est_facturation", "facturation"),
-        adresse_livraison=_adresse_principale(devis.client, "est_livraison", "livraison"),
+        # Les adresses choisies sur le devis priment ; repli sur les adresses principales du client
+        # pour les anciens devis enregistrés sans adresse.
+        adresse_facturation=devis.adresse_facturation or _adresse_principale(devis.client, "est_facturation", "facturation"),
+        adresse_livraison=devis.adresse_livraison or _adresse_principale(devis.client, "est_livraison", "livraison"),
         devise=devis.client.devise,
     )
 
@@ -453,6 +455,30 @@ def reviser_devis(devis, motif=""):
         devis._change_reason = f"Remplacé par {numero} : {motif}"[:100]
         devis.save(update_fields=["issue"])
     return nouveau
+
+
+def repasser_devis_en_brouillon(devis):
+    """Rouvre un devis validé pour le modifier SANS créer de nouvel indice (correction avant ou juste
+    après l'envoi) : même numéro, même indice, statut « brouillon ». Il faudra le revalider ; sa date
+    de validité sera reposée à ce moment-là. Un refus noté est effacé (l'offre corrigée repart en attente)."""
+    with transaction.atomic():
+        devis = Devis.objects.select_for_update().get(pk=devis.pk)
+        if devis.statut != Devis.Statut.VALIDE:
+            raise ChiffrageError("Ce devis est déjà en brouillon : il se modifie directement.")
+        if Commande.objects.filter(devis=devis).exists():
+            raise ChiffrageError(
+                f"Le devis « {devis} » est déjà devenu une commande : il ne se modifie plus "
+                "(modifiez les lignes de la commande, les changements sont tracés)."
+            )
+        if devis.issue == Devis.Issue.REMPLACE:
+            raise ChiffrageError(f"Le devis « {devis} » a été remplacé par un indice plus récent : modifiez ce dernier.")
+        devis.statut = Devis.Statut.BROUILLON
+        if devis.issue == Devis.Issue.REFUSE:
+            devis.issue = Devis.Issue.EN_ATTENTE
+            devis.motif_refus = ""
+        devis._change_reason = "Repassé en brouillon pour modification (même indice)"
+        devis.save()
+    return devis
 
 
 def comparer_indices(precedent, courant):

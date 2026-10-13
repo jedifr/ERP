@@ -564,6 +564,8 @@ class ReordonnerLignesDevisAdminTests(TestCase):
         self.tiers = Tiers.objects.create(
             code="CLI-REORDER", raison_sociale="Client Reorder", type_tiers=Tiers.TypeTiers.CLIENT
         )
+        # Adresses obligatoires sur le devis : une seule adresse, remplie d'office à l'enregistrement.
+        Adresse.objects.create(tiers=self.tiers, adresse="1 rue", code_postal="75000", ville="Paris", est_facturation=True, est_livraison=True)
         self.article = Article.objects.create(
             reference="ART-REORDER",
             nature=Article.Nature.MATIERE_PREMIERE,
@@ -2328,6 +2330,8 @@ class AjoutDevisOuvrirConstructeurTests(TestCase):
         self.client_tiers = Tiers.objects.create(
             code="CLI-CONSTRUIRE", raison_sociale="Client Construire", type_tiers=Tiers.TypeTiers.CLIENT
         )
+        # Adresses obligatoires sur le devis : une seule adresse, remplie d'office à l'enregistrement.
+        Adresse.objects.create(tiers=self.client_tiers, adresse="1 rue", code_postal="75000", ville="Paris", est_facturation=True, est_livraison=True)
         self.article = Article.objects.create(
             reference="ART-CONSTRUIRE",
             nature=Article.Nature.MATIERE_PREMIERE,
@@ -4396,6 +4400,66 @@ class CycleDeVieDevisTests(_FixtureModuleA, TestCase):
         self.assertContains(r, "motif")
         self.assertFalse(Devis.objects.filter(pk="DEV-REC-A-B").exists())
 
+    def test_action_admin_modifier_sans_indicer(self):
+        self._valider()
+        fiche = self.client.get(f"/admin/chiffrage/devis/{self.devis.pk}/change/")
+        self.assertContains(fiche, "Modifier sans indicer")  # menu « Modifier le devis » : sans indicer…
+        self.assertContains(fiche, "Nouvel indice (réviser)")  # … ou nouvel indice
+        url = f"/admin/chiffrage/devis/{self.devis.pk}/modifier/"
+        page = self.client.get(url)
+        self.assertContains(page, "Repasser en brouillon et modifier")
+        self.assertNotContains(page, 'name="motif"')  # pas de motif à saisir : on ne crée pas d'indice
+        self.devis.refresh_from_db()
+        self.assertEqual(self.devis.statut, Devis.Statut.VALIDE)  # le GET ne change rien
+        r = self.client.post(url, follow=True)
+        self.assertContains(r, "repassé en brouillon")
+        self.devis.refresh_from_db()
+        self.assertEqual((self.devis.statut, self.devis.revision), (Devis.Statut.BROUILLON, 1))
+        self.assertIsNone(self.devis.date_validite)
+        self.assertEqual(Devis.objects.count(), 1)  # aucun nouvel indice
+
+    def test_modifier_sans_indicer_efface_le_refus(self):
+        from .production import repasser_devis_en_brouillon
+
+        self._valider()
+        self.devis.issue, self.devis.motif_refus = Devis.Issue.REFUSE, "Trop cher"
+        self.devis.save()
+        repasser_devis_en_brouillon(self.devis)
+        self.devis.refresh_from_db()
+        self.assertEqual((self.devis.issue, self.devis.motif_refus), (Devis.Issue.EN_ATTENTE, ""))
+        self.devis.full_clean()
+
+    def test_modifier_sans_indicer_refuse_si_brouillon_commande_ou_remplace(self):
+        from .production import repasser_devis_en_brouillon, reviser_devis
+
+        with self.assertRaises(ChiffrageError):
+            repasser_devis_en_brouillon(self.devis)  # déjà brouillon
+        self._valider()
+        reviser_devis(self.devis, "Changement")
+        with self.assertRaises(ChiffrageError):
+            repasser_devis_en_brouillon(self.devis)  # remplacé
+        autre = Devis.objects.create(numero="DEV-REC-A2", client=self.tiers, date_creation=datetime.date(2026, 1, 1))
+        DevisLigne.objects.create(devis=autre, article=self.article, quantite=1)
+        autre.statut = Devis.Statut.VALIDE
+        autre.save()
+        lancer_en_production(autre)
+        r = self.client.post(f"/admin/chiffrage/devis/{autre.pk}/modifier/", follow=True)
+        self.assertContains(r, "déjà devenu une commande")
+        autre.refresh_from_db()
+        self.assertEqual(autre.statut, Devis.Statut.VALIDE)
+
+    def test_modifier_sans_indicer_reserve_aux_valideurs(self):
+        from django.contrib.auth import get_user_model
+        from django.contrib.auth.models import Permission
+
+        self._valider()
+        commercial = get_user_model().objects.create_user("commercial-a", password="x", is_staff=True)
+        commercial.user_permissions.add(*Permission.objects.filter(codename__in=["view_devis", "change_devis"]))
+        self.client.force_login(commercial)
+        self.assertEqual(self.client.post(f"/admin/chiffrage/devis/{self.devis.pk}/modifier/").status_code, 403)
+        self.devis.refresh_from_db()
+        self.assertEqual(self.devis.statut, Devis.Statut.VALIDE)
+
     def test_api_reviser(self):
         self._valider()
         url = f"/api/v1/devis/{self.devis.pk}/reviser/"
@@ -5026,6 +5090,8 @@ class FicheDevisDeuxColonnesTests(TestCase):
         self.admin = get_user_model().objects.create_superuser("dc-admin", "d@example.com", "pass-mot-de-passe-1")
         self.client.force_login(self.admin)
         self.tiers = Tiers.objects.create(code="CLI-DC", raison_sociale="Client DC", type_tiers=Tiers.TypeTiers.CLIENT)
+        # Adresses obligatoires sur le devis : une seule adresse, remplie d'office à l'enregistrement.
+        Adresse.objects.create(tiers=self.tiers, adresse="1 rue", code_postal="75000", ville="Paris", est_facturation=True, est_livraison=True)
         self.devis = Devis.objects.create(numero="DEV-DC", client=self.tiers, date_creation=datetime.date(2026, 10, 1))
 
     def test_fieldsets_saisie_et_recapitulatif(self):
@@ -5751,3 +5817,73 @@ class RemisesDevisTests(_FixtureModuleA, TestCase):
         html, _ = moteur.appliquer(LIGNES_DEVIS + TOTAUX, contexte_devis(self.devis))
         self.assertNotIn("Remise", html)
         self.assertNotIn("Total des lignes HT", html)
+
+
+class AdressesDevisObligatoiresTests(_FixtureModuleA, TestCase):
+    """Adresses de facturation et de livraison obligatoires sur le devis ; remplies d'office quand le
+    client n'a qu'une adresse possible."""
+
+    def _formulaire(self, client, **donnees):
+        from .admin import DevisAdminForm
+
+        data = {"numero": "DEV-ADR", "client": client.pk, "date_creation": "2026-01-01", "statut": "brouillon",
+                "issue": "en_attente", "remise_globale_type": "pct", **donnees}
+        return DevisAdminForm(data=data)
+
+    def _client_une_adresse(self, **types):
+        tiers = Tiers.objects.create(code="CLI-UNE", raison_sociale="Une adresse", type_tiers=Tiers.TypeTiers.CLIENT)
+        adresse = Adresse.objects.create(tiers=tiers, adresse="2 rue", code_postal="69000", ville="Lyon",
+                                         **(types or {"est_livraison": True}))
+        return tiers, adresse
+
+    def test_adresse_par_defaut(self):
+        tiers, unique = self._client_une_adresse()
+        # Une seule adresse (livraison) : elle sert aussi à la facturation.
+        self.assertEqual(Adresse.par_defaut(tiers, "est_facturation"), unique)
+        self.assertEqual(Adresse.par_defaut(tiers, "est_livraison"), unique)
+        # Deux adresses, une seule de livraison et aucune de facturation : la livraison est évidente, pas la facturation.
+        Adresse.objects.create(tiers=tiers, adresse="3 rue", code_postal="69000", ville="Lyon", est_facturation=False,
+                               est_livraison=False)
+        self.assertEqual(Adresse.par_defaut(tiers, "est_livraison"), unique)
+        self.assertIsNone(Adresse.par_defaut(tiers, "est_facturation"))
+        # Les adresses principales du client de référence restent prioritaires.
+        self.assertEqual(Adresse.par_defaut(self.tiers, "est_facturation").est_facturation, True)
+
+    def test_adresses_obligatoires(self):
+        tiers = Tiers.objects.create(code="CLI-SANS", raison_sociale="Sans adresse", type_tiers=Tiers.TypeTiers.CLIENT)
+        form = self._formulaire(tiers)
+        self.assertFalse(form.is_valid())
+        self.assertIn("adresse_facturation", form.errors)
+        self.assertIn("adresse_livraison", form.errors)
+        self.assertIn("fiche du client", str(form.errors["adresse_facturation"]))
+
+    def test_client_a_une_seule_adresse_remplie_d_office(self):
+        tiers, unique = self._client_une_adresse(est_facturation=True, est_livraison=True)
+        form = self._formulaire(tiers)
+        self.assertNotIn("adresse_facturation", form.errors)
+        self.assertNotIn("adresse_livraison", form.errors)
+        self.assertEqual(form.cleaned_data["adresse_facturation"], unique)
+        self.assertEqual(form.cleaned_data["adresse_livraison"], unique)
+
+    def test_choix_de_l_utilisateur_conserve(self):
+        livraison = self.tiers.adresses.get(est_livraison=True)
+        facturation = self.tiers.adresses.get(est_facturation=True)
+        form = self._formulaire(self.tiers, adresse_facturation=livraison.pk, adresse_livraison=livraison.pk)
+        self.assertNotIn("adresse_facturation", form.errors)
+        self.assertEqual(form.cleaned_data["adresse_facturation"], livraison)
+        self.assertNotEqual(livraison, facturation)
+
+    def test_valeurs_defaut_client_une_adresse(self):
+        tiers, unique = self._client_une_adresse()
+        r = self.client.get(f"/admin/chiffrage/devis/tiers/{tiers.pk}/valeurs-defaut/").json()
+        self.assertEqual((r["adresse_facturation"]["id"], r["adresse_livraison"]["id"]), (unique.pk, unique.pk))
+
+    def test_commande_reprend_les_adresses_du_devis(self):
+        autre = Adresse.objects.create(tiers=self.tiers, adresse="9 quai", code_postal="13000", ville="Marseille",
+                                       est_livraison=True)
+        self.devis.adresse_livraison = autre
+        self.devis.statut = Devis.Statut.VALIDE
+        self.devis.save()
+        commande = lancer_en_production(self.devis)
+        self.assertEqual(commande.adresse_livraison, autre)
+        self.assertEqual(commande.adresse_facturation, self.tiers.adresses.get(est_facturation=True))
