@@ -45,7 +45,7 @@
 2. Copier l'archive et le fichier de la phrase secrète vers le nouveau NAS (clé USB, scp…).
 
 **Sur le nouveau NAS**
-1. Installer Docker (Container Manager) et le projet : `docs/DEPLOIEMENT_SYNOLOGY.md` (la version du projet doit être **égale ou plus récente**).
+1. Installer Docker et le projet : [DEPLOIEMENT_UGREEN.md](DEPLOIEMENT_UGREEN.md) (UGREEN, pas à pas complet du transfert) ou `docs/DEPLOIEMENT_SYNOLOGY.md` (la version du projet doit être **égale ou plus récente**).
 2. Créer `sauvegarde.conf` avec `CLE_CHIFFREMENT` pointant vers le fichier de la phrase secrète.
 3. `./importer-transfert.sh erp_transfert_….tar.gz.enc` : installe le `.env` (s'il n'existe pas), démarre la base, restaure base et fichiers.
 4. Ouvrir l'ERP : connexion, un devis, un PDF. **Garder l'ancien NAS intact** jusqu'à ce contrôle ; refaire ensuite l'étape 1 de ce document (planification, copie externe) sur le nouveau NAS.

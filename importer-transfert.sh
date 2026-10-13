@@ -1,6 +1,6 @@
 #!/bin/sh
 # Installe sur ce NAS les données d'une archive créée par exporter-transfert.sh (sur l'ancien NAS).
-# À lancer APRÈS avoir installé le projet (docs/DEPLOIEMENT_SYNOLOGY.md), dans le dossier du projet.
+# À lancer APRÈS avoir installé le projet (docs/DEPLOIEMENT_UGREEN.md sur un UGREEN, docs/DEPLOIEMENT_SYNOLOGY.md sur un Synology), dans le dossier du projet.
 #
 # Usage : ./importer-transfert.sh erp_transfert_AAAAMMJJ_HHMMSS.tar.gz[.enc]
 #   (une archive .enc se déchiffre avec la phrase secrète indiquée par CLE_CHIFFREMENT dans sauvegarde.conf)
@@ -56,10 +56,12 @@ if [ -f "$PAQUET/sauvegarde.conf" ] && [ ! -f sauvegarde.conf ]; then
     cp "$PAQUET/sauvegarde.conf" sauvegarde.conf
     echo "    sauvegarde.conf installé : vérifiez les chemins (COPIE_EXTERNE, CLE_CHIFFREMENT) pour ce NAS."
 fi
-[ -f .env ] || { echo "!! Pas de .env : créez-le (voir docs/DEPLOIEMENT_SYNOLOGY.md) puis relancez." >&2; exit 1; }
+[ -f .env ] || { echo "!! Pas de .env : créez-le (voir docs/DEPLOIEMENT_UGREEN.md ou docs/DEPLOIEMENT_SYNOLOGY.md) puis relancez." >&2; exit 1; }
 
-echo "==> Démarrage de la base..."
-$DOCKER_CMD up -d db
+# Construit l'image et démarre toute l'installation (base vide, migrée) AVANT la restauration : une erreur de build
+# ou de .env apparaît ici, avant de toucher aux données, et le conteneur web existe pour restaurer les fichiers déposés.
+echo "==> Construction et démarrage des conteneurs (le premier build peut prendre plusieurs minutes)..."
+$DOCKER_CMD up -d --build
 echo "==> Restauration (installation neuve : pas de sauvegarde de sécurité)..."
 printf 'RESTAURER\n' | ./restaurer-nas.sh --nouveau-nas "$BASE" ${MEDIA:+"$MEDIA"}
 echo "==> Transfert terminé. Vérifiez l'ERP (connexion, un devis, un PDF) avant d'éteindre l'ancien NAS."

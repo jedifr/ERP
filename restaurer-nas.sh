@@ -83,6 +83,16 @@ if [ -z "$NOUVEAU_NAS" ]; then
     ERP_SANS_COPIE_EXTERNE=1 ./sauvegarder-nas.sh "${PROJECT_DIR}_sauvegardes/avant_restauration" 5
 fi
 
+# Au tout premier démarrage, l'image postgres initialise la base avec un serveur temporaire (socket local seulement), puis
+# redémarre : on attend le vrai serveur, joignable en TCP, sinon psql peut échouer (« No such file or directory »).
+echo "==> Attente de la base..."
+essais=0
+until $DOCKER_CMD exec -T db pg_isready -q -h 127.0.0.1 -U "$DB_USER" -d postgres; do
+    essais=$((essais + 1))
+    [ "$essais" -lt 60 ] || { echo "!! La base ne répond pas (voir : $DOCKER_CMD logs db)." >&2; exit 1; }
+    sleep 2
+done
+
 echo "==> Arrêt de l'application..."
 $DOCKER_CMD stop web
 
@@ -94,7 +104,8 @@ gzip -dc "$BASE_SAUVEGARDE" | $DOCKER_CMD exec -T db psql -U "$DB_USER" -d "$DB_
 
 if [ -n "$MEDIA_SAUVEGARDE" ]; then
     echo "==> Restauration des fichiers déposés..."
-    $DOCKER_CMD start web
+    # `up` plutôt que `start` : sur un NAS neuf, le conteneur web peut ne pas encore exister.
+    $DOCKER_CMD up -d web
     gzip -dc "$MEDIA_SAUVEGARDE" | $DOCKER_CMD exec -T web tar -C /app -x
     $DOCKER_CMD stop web
 fi

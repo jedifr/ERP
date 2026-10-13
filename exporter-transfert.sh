@@ -48,7 +48,7 @@ Archive de transfert de l'ERP — créée le $(date '+%d/%m/%Y à %H:%M') sur $(
 Version de l'application : $( [ -f VERSION ] && cat VERSION || echo inconnue )
 
 Sur le NOUVEAU NAS :
-  1. Installer Docker (Container Manager) et copier le projet (voir docs/DEPLOIEMENT_SYNOLOGY.md).
+  1. Installer Docker (Container Manager) et copier le projet (voir docs/DEPLOIEMENT_UGREEN.md ou docs/DEPLOIEMENT_SYNOLOGY.md).
   2. Copier cette archive dans le dossier du projet.
   3. Lancer :  ./importer-transfert.sh erp_transfert_AAAAMMJJ_HHMMSS.tar.gz   (ou .tar.gz.enc si l'archive est chiffrée)
   4. Ouvrir l'ERP et vérifier (connexion, un devis, un PDF). Garder l'ancien NAS intact jusqu'à cette vérification.
