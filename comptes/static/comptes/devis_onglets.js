@@ -1,10 +1,13 @@
-/* Fiche devis en onglets : Général (saisie + récapitulatif) · Pièces et matière · Lignes du devis.
+/* Fiches devis et commande client en onglets : Général (saisie + récapitulatif) · Pièces et matière (devis seulement)
+   · Lignes du devis / Lignes de commande · Chronologie.
    Le contenu reste dans le même formulaire (un seul « Enregistrer ») ; seul l'affichage change.
    L'onglet actif est mémorisé dans l'adresse (#onglet=…) et, si un champ est en erreur, c'est cet onglet qui s'ouvre. */
 function initOnglets() {
     "use strict";
-    var form = document.getElementById("devis_form");
+    var form = document.getElementById("devis_form") || document.getElementById("commande_form");
     if (!form) return;
+    var commande = form.id === "commande_form";
+    var titreLignes = commande ? "Lignes de commande" : "Lignes du devis";
     var conteneur = form.querySelector(":scope > div:has(> fieldset.fiche-saisie)");
     if (!conteneur) return;
 
@@ -16,18 +19,20 @@ function initOnglets() {
     var constructeur = conteneur.querySelector(":scope > #lignes-constructeur");
     var detail = conteneur.querySelector(":scope > #lignes-detail");
     var recapLignes = conteneur.querySelector(":scope > #lignes-recap");
-    // Devis pas encore enregistré : « Pièces et matière » et « Lignes du devis » enregistrent le devis puis s'ouvrent.
+    // Outils de la commande : « Importer des lignes de devis » et « Composer un article » (commande/_outils_lignes.html).
+    var outils = conteneur.querySelector(":scope > #commande-outils-lignes");
+    // Fiche pas encore enregistrée : les onglets autres que « Général » enregistrent la fiche puis s'ouvrent.
     var nouveau = !!document.getElementById("devis-nouveau");
 
     var onglets = [{ cle: "general", titre: "Général", icone: "assignment", elements: [saisie, recap] }];
     if (nouveau) {
-        onglets.push({ cle: "pieces", titre: "Pièces et matière", icone: "content_cut", elements: [] });
-        onglets.push({ cle: "lignes", titre: "Lignes du devis", icone: "list_alt", elements: [lignes] });
+        if (!commande) onglets.push({ cle: "pieces", titre: "Pièces et matière", icone: "content_cut", elements: [] });
+        onglets.push({ cle: "lignes", titre: titreLignes, icone: "list_alt", elements: [lignes, outils] });
     }
     if (pieces && !nouveau) onglets.push({ cle: "pieces", titre: "Pièces et matière", icone: "content_cut", elements: [pieces], compte: function () {
         return pieces.querySelectorAll("#dp-cartes > *, #dp-profils > *").length;
     } });
-    if (lignes && !nouveau) onglets.push({ cle: "lignes", titre: "Lignes du devis", icone: "list_alt", elements: [lignes, recapLignes, detail, constructeur], compte: function () {
+    if (lignes && !nouveau) onglets.push({ cle: "lignes", titre: titreLignes, icone: "list_alt", elements: [lignes, recapLignes, detail, constructeur, outils], compte: function () {
         var n = 0;
         lignes.querySelectorAll("input[name$='-id']").forEach(function (i) { if (i.value && !/__prefix__/.test(i.name)) n++; });
         return n;
@@ -62,7 +67,8 @@ function initOnglets() {
     form.insertBefore(nav, conteneur);
 
     function enregistrerPuisOuvrir(cle) {
-        // Le devis doit exister pour recevoir des pièces ou des lignes : on l'enregistre (en restant sur la fiche) puis on ouvre l'onglet.
+        // Le devis (ou la commande) doit exister pour recevoir des pièces ou des lignes : on l'enregistre (en restant sur la fiche)
+        // puis on ouvre l'onglet.
         if (!form.reportValidity()) { activer("general", false); return; }
         try { window.sessionStorage.setItem("devis-onglet-apres-rechargement", cle); } catch (e) { /* ignoré */ }
         var continuer = document.createElement("input");

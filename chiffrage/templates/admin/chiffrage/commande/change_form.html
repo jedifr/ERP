@@ -1,5 +1,9 @@
 {% extends "admin/chronologie_change_form.html" %}
 {% block after_related_objects %}
+  {% comment %}Repère lu par devis_onglets.js : commande pas encore enregistrée, l'onglet « Lignes de commande » l'enregistre d'abord.{% endcomment %}
+  {% if not original %}<div id="devis-nouveau" hidden></div>{% endif %}
+  <div id="commande-outils-lignes">
   {% include "admin/chiffrage/commande/_outils_lignes.html" %}
+  </div>
   {{ block.super }}
 {% endblock %}

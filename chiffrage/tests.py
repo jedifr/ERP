@@ -5133,6 +5133,15 @@ class FicheCommandeDeuxColonnesTests(_FixtureOrdresCommande, TestCase):
         self.assertContains(page, f"/admin/chiffrage/livraison/{livraison.pk}/change/")
         self.assertContains(page, f"/admin/facturation/facture/{facture.pk}/change/")
 
+    def test_reperes_des_onglets(self):
+        # devis_onglets.js range les outils sous « Lignes de commande » ; sur l'ajout, cet onglet enregistre d'abord la commande.
+        ajout = self.client.get("/admin/chiffrage/commande/add/")
+        self.assertContains(ajout, 'id="devis-nouveau"')
+        self.assertContains(ajout, 'id="commande-outils-lignes"')
+        fiche = self.client.get(f"/admin/chiffrage/commande/{self.commande.pk}/change/")
+        self.assertNotContains(fiche, 'id="devis-nouveau"')
+        self.assertContains(fiche, 'id="commande-outils-lignes"')
+
     def test_commande_vide_et_formulaire_d_ajout(self):
         self.assertContains(self.client.get("/admin/chiffrage/commande/add/"), "fiche-recap")
         vide = Commande.objects.create(
