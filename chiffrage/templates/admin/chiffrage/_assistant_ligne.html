@@ -22,6 +22,10 @@ date_reference, url_ajout, onglet (onglet à rouvrir après rechargement, facult
             <label class="block font-medium mb-1" title="Quantité ({{ libelle_quantite }})">Quantité<span class="text-red-600">*</span></label>
             <input type="number" step="any" id="ligne-quantite" class="border border-base-200 dark:border-base-700 dark:bg-base-800 rounded-default px-3 py-2 w-full" required>
         </div>
+        <div class="lc-champ lc-marge">
+            <label class="block font-medium mb-1" for="ligne-taux-marge" title="Marge matière de la ligne. Pré-remplie avec la marge par défaut de l'article (ou de son premier composant), modifiable ici puis dans la colonne « Taux de marge » du tableau.">Taux de marge (%)</label>
+            <input type="number" step="any" min="0" id="ligne-taux-marge" class="border border-base-200 dark:border-base-700 dark:bg-base-800 rounded-default px-3 py-2 w-full">
+        </div>
         <div class="lc-champ lc-large">
             <label class="block font-medium mb-1">Libellé de la ligne <span class="font-normal opacity-70">(facultatif)</span></label>
             <input type="text" id="ligne-designation" maxlength="255" placeholder="Imprimé sur {{ document }} à la place du libellé de l'article" class="border border-base-200 dark:border-base-700 dark:bg-base-800 rounded-default px-3 py-2 w-full">
@@ -52,8 +56,7 @@ date_reference, url_ajout, onglet (onglet à rouvrir après rechargement, facult
         </div>
     </div>
 
-    <!-- Bloc nouvel article. La marge ne se saisit plus ici : l'article reprend celle de son premier composant, et elle se
-         règle ensuite dans la colonne « Taux de marge » de la ligne. -->
+    <!-- Bloc nouvel article. Le taux de marge (rangée du haut) est pré-rempli avec celui du premier composant. -->
     <div id="bloc-nouvel-article" class="hidden">
         <h3 class="lc-section">Nomenclature (composants)</h3>
         <div id="nomenclature-rows" class="space-y-2 mb-2"></div>

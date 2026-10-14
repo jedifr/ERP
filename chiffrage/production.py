@@ -377,7 +377,7 @@ def importer_lignes_devis(commande, lignes_devis):
     return creees
 
 
-def ajouter_ligne_commande(commande, article, quantite, designation=""):
+def ajouter_ligne_commande(commande, article, quantite, designation="", taux_marge=None):
     """Ajoute en fin de commande une ligne sans devis d'origine (assistant « Composer un article » de la fiche
     Commande) : prix calculé comme une ligne saisie à la main (nomenclature + gamme, marges par défaut de l'article
     et des postes, voir previsualiser_ligne_commande) et TVA selon le régime du client."""
@@ -385,7 +385,7 @@ def ajouter_ligne_commande(commande, article, quantite, designation=""):
         raise ChiffrageError(f"La commande « {commande} » est annulée : on ne peut plus y ajouter de lignes.")
     if not quantite or quantite <= 0:
         raise ChiffrageError("La quantité doit être strictement positive.")
-    prix = previsualiser_ligne_commande(article, quantite, commande.date_commande)
+    prix = previsualiser_ligne_commande(article, quantite, commande.date_commande, taux_marge)
     ligne = CommandeLigne.objects.create(
         commande=commande,
         article=article,

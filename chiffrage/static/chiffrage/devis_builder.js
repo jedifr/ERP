@@ -92,6 +92,16 @@ function demarrerConstructeur() {
         });
     }
 
+    // ---- Taux de marge : pré-rempli avec la marge par défaut de l'article (ou du 1er composant), sauf saisie à la main ----
+    const champMarge = document.getElementById("ligne-taux-marge");
+    let margeSaisieMain = false;
+    if (champMarge) champMarge.addEventListener("input", () => { margeSaisieMain = champMarge.value !== ""; });
+    function proposerMarge(article) {
+        if (!champMarge || margeSaisieMain) return;
+        const taux = article ? article.taux_marge_defaut : null;
+        champMarge.value = taux == null ? "" : taux;
+    }
+
     // ---- Toggle article existant / nouvel article ----
     const radios = document.querySelectorAll("input[name=mode-article]");
     const blocExistant = document.getElementById("bloc-article-existant");
@@ -120,6 +130,7 @@ function demarrerConstructeur() {
             document.getElementById("article-existant-results"),
             document.getElementById("article-existant-reference"),
             (article) => {
+                proposerMarge(article);
                 if (voirArticleLink) {
                     voirArticleLink.href = `/admin/technique/article/${encodeURIComponent(article.reference)}/change/`;
                     voirArticleLink.classList.remove("hidden");
@@ -247,7 +258,10 @@ function demarrerConstructeur() {
         const searchInput = row.querySelector(".composant-search");
         const resultsEl = row.querySelector(".composant-results");
         const hiddenEl = row.querySelector(".composant-reference");
-        wireTypeahead(searchInput, resultsEl, hiddenEl, (article) => configureRowForArticle(row, article));
+        wireTypeahead(searchInput, resultsEl, hiddenEl, (article) => {
+            configureRowForArticle(row, article);
+            if (row === nomenclatureRowsEl.querySelector(".nomenclature-row")) proposerMarge(article);
+        });
 
         row.querySelector(".remove-row").addEventListener("click", () => row.remove());
     }
@@ -311,6 +325,8 @@ function demarrerConstructeur() {
         }
         const nouveau = document.querySelector("input[name=mode-article]:checked").value === "nouveau";
         const payload = { quantite: quantite, designation: document.getElementById("ligne-designation").value.trim() };
+        const marge = champMarge && champMarge.value !== "" ? parseFloat(champMarge.value) : null;
+        if (marge != null && !Number.isNaN(marge)) payload.taux_marge = marge;
         if (nouveau) {
             const reference = document.getElementById("na-reference").value.trim();
             if (!reference) {
@@ -320,6 +336,7 @@ function demarrerConstructeur() {
             payload.nouvel_article = {
                 reference: reference,
                 libelle: document.getElementById("na-libelle").value.trim(),
+                taux_marge_defaut: payload.taux_marge ?? null,  // devient la marge par défaut du nouvel article
                 composants: collectNomenclature(),
                 etapes: collectGamme(),
             };
