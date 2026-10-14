@@ -368,7 +368,7 @@
                 taux_marge_matiere_applique: tauxInput ? tauxInput.value : null,
                 prix_vente_unitaire_force: prixForceInput ? prixForceInput.value : null,
                 remise_pct: remiseInput ? remiseInput.value : null,
-                taux_tva: tauxTvaSelect ? tauxTvaSelect.value : null,
+                taux_tva: tauxTvaSelect ? tauxTvaSelect.value : undefined, // plus de colonne TVA (taux du devis) : clé omise
             };
 
             row.style.opacity = "0.6";
@@ -447,7 +447,7 @@
                 taux_marge_matiere_applique: tauxInput ? tauxInput.value : null,
                 prix_vente_unitaire_force: prixForceInput ? prixForceInput.value : null,
                 remise_pct: remiseInput ? remiseInput.value : null,
-                taux_tva: tauxTvaSelect ? tauxTvaSelect.value : null,
+                taux_tva: tauxTvaSelect ? tauxTvaSelect.value : undefined, // plus de colonne TVA (taux du devis) : clé omise
             };
 
             row.style.opacity = "0.6";
@@ -551,7 +551,7 @@
                 taux_marge_matiere_applique: tauxInput ? tauxInput.value : null,
                 prix_vente_unitaire_force: prixForceInput ? prixForceInput.value : null,
                 remise_pct: remiseInput ? remiseInput.value : null,
-                taux_tva: tauxTvaSelect ? tauxTvaSelect.value : null,
+                taux_tva: tauxTvaSelect ? tauxTvaSelect.value : undefined, // plus de colonne TVA (taux du devis) : clé omise
             };
 
             row.style.opacity = "0.6";

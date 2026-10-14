@@ -407,16 +407,28 @@ def resoudre_taux_tva(article, client):
     return taux
 
 
-def previsualiser_ligne_commande(article, quantite, date_reference):
+def taux_tva_document(client):
+    """Taux de TVA proposé pour un devis ou une commande de `client` (onglet Général) : 0 % pour un client
+    non soumis à la TVA française, sinon le taux par défaut du référentiel. None si le référentiel n'a pas
+    le taux voulu (les lignes gardent alors le leur)."""
+    if client is None:
+        return None
+    if client.regime_fiscal != Tiers.RegimeFiscal.FRANCE:
+        return TauxTVA.objects.filter(taux=0).first()
+    return TauxTVA.objects.filter(est_defaut=True).first()
+
+
+def previsualiser_ligne_commande(article, quantite, date_reference, taux_marge=None):
     """Prix de vente d'une ligne de commande à partir de la quantité, du
     coût matière (nomenclature pour un article FABRIQUE, coût unitaire
     sinon) et du coût des opérations de gamme — même principe que
     previsualiser_ligne (devis), mais sans les surcharges de marge par
-    ligne/devis : CommandeLigne n'a ni taux_marge_matiere_applique ni
-    prix_vente_unitaire_force, donc les marges par défaut de
-    l'article/poste s'appliquent toujours."""
+    devis : `taux_marge` (colonne « Taux de marge » de la ligne de
+    commande) remplace la marge matière par défaut de l'article ; les
+    opérations gardent les marges par défaut de leurs postes."""
     cout_matiere = cout_matiere_article(article, quantite, date_reference=date_reference)
-    prix_matiere = _vendu(cout_matiere, article.taux_marge_defaut)
+    taux_matiere = article.taux_marge_defaut if taux_marge is None else taux_marge
+    prix_matiere = _vendu(cout_matiere, taux_matiere)
 
     prix_operations = ZERO
     cout_operations = ZERO
@@ -435,4 +447,5 @@ def previsualiser_ligne_commande(article, quantite, date_reference):
         "prix_vente_operations": prix_operations,
         "prix_vente_total": prix_total,
         "cout_total": D(cout_matiere) + cout_operations,
+        "taux_marge": taux_matiere,
     }

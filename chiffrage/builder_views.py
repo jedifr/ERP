@@ -220,9 +220,20 @@ def _creer_article_depuis_payload(data, date_devis=None):
     return creer_article_fabrique(
         reference=reference,
         libelle=(data.get("libelle") or "").strip(),
-        taux_marge_defaut=data.get("taux_marge_defaut") or None,
+        taux_marge_defaut=_taux_marge_nouvel_article(data, composants),
         composants=composants,
         etapes=etapes,
+    )
+
+
+def _taux_marge_nouvel_article(data, composants):
+    """L'assistant ne demande plus la marge (elle se règle dans la colonne « Taux de marge » de la ligne) : le nouvel
+    article reprend celle du premier composant qui en a une, comme une pièce reprend celle de sa tôle (pieces_views)."""
+    if data.get("taux_marge_defaut") not in (None, ""):
+        return data["taux_marge_defaut"]
+    return next(
+        (c["article_composant"].taux_marge_defaut for c in composants if c["article_composant"].taux_marge_defaut is not None),
+        None,
     )
 
 
@@ -413,7 +424,7 @@ def previsualiser_ligne_view(request, numero):
             quantite,
             taux_marge_matiere_applique=taux,
             prix_vente_unitaire_force=prix_force,
-            taux_tva=taux_tva,
+            taux_tva=taux_tva or devis.taux_tva,
             remise_pct=remise,
         )
     except ChiffrageError as exc:
@@ -577,6 +588,10 @@ def recalculer_ligne_commande_view(request, numero, ligne_id):
         if prix_fourni:
             ligne.prix_vente_unitaire = prix
 
+        taux_marge, marge_fournie = _parse_float_optionnel(payload, "taux_marge", "Taux de marge invalide.")
+        if marge_fournie:
+            ligne.taux_marge = taux_marge
+
         taux_tva, fourni = _parse_fk_optionnel(
             payload, "taux_tva", TauxTVA.objects.all(), "Taux de TVA introuvable."
         )
@@ -585,10 +600,11 @@ def recalculer_ligne_commande_view(request, numero, ligne_id):
     except _ValeurInvalide as exc:
         return JsonResponse({"detail": exc.message}, status=400)
 
-    if ligne.devis_ligne_id is None and not prix_fourni and ligne.quantite_commandee:
+    # Une marge modifiée à la main recalcule le prix, même sur une ligne issue d'un devis : c'est une demande explicite.
+    if (ligne.devis_ligne_id is None or marge_fournie) and not prix_fourni and ligne.quantite_commandee:
         try:
             resultat = previsualiser_ligne_commande(
-                ligne.article, ligne.quantite_commandee, commande.date_commande
+                ligne.article, ligne.quantite_commandee, commande.date_commande, ligne.taux_marge
             )
         except ChiffrageError as exc:
             return JsonResponse({"detail": str(exc)}, status=400)
@@ -605,6 +621,7 @@ def recalculer_ligne_commande_view(request, numero, ligne_id):
         {
             "ok": True,
             "prix_vente_unitaire": ligne.prix_vente_unitaire,
+            "taux_marge": ligne.taux_marge,
             "montant_ht": ligne.montant_ht,
             "montant_ttc": ligne.montant_ttc,
             "taux_tva_suggere": _taux_tva_suggere_json(ligne.article, commande.client),
@@ -639,7 +656,12 @@ def previsualiser_ligne_commande_view(request, numero):
         return JsonResponse({"detail": "Quantité invalide."}, status=400)
 
     try:
-        resultat = previsualiser_ligne_commande(article, quantite, commande.date_commande)
+        taux_marge, _ = _parse_float_optionnel(payload, "taux_marge", "Taux de marge invalide.")
+    except _ValeurInvalide as exc:
+        return JsonResponse({"detail": exc.message}, status=400)
+
+    try:
+        resultat = previsualiser_ligne_commande(article, quantite, commande.date_commande, taux_marge)
     except ChiffrageError as exc:
         return JsonResponse({"detail": str(exc)}, status=400)
 
@@ -686,7 +708,12 @@ def previsualiser_ligne_nouvelle_commande_view(request):
         client = Tiers.objects.filter(pk=client_code).first()
 
     try:
-        resultat = previsualiser_ligne_commande(article, quantite, date_commande)
+        taux_marge, _ = _parse_float_optionnel(payload, "taux_marge", "Taux de marge invalide.")
+    except _ValeurInvalide as exc:
+        return JsonResponse({"detail": exc.message}, status=400)
+
+    try:
+        resultat = previsualiser_ligne_commande(article, quantite, date_commande, taux_marge)
     except ChiffrageError as exc:
         return JsonResponse({"detail": str(exc)}, status=400)
 

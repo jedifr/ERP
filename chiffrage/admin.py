@@ -75,7 +75,7 @@ from .documents import (
     generer_pdf_ordres_fabrication,
 )
 from . import etapes
-from .moteur import ChiffrageError, calculer_devis
+from .moteur import ChiffrageError, calculer_devis, taux_tva_document
 from .planning_sync import resynchroniser
 from .validation import verifier_validation_devis
 from .production import (
@@ -138,6 +138,16 @@ class DevisLigneForm(forms.ModelForm):
         return self.cleaned_data.get("ordre") or 0
 
 
+class DevisLigneInlineForm(DevisLigneForm):
+    # Le taux de TVA se choisit pour tout le devis (onglet Général, Devis.taux_tva) : plus de colonne par ligne.
+    taux_tva = None
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if "taux_marge_matiere_applique" in self.fields:
+            self.fields["taux_marge_matiere_applique"].label = "Taux de marge (%)"
+
+
 def devis_verrouille(devis):
     """Un devis validé est figé : c'est le prix engagé auprès du client. Pour le
     modifier, il faut d'abord le repasser en brouillon (voir DevisAdminForm)."""
@@ -151,7 +161,8 @@ def devis_verrouille(devis):
 
 class DevisLigneInline(TabularInline):
     model = DevisLigne
-    form = DevisLigneForm
+    form = DevisLigneInlineForm
+    exclude = ["taux_tva"]
     extra = 1
     autocomplete_fields = ["article"]
     readonly_fields = [
@@ -344,6 +355,27 @@ class EnregistrerEtValiderMixin:
         return HttpResponseRedirect(pdf)
 
 
+class TauxTvaDocumentMixin:
+    """Taux de TVA du devis / de la commande (onglet Général) : laissé vide, ou client changé sans retoucher le
+    taux, il est déduit du régime fiscal du client (voir moteur.taux_tva_document) ; les lignes le reprennent
+    (voir models.appliquer_taux_tva_aux_lignes)."""
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == "taux_tva":
+            # Même affichage compact (« 20% ») que l'ancienne colonne des lignes.
+            return TauxTVACompactChoiceField(
+                queryset=TauxTVA.objects.all(), required=False, label="Taux de TVA", help_text=db_field.help_text
+            )
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
+    def save_model(self, request, obj, form, change):
+        if "taux_tva" in form.fields and (
+            obj.taux_tva_id is None or ("client" in form.changed_data and "taux_tva" not in form.changed_data)
+        ):
+            obj.taux_tva = taux_tva_document(obj.client) if obj.client_id else None
+        super().save_model(request, obj, form, change)
+
+
 class DevisAdminForm(forms.ModelForm):
     class Meta:
         model = Devis
@@ -441,7 +473,7 @@ class ExpireFilter(admin.SimpleListFilter):
 
 
 @admin.register(Devis)
-class DevisAdmin(ProchaineActionMixin, DateDuJourMixin, ChronologieMixin, PucesMixin, PiecesDevisMixin, ColonnesPersonnalisablesMixin, PastillesMixin, EnregistrerEtValiderMixin, EtapeSuivanteMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
+class DevisAdmin(TauxTvaDocumentMixin, ProchaineActionMixin, DateDuJourMixin, ChronologieMixin, PucesMixin, PiecesDevisMixin, ColonnesPersonnalisablesMixin, PastillesMixin, EnregistrerEtValiderMixin, EtapeSuivanteMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
     fonction_prochaine_action = staticmethod(action_devis)
     champs_date_du_jour = ("date_creation",)
     puces = [('Tous', ''), ('Brouillons', '?statut__exact=brouillon'), ('Envoyés', '?statut__exact=valide&issue__exact=en_attente'), ('À relancer', '?validite=bientot'), ('Acceptés', '?issue__exact=accepte')]
@@ -919,6 +951,8 @@ class CommandeLigneForm(forms.ModelForm):
 
 
 class CommandeLigneInlineForm(CommandeLigneForm):
+    # Le taux de TVA se choisit pour toute la commande (onglet Général, Commande.taux_tva) : plus de colonne par ligne.
+    taux_tva = None
     # Rempli en JS (devisligne_reorder.js, le même que sur le devis) au glisser-déposer d'une ligne. Sans JS, une
     # ligne existante garde son ordre et une nouvelle ligne se place en fin de commande.
     ordre = forms.IntegerField(required=False, min_value=0, widget=forms.HiddenInput())
@@ -991,7 +1025,7 @@ class CommandeLigneInline(ColonnesPersonnalisablesMixin, TabularInline):
         "designation",
         "quantite_commandee",
         "prix_vente_unitaire",
-        "taux_tva",
+        "taux_marge",
         "montant_ht",
         "montant_ttc",
         "date_livraison_prevue",
@@ -1021,7 +1055,7 @@ class CommandeLigneInline(ColonnesPersonnalisablesMixin, TabularInline):
 
 
 @admin.register(Commande)
-class CommandeAdmin(ProchaineActionMixin, DateDuJourMixin, ChronologieMixin, PucesMixin, ColonnesPersonnalisablesMixin, PastillesMixin, EnregistrerEtValiderMixin, EtapeSuivanteMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
+class CommandeAdmin(TauxTvaDocumentMixin, ProchaineActionMixin, DateDuJourMixin, ChronologieMixin, PucesMixin, ColonnesPersonnalisablesMixin, PastillesMixin, EnregistrerEtValiderMixin, EtapeSuivanteMixin, ExportCsvMixin, VerrouOptimisteMixin, CodificationInitialeMixin, HistoriqueLectureSeule, ModelAdmin):
     fonction_prochaine_action = staticmethod(action_commande)
     champs_date_du_jour = ("date_commande",)
     change_form_template = "admin/chiffrage/commande/change_form.html"

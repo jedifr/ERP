@@ -172,6 +172,17 @@
         if (tauxTvaSelect && !tauxTvaSelect.value && data.taux_tva_suggere) {
             tauxTvaSelect.value = String(data.taux_tva_suggere.id);
         }
+        // Taux de marge : marge appliquée renvoyée par le serveur (celle de l'article tant qu'on n'en a pas saisi).
+        const margeInput = row.querySelector('input[name$="-taux_marge"]');
+        if (margeInput && data.taux_marge != null && document.activeElement !== margeInput) {
+            margeInput.value = data.taux_marge;
+        }
+    }
+
+    // Taux de marge saisi sur une ligne pas encore enregistrée : envoyé à l'aperçu (vide = marge de l'article).
+    function margeSaisie(row) {
+        const margeInput = row.querySelector('input[name$="-taux_marge"]');
+        return margeInput && margeInput.value !== "" ? margeInput.value : null;
     }
 
     function showLigneErreur(row, message) {
@@ -211,7 +222,8 @@
 
         const prixInput = row.querySelector('input[name$="-prix_vente_unitaire"]');
         const tauxTvaSelect = row.querySelector('select[name$="-taux_tva"]');
-        const champs = { quantiteInput, prixInput, tauxTvaSelect };
+        const margeInput = row.querySelector('input[name$="-taux_marge"]');
+        const champs = { quantiteInput, prixInput, tauxTvaSelect, margeInput };
 
         if (idInput && idInput.value) {
             wireRowExistante(row, numero, idInput.value, champs);
@@ -227,17 +239,22 @@
     // changement de quantité modifie juste la quantité, le prix (une
     // surcharge) reste tel quel tant qu'on ne le retouche pas soi-même.
     function wireRowExistante(row, numero, ligneId, champs) {
-        const { quantiteInput, prixInput, tauxTvaSelect } = champs;
+        const { quantiteInput, prixInput, tauxTvaSelect, margeInput } = champs;
         const url = `/admin/chiffrage/commande/${encodeURIComponent(numero)}/lignes/${ligneId}/recalculer/`;
         let dernierPrixEnvoye = null;
 
-        const executer = (prixModifieParUtilisateur) => {
-            const payload = {
-                quantite_commandee: quantiteInput.value,
-                taux_tva: tauxTvaSelect ? tauxTvaSelect.value : null,
-            };
+        // La marge n'est envoyée que quand on la modifie : le serveur recalcule alors le prix, y compris sur une
+        // ligne issue d'un devis (sinon une simple quantité changée réécrirait le prix repris du devis).
+        const executer = (prixModifieParUtilisateur, margeModifiee) => {
+            const payload = { quantite_commandee: quantiteInput.value };
+            if (tauxTvaSelect) {
+                payload.taux_tva = tauxTvaSelect.value;
+            }
             if (prixModifieParUtilisateur && prixInput) {
                 payload.prix_vente_unitaire = prixInput.value;
+            }
+            if (margeModifiee && margeInput) {
+                payload.taux_marge = margeInput.value;
             }
 
             row.style.opacity = "0.6";
@@ -275,6 +292,9 @@
         quantiteInput.addEventListener("input", recalculerAutomatique);
         if (tauxTvaSelect) {
             tauxTvaSelect.addEventListener("change", recalculerAutomatique);
+        }
+        if (margeInput) {
+            margeInput.addEventListener("input", debounce(() => executer(false, true), 400));
         }
         if (prixInput) {
             // Distingue "le serveur vient de remplir ce champ" (ignoré) d'une
@@ -318,7 +338,7 @@
                     "Content-Type": "application/json",
                     "X-CSRFToken": csrfToken(),
                 },
-                body: JSON.stringify({ article: article, quantite: quantite }),
+                body: JSON.stringify({ article: article, quantite: quantite, taux_marge: margeSaisie(row) }),
             })
                 .then((response) => response.json().then((data) => ({ status: response.status, data })))
                 .then(({ status, data }) => {
@@ -340,6 +360,12 @@
         const previsualiser = debounce(executer, 400);
         quantiteInput.addEventListener("input", previsualiser);
         articleSelect.addEventListener("change", previsualiser);
+        const margeNouvelle = row.querySelector('input[name$="-taux_marge"]');
+        if (margeNouvelle) {
+            margeNouvelle.addEventListener("input", previsualiser);
+            // Autre article : on repart de sa marge par défaut.
+            articleSelect.addEventListener("change", () => { margeNouvelle.value = ""; });
+        }
 
         executer();
     }
@@ -382,6 +408,7 @@
                 quantite: quantite,
                 date_commande: dateCommandeInput ? dateCommandeInput.value : null,
                 client: clientSelect ? clientSelect.value : null,
+                taux_marge: margeSaisie(row),
             };
 
             row.style.opacity = "0.6";
@@ -415,6 +442,12 @@
         const previsualiser = debounce(executer, 400);
         quantiteInput.addEventListener("input", previsualiser);
         articleSelect.addEventListener("change", previsualiser);
+        const margeNouvelle = row.querySelector('input[name$="-taux_marge"]');
+        if (margeNouvelle) {
+            margeNouvelle.addEventListener("input", previsualiser);
+            // Autre article : on repart de sa marge par défaut.
+            articleSelect.addEventListener("change", () => { margeNouvelle.value = ""; });
+        }
 
         executer();
     }

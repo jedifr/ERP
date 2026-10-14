@@ -14,11 +14,15 @@ from .serializers import (
 class MatiereViewSet(viewsets.ModelViewSet):
     queryset = Matiere.objects.all()
     serializer_class = MatiereSerializer
+    # Les nuances ont souvent un point (1.4307) : le motif par défaut du routeur l'exclut et la fiche répondait 404
+    # (poids jamais calculé dans « Composer un article »).
+    lookup_value_regex = "[^/]+"
 
 
 class ArticleViewSet(viewsets.ModelViewSet):
     queryset = Article.objects.select_related("matiere").all()
     serializer_class = ArticleSerializer
+    lookup_value_regex = "[^/]+"  # références avec un point (1.4307-1 1000x2000), voir MatiereViewSet
     filterset_fields = ["nature", "unite_cout", "gere_en_stock", "matiere"]
     search_fields = ["reference", "libelle"]
 

@@ -16,14 +16,14 @@ from technique.models import Article, PosteTravail
 from .models import (
     ComposantOF, Commande, CommandeLigne, CommandeLigneModification, Devis, OperationOF, OrdreFabrication, indice_pour,
 )
-from .moteur import ChiffrageError, gamme_active, previsualiser_ligne_commande, resoudre_taux_tva
+from .moteur import ChiffrageError, gamme_active, previsualiser_ligne_commande, resoudre_taux_tva, taux_tva_document
 from .planning_sync import tenter_synchronisation
 
 # Champs de CommandeLigne qui sont des surcharges du devis (valeur de départ
 # recopiée à la création, modifiable ensuite) — chaque changement sur l'un
 # d'eux est tracé dans CommandeLigneModification par les ModelAdmin
 # (chiffrage/admin.py, qui a accès à request.user).
-CHAMPS_SUIVIS_COMMANDE_LIGNE = ("quantite_commandee", "prix_vente_unitaire", "taux_tva", "designation")
+CHAMPS_SUIVIS_COMMANDE_LIGNE = ("quantite_commandee", "prix_vente_unitaire", "taux_marge", "taux_tva", "designation")
 
 
 def prix_unitaire_commande(ligne_devis):
@@ -228,6 +228,7 @@ def _creer_commande_et_ordres(devis):
         adresse_facturation=devis.adresse_facturation or _adresse_principale(devis.client, "est_facturation", "facturation"),
         adresse_livraison=devis.adresse_livraison or _adresse_principale(devis.client, "est_livraison", "livraison"),
         devise=devis.client.devise,
+        taux_tva=devis.taux_tva or taux_tva_document(devis.client),
     )
 
     devis.issue = Devis.Issue.ACCEPTE
@@ -248,6 +249,7 @@ def _creer_commande_et_ordres(devis):
             devis_ligne=ligne,
             designation=ligne.designation,
             prix_vente_unitaire=prix_unitaire_commande(ligne),
+            taux_marge=ligne.taux_marge_matiere_applique,
             taux_tva=ligne.taux_tva,
             ordre=ordre,
         )
@@ -302,6 +304,7 @@ def synchroniser_lignes_commande(commande):
                 devis_ligne=ligne,
                 designation=ligne.designation,
                 prix_vente_unitaire=prix_unitaire_commande(ligne),
+                taux_marge=ligne.taux_marge_matiere_applique,
                 taux_tva=ligne.taux_tva,
                 ordre=ordre,
             )
@@ -358,6 +361,7 @@ def importer_lignes_devis(commande, lignes_devis):
                     devis_ligne=ligne,
                     designation=ligne.designation,
                     prix_vente_unitaire=prix_unitaire_commande(ligne),
+                    taux_marge=ligne.taux_marge_matiere_applique,
                     taux_tva=ligne.taux_tva,
                     ordre=ordre,
                 )
@@ -388,7 +392,8 @@ def ajouter_ligne_commande(commande, article, quantite, designation=""):
         quantite_commandee=quantite,
         designation=designation,
         prix_vente_unitaire=prix["prix_vente_unitaire"],
-        taux_tva=resoudre_taux_tva(article, commande.client),
+        taux_marge=prix["taux_marge"],
+        taux_tva=commande.taux_tva or resoudre_taux_tva(article, commande.client),
         ordre=CommandeLigne.prochain_ordre(commande),
     )
     commande.mettre_a_jour_statut_livraison()
@@ -432,6 +437,7 @@ def reviser_devis(devis, motif=""):
             date_creation=timezone.localdate(),
             statut=Devis.Statut.BROUILLON,
             taux_marge_globale=devis.taux_marge_globale,
+            taux_tva=devis.taux_tva,
             remise_globale=devis.remise_globale,
             remise_globale_type=devis.remise_globale_type,
             delai=devis.delai,

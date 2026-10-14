@@ -3322,7 +3322,8 @@ class CommandeLigneAuditAdminTests(TestCase):
     def test_options_taux_tva_devis_affichent_uniquement_le_pourcentage(self):
         # Même correctif que ci-dessus, côté DevisLigne (DevisLigneForm) : la
         # ligne de devis a son propre champ taux_tva, distinct de celui de
-        # CommandeLigne, jamais touché par la première correction.
+        # CommandeLigne, jamais touché par la première correction. Sur la fiche
+        # devis, le taux se choisit dans l'onglet Général (Devis.taux_tva).
         taux = TauxTVA.objects.create(nom="Taux unique devis pour ce test", taux=20)
         ligne = DevisLigne.objects.create(
             devis=self.devis, article=self.article, quantite=1, taux_tva=taux,
