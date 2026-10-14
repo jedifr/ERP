@@ -117,6 +117,27 @@ div[data-onglet-actif="pieces"], div[data-onglet-actif="lignes"], div[data-ongle
 .lc-apercu[hidden] { display: none; }
 .lc-apercu small { display: block; color: #a8a29e; font-size: .7rem; }
 .lc-apercu b { font-size: 1.1rem; }
+/* Assistant « Ajouter une ligne » / « Composer un article » : champs groupés par blocs, une rangée par composant. */
+.lc-entete { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: .75rem; margin-bottom: .75rem; }
+.lc-mode { display: inline-flex; border: 1px solid #d6d3d1; border-radius: .5rem; overflow: hidden; }
+.lc-mode label { cursor: pointer; }
+.lc-mode input { position: absolute; opacity: 0; pointer-events: none; }
+.lc-mode span { display: block; padding: .4rem .9rem; font-size: .85rem; }
+.lc-mode input:checked + span { background: #f59e0b; color: #fff; font-weight: 600; }
+.lc-mode input:focus-visible + span { outline: 2px solid #b45309; outline-offset: -2px; }
+.lc-section { font-size: .7rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; opacity: .65; margin: 1.1rem 0 .5rem; padding-bottom: .25rem; border-bottom: 1px dashed #d6d3d1; }
+.lc-rangee { display: flex; flex-wrap: wrap; gap: .75rem; align-items: flex-end; }
+.lc-champ { min-width: 0; }
+.lc-champ.hidden, .lc-dimensions.hidden { display: none; }
+.lc-court { flex: 0 0 7.5rem; }
+.lc-moyen { flex: 2 1 12rem; }
+.lc-large { flex: 3 1 14rem; }
+.lc-dimensions:not(.hidden) { display: flex; flex: 4 1 26rem; gap: .75rem; }
+.lc-dim { flex: 1 1 6.5rem; }
+.lc-composant { border: 1px solid #e7e5e4; border-radius: .5rem; padding: .6rem .75rem; }
+.lc-retirer { flex: 0 0 auto; padding: .5rem .25rem; font-weight: 700; }
+.lc-actions { display: flex; flex-wrap: wrap; gap: .75rem; align-items: center; border-top: 1px solid #e7e5e4; padding-top: .9rem; margin-top: .5rem; }
+.dark .lc-composant, .dark .lc-actions { border-color: #44403c; }
 div[data-onglet-actif="lignes"] > #lignes-constructeur { display: block !important; }
 .ge-titre { margin-bottom: .3rem; font-size: .85rem; }
 .lignes-detail { margin-top: 1.25rem; }

@@ -102,6 +102,11 @@ function demarrerConstructeur() {
                 const nouveau = document.querySelector("input[name=mode-article]:checked").value === "nouveau";
                 blocExistant.classList.toggle("hidden", nouveau);
                 blocNouveau.classList.toggle("hidden", !nouveau);
+                // Référence et libellé du nouvel article : sur la rangée de la quantité, à la place de la recherche d'article.
+                ["bloc-nouvel-article-entete", "bloc-nouvel-article-libelle"].forEach((id) => {
+                    const el = document.getElementById(id);
+                    if (el) el.classList.toggle("hidden", !nouveau);
+                });
             });
         });
     }
@@ -201,6 +206,7 @@ function demarrerConstructeur() {
             champSurface.classList.remove("hidden");
             if (article.matiere && article.epaisseur) {
                 infoEl.textContent = "Vendu au poids — renseignez longueur × largeur, le poids est calculé.";
+                champPoids.classList.remove("hidden");  // à côté de la surface, rempli dès que la densité est connue
                 fetchMatiereDensite(article.matiere, (densite) => {
                     row._articleData._densite = densite;
                     refreshDerivedFields(row);
@@ -314,7 +320,6 @@ function demarrerConstructeur() {
             payload.nouvel_article = {
                 reference: reference,
                 libelle: document.getElementById("na-libelle").value.trim(),
-                taux_marge_defaut: parseFloat(document.getElementById("na-taux-marge").value) || null,
                 composants: collectNomenclature(),
                 etapes: collectGamme(),
             };

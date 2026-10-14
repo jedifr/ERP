@@ -44,6 +44,19 @@ def indice_pour(revision):
     return lettres
 
 
+def appliquer_taux_tva_aux_lignes(document):
+    """Le taux de TVA se choisit sur le devis ou la commande (onglet Général) : il est recopié sur
+    chaque ligne, qui garde son propre champ (factures, ventilation de TVA). Sans taux sur le
+    document (anciens documents aux taux mélangés), les lignes gardent le leur."""
+    if document.taux_tva_id:
+        document.lignes.exclude(taux_tva_id=document.taux_tva_id).update(taux_tva_id=document.taux_tva_id)
+
+
+def _taux_tva_du_document(ligne, document, kwargs):
+    if document is not None and document.taux_tva_id and "update_fields" not in kwargs:
+        ligne.taux_tva_id = document.taux_tva_id
+
+
 class Devis(models.Model):
     class Statut(models.TextChoices):
         BROUILLON = "brouillon", "Brouillon"
@@ -58,6 +71,18 @@ class Devis(models.Model):
         related_name="devis_facturation",
         null=True,
         blank=True,
+    )
+    taux_tva = models.ForeignKey(
+        TauxTVA,
+        verbose_name="taux de TVA",
+        on_delete=models.PROTECT,
+        related_name="+",
+        null=True,
+        blank=True,
+        help_text=(
+            "S'applique à toutes les lignes. Laissé vide, il est déduit du régime fiscal du client "
+            "(lui-même tiré du pays de son adresse) : France 20 %, sinon 0 %."
+        ),
     )
     adresse_livraison = models.ForeignKey(
         Adresse,
@@ -202,6 +227,7 @@ class Devis(models.Model):
             # Repassé en brouillon : l'ancienne échéance ne vaut plus, une nouvelle sera posée à la re-validation.
             self.date_validite = None
         super().save(*args, **kwargs)
+        appliquer_taux_tva_aux_lignes(self)
 
     def clean(self):
         super().clean()
@@ -414,6 +440,10 @@ class DevisLigne(models.Model):
     def __str__(self):
         return f"{self.devis} — {self.article} × {self.quantite}"
 
+    def save(self, *args, **kwargs):
+        _taux_tva_du_document(self, self.devis if self.devis_id else None, kwargs)
+        super().save(*args, **kwargs)
+
     @property
     def prix_vente_operations(self):
         """Prix de vente cumulé des opérations de gamme (temps machine / main d'œuvre)."""
@@ -549,6 +579,18 @@ class Commande(models.Model):
         on_delete=models.PROTECT,
         related_name="commandes_facturation",
     )
+    taux_tva = models.ForeignKey(
+        TauxTVA,
+        verbose_name="taux de TVA",
+        on_delete=models.PROTECT,
+        related_name="+",
+        null=True,
+        blank=True,
+        help_text=(
+            "S'applique à toutes les lignes. Laissé vide, il est déduit du régime fiscal du client "
+            "(lui-même tiré du pays de son adresse) : France 20 %, sinon 0 %."
+        ),
+    )
     adresse_livraison = models.ForeignKey(
         Adresse,
         verbose_name="adresse de livraison",
@@ -575,6 +617,10 @@ class Commande(models.Model):
 
     def __str__(self):
         return self.numero
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        appliquer_taux_tva_aux_lignes(self)
 
     def clean(self):
         super().clean()
@@ -671,6 +717,16 @@ class CommandeLigne(models.Model):
         validators=[positif_ou_nul],
         help_text="Pré-rempli depuis le devis à la création de la commande, modifiable ensuite.", **PRIX_VENTE,
     )
+    taux_marge = ChampDecimal(
+        "taux de marge (%)",
+        null=True,
+        blank=True,
+        validators=[positif_ou_nul],
+        help_text=(
+            "Marge sur la matière : reprise du devis ou de l'article. La modifier recalcule le prix "
+            "de vente unitaire (opérations aux marges de leurs postes)."
+        ), **TAUX,
+    )
     taux_tva = models.ForeignKey(
         TauxTVA,
         verbose_name="taux de TVA",
@@ -697,6 +753,10 @@ class CommandeLigne(models.Model):
 
     def __str__(self):
         return f"{self.commande} — {self.article} × {self.quantite_commandee}"
+
+    def save(self, *args, **kwargs):
+        _taux_tva_du_document(self, self.commande if self.commande_id else None, kwargs)
+        super().save(*args, **kwargs)
 
     @staticmethod
     def prochain_ordre(commande):
