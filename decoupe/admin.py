@@ -789,6 +789,12 @@ class ReglageProcedeAdmin(ModelAdmin):
 
     list_display = ["procede", "coefficient_vitesse", "temps_palpage_s", "espacement_minimum_mm", "bord_tole_minimum_mm"]
 
+    def get_exclude(self, request, obj=None):
+        exclude = list(super().get_exclude(request, obj) or [])
+        if obj is not None and obj.procede != "jet_eau":
+            exclude.append("temps_palpage_s")  # le palpage du canon ne concerne que le jet d'eau
+        return exclude
+
     def has_add_permission(self, request):
         return False  # un réglage par procédé, créé avec les valeurs usuelles
 

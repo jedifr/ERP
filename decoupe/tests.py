@@ -1776,7 +1776,8 @@ class FamillesMatiereTests(TestCase):
     def test_familles_standard_et_base_de_coupe_fournies(self):
         self.assertEqual(FamilleMatiere.objects.get(nom="Acier").usinabilite, 87.6)
         self.assertEqual(FamilleMatiere.objects.get(nom="Inox").nom_igems, "Stainless Steel")
-        self.assertEqual(ParametreCoupe.objects.filter(matiere__isnull=True, procede="jet_eau").count(), 153)
+        # 153 de materials.lua + 21 « Acier trempé » (XC70) repris de l'acier par la migration 0037
+        self.assertEqual(ParametreCoupe.objects.filter(matiere__isnull=True, procede="jet_eau").count(), 174)
         acier = ParametreCoupe.objects.get(famille__nom="Acier", procede="jet_eau", epaisseur_mm=10)
         self.assertEqual(acier.vitesses.count(), 5)
         self.assertGreater(acier.percage_stationnaire_hp_s, 0)  # temps de perçage de materials.lua
