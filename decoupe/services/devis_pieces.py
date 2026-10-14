@@ -133,7 +133,7 @@ def modifier_forme(piece, famille, cotes):
 
 
 def appliquer_reglages(piece, donnees):
-    """Enregistre les réglages saisis (matière, épaisseur, procédé, gaz, quantité, nom) et les reporte sur l'article.
+    """Enregistre les réglages saisis (matière, épaisseur, procédé, gaz, palpage, quantité, nom) et les reporte sur l'article.
     `donnees` : dictionnaire de chaînes (formulaire). Lève ErreurPieceDevis pour une valeur invalide."""
     if "nom" in donnees:
         nom = donnees["nom"].strip()
@@ -164,6 +164,8 @@ def appliquer_reglages(piece, donnees):
         if donnees["rotation"] and donnees["rotation"] not in {str(v) for v in PieceDecoupe.PasRotation.values}:
             raise ErreurPieceDevis("Pas de rotation inconnu.")
         piece.pas_rotation_deg = int(donnees["rotation"]) if donnees["rotation"] else None
+    if "palpage_unique" in donnees:
+        piece.palpage_unique = bool(donnees["palpage_unique"])
     if "quantite" in donnees:
         try:
             piece.quantite = int(float(donnees["quantite"].replace(",", ".")))

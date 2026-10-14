@@ -39,6 +39,9 @@
       <label>Quantité
         <input type="number" min="1" step="1" data-champ="quantite" value="{{ piece.quantite }}" {% if not editable %}disabled{% endif %}>
       </label>
+      <label class="dp-palpage" {% if piece.procede != "jet_eau" %}hidden{% endif %} title="Jet d'eau : la hauteur du canon n'est ajustée qu'une fois pour la pièce, au lieu d'un palpage à chaque perçage">
+        <input type="checkbox" data-champ="palpage_unique" {% if piece.palpage_unique %}checked{% endif %} {% if not editable %}disabled{% endif %}> Un seul palpage par pièce
+      </label>
     </div>
     <div class="dp-verdict {% if verdict.ok %}dp-verdict-ok{% elif verdict.ok is False %}dp-verdict-ko{% else %}dp-verdict-attente{% endif %}">
       {% if verdict.ok %}Réalisable · {{ verdict.temps_min|floatformat:2 }} min de coupe par pièce{% else %}{{ verdict.message }}{% endif %}

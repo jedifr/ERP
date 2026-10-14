@@ -253,7 +253,7 @@ function demarrer() {
     // ---------------------------------------------------------------- réglages
     function champs(carte) {
         const donnees = new FormData();
-        carte.querySelectorAll("[data-champ]").forEach((el) => donnees.append(el.dataset.champ, el.value));
+        carte.querySelectorAll("[data-champ]").forEach((el) => donnees.append(el.dataset.champ, el.type === "checkbox" ? (el.checked ? "1" : "") : el.value));
         return donnees;
     }
 
@@ -281,6 +281,8 @@ function demarrer() {
         if (e.target.dataset.champ === "procede") {
             const gaz = carte.querySelector(".dp-gaz");
             if (gaz) gaz.hidden = e.target.value !== "laser";
+            const palpage = carte.querySelector(".dp-palpage");
+            if (palpage) palpage.hidden = e.target.value !== "jet_eau";
         }
         enregistrer(carte);
     });
