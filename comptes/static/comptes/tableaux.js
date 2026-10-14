@@ -8,7 +8,7 @@
 (function () {
     "use strict";
 
-    const MIN = 40;
+    const MIN = 50;
     const ECRAN_LARGE = "(min-width: 1024px)"; // en dessous, Unfold affiche les lignes en fiches : pas de colonnes
 
     function nomColonne(th) {
@@ -48,7 +48,11 @@
             Object.entries(largeurs).forEach(([nom, px]) => {
                 const th = `#${CSS.escape(id)} th.column-${CSS.escape(nom)}`;
                 const td = `#${CSS.escape(id)} .field-${CSS.escape(nom)}`;
-                larges.push(`${th} { width: ${px}px; min-width: ${px}px; max-width: ${px}px; }`);
+                larges.push(`${th} { width: ${px}px; min-width: ${px}px; max-width: ${px}px; white-space: normal; }`);
+                // Colonne étroite : le titre passe à la ligne (3 lignes au plus, puis « … ») au lieu de déborder sur
+                // la colonne voisine ; le titre complet reste en info-bulle.
+                larges.push(`${th} .colonne-libelle { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; overflow-wrap: anywhere; hyphens: auto; white-space: normal; min-width: 0; flex: 1 1 100%; }`);
+                larges.push(`${th} > * { min-width: 0; flex-wrap: wrap; }`); // les icônes de tri passent sous le titre
                 larges.push(`${td} { max-width: ${px}px; overflow: hidden; text-overflow: ellipsis; }`);
                 larges.push(`${td} input, ${td} select, ${td} textarea, ${td} .select2-container { min-width: 0 !important; width: 100% !important; }`);
             });
@@ -85,6 +89,9 @@
         entetes.forEach((th) => {
             const nom = nomColonne(th);
             th.classList.add("colonne-reglable");
+            const texte = th.querySelector(".text") || th.querySelector(":scope > span > span:first-child");
+            if (texte) texte.classList.add("colonne-libelle");
+            if (!th.title) th.title = libelle(th);
             const poignee = document.createElement("span");
             poignee.className = "colonne-poignee";
             poignee.title = "Tirer pour régler la largeur (double-clic : largeur par défaut)";
