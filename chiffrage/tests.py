@@ -589,6 +589,7 @@ class ReordonnerLignesDevisAdminTests(TestCase):
         return {
             "numero": "DEV-REORDER",
             "client": self.tiers.pk,
+            "reference": "Réf. test",
             "date_creation": "01/01/2026",
             "statut": Devis.Statut.BROUILLON,
             "taux_marge_globale": "",
@@ -2341,7 +2342,7 @@ class AjoutDevisOuvrirConstructeurTests(TestCase):
 
     def _formulaire_de_base(self):
         return {
-            "numero": "DEV-CONSTRUIRE-01", "client": self.client_tiers.pk, "date_creation": "2026-01-01", "statut": Devis.Statut.BROUILLON,
+            "numero": "DEV-CONSTRUIRE-01", "client": self.client_tiers.pk, "reference": "Réf. test", "date_creation": "2026-01-01", "statut": Devis.Statut.BROUILLON,
             "taux_marge_globale": "", "adresse_facturation": "", "adresse_livraison": "", "contact": "",
             "lignes-TOTAL_FORMS": "0", "lignes-INITIAL_FORMS": "0", "lignes-MIN_NUM_FORMS": "0", "lignes-MAX_NUM_FORMS": "1000",
         }
@@ -3747,7 +3748,7 @@ class PisteDAuditTests(_FixtureModuleA, TestCase):
         self.client.force_login(simple)
         self.client.post(
             f"/admin/chiffrage/devis/{self.devis.pk}/change/",
-            {"numero": self.devis.pk, "client": self.tiers.pk, "date_creation": "2026-01-01", "statut": "valide",
+            {"numero": self.devis.pk, "client": self.tiers.pk, "reference": "Réf. test", "date_creation": "2026-01-01", "statut": "valide",
              "taux_marge_globale": "", "adresse_facturation": "", "adresse_livraison": "", "contact": "",
              "lignes-TOTAL_FORMS": "1", "lignes-INITIAL_FORMS": "1", "lignes-MIN_NUM_FORMS": "0",
              "lignes-MAX_NUM_FORMS": "1000", "lignes-0-id": self.ligne.pk, "lignes-0-devis": self.devis.pk,
@@ -3826,7 +3827,7 @@ class ValidationDuDevisTests(_FixtureModuleA, TestCase):
 
     def _formulaire(self, ligne, **champs):
         data = {
-            "numero": "DEV-VALID-01", "client": self.tiers.pk, "date_creation": "2026-01-01",
+            "numero": "DEV-VALID-01", "client": self.tiers.pk, "reference": "Réf. test", "date_creation": "2026-01-01",
             "statut": Devis.Statut.VALIDE, "taux_marge_globale": "", "adresse_facturation": "",
             "adresse_livraison": "", "contact": "",
             "lignes-TOTAL_FORMS": "1", "lignes-INITIAL_FORMS": "1",
@@ -5108,7 +5109,7 @@ class FicheDevisDeuxColonnesTests(TestCase):
         self.assertContains(self.client.get("/admin/chiffrage/devis/add/"), "fiche-recap")
         reponse = self.client.post(
             f"/admin/chiffrage/devis/{self.devis.pk}/change/",
-            {"numero": "DEV-DC", "client": self.tiers.pk, "date_creation": "2026-10-01", "statut": "brouillon",
+            {"numero": "DEV-DC", "client": self.tiers.pk, "reference": "Réf. test", "date_creation": "2026-10-01", "statut": "brouillon",
              "issue": "en_attente", "delai": "3 semaines", "lignes-TOTAL_FORMS": "0", "lignes-INITIAL_FORMS": "0",
              "version_verrou": ""},
         )
@@ -5463,7 +5464,7 @@ class EnregistrerEtValiderTests(_FixtureModuleA, TestCase):
 
     def payload(self, devis, ligne=None):
         donnees = {
-            "numero": devis.pk, "client": self.tiers.pk, "date_creation": "01/01/2026", "statut": "brouillon", "issue": "en_attente",
+            "numero": devis.pk, "client": self.tiers.pk, "reference": "Réf. test", "date_creation": "01/01/2026", "statut": "brouillon", "issue": "en_attente",
             "taux_marge_globale": "", "adresse_facturation": "", "adresse_livraison": "", "contact": "", "delai": "",
             "lignes-TOTAL_FORMS": "1" if ligne else "0", "lignes-INITIAL_FORMS": "1" if ligne else "0",
             "lignes-MIN_NUM_FORMS": "0", "lignes-MAX_NUM_FORMS": "1000",
@@ -5833,7 +5834,7 @@ class RemisesDevisTests(_FixtureModuleA, TestCase):
         self.assertContains(page, 'id="tableaux-config"')  # colonnes et largeurs réglables (comptes/tableaux.js)
         reponse = self.client.post(
             f"/admin/chiffrage/devis/{self.devis.pk}/change/",
-            {"numero": "DEV-REC-A", "client": self.tiers.pk, "date_creation": "2026-01-01", "statut": "brouillon",
+            {"numero": "DEV-REC-A", "client": self.tiers.pk, "reference": "Réf. test", "date_creation": "2026-01-01", "statut": "brouillon",
              "issue": "en_attente", "remise_globale": "7", "remise_globale_type": "eur",
              "lignes-TOTAL_FORMS": "0", "lignes-INITIAL_FORMS": "0", "version_verrou": ""},
         )

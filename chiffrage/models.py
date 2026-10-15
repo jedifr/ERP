@@ -84,6 +84,9 @@ class Devis(models.Model):
             "(lui-même tiré du pays de son adresse) : France 20 %, sinon 0 %."
         ),
     )
+    # Obligatoire dans la fiche (DevisAdminForm) ; vide pour les devis créés avant son ajout, qui restent donc
+    # modifiables par l'API et les traitements automatiques sans qu'on leur en invente une.
+    reference = models.CharField("référence du devis", max_length=100, blank=True, default="")
     adresse_livraison = models.ForeignKey(
         Adresse,
         verbose_name="adresse de livraison",

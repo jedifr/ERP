@@ -431,6 +431,7 @@ def reviser_devis(devis, motif=""):
         nouveau = Devis.objects.create(
             numero=numero,
             client=devis.client,
+            reference=devis.reference,
             adresse_facturation=devis.adresse_facturation,
             adresse_livraison=devis.adresse_livraison,
             contact=devis.contact,

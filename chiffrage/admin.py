@@ -397,6 +397,9 @@ class DevisAdminForm(forms.ModelForm):
         elif champ is not None:
             champ.choices = [c for c in champ.choices if c[0] == Devis.Issue.EN_ATTENTE]
         self._adresses_obligatoires()
+        champ = self.fields.get("reference")
+        if champ is not None:  # absent quand le devis est validé (lecture seule)
+            champ.required = True
 
     def _adresses_obligatoires(self):
         """Adresses de facturation et de livraison obligatoires. Laissées vides alors que le client n'a
@@ -488,6 +491,7 @@ class DevisAdmin(TauxTvaDocumentMixin, ProchaineActionMixin, DateDuJourMixin, Ch
         "numero",
         "indice",
         "client",
+        "reference",
         "date_creation",
         "statut",
         "issue",
@@ -501,7 +505,7 @@ class DevisAdmin(TauxTvaDocumentMixin, ProchaineActionMixin, DateDuJourMixin, Ch
         "montant_total_ttc",
     ]
     list_filter = ["statut", "issue", DernierIndiceFilter, ExpireFilter]
-    search_fields = ["numero", "client__raison_sociale"]
+    search_fields = ["numero", "reference", "client__raison_sociale"]
     autocomplete_fields = ["client", "adresse_facturation", "adresse_livraison", "contact"]
     readonly_fields = [
         "montant_matiere_ht_display",
@@ -631,6 +635,12 @@ class DevisAdmin(TauxTvaDocumentMixin, ProchaineActionMixin, DateDuJourMixin, Ch
     def get_fieldsets(self, request, obj=None):
         exclus = self.CHAMPS_RECAPITULATIF + self.CHAMPS_REMISE_GLOBALE
         saisie = [c for c in self.get_fields(request, obj) if c not in exclus]
+        lecture_seule = self.get_readonly_fields(request, obj)
+        if all(c in saisie and c not in lecture_seule for c in ("adresse_facturation", "taux_tva")):
+            # Le taux de TVA découle de l'adresse de facturation : sur la même ligne, à sa droite (mise en page dans
+            # devis_admin_live.css, qui s'appuie sur les classes field-<nom> des seuls champs modifiables).
+            saisie.remove("taux_tva")
+            saisie[saisie.index("adresse_facturation")] = ("adresse_facturation", "taux_tva")
         return [
             (None, {"fields": saisie, "classes": ["fiche-saisie"]}),
             ("Récapitulatif", {"fields": self.CHAMPS_RECAPITULATIF, "classes": ["fiche-recap"]}),
