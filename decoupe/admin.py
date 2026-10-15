@@ -792,7 +792,7 @@ class ReglageProcedeAdmin(ModelAdmin):
     def get_exclude(self, request, obj=None):
         exclude = list(super().get_exclude(request, obj) or [])
         if obj is not None and obj.procede != "jet_eau":
-            exclude.append("temps_palpage_s")  # le palpage du canon ne concerne que le jet d'eau
+            exclude += ["temps_palpage_s", "diametre_petits_trous_mm", "qualite_petits_trous"]  # propres au jet d'eau
         return exclude
 
     def has_add_permission(self, request):

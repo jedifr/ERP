@@ -1584,6 +1584,23 @@ class PieceTestVitessesJetEauTests(TestCase):
         self.assertEqual(unique.palpage_s, 4)
         self.assertAlmostEqual(chaque.total_s - unique.total_s, 76)
 
+    def test_trous_de_moins_de_20_mm_en_qualite_4(self):
+        from .services.temps import _diametre, estimer_temps_decoupe
+
+        piece = self.piece(matiere=Matiere.objects.create(nom="S235 test petits trous", famille=FamilleMatiere.objects.get(nom="Acier"), densite=7.85), epaisseur=10)
+        petits = [t for t in piece.contour_json["trous"] if _diametre(t) < 20]
+        self.assertTrue(0 < len(petits) < len(piece.contour_json["trous"]))  # Ø9, 11, 12, 18,5 d'un côté ; Ø21,5, 22… de l'autre
+        regle = estimer_temps_decoupe(piece)
+        tout_q4 = estimer_temps_decoupe(piece, qualite_interieure=4)
+        ReglageProcede.objects.filter(procede="jet_eau").update(diametre_petits_trous_mm=0)  # sans la règle : tout en qualité 3
+        tout_q3 = estimer_temps_decoupe(piece)
+        self.assertLess(tout_q3.coupe_s, regle.coupe_s)
+        self.assertLess(regle.coupe_s, tout_q4.coupe_s)
+        # une pièce en qualité 5 garde sa qualité pour ses petits trous
+        ReglageProcede.objects.filter(procede="jet_eau").update(diametre_petits_trous_mm=20)
+        piece.qualite_coupe = 5
+        self.assertAlmostEqual(estimer_temps_decoupe(piece).coupe_s, estimer_temps_decoupe(piece, qualite_interieure=5).coupe_s)
+
     def test_qualite_interieure_ralentit_les_trous(self):
         from .services.temps import estimer_temps_decoupe
 
