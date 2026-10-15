@@ -56,7 +56,8 @@
    (display: contents) pour que libellé, liste et aide se rangent directement dans la ligne. */
 @media (min-width: 1024px) {
     .field-row:has(> .field-taux_tva) { display: flex; flex-wrap: wrap; align-items: flex-start; border-bottom: 1px dashed var(--color-base-200, #e5e7eb); }
-    .field-row > .field-adresse_facturation { flex: 1 1 0; min-width: 0; border-bottom: 0; }
+    /* Largeur des autres lignes (libellé 14rem + champ max-w-2xl + menu ⋮) : sur grand écran, le taux suit le menu ⋮. */
+    .field-row > .field-adresse_facturation { flex: 1 1 0; max-width: calc(14rem + 42rem + 3rem + 1.5rem); min-width: 0; border-bottom: 0; }
     .field-row > .field-adresse_facturation .grow,
     .field-row > .field-adresse_facturation .related-widget-wrapper { min-width: 0; }
     .field-row > .field-adresse_facturation .select2-container { width: auto !important; flex: 1 1 0; min-width: 0; }
