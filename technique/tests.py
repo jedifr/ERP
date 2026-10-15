@@ -523,3 +523,21 @@ class CatalogueProfilesTests(TestCase):
         appliquer(apps, None)
         self.assertEqual(ProfileSection.objects.count(), nb)  # idempotent
         self.assertEqual(ProfileSection.objects.get(pk=s.pk).masse_lineique, 9.99)  # vérifié : jamais recalculé
+
+
+class CoefficientKFamillesTests(TestCase):
+    """Le coefficient K de pliage est renseigné par la migration pour les familles usuelles et borné entre 0 et 0,5."""
+
+    def test_valeurs_atelier(self):
+        from .models import FamilleMatiere
+
+        attendus = {"Acier": Decimal("0.445"), "Inox": Decimal("0.36"), "Aluminium": Decimal("0.45")}
+        for nom, k in attendus.items():
+            self.assertEqual(FamilleMatiere.objects.get(nom=nom).coef_k, k)
+
+    def test_borne(self):
+        from .models import FamilleMatiere
+
+        famille = FamilleMatiere(nom="Essai K", coef_k=Decimal("0.6"))
+        with self.assertRaises(ValidationError):
+            famille.full_clean()

@@ -3306,3 +3306,7 @@ Les textes d'Unfold (recherche, filtres, boutons…) sont traduits dans `locale/
 ## Taille des aperçus réglable
 
 Les aperçus de pièces des articles fabriqués étaient affichés à 420 px de large dans la liste (la taille fixée par le SVG n'était pas remplacée), ce qui rendait la liste illisible. Ils tiennent désormais dans un cadre réglable : **Paramétrage → Société et documents → Affichage (taille des aperçus)**. Par défaut, 80 × 50 px dans les listes et 240 × 240 px sur la fiche article. L'aperçu garde ses proportions : sa taille en pixels est calculée d'après le viewBox du SVG (`technique/admin.py`, `dimensionner_svg`). Réglage : `comptes.ReglageAffichage` (fiche unique, migration `comptes 0007`).
+
+## Coefficient K de pliage par famille de matière
+
+Chaque **famille de matière** (Paramétrage → Matières → Familles de matière, section « Pliage ») porte un **coefficient K** : la position de la fibre neutre dans l'épaisseur, qui sert à calculer le développé d'une pièce pliée (arc neutre = angle de pliage en radians × (rayon intérieur + K × épaisseur)). Règle de l'atelier, renseignée par la migration `technique 0029` sans écraser une valeur déjà saisie : **0,445** pour l'acier, l'acier galvanisé et l'acier électrozingué, **0,36** pour l'inox, **0,45** pour l'aluminium. Les autres familles restent vides. Contrôle : une cornière acier 2 mm, ailes extérieures 50 × 100 à 90° en V12 (rayon intérieur 2), donne un développé de 146,54 mm. Valeur admise : de 0 à 0,5.

@@ -1,7 +1,9 @@
 import re
+from decimal import Decimal
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from comptes.champs import ChampDecimal
 from comptes.montants import PRIX, TAUX, D
@@ -32,6 +34,12 @@ class FamilleMatiere(models.Model):
     )
     ordre = models.PositiveSmallIntegerField(
         "priorité", default=50, help_text="Les familles de priorité faible sont essayées d'abord (« inox » avant « acier »)."
+    )
+    coef_k = ChampDecimal(
+        "coefficient K de pliage", max_digits=4, decimal_places=3, null=True, blank=True,
+        validators=[MinValueValidator(Decimal("0")), MaxValueValidator(Decimal("0.5"))],
+        help_text="Position de la fibre neutre dans l'épaisseur, pour le développé d'une pièce pliée : "
+                  "arc neutre = angle de pliage (rad) × (rayon intérieur + K × épaisseur). Ex. 0,445 aciers, 0,36 inox, 0,45 aluminium.",
     )
 
     class Meta:
