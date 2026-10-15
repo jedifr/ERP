@@ -1076,18 +1076,20 @@ def _liste_nombres(texte, nom):
 
 
 class PliageArticleForm(forms.ModelForm):
-    faces = forms.CharField(label="Cotes extérieures des faces (mm)", widget=UnfoldAdminTextInputWidget, help_text="Séparées par des points-virgules : 50 ; 100 pour une cornière, 20 ; 60 ; 20 pour un U.")
-    angles = forms.CharField(label="Angles des plis (°)", widget=UnfoldAdminTextInputWidget, help_text="Un par pli : 90 ; 90 pour un U, 90 ; -90 pour un Z (le signe donne le sens du pli). 90 = équerre.")
+    faces = forms.CharField(label="Cotes extérieures des faces (mm)", required=False, widget=UnfoldAdminTextInputWidget, help_text="Séparées par des points-virgules : 50 ; 100 pour une cornière, 20 ; 60 ; 20 pour un U.")
+    angles = forms.CharField(label="Angles des plis (°)", required=False, widget=UnfoldAdminTextInputWidget, help_text="Un par pli : 90 ; 90 pour un U, 90 ; -90 pour un Z (le signe donne le sens du pli). 90 = équerre.")
+    bords = forms.CharField(label="Hauteurs des bords A ; B ; C ; D (mm)", required=False, widget=UnfoldAdminTextInputWidget, help_text="Cotes extérieures, 0 = pas de bord. A et C le long de la longueur du fond, B et D le long de sa largeur. Ex. 40 ; 40 ; 40 ; 40.")
+    angles_bords = forms.CharField(label="Angles des bords A ; B ; C ; D (°)", required=False, widget=UnfoldAdminTextInputWidget, help_text="Vide = 90° partout. Plus ouvert (ex. 100) pour un bac évasé.")
 
     class Meta:
         model = PliageArticle
-        fields = ["article", "matiere", "epaisseur_mm", "longueur_pli_mm"]
+        fields = ["article", "matiere", "epaisseur_mm", "forme", "longueur_pli_mm", "longueur_fond_mm", "largeur_fond_mm"]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         if self.instance.pk:
-            self.fields["faces"].initial = " ; ".join(f"{f:g}" for f in self.instance.faces_mm)
-            self.fields["angles"].initial = " ; ".join(f"{a:g}" for a in self.instance.angles_deg)
+            for champ, attribut in (("faces", "faces_mm"), ("angles", "angles_deg"), ("bords", "bords_mm"), ("angles_bords", "angles_bords_deg")):
+                self.fields[champ].initial = " ; ".join(f"{x:g}" for x in getattr(self.instance, attribut) or [])
 
     def clean_faces(self):
         return _liste_nombres(self.cleaned_data["faces"], "Faces")
@@ -1095,30 +1097,46 @@ class PliageArticleForm(forms.ModelForm):
     def clean_angles(self):
         return _liste_nombres(self.cleaned_data["angles"], "Angles")
 
+    def clean_bords(self):
+        return _liste_nombres(self.cleaned_data["bords"], "Bords")
+
+    def clean_angles_bords(self):
+        return _liste_nombres(self.cleaned_data["angles_bords"], "Angles des bords")
+
     def clean(self):
         donnees = super().clean()
-        self.instance.faces_mm = donnees.get("faces") or []
-        self.instance.angles_deg = donnees.get("angles") or []
+        if donnees.get("forme") == PliageArticle.Forme.BOITE:
+            self.instance.bords_mm = donnees.get("bords") or []
+            self.instance.angles_bords_deg = donnees.get("angles_bords") or []
+            self.instance.faces_mm, self.instance.angles_deg = [], []
+        else:
+            self.instance.faces_mm = donnees.get("faces") or []
+            self.instance.angles_deg = donnees.get("angles") or []
+            self.instance.bords_mm, self.instance.angles_bords_deg = [], []
         return donnees
 
 
 @admin.register(PliageArticle)
 class PliageArticleAdmin(ModelAdmin):
-    """Profil plié d'un article fabriqué : enregistrer calcule le pliage et met à jour l'étape « pliage » de sa gamme."""
+    """Pièce pliée (profil ou boîte) d'un article fabriqué : enregistrer calcule le pliage et met à jour l'étape « pliage » de sa gamme."""
 
     form = PliageArticleForm
-    list_display = ["article", "matiere", "epaisseur_mm", "longueur_pli_mm", "profil", "statut", "developpe"]
+    list_display = ["article", "matiere", "epaisseur_mm", "profil", "statut", "developpe"]
     search_fields = ["article__reference", "article__libelle"]
     autocomplete_fields = ["article"]
     readonly_fields = ["resultat_detaille", "date_calcul"]
     fieldsets = [
-        (None, {"fields": ["article", "matiere", "epaisseur_mm", "longueur_pli_mm", "faces", "angles"]}),
+        (None, {"fields": ["article", "matiere", "epaisseur_mm", "forme"]}),
+        ("Profil", {"fields": ["longueur_pli_mm", "faces", "angles"]}),
+        ("Boîte", {"fields": ["longueur_fond_mm", "largeur_fond_mm", "bords", "angles_bords"]}),
         ("Résultat", {"fields": ["resultat_detaille", "date_calcul"]}),
     ]
 
-    @admin.display(description="Profil")
+    @admin.display(description="Pièce")
     def profil(self, obj):
-        return " / ".join(f"{f:g}" for f in obj.faces_mm) + " — " + " / ".join(f"{a:g}°" for a in obj.angles_deg)
+        if obj.forme == PliageArticle.Forme.BOITE:
+            return f"Boîte {obj.longueur_fond_mm:g} × {obj.largeur_fond_mm:g}, bords " + " / ".join(f"{h:g}" for h in obj.bords_mm)
+        return f"{obj.longueur_pli_mm:g} mm : " + " / ".join(f"{f:g}" for f in obj.faces_mm) + " — " + " / ".join(f"{a:g}°" for a in obj.angles_deg)
 
     @admin.display(description="Statut")
     def statut(self, obj):
@@ -1126,7 +1144,10 @@ class PliageArticleAdmin(ModelAdmin):
 
     @admin.display(description="Développé (mm)")
     def developpe(self, obj):
-        return (obj.resultat or {}).get("developpe_mm") or "—"
+        r = obj.resultat or {}
+        if r.get("flan_mm"):
+            return "{:g} × {:g}".format(*r["flan_mm"])
+        return r.get("developpe_mm") or "—"
 
     @admin.display(description="Calcul")
     def resultat_detaille(self, obj):
@@ -1137,9 +1158,10 @@ class PliageArticleAdmin(ModelAdmin):
         if r.get("ve"):
             lignes += [
                 ("Plieuse", r["plieuse"]), ("Vé / poinçon", f"{r['ve']} / {r['poincon']}"),
-                ("Force", f"{r['force_kn_m']:g} kN/m, soit {r['force_t']:g} t sur la longueur de pli"),
+                ("Force", f"{r['force_kn_m']:g} kN/m, soit {r['force_t']:g} t sur le pli le plus long"),
                 ("Bord mini / rayon intérieur", f"{r['bord_mini']:g} mm / {r['rayon_interieur']:g} mm"),
-                ("Angle mini", f"{r['angle_mini']:g}°"), ("Développé", f"{r['developpe_mm']:g} mm"),
+                ("Angle mini", f"{r['angle_mini']:g}°"),
+                ("Flan", "{:g} × {:g} mm, coins crantés".format(*r["flan_mm"])) if r.get("flan_mm") else ("Développé", f"{r['developpe_mm']:g} mm"),
                 ("Temps", f"{r['nb_reglages']} réglage(s) : {r['temps_reglage_min']:g} min ; {r['nb_plis']} pli(s) : {r['temps_pli_min']:g} min par pièce"),
             ]
         lignes += [("Refusé", m) for m in r.get("refus", [])] + [("À valider", m) for m in r.get("validations", [])] + [("Note", m) for m in r.get("notes", [])]

@@ -1040,17 +1040,29 @@ class ReglagePliage(models.Model):
 
 
 class PliageArticle(models.Model):
-    """Profil plié d'un article fabriqué : cotes extérieures des faces et angles des plis, sur une longueur de pli.
+    """Pièce pliée d'un article fabriqué.
 
-    Angle d'un pli : angle de la pièce entre les deux faces (90 = équerre, 180 = plat). Un angle négatif plie dans
-    l'autre sens (profil en Z) ; deux plis de même signe forment un U."""
+    Profil : cotes extérieures des faces et angles des plis, sur une longueur de pli. Angle d'un pli : angle de la pièce
+    entre les deux faces (90 = équerre, 180 = plat). Un angle négatif plie dans l'autre sens (profil en Z) ; deux plis
+    de même signe forment un U.
+    Boîte : fond longueur × largeur (cotes extérieures) et hauteurs des bords A, B, C, D (A et C le long de la longueur,
+    B et D le long de la largeur), pliée dans deux directions, coins crantés."""
+
+    class Forme(models.TextChoices):
+        PROFIL = "profil", "Profil (cornière, U, Z…)"
+        BOITE = "boite", "Boîte ou bac (deux directions)"
 
     article = models.OneToOneField(Article, verbose_name="article", on_delete=models.CASCADE, related_name="pliage")
     matiere = models.ForeignKey(Matiere, verbose_name="matière", on_delete=models.PROTECT, related_name="pliages")
     epaisseur_mm = models.FloatField("épaisseur (mm)")
-    longueur_pli_mm = models.FloatField("longueur de pli (mm)")
-    faces_mm = models.JSONField("cotes extérieures des faces (mm)", default=list, help_text="Ex. [50, 100] pour une cornière, [20, 60, 20] pour un U.")
-    angles_deg = models.JSONField("angles des plis (°)", default=list, help_text="Un angle par pli, entre deux faces. Ex. [90] ; [90, 90] pour un U ; [90, -90] pour un Z.")
+    forme = models.CharField("forme", max_length=10, choices=Forme.choices, default=Forme.PROFIL)
+    longueur_pli_mm = models.FloatField("longueur de pli (mm)", null=True, blank=True, help_text="Profil seulement.")
+    faces_mm = models.JSONField("cotes extérieures des faces (mm)", default=list, blank=True, help_text="Ex. [50, 100] pour une cornière, [20, 60, 20] pour un U.")
+    angles_deg = models.JSONField("angles des plis (°)", default=list, blank=True, help_text="Un angle par pli, entre deux faces. Ex. [90] ; [90, 90] pour un U ; [90, -90] pour un Z.")
+    longueur_fond_mm = models.FloatField("longueur du fond (mm)", null=True, blank=True, help_text="Boîte : cote extérieure.")
+    largeur_fond_mm = models.FloatField("largeur du fond (mm)", null=True, blank=True, help_text="Boîte : cote extérieure.")
+    bords_mm = models.JSONField("hauteurs des bords A, B, C, D (mm)", default=list, blank=True, help_text="Boîte : cotes extérieures, 0 = pas de bord. A et C le long de la longueur.")
+    angles_bords_deg = models.JSONField("angles des bords A, B, C, D (°)", default=list, blank=True, help_text="Boîte : angle de chaque bord avec le fond, 90 par défaut.")
     resultat = models.JSONField("résultat du calcul", null=True, blank=True)
     date_calcul = models.DateTimeField("calculé le", null=True, blank=True)
 
@@ -1066,6 +1078,11 @@ class PliageArticle(models.Model):
         super().clean()
         if self.article_id and self.article.nature != Article.Nature.FABRIQUE:
             raise ValidationError({"article": "Seul un article fabriqué se plie."})
+        if self.forme == self.Forme.BOITE:
+            self._clean_boite()
+            return
+        if not self.longueur_pli_mm or self.longueur_pli_mm <= 0:
+            raise ValidationError({"longueur_pli_mm": "Indiquez la longueur de pli du profil."})
         faces, angles = self.faces_mm or [], self.angles_deg or []
         if not isinstance(faces, list) or not isinstance(angles, list):
             raise ValidationError("Faces et angles sont des listes de nombres.")
@@ -1075,3 +1092,15 @@ class PliageArticle(models.Model):
             raise ValidationError({"faces_mm": "Chaque face est une cote positive en mm."})
         if any(not isinstance(a, (int, float)) or not 0 < abs(a) < 180 for a in angles):
             raise ValidationError({"angles_deg": "Chaque angle est compris entre 0 et 180° (exclus) : pas de pli écrasé."})
+
+    def _clean_boite(self):
+        for champ in ("longueur_fond_mm", "largeur_fond_mm"):
+            if not getattr(self, champ) or getattr(self, champ) <= 0:
+                raise ValidationError({champ: "Cote positive en mm."})
+        bords, angles = self.bords_mm or [], self.angles_bords_deg or []
+        if not isinstance(bords, list) or len(bords) != 4 or any(not isinstance(h, (int, float)) or h < 0 for h in bords):
+            raise ValidationError({"bords_mm": "Quatre hauteurs (A, B, C, D) positives ou nulles."})
+        if not any(bords):
+            raise ValidationError({"bords_mm": "Une boîte a au moins un bord relevé."})
+        if angles and (not isinstance(angles, list) or len(angles) != 4 or any(not isinstance(a, (int, float)) or not 0 < a < 180 for a in angles)):
+            raise ValidationError({"angles_bords_deg": "Quatre angles compris entre 0 et 180° (exclus), ou rien pour 90°."})
