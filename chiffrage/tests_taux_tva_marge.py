@@ -170,3 +170,41 @@ class ComposerArticleSansMargeTests(Base):
             datetime.date(2026, 1, 1),
         )
         self.assertEqual(article.taux_marge_defaut, Decimal("40"))
+
+
+class MargeAssistantTests(Base):
+    """Le taux de marge saisi dans l'assistant (pré-rempli avec la marge par défaut) s'applique à la ligne créée."""
+
+    def setUp(self):
+        super().setUp()
+        self.client.force_login(get_user_model().objects.create_superuser("assistant", "a@example.com", "pass1234"))
+
+    def test_ligne_de_devis(self):
+        devis = Devis.objects.create(numero="DEV-ASS-MARGE", client=self.tiers, date_creation=datetime.date(2026, 1, 1))
+        response = self.client.post(
+            f"/admin/chiffrage/devis/{devis.pk}/constructeur/",
+            data={"quantite": 3, "article_existant": "MP-TVA-DOC", "taux_marge": 50}, content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        ligne = devis.lignes.get()
+        self.assertEqual(ligne.taux_marge_matiere_applique, Decimal("50"))
+        self.assertEqual(ligne.prix_vente_matiere, Decimal("45"))  # 30 € de matière + 50 %
+
+    def test_ligne_de_commande(self):
+        commande = self.commande()
+        response = self.client.post(
+            f"/admin/chiffrage/commande/{commande.pk}/lignes/composer/",
+            data={"quantite": 3, "article_existant": "MP-TVA-DOC", "taux_marge": 50}, content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        ligne = commande.lignes.get()
+        self.assertEqual(ligne.taux_marge, Decimal("50"))
+        self.assertEqual(ligne.prix_vente_unitaire, Decimal("15"))
+
+    def test_sans_marge_saisie_la_marge_de_l_article_s_applique(self):
+        commande = self.commande()
+        self.client.post(
+            f"/admin/chiffrage/commande/{commande.pk}/lignes/composer/",
+            data={"quantite": 3, "article_existant": "MP-TVA-DOC"}, content_type="application/json",
+        )
+        self.assertEqual(commande.lignes.get().taux_marge, Decimal("20"))

@@ -70,6 +70,11 @@ def _traiter_ajout_ligne(request, devis):
         quantite = float(payload["quantite"])
     except (KeyError, TypeError, ValueError):
         return JsonResponse({"detail": "Quantité manquante ou invalide."}, status=400)
+    try:
+        # Taux de marge de l'assistant (pré-rempli avec la marge par défaut de l'article) ; vide = marge par défaut.
+        taux_marge, _ = _parse_float_optionnel(payload, "taux_marge", "Taux de marge invalide.")
+    except _ValeurInvalide as exc:
+        return JsonResponse({"detail": exc.message}, status=400)
 
     # Tout ou rien : si le prix de la ligne ne peut pas être calculé (ex.
     # matière choisie sans coût unitaire renseigné), on ne doit RIEN valider
@@ -92,7 +97,9 @@ def _traiter_ajout_ligne(request, devis):
                 except Article.DoesNotExist:
                     raise ChiffrageError(f"Article « {reference} » introuvable.")
 
-            ligne = ajouter_ligne_devis(devis, article, quantite, designation=(payload.get("designation") or "").strip()[:255])
+            ligne = ajouter_ligne_devis(
+                devis, article, quantite, designation=(payload.get("designation") or "").strip()[:255], taux_marge=taux_marge,
+            )
             calculer_ligne(devis, ligne)
             ligne.refresh_from_db()
             resultat_apercu = {
@@ -145,6 +152,11 @@ def commande_constructeur_view(request, numero):
         quantite = float(payload["quantite"])
     except (KeyError, TypeError, ValueError):
         return JsonResponse({"detail": "Quantité manquante ou invalide."}, status=400)
+    try:
+        # Taux de marge de l'assistant (pré-rempli avec la marge par défaut de l'article) ; vide = marge par défaut.
+        taux_marge, _ = _parse_float_optionnel(payload, "taux_marge", "Taux de marge invalide.")
+    except _ValeurInvalide as exc:
+        return JsonResponse({"detail": exc.message}, status=400)
 
     apercu = bool(payload.get("apercu"))
     try:
@@ -159,8 +171,10 @@ def commande_constructeur_view(request, numero):
                     article = Article.objects.get(pk=reference)
                 except Article.DoesNotExist:
                     raise ChiffrageError(f"Article « {reference} » introuvable.")
-            ligne = ajouter_ligne_commande(commande, article, quantite, designation=(payload.get("designation") or "").strip()[:255])
-            detail = previsualiser_ligne_commande(article, quantite, commande.date_commande)
+            ligne = ajouter_ligne_commande(
+                commande, article, quantite, designation=(payload.get("designation") or "").strip()[:255], taux_marge=taux_marge,
+            )
+            detail = previsualiser_ligne_commande(article, quantite, commande.date_commande, taux_marge)
             if apercu:
                 transaction.set_rollback(True)
     except ChiffrageError as exc:

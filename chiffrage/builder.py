@@ -81,8 +81,11 @@ def creer_article_fabrique(reference, taux_marge_defaut, composants, etapes, lib
 
 
 @transaction.atomic
-def ajouter_ligne_devis(devis, article, quantite, designation=""):
+def ajouter_ligne_devis(devis, article, quantite, designation="", taux_marge=None):
+    """`taux_marge` : marge matière de la ligne saisie dans l'assistant ; None = marge par défaut de l'article."""
     if devis.statut != Devis.Statut.BROUILLON:
         raise ChiffrageError("Seul un devis en brouillon peut être modifié depuis le constructeur.")
-    ligne = DevisLigne(devis=devis, article=article, quantite=quantite, designation=designation)
+    ligne = DevisLigne(
+        devis=devis, article=article, quantite=quantite, designation=designation, taux_marge_matiere_applique=taux_marge,
+    )
     return _valider_et_sauver(ligne)
