@@ -96,7 +96,10 @@ AIDES = {
     "technique.famillematiere": {
         "resume": "Une famille regroupe des nuances (Acier, Inox, Aluminium…) : elles partagent leurs paramètres de coupe et leur usinabilité.",
         "etapes": ["Créez la famille avec son usinabilité (sert à estimer les vitesses de coupe du jet d'eau).", "Dans « Mots-clés des nuances », listez les débuts de noms rattachés (s235, s355, acier…) : une nouvelle nuance rejoint sa famille toute seule."],
-        "bon_a_savoir": ["L'action « Rattacher les matières sans famille » range les matières existantes."],
+        "bon_a_savoir": [
+            "L'action « Rattacher les matières sans famille » range les matières existantes.",
+            "Le coefficient K (section Pliage) sert au calcul du développé des pièces pliées : 0,445 pour les aciers, 0,36 pour l'inox, 0,45 pour l'aluminium.",
+        ],
     },
     "technique.profilesection": {
         "resume": "Le catalogue des profilés (cornières, UPN, IPE, tubes, plats, ronds, carrés) avec leurs cotes et leur masse au mètre. Il sert aux débits de profilés des devis.",

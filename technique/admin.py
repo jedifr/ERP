@@ -72,12 +72,13 @@ class FamilleMatiereAdmin(ModelAdmin):
     """Matières génériques (Acier, Inox, Aluminium…) : les nuances précises (S235, 5754…) s'y rattachent et en héritent
     l'usinabilité et les paramètres de coupe (temps de perçage, vitesses… de la base du logiciel de la machine)."""
 
-    list_display = ["nom", "nom_igems", "usinabilite", "nb_nuances", "nb_parametres", "ordre"]
+    list_display = ["nom", "nom_igems", "usinabilite", "coef_k", "nb_nuances", "nb_parametres", "ordre"]
     search_fields = ["nom", "nom_igems", "mots_cles"]
     ordering = ["ordre", "nom"]
     actions = ["action_rattacher_nuances"]
     fieldsets = [
         (None, {"fields": ["nom", "nom_igems", "usinabilite", "ordre"]}),
+        ("Pliage", {"fields": ["coef_k"]}),
         ("Rattachement automatique des nuances", {"fields": ["mots_cles"]}),
     ]
 
