@@ -7,7 +7,7 @@ copie démarre à zéro. Action "Dupliquer et modifier" de l'admin Article.
 
 from django.db import transaction
 
-from .models import Article, Gamme, Nomenclature
+from .models import Article, Gamme, Nomenclature, PosteTravail
 
 
 class DuplicationError(Exception):
@@ -121,3 +121,58 @@ def renommer_article(article, nouvelle_reference):
             historique.model.objects.filter(**{champ.attname: ancienne}).update(**{champ.attname: nouvelle})
     Article.objects.filter(pk=ancienne).delete()
     return nouveau
+
+
+@transaction.atomic
+def renommer_poste(poste, nouveau_nom):
+    """Change le nom d'un poste de travail (clé primaire) en reportant le changement sur tout ce qui s'y rattache : tarifs, gammes et
+    gammes types, opérations de devis et d'OF, paramètres de coupe, scies, plieuses… ainsi que sur leur historique et sur le journal
+    des modifications par lots (pour pouvoir encore annuler un lot). Le poste est recréé sous son nouveau nom, les liens sont
+    repointés, puis l'ancien est supprimé. Retourne le nouveau poste."""
+    from comptes.models import LotModification
+
+    nouveau_nom = (nouveau_nom or "").strip()
+    if not nouveau_nom:
+        raise DuplicationError("Indiquez le nouveau nom.")
+    if nouveau_nom == poste.nom:
+        raise DuplicationError("Le nouveau nom est identique à l'ancien.")
+    if len(nouveau_nom) > PosteTravail._meta.pk.max_length:
+        raise DuplicationError(f"Le nom ne peut dépasser {PosteTravail._meta.pk.max_length} caractères.")
+    if PosteTravail.objects.filter(pk=nouveau_nom).exists():
+        raise DuplicationError(f"Le poste « {nouveau_nom} » existe déjà.")
+    ancien = poste.nom
+    valeurs = {f.attname: getattr(poste, f.attname) for f in PosteTravail._meta.concrete_fields}
+    valeurs["nom"] = nouveau_nom
+    nouveau = PosteTravail(**valeurs)
+    _valider_et_sauver(nouveau)
+    champs_lies = {}  # étiquette du modèle → noms des champs pointant vers un poste (pour le journal des lots)
+    for lien in PosteTravail._meta.related_objects:
+        champ = lien.field
+        modele = lien.related_model
+        modele.objects.filter(**{champ.name: ancien}).update(**{champ.attname: nouveau_nom})
+        historique = getattr(modele, "history", None)
+        if historique is not None:  # simple_history garde la clé étrangère comme une simple colonne
+            historique.model.objects.filter(**{champ.attname: ancien}).update(**{champ.attname: nouveau_nom})
+        champs_lies.setdefault(modele._meta.label, set()).add(champ.name)
+    _renommer_dans_les_lots(LotModification, ancien, nouveau_nom, champs_lies)
+    PosteTravail.objects.filter(pk=ancien).delete()
+    return nouveau
+
+
+def _renommer_dans_les_lots(LotModification, ancien, nouveau, champs_lies):
+    etiquette_poste = PosteTravail._meta.label
+    for lot in LotModification.objects.filter(modele__in=[etiquette_poste, *champs_lies]):
+        champs = champs_lies.get(lot.modele, set())
+        change = False
+        for entree in lot.modifications:
+            if lot.modele == etiquette_poste and entree.get("pk") == ancien:
+                entree["pk"], change = nouveau, True
+            for cote in ("avant", "apres"):
+                for nom in champs:
+                    if entree.get(cote, {}).get(nom) == ancien:
+                        entree[cote][nom], change = nouveau, True
+        for cree in lot.crees:
+            if cree[0] == etiquette_poste and cree[1] == ancien:
+                cree[1], change = nouveau, True
+        if change:
+            lot.save(update_fields=["modifications", "crees"])

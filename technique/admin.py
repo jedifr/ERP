@@ -22,7 +22,7 @@ from comptabilite.models import ArticleCompteAchat, ArticleCompteVente
 from .models import Article, FamilleMatiere, Gamme, GammeType, GammeTypeEtape, Matiere, Nomenclature, PosteTravail, ProfileSection, RegleCreationTole, TarifPoste
 from . import lots_champs
 from .imports import IMPORT_ARTICLES, IMPORT_MATIERES, IMPORT_NOMENCLATURES
-from .services import DuplicationError, dupliquer_article, renommer_article
+from .services import DuplicationError, dupliquer_article, renommer_article, renommer_poste
 
 
 class NomenclatureInline(TabularInline):
@@ -268,6 +268,25 @@ def renommer_article_view(request, reference):
         return redirect("admin:technique_article_change", reference)
     messages.success(request, f"« {reference} » renommé en « {nouveau.reference} » (devis, commandes, nomenclatures et stock suivent).")
     return redirect("admin:technique_article_change", nouveau.pk)
+
+
+@staff_member_required
+@require_http_methods(["POST"])
+def renommer_poste_view(request, nom):
+    from django.contrib.admin.utils import quote, unquote
+
+    poste = get_object_or_404(PosteTravail, pk=unquote(nom))
+    fiche = lambda p: redirect(reverse("admin:technique_postetravail_change", args=[quote(p.pk)]))
+    if not request.user.has_perm("technique.change_postetravail"):
+        messages.error(request, "Vous n'avez pas le droit de modifier les postes de travail.")
+        return fiche(poste)
+    try:
+        nouveau = renommer_poste(poste, request.POST.get("nouveau_nom"))
+    except DuplicationError as exc:
+        messages.error(request, f"Renommage impossible : {exc}")
+        return fiche(poste)
+    messages.success(request, f"« {poste.nom} » renommé en « {nouveau.nom} » (tarifs, gammes, devis, OF et paramètres de coupe suivent).")
+    return fiche(nouveau)
 
 
 def dimensionner_svg(svg, largeur_max, hauteur_max):
@@ -707,6 +726,16 @@ class PosteTravailAdmin(ModificationParLotsMixin, ModelAdmin):
     inlines = [TarifPosteInline]
     actions = ["action_modifier_par_lots", "action_hausse_tarifs"]
     champs_lot = lots_champs.champs_poste()
+
+    def get_readonly_fields(self, request, obj=None):
+        # Nom = clé du poste : on le change par le bouton « Renommer », qui fait suivre tous les liens (sinon un second poste serait créé).
+        return [*self.readonly_fields, "nom"] if obj is not None and obj.pk else self.readonly_fields
+
+    def get_urls(self):
+        urls = [
+            path("<path:nom>/renommer/", self.admin_site.admin_view(renommer_poste_view), name="technique_postetravail_renommer"),
+        ]
+        return urls + super().get_urls()
 
     @admin.action(description="Modifier le coût horaire avec effet à une date (hausse)…", permissions=["change"])
     def action_hausse_tarifs(self, request, queryset):
