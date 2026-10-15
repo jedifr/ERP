@@ -10,6 +10,7 @@ from django.utils.safestring import mark_safe
 from comptes.pastilles import EN_COURS, PROBLEME, TERMINE, PastillesMixin
 from unfold.admin import ModelAdmin, TabularInline
 from unfold.decorators import action as unfold_action
+from unfold.widgets import UnfoldAdminTextInputWidget
 
 from comptes.lots import ChampLot
 from comptes.lots_admin import ModificationParLotsMixin
@@ -1075,8 +1076,8 @@ def _liste_nombres(texte, nom):
 
 
 class PliageArticleForm(forms.ModelForm):
-    faces = forms.CharField(label="Cotes extérieures des faces (mm)", help_text="Séparées par des points-virgules : 50 ; 100 pour une cornière, 20 ; 60 ; 20 pour un U.")
-    angles = forms.CharField(label="Angles des plis (°)", help_text="Un par pli : 90 ; 90 pour un U, 90 ; -90 pour un Z (le signe donne le sens du pli). 90 = équerre.")
+    faces = forms.CharField(label="Cotes extérieures des faces (mm)", widget=UnfoldAdminTextInputWidget, help_text="Séparées par des points-virgules : 50 ; 100 pour une cornière, 20 ; 60 ; 20 pour un U.")
+    angles = forms.CharField(label="Angles des plis (°)", widget=UnfoldAdminTextInputWidget, help_text="Un par pli : 90 ; 90 pour un U, 90 ; -90 pour un Z (le signe donne le sens du pli). 90 = équerre.")
 
     class Meta:
         model = PliageArticle
