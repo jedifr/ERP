@@ -216,6 +216,10 @@ class PieceDecoupe(models.Model):
         "qualité de coupe", max_digits=2, decimal_places=1, default=Decimal("3.0"), choices=QUALITES_COUPE,
         help_text="Niveau de qualité du jet d'eau (1,5 extra brut → 5 extra fin) : plus c'est fin, plus la coupe est lente.",
     )
+    palpage_unique = models.BooleanField(
+        "un seul palpage par pièce", default=False,
+        help_text="Jet d'eau : la hauteur du canon n'est ajustée qu'une fois pour la pièce, au lieu d'un palpage à chaque perçage.",
+    )
     # Matière : chiffrage par imbrication (voir services/matiere.py)
     tole = models.ForeignKey(
         Article, verbose_name="tôle", on_delete=models.SET_NULL, null=True, blank=True, related_name="pieces_decoupees_dans",
@@ -726,6 +730,18 @@ class ReglageProcede(models.Model):
         "bord de tôle minimal (mm)", default=5,
         help_text="Plancher du bord de tôle (bande non découpée sur le pourtour), quelles que soient la matière et l'épaisseur (jet d'eau : 5 constant ; laser : 10). Au laser, le bord grandit avec l'épaisseur (jamais moins que l'épaisseur) ; le paramètre de coupe peut imposer plus.",
     )
+    temps_palpage_s = models.FloatField(
+        "temps de palpage (s)", default=0,
+        help_text="Jet d'eau : ajustement de la hauteur du canon de découpe, compté à chaque perçage (une seule fois par pièce si la case « un seul palpage par pièce » est cochée dans le devis). Non compté par le logiciel de la machine.",
+    )
+    diametre_petits_trous_mm = models.FloatField(
+        "diamètre des petits trous (mm)", default=0,
+        help_text="Jet d'eau : un trou plus petit que ce diamètre (plus grande dimension) se coupe dans la qualité des petits trous. 0 : pas de règle.",
+    )
+    qualite_petits_trous = models.DecimalField(
+        "qualité des petits trous", max_digits=2, decimal_places=1, default=Decimal("4.0"), choices=QUALITES_COUPE,
+        help_text="Jet d'eau : qualité de coupe des petits trous quand celle de la pièce est plus grossière.",
+    )
     espacement_minimum_mm = models.FloatField(
         "écart minimal entre pièces (mm)", default=4,
         help_text="Plancher de l'écart entre deux pièces à l'imbrication, quelles que soient la matière et l'épaisseur (jet d'eau : 6 ; laser : 10). Au laser, la base donne un écart plus grand quand l'épaisseur augmente : le plus grand des deux est retenu.",
@@ -756,7 +772,7 @@ class ReglageProcede(models.Model):
     def pour(cls, procede):
         """Réglage du procédé (créé avec les valeurs usuelles s'il n'existe pas encore)."""
         defauts = {
-            "jet_eau": {"espacement_minimum_mm": 6, "bord_tole_minimum_mm": 5, "capacite_largeur_mm": 2000, "capacite_longueur_mm": 4000},
+            "jet_eau": {"espacement_minimum_mm": 6, "bord_tole_minimum_mm": 5, "temps_palpage_s": 4, "diametre_petits_trous_mm": 20, "capacite_largeur_mm": 2000, "capacite_longueur_mm": 4000},
             "laser": {"coefficient_vitesse": 0.85, "espacement_minimum_mm": 10, "bord_tole_minimum_mm": 10, "capacite_largeur_mm": 1500, "capacite_longueur_mm": 3000},
         }
         return cls.objects.get_or_create(procede=procede, defaults=defauts.get(procede, {}))[0]

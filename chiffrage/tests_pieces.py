@@ -104,6 +104,20 @@ class PanneauPiecesDevisTests(TestCase):
         jet = self.client.post(url, {"procede": "jet_eau"})
         self.assertIn("Réalisable", jet.json()["html"])
         self.assertIn("la plus proche", jet.json()["html"])
+        self.assertIn('data-champ="palpage_unique"', jet.json()["html"])
+
+    def test_un_seul_palpage_par_piece(self):
+        self.importer()
+        piece = PieceDecoupe.objects.get()
+        url = f"{self.url}{piece.pk}/enregistrer/"
+        chaque = self.client.post(url, {"matiere": "S235", "epaisseur": "10", "procede": "jet_eau", "palpage_unique": ""})
+        piece.refresh_from_db()
+        self.assertFalse(piece.palpage_unique)
+        unique = self.client.post(url, {"palpage_unique": "1"})
+        piece.refresh_from_db()
+        self.assertTrue(piece.palpage_unique)
+        self.assertIn("checked", unique.json()["html"].split('data-champ="palpage_unique"')[1][:20])
+        self.assertNotEqual(chaque.json()["html"], unique.json()["html"])  # le temps de coupe change
 
     def test_gamme_alimentee_quand_le_poste_est_connu(self):
         poste = PosteTravail.objects.create(nom="Laser pièces", mode_calcul=PosteTravail.ModeCalcul.HORAIRE)

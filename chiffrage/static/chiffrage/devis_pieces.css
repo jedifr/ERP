@@ -16,6 +16,8 @@
 .dp-drop-icone { font-size: 32px; color: var(--color-primary-600); }
 .dp-drop-options { display: flex; flex-wrap: wrap; gap: .75rem 1.5rem; justify-content: center; font-size: 12px; }
 .dp-drop-options label, .dp-champs label { display: flex; flex-direction: column; gap: .15rem; font-size: 11px; color: var(--color-base-500); }
+.dp-champs label.dp-palpage { flex-direction: row; align-items: center; align-self: end; gap: .35rem; padding-bottom: .35rem; }
+.dp-champs label.dp-palpage input { width: auto; margin: 0; }
 .dp-drop-options select { cursor: pointer; }
 .dp-aide { margin: .5rem 0 1rem; font-size: 12px; color: var(--color-base-500); }
 #dp-cartes { display: grid; gap: .75rem; }

@@ -13,7 +13,7 @@ from django.db import transaction
 from decoupe.models import ParametreCoupe, VitesseCoupe
 from technique.models import FamilleMatiere
 
-from .vitesses import QUALITES, vitesses_depuis_usinabilite
+from .vitesses import QUALITES, coefficient_temps, vitesses_depuis_usinabilite
 
 NOMS_FRANCAIS = {
     "Steel": "Acier", "Stainless Steel": "Inox", "Aluminium": "Aluminium", "Copper": "Cuivre", "Brass": "Laiton",
@@ -116,7 +116,9 @@ def importer_materiaux(entrees, correspondance, poste=None, remplacer_calcules=T
             procede=ParametreCoupe.Procede.JET_EAU, famille=famille, epaisseur_mm=e["epaisseur"]
         ).first()
         if parametre is None:
-            parametre = ParametreCoupe.objects.create(famille=famille, epaisseur_mm=e["epaisseur"], **valeurs)
+            parametre = ParametreCoupe.objects.create(
+                famille=famille, epaisseur_mm=e["epaisseur"], coefficient_ajustement=coefficient_temps(e["epaisseur"]), **valeurs
+            )
             stats["crees"] += 1
         elif parametre.origine == "machine":
             stats["proteges"] += 1

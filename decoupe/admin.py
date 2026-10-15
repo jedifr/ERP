@@ -265,7 +265,7 @@ class PieceDecoupeAdmin(PastillesMixin, ModelAdmin):
             return str(exc)
         texte = (
             f"{e.total_min:.1f} min par pièce — coupe {e.coupe_s / 60:.1f} min ({e.longueur_coupe_mm:.0f} mm, {e.nb_coins} coins), "
-            f"perçage {e.percage_s / 60:.1f} min ({e.nb_percages} contours), déplacements {e.deplacements_s / 60:.1f} min, marquage {e.marquage_s / 60:.1f} min. "
+            f"perçage {e.percage_s / 60:.1f} min ({e.nb_percages} contours), déplacements {e.deplacements_s / 60:.1f} min, palpage {e.palpage_s / 60:.1f} min, marquage {e.marquage_s / 60:.1f} min. "
             f"Paramètres : {e.parametre}."
         )
         return format_html("{}{}", texte, mark_safe("".join(format_html("<br><em>{}</em>", a) for a in e.avertissements)))
@@ -787,7 +787,13 @@ class ParametreCoupeAdmin(ModelAdmin):
 class ReglageProcedeAdmin(ModelAdmin):
     """Pondération des vitesses du laser et écart minimal entre pièces de chaque procédé."""
 
-    list_display = ["procede", "coefficient_vitesse", "espacement_minimum_mm", "bord_tole_minimum_mm"]
+    list_display = ["procede", "coefficient_vitesse", "temps_palpage_s", "espacement_minimum_mm", "bord_tole_minimum_mm"]
+
+    def get_exclude(self, request, obj=None):
+        exclude = list(super().get_exclude(request, obj) or [])
+        if obj is not None and obj.procede != "jet_eau":
+            exclude += ["temps_palpage_s", "diametre_petits_trous_mm", "qualite_petits_trous"]  # propres au jet d'eau
+        return exclude
 
     def has_add_permission(self, request):
         return False  # un réglage par procédé, créé avec les valeurs usuelles

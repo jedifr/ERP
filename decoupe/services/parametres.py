@@ -6,7 +6,7 @@ from django.db.models import Q
 
 from decoupe.models import ParametreCoupe, VitesseCoupe
 
-from .vitesses import CHAMPS_PROPORTIONNELS, vitesses_depuis_usinabilite
+from .vitesses import CHAMPS_PROPORTIONNELS, coefficient_temps, vitesses_depuis_usinabilite
 
 
 class ErreurParametre(Exception):
@@ -84,7 +84,7 @@ def calculer_vitesses(parametre):
 
 def dupliquer_vers_epaisseurs(modele, epaisseurs):
     """Crée un paramètre par épaisseur (sauf celles qui existent déjà) à partir de `modele` : mêmes réglages, perçage,
-    percement et chevauchement proportionnels à l'épaisseur, vitesses calculées. Retourne (créés, déjà existants)."""
+    percement et chevauchement proportionnels à l'épaisseur, vitesses et coefficient de temps calculés. Retourne (créés, déjà existants)."""
     if modele.procede == ParametreCoupe.Procede.LASER:
         raise ErreurParametre("Au laser, une épaisseur absente du tableau du constructeur n'est pas réalisable : pas de duplication.")
     if not usinabilite_de(modele):
@@ -103,6 +103,7 @@ def dupliquer_vers_epaisseurs(modele, epaisseurs):
         propres = dict(valeurs)
         for champ in CHAMPS_PROPORTIONNELS:
             propres[champ] = round(propres[champ] * epaisseur / modele.epaisseur_mm, 2)
+        propres["coefficient_ajustement"] = coefficient_temps(epaisseur)
         parametre = ParametreCoupe(epaisseur_mm=epaisseur, origine="calcule", **propres)
         parametre.save()
         calculer_vitesses(parametre)

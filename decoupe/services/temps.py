@@ -11,7 +11,11 @@ Modèle (volontairement simple et réglable ; à caler sur les temps réels du l
 - **perçage** : par contour, temporisation de pointage + temps de perçage selon le mode choisi, multiplié par un
   facteur de perçage (calé sur la durée donnée par le logiciel de la machine) ; **déplacements** entre contours ;
 - **marquage** : longueur des tracés de gravure à la vitesse de marquage + temporisation par tracé ;
-- le tout multiplié par `coefficient_ajustement` (le réglage qui permet de caler le calcul sur la machine).
+- le tout multiplié par `coefficient_ajustement` (le réglage qui permet de caler le calcul sur la machine) ;
+- **petits trous** : un trou plus petit que le seuil des réglages de coupe (jet d'eau : Ø 20 mm) se coupe dans la qualité
+  des petits trous (4), plus lente, si la pièce est en qualité plus grossière ;
+- **palpage** : ajustement de la hauteur du canon (réglages de coupe du jet d'eau), à chaque perçage ou une seule fois
+  par pièce (`palpage_unique`). Le logiciel de la machine ne le compte pas : il s'ajoute tel quel, hors coefficient.
 
 Les déplacements à vide entre contours et le réglage de la machine ne sont pas comptés (le réglage reste le
 « temps fixe » de la gamme)."""
@@ -34,6 +38,7 @@ class EstimationTemps:
     nb_percages: int
     nb_coins: int
     deplacements_s: float = 0.0
+    palpage_s: float = 0.0
     parametre: object = None
     avertissements: list = field(default_factory=list)
 
@@ -166,6 +171,12 @@ def _contours(piece):
     return [c for c in contours if len(c) >= 3]
 
 
+def _diametre(points):
+    """Diamètre d'un trou : la plus grande dimension de son rectangle englobant (le diamètre pour un trou rond)."""
+    xs, ys = [p[0] for p in points], [p[1] for p in points]
+    return max(max(xs) - min(xs), max(ys) - min(ys))
+
+
 def _longueur_contour(points):
     points = _fermer(points)
     return sum(math.hypot(b[0] - a[0], b[1] - a[1]) for a, b in zip(points, points[1:]))
@@ -204,8 +215,18 @@ def _estimer_laser(piece, parametre, avertissements):
     )
 
 
-def estimer_temps_decoupe(piece, qualite=None, parametre=None):
-    """Temps de découpe d'UNE pièce (secondes, détail et avertissements). Lève ErreurTemps si impossible."""
+def _vitesse_qualite(parametre, qualite):
+    vitesse = next((v for v in parametre.vitesses.all() if abs(float(v.qualite) - qualite) < 1e-9), None)
+    if vitesse is None:
+        raise ErreurTemps(f"Pas de vitesses de coupe pour la qualité {qualite:g} dans « {parametre} ».")
+    return vitesse
+
+
+def estimer_temps_decoupe(piece, qualite=None, parametre=None, qualite_interieure=None):
+    """Temps de découpe d'UNE pièce (secondes, détail et avertissements). Lève ErreurTemps si impossible.
+    `qualite_interieure` : qualité de tous les trous si elle diffère de celle du contour extérieur (ex. 3 dehors, 4 dedans).
+    Sans elle, les trous plus petits que le seuil des réglages de coupe (jet d'eau : Ø 20 mm) passent dans la qualité des
+    petits trous (4) quand la pièce est en qualité plus grossière."""
     if piece.statut != piece.Statut.OK or not piece.contour_json:
         raise ErreurTemps("La géométrie de la pièce n'est pas encore importée.")
     avertissements = []
@@ -218,14 +239,30 @@ def estimer_temps_decoupe(piece, qualite=None, parametre=None):
     if parametre.origine == "calcule":
         avertissements.append("Vitesses calculées depuis l'usinabilité (estimation) : à confirmer avec les valeurs de la machine.")
     qualite = float(qualite if qualite is not None else piece.qualite_coupe)
-    vitesse = next((v for v in parametre.vitesses.all() if abs(float(v.qualite) - qualite) < 1e-9), None)
-    if vitesse is None:
-        raise ErreurTemps(f"Pas de vitesses de coupe pour la qualité {qualite:g} dans « {parametre} ».")
+    vitesse = _vitesse_qualite(parametre, qualite)
+    from .parametres import reglage
+
+    reglages = reglage(parametre.procede)
+    vitesse_trous = vitesse if qualite_interieure is None else _vitesse_qualite(parametre, float(qualite_interieure))
+    # Règle d'atelier : les petits trous (diamètre sous le seuil des réglages de coupe) passent en qualité plus fine.
+    vitesse_petits_trous = vitesse_trous
+    if qualite_interieure is None and reglages.diametre_petits_trous_mm and float(reglages.qualite_petits_trous) > qualite:
+        vitesse_petits_trous = next(
+            (v for v in parametre.vitesses.all() if abs(float(v.qualite) - float(reglages.qualite_petits_trous)) < 1e-9), vitesse
+        )
 
     contours = _contours(piece)
+    autres = piece.contour_json.get("autres") or []
+    trous = {id(t) for t in [*(piece.contour_json.get("trous") or []), *(t for a in autres for t in a.get("trous") or [])]}
     coupe_s, longueur, nb_coins = 0.0, 0.0, 0
     for contour in contours:
-        t, l, c = _temps_contour(contour, parametre, vitesse)
+        if id(contour) not in trous:
+            vitesse_contour = vitesse
+        elif _diametre(contour) < reglages.diametre_petits_trous_mm:
+            vitesse_contour = vitesse_petits_trous
+        else:
+            vitesse_contour = vitesse_trous
+        t, l, c = _temps_contour(contour, parametre, vitesse_contour)
         coupe_s, longueur, nb_coins = coupe_s + t, longueur + l, nb_coins + c
     percage_s = len(contours) * _temps_percage(parametre, vitesse) * parametre.facteur_percage
     deplacements_s = len(contours) * parametre.deplacement_par_contour_s
@@ -236,9 +273,13 @@ def estimer_temps_decoupe(piece, qualite=None, parametre=None):
         marquage_s = (piece.longueur_gravure_mm or 0) / (parametre.vitesse_marquage_mm_min / 60)
         marquage_s += len(traits) * parametre.temporisation_marquage_s
 
+    nb_palpages = min(1, len(contours)) if piece.palpage_unique else len(contours)
+    palpage_s = nb_palpages * (reglages.temps_palpage_s or 0)
+
     coefficient = parametre.coefficient_ajustement or 1
     return EstimationTemps(
         coupe_s=coupe_s * coefficient, percage_s=percage_s * coefficient, marquage_s=marquage_s * coefficient,
-        deplacements_s=deplacements_s * coefficient, total_s=(coupe_s + percage_s + marquage_s + deplacements_s) * coefficient, longueur_coupe_mm=longueur,
+        deplacements_s=deplacements_s * coefficient, palpage_s=palpage_s,
+        total_s=(coupe_s + percage_s + marquage_s + deplacements_s) * coefficient + palpage_s, longueur_coupe_mm=longueur,
         nb_percages=len(contours), nb_coins=nb_coins, parametre=parametre, avertissements=avertissements,
     )
