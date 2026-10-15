@@ -162,6 +162,8 @@ def generer_pdf_devis(devis):
         raise DocumentError("Lignes non chiffrées : " + ", ".join(non_chiffrees) + ". Recalculez le chiffrage.")
 
     references = [f"Date : {devis.date_creation:%d/%m/%Y}"]
+    if devis.reference:
+        references.append(f"Référence : {devis.reference}")
     if devis.date_validite:
         references.append(f"Valable jusqu'au {devis.date_validite:%d/%m/%Y}")
     if devis.devis_origine_id:
