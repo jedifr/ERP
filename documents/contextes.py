@@ -139,6 +139,8 @@ def contexte_devis(devis):
         raise _erreur("Lignes non chiffrées : " + ", ".join(non_chiffrees) + ". Recalculez le chiffrage.")
 
     references = [f"Date : {devis.date_creation:%d/%m/%Y}"]
+    if devis.reference:
+        references.append(f"Référence : {devis.reference}")
     if devis.date_validite:
         references.append(f"Valable jusqu'au {devis.date_validite:%d/%m/%Y}")
     if devis.devis_origine_id:
@@ -187,7 +189,7 @@ def contexte_devis(devis):
         "lignes": lignes, "totaux": totaux, "avec_remise": "1" if avec_remise else "",
         "delai": devis.delai, "reglement": paiement.libelle if paiement else "",
         "mentions": contexte["societe"]["mentions_devis"],
-        "indice": devis.indice, "validite": _date(devis.date_validite),
+        "indice": devis.indice, "validite": _date(devis.date_validite), "reference": devis.reference,
     })
     return contexte
 
@@ -387,7 +389,7 @@ _REMISES_DEVIS = ("Remises", [
 VARIABLES = {
     T.DEVIS: [_SOCIETE, _DOCUMENT, _CLIENT, _TOTAUX, _REMISES_DEVIS, ("Conditions", [
         ("delai", "Délai"), ("reglement", "Conditions de règlement"), ("mentions", "Mentions légales du devis"),
-        ("indice", "Indice"), ("validite", "Valable jusqu'au")]),
+        ("reference", "Référence du devis"), ("indice", "Indice"), ("validite", "Valable jusqu'au")]),
         ("Ligne (dans un tableau répété sur « lignes »)", [
             ("ligne.designation_html", "Désignation"), ("ligne.reference", "Référence"), ("ligne.libelle", "Libellé"),
             ("ligne.quantite", "Quantité"), ("ligne.pu_ht", "PU HT (avant remise)"), ("ligne.remise", "Remise"),
@@ -436,7 +438,7 @@ def contexte_exemple(type_document):
                    "lignes_ht": "", "remise_globale": "", "remise_globale_libelle": ""},
         "avec_remise": "",
         "delai": "6 semaines", "reglement": "30 jours net", "mentions": "Mentions légales de l'exemple.",
-        "indice": "A", "validite": "02/11/2026", "commande": {"numero": "CDE-0001", "reference_client": "BC-7788"},
+        "indice": "A", "validite": "02/11/2026", "reference": "Garde-corps escalier", "commande": {"numero": "CDE-0001", "reference_client": "BC-7788"},
         "of": {"numero": "OF-CDE-0001-1", "reference": "FLASQUE-100", "libelle": "Flasque de pompe", "quantite": "10",
                "date_lancement": "03/10/2026", "livraison_prevue": "15/12/2026"},
         "composants": [{"designation_html": "<b>TOLE-S235-3MM</b>", "dimensions": "500 × 300", "par_piece": "1", "a_sortir": "10"}],
