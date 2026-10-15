@@ -937,3 +937,141 @@ class DebitSciage(models.Model):
                 raise ValidationError({nom: f"Entre -{ANGLE_MAX:g}° et {ANGLE_MAX:g}° (0 = coupe droite)."})
         if self.couleur and not (len(self.couleur) == 7 and self.couleur.startswith("#")):
             raise ValidationError({"couleur": "Une couleur au format #rrggbb."})
+
+
+class Plieuse(models.Model):
+    """Presse plieuse : longueur et force maximales, outillage (vés et poinçons) et poste de travail qui porte son taux horaire."""
+
+    nom = models.CharField("nom", max_length=100, unique=True)
+    poste = models.ForeignKey(
+        "technique.PosteTravail", verbose_name="poste de travail", on_delete=models.PROTECT, null=True, blank=True, related_name="plieuses",
+        help_text="Poste dont le taux horaire chiffre le pliage sur cette machine. Obligatoire pour ajouter l'étape de pliage à la gamme.",
+    )
+    longueur_max_mm = models.FloatField("longueur de pli maximale (mm)")
+    force_max_t = models.FloatField("force maximale (t)")
+    actif = models.BooleanField("active", default=True)
+
+    class Meta:
+        verbose_name = "Plieuse"
+        verbose_name_plural = "Plieuses"
+        ordering = ["force_max_t", "nom"]
+
+    def __str__(self):
+        return self.nom
+
+
+class Ve(models.Model):
+    """Matrice en V d'une plieuse. La force admise baisse quand l'angle se ferme : elle est interpolée entre l'angle du vé et 90°."""
+
+    plieuse = models.ForeignKey(Plieuse, verbose_name="plieuse", on_delete=models.CASCADE, related_name="ves")
+    ouverture_mm = models.FloatField("ouverture (mm)")
+    angle_deg = models.FloatField("angle du vé (°)", default=30)
+    rayon_epaule_mm = models.FloatField("rayon d'épaule (mm)", null=True, blank=True)
+    force_max_angle_kn_m = models.FloatField("force max à l'angle du vé (kN/m)")
+    force_max_90_kn_m = models.FloatField("force max à 90° (kN/m)")
+    actif = models.BooleanField("actif", default=True)
+    vendable_en_ligne = models.BooleanField("vendu en ligne", default=True, help_text="Décoché : le vé ne sert qu'aux devis validés par un technicien.")
+
+    class Meta:
+        verbose_name = "Vé"
+        verbose_name_plural = "Vés"
+        ordering = ["plieuse", "ouverture_mm"]
+        constraints = [models.UniqueConstraint(fields=["plieuse", "ouverture_mm"], name="ve_unique_par_plieuse")]
+
+    def __str__(self):
+        return f"V{self.ouverture_mm:g}/{self.angle_deg:g}°"
+
+    def force_max_a(self, angle_deg):
+        """Force admise (kN/m) pour un pli à `angle_deg` (angle de la pièce, 90 = équerre)."""
+        if angle_deg >= 90:
+            return self.force_max_90_kn_m
+        angle = max(angle_deg, self.angle_deg)
+        return self.force_max_angle_kn_m + (self.force_max_90_kn_m - self.force_max_angle_kn_m) * (angle - self.angle_deg) / (90 - self.angle_deg)
+
+
+class Poincon(models.Model):
+    """Poinçon d'une plieuse : son angle de nez borne l'angle de pliage."""
+
+    plieuse = models.ForeignKey(Plieuse, verbose_name="plieuse", on_delete=models.CASCADE, related_name="poincons")
+    nom = models.CharField("nom", max_length=50)
+    angle_nez_deg = models.FloatField("angle de nez (°)")
+    rayon_mm = models.FloatField("rayon (mm)", null=True, blank=True)
+    hauteur_mm = models.FloatField("hauteur (mm)", null=True, blank=True)
+    force_max_kn_m = models.FloatField("force max (kN/m)")
+    actif = models.BooleanField("actif", default=True)
+
+    class Meta:
+        verbose_name = "Poinçon"
+        verbose_name_plural = "Poinçons"
+        ordering = ["plieuse", "force_max_kn_m", "nom"]
+
+    def __str__(self):
+        return f"{self.nom} ({self.angle_nez_deg:g}°)"
+
+
+class ReglagePliage(models.Model):
+    """Réglage unique du chiffrage du pliage : marges de sécurité et temps de l'atelier."""
+
+    marge_force_pct = models.FloatField("force utilisable (% de la capacité)", default=70, help_text="70 : une plieuse de 50 t ne prend que les plis de 35 t au plus.")
+    reglage_court_min = models.FloatField("réglage d'un pli court (min)", default=5)
+    reglage_long_min = models.FloatField("réglage d'un pli long (min)", default=7.5)
+    seuil_pli_long_mm = models.FloatField("pli long à partir de (mm)", default=800)
+    temps_pli_s = models.FloatField("temps par pli (s)", default=30)
+    temps_pli_serie_s = models.FloatField("temps par pli en série (s)", default=15)
+    seuil_serie = models.PositiveIntegerField("série à partir de (pièces)", default=10)
+    retour_elastique_deg = models.FloatField(
+        "marge de retour élastique (°)", default=5,
+        help_text="Ajoutée à l'angle mini des outils, puis arrondie au multiple de 5 supérieur.",
+    )
+    epaisseur_max_sans_validation_mm = models.FloatField(
+        "épaisseur max sans validation (mm)", default=6, help_text="Au-delà, le pli est chiffré mais passe en validation technicien.",
+    )
+
+    class Meta:
+        verbose_name = "Réglage de pliage"
+        verbose_name_plural = "Réglage de pliage"
+
+    def __str__(self):
+        return "Réglage de pliage"
+
+    @classmethod
+    def charger(cls):
+        return cls.objects.get_or_create(pk=1)[0]
+
+
+class PliageArticle(models.Model):
+    """Profil plié d'un article fabriqué : cotes extérieures des faces et angles des plis, sur une longueur de pli.
+
+    Angle d'un pli : angle de la pièce entre les deux faces (90 = équerre, 180 = plat). Un angle négatif plie dans
+    l'autre sens (profil en Z) ; deux plis de même signe forment un U."""
+
+    article = models.OneToOneField(Article, verbose_name="article", on_delete=models.CASCADE, related_name="pliage")
+    matiere = models.ForeignKey(Matiere, verbose_name="matière", on_delete=models.PROTECT, related_name="pliages")
+    epaisseur_mm = models.FloatField("épaisseur (mm)")
+    longueur_pli_mm = models.FloatField("longueur de pli (mm)")
+    faces_mm = models.JSONField("cotes extérieures des faces (mm)", default=list, help_text="Ex. [50, 100] pour une cornière, [20, 60, 20] pour un U.")
+    angles_deg = models.JSONField("angles des plis (°)", default=list, help_text="Un angle par pli, entre deux faces. Ex. [90] ; [90, 90] pour un U ; [90, -90] pour un Z.")
+    resultat = models.JSONField("résultat du calcul", null=True, blank=True)
+    date_calcul = models.DateTimeField("calculé le", null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Pièce pliée"
+        verbose_name_plural = "Pièces pliées"
+        ordering = ["article"]
+
+    def __str__(self):
+        return f"Pliage de {self.article}"
+
+    def clean(self):
+        super().clean()
+        if self.article_id and self.article.nature != Article.Nature.FABRIQUE:
+            raise ValidationError({"article": "Seul un article fabriqué se plie."})
+        faces, angles = self.faces_mm or [], self.angles_deg or []
+        if not isinstance(faces, list) or not isinstance(angles, list):
+            raise ValidationError("Faces et angles sont des listes de nombres.")
+        if len(faces) < 2 or len(angles) != len(faces) - 1:
+            raise ValidationError({"angles_deg": "Il faut au moins deux faces et un angle de moins que de faces."})
+        if any(not isinstance(f, (int, float)) or f <= 0 for f in faces):
+            raise ValidationError({"faces_mm": "Chaque face est une cote positive en mm."})
+        if any(not isinstance(a, (int, float)) or not 0 < abs(a) < 180 for a in angles):
+            raise ValidationError({"angles_deg": "Chaque angle est compris entre 0 et 180° (exclus) : pas de pli écrasé."})

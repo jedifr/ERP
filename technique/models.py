@@ -35,6 +35,10 @@ class FamilleMatiere(models.Model):
     ordre = models.PositiveSmallIntegerField(
         "priorité", default=50, help_text="Les familles de priorité faible sont essayées d'abord (« inox » avant « acier »)."
     )
+    rm_mpa = models.FloatField(
+        "résistance à la traction Rm (N/mm²)", null=True, blank=True,
+        help_text="Sert à la force de pliage : abaque de l'acier (Rm 450) ou de l'inox (Rm 700) multiplié par Rm / Rm de l'abaque.",
+    )
     coef_k = ChampDecimal(
         "coefficient K de pliage", max_digits=4, decimal_places=3, null=True, blank=True,
         validators=[MinValueValidator(Decimal("0")), MaxValueValidator(Decimal("0.5"))],
@@ -702,7 +706,7 @@ class Gamme(DateRangeHistoriqueMixin, models.Model):
         "date de fin", null=True, blank=True, help_text="Historisation de la révision"
     )
     origine = models.CharField(
-        "origine", max_length=12, default="manuelle", choices=[("manuelle", "Saisie à la main"), ("decoupe", "Calculée depuis la pièce à découper")],
+        "origine", max_length=12, default="manuelle", choices=[("manuelle", "Saisie à la main"), ("decoupe", "Calculée depuis la pièce à découper"), ("pliage", "Calculée depuis la pièce pliée")],
         help_text="Une étape « calculée » est remise à jour depuis la pièce à découper (temps de coupe) ; la modifier à la main la fait revenir en « saisie à la main ».",
     )
 

@@ -49,3 +49,42 @@ def alimenter_gamme(piece, aujourdhui=None):
             date_debut=aujourdhui, origine="decoupe",
         )
     return etape, estimation
+
+
+def alimenter_gamme_pliage(pliage, aujourdhui=None):
+    """Calcule la pièce pliée et crée ou met à jour l'étape « pliage » de la gamme de son article, sur le poste de la
+    plieuse retenue : temps fixe = réglages, temps variable = temps des plis d'une pièce (le moteur applique le temps
+    de série selon la quantité). Une étape saisie à la main n'est jamais écrasée. Retourne (étape, résultat).
+    Lève ErreurPliage si le paramétrage manque ou si le pliage est refusé."""
+    from decoupe.models import Plieuse
+
+    from .pliage import ErreurPliage, calculer_pliage_article
+
+    aujourdhui = aujourdhui or datetime.date.today()
+    resultat = calculer_pliage_article(pliage)
+    if resultat.statut == "refus":
+        raise ErreurPliage(" ".join(resultat.refus))
+    poste = Plieuse.objects.get(pk=resultat.plieuse_id).poste
+    if poste is None:
+        raise ErreurPliage(f"Renseignez le poste de travail de la plieuse « {resultat.plieuse} » (Paramétrage → Pliage).")
+    article = pliage.article
+    valeurs = {"poste": poste, "temps_fixe": resultat.temps_reglage_min, "temps_variable": resultat.temps_pli_min}
+
+    with transaction.atomic():
+        actives = Gamme.objects.filter(article=article, date_debut__lte=aujourdhui).filter(
+            Q(date_fin__isnull=True) | Q(date_fin__gte=aujourdhui)
+        )
+        existante = actives.filter(origine="pliage").order_by("ordre").first()
+        if existante and existante.date_debut == aujourdhui:
+            for champ, valeur in valeurs.items():
+                setattr(existante, champ, valeur)
+            existante.save(update_fields=list(valeurs))
+            return existante, resultat
+        if existante:
+            existante.date_fin = aujourdhui - datetime.timedelta(days=1)
+            existante.save(update_fields=["date_fin"])
+            ordre = existante.ordre
+        else:
+            ordre = (actives.aggregate(m=Max("ordre"))["m"] or 0) + 1
+        etape = Gamme.objects.create(article=article, ordre=ordre, date_debut=aujourdhui, origine="pliage", **valeurs)
+    return etape, resultat

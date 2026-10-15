@@ -3310,3 +3310,17 @@ Les aperçus de pièces des articles fabriqués étaient affichés à 420 px de 
 ## Coefficient K de pliage par famille de matière
 
 Chaque **famille de matière** (Paramétrage → Matières → Familles de matière, section « Pliage ») porte un **coefficient K** : la position de la fibre neutre dans l'épaisseur, qui sert à calculer le développé d'une pièce pliée (arc neutre = angle de pliage en radians × (rayon intérieur + K × épaisseur)). Règle de l'atelier, renseignée par la migration `technique 0029` sans écraser une valeur déjà saisie : **0,445** pour l'acier, l'acier galvanisé et l'acier électrozingué, **0,36** pour l'inox, **0,45** pour l'aluminium. Les autres familles restent vides. Contrôle : une cornière acier 2 mm, ailes extérieures 50 × 100 à 90° en V12 (rayon intérieur 2), donne un développé de 146,54 mm. Valeur admise : de 0 à 0,5.
+
+## Chiffrage du pliage
+
+**Paramétrage → Pliage** regroupe les **plieuses** (longueur et force maximales, poste de travail qui porte le taux horaire), leurs **vés** (ouverture, angle, force maximale à l'angle du vé et à 90°, « vendu en ligne ») et **poinçons** (angle de nez, rayon, hauteur, force maximale), et le **réglage de pliage** (force utilisable 70 %, réglage 5 min / 7,5 min au-delà de 800 mm, 30 s par pli et 15 s dès 10 pièces, 5° de retour élastique, validation au-delà de 6 mm). La migration `decoupe 0038` crée les deux plieuses de l'atelier (2 m / 50 t et 3 m / 200 t) avec l'outillage de la fiche Bystronic (V8 à V32 à 30°, V50 à 60°, V80 à 80° hors vente en ligne ; poinçons P4, P5, P7) : **il reste à renseigner leur poste de travail**. Chaque famille de matière porte sa résistance Rm (`technique 0030` : 450 aciers, 700 inox, 250 aluminium à confirmer).
+
+Une **pièce pliée** (Paramétrage → Pliage → Pièces pliées) décrit le profil d'un article fabriqué : matière, épaisseur, longueur de pli, cotes **extérieures** des faces et angle de chaque pli (90 = équerre, signe = sens du pli : 90 ; 90 pour un U, 90 ; -90 pour un Z). L'enregistrement calcule (`decoupe/services/pliage.py`, abaques Amada dans `decoupe/data/abaque_pliage_amada.json`) :
+- le **vé** le plus proche de 6 × épaisseur (8 × de 3 à 8 mm…), un plus petit si une face est sous le bord mini, sinon refus ;
+- la **force** (abaque acier ou inox × Rm / Rm de l'abaque ; ouverture ou épaisseur absente : ∝ 1/V et ∝ e², signalé « interpolée ») et la **plieuse** la moins puissante qui a le vé, un poinçon, la longueur et la force ;
+- l'**angle mini** (force admise par le vé interpolée entre son angle et 90°, poinçon le plus aigu, + retour élastique, arrondi à 5°) ;
+- les cas **à valider** : face entre deux plis < 2 × bord mini, aile d'un U plus longue que sa largeur, angle aigu au-delà de la force nominale du vé (bureau d'études), épaisseur > 6 mm, vé hors vente en ligne ;
+- le **développé** (Σ faces − reculs + arcs neutres, K de la famille ; recul à l'intersection virtuelle au-delà de 90°, à la tangence en dessous) ;
+- les **temps** : un réglage par réglage distinct (même angle entre des faces identiques), et le temps des plis.
+
+L'étape **« pliage »** de la gamme de l'article est créée ou mise à jour sur le poste de la plieuse (temps fixe = réglages, temps variable = plis d'une pièce) ; le moteur de chiffrage passe au temps de série à partir de 10 pièces. Contrôle : cornière acier 2 mm 50 × 100 en V12, 600 pièces : 5 min + 600 × 15 s = 155 min. Les profils (L, U, Z, C…) sont couverts ; les boîtes pliées dans deux directions ne le sont pas encore.

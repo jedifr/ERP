@@ -93,6 +93,29 @@ AIDES = {
         ],
         "bon_a_savoir": ["La densité sert au calcul des poids et des prix au kilo ; la famille donne les paramètres de coupe."],
     },
+    "decoupe.plieuse": {
+        "resume": "Vos presses plieuses : longueur et force maximales, vés et poinçons montés, poste de travail qui porte le taux horaire.",
+        "etapes": [
+            "Renseignez le poste de travail de chaque plieuse : l'étape de pliage de la gamme est chiffrée à son taux horaire.",
+            "Dans les vés, l'angle et les deux forces maximales viennent de la fiche de l'outil (force à l'angle du vé et à 90°).",
+            "Décochez « vendu en ligne » pour un vé réservé aux devis validés (V80 pour les fortes épaisseurs).",
+        ],
+        "bon_a_savoir": ["Le calcul prend la plieuse la moins puissante qui a le vé, la longueur et la force (dans la limite du réglage de pliage)."],
+    },
+    "decoupe.reglagepliage": {
+        "resume": "Règles de l'atelier pour chiffrer un pliage : force utilisable, temps de réglage et de pli, retour élastique.",
+        "etapes": ["Ajustez les temps de réglage (pli court, pli long) et le temps par pli (unitaire et en série)."],
+        "bon_a_savoir": ["Un réglage est compté par réglage distinct : deux plis de même angle entre des faces identiques n'en font qu'un."],
+    },
+    "decoupe.pliagearticle": {
+        "resume": "Profil plié d'un article fabriqué (cornière, U, Z…) : vé, plieuse, force, angle mini, développé et temps de pliage.",
+        "etapes": [
+            "Choisissez l'article, la matière, l'épaisseur et la longueur de pli.",
+            "Saisissez les cotes extérieures des faces et l'angle de chaque pli (90 = équerre, -90 = pli dans l'autre sens).",
+            "Enregistrez : le calcul s'affiche et l'étape « pliage » de la gamme de l'article est créée ou mise à jour.",
+        ],
+        "bon_a_savoir": ["Un résultat « À valider » est chiffré mais doit être vérifié par un technicien (aile haute, face courte entre deux plis, forte épaisseur…)."],
+    },
     "technique.famillematiere": {
         "resume": "Une famille regroupe des nuances (Acier, Inox, Aluminium…) : elles partagent leurs paramètres de coupe et leur usinabilité.",
         "etapes": ["Créez la famille avec son usinabilité (sert à estimer les vitesses de coupe du jet d'eau).", "Dans « Mots-clés des nuances », listez les débuts de noms rattachés (s235, s355, acier…) : une nouvelle nuance rejoint sa famille toute seule."],

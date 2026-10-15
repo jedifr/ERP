@@ -15,6 +15,9 @@ CARTES = [
         ("Paramètres de coupe", "decoupe", "parametrecoupe"), ("Paramètres de coupe en grille", "decoupe", "parametrecoupe", "admin:decoupe_parametrecoupe_action_grille"), ("Réglages de coupe", "decoupe", "reglageprocede"),
         ("Formats de tôle", "decoupe", "formattole"), ("Imbrication : seuil de chutes", "decoupe", "reglageimbrication"), ("Imbrications (historique)", "decoupe", "imbricationjob"),
     ], "decoupe"),
+    ("pliage", "Pliage", "architecture", "Plieuses, vés, poinçons, temps et marge de force", [
+        ("Plieuses et outillage", "decoupe", "plieuse"), ("Réglage de pliage", "decoupe", "reglagepliage"), ("Pièces pliées", "decoupe", "pliagearticle"),
+    ], None),
     ("formes", "Formes et profilés", "straighten", "Cotes normalisées, profils d'import DXF", [
         ("Cotes normalisées", "decoupe", "normecote"),
         ("Profils d'import DXF", "decoupe", "profilimportdecoupe"),

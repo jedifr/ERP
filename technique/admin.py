@@ -78,7 +78,7 @@ class FamilleMatiereAdmin(ModelAdmin):
     actions = ["action_rattacher_nuances"]
     fieldsets = [
         (None, {"fields": ["nom", "nom_igems", "usinabilite", "ordre"]}),
-        ("Pliage", {"fields": ["coef_k"]}),
+        ("Pliage", {"fields": ["coef_k", "rm_mpa"]}),
         ("Rattachement automatique des nuances", {"fields": ["mots_cles"]}),
     ]
 
@@ -332,7 +332,7 @@ class ArticleAdmin(ImportTableauMixin, ModificationParLotsMixin, ColonnesPersonn
         # un recalcul ultérieur ne l'écrase plus.
         if formset.model is Gamme:
             for f in formset.forms:
-                if f.instance.pk and f.has_changed() and f.instance.origine == "decoupe":
+                if f.instance.pk and f.has_changed() and f.instance.origine in ("decoupe", "pliage"):
                     f.instance.origine = "manuelle"
         super().save_formset(request, form, formset, change)
 
@@ -749,7 +749,7 @@ class GammeAdmin(ModificationParLotsMixin, ModelAdmin):
     readonly_fields = ["origine"]
 
     def save_model(self, request, obj, form, change):
-        if change and obj.origine == "decoupe" and form.has_changed():
+        if change and obj.origine in ("decoupe", "pliage") and form.has_changed():
             obj.origine = "manuelle"
         super().save_model(request, obj, form, change)
     list_filter = ["poste"]
