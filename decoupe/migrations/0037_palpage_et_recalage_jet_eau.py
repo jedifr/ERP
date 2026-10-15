@@ -11,7 +11,7 @@ def palpage_jet_eau(apps, schema_editor):
 
 
 def coefficient_de_temps(apps, schema_editor):
-    """Coefficient de temps calé sur la pièce test du 14/10/2026, sur les paramètres de jet d'eau dont le coefficient
+    """Coefficient de temps calé sur les temps réels du 15/10/2026, sur les paramètres de jet d'eau dont le coefficient
     d'ajustement n'a pas été modifié (1)."""
     from decoupe.services.vitesses import coefficient_temps
 

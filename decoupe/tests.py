@@ -1468,8 +1468,8 @@ class ImportMaterialsLuaEtCalibrageTests(TestCase):
         from .services.temps import estimer_temps_decoupe
 
         self.importer()
-        # Ces temps valident le modèle de vitesses seul : sans le coefficient de temps calé sur la pièce test du 14/10/2026
-        # (+5 à +14 %, voir PieceTestVitessesJetEauTests), ni le palpage, que le logiciel de la machine ne compte pas.
+        # Ces temps valident le modèle de vitesses seul : sans le coefficient de temps calé sur les temps réels du 15/10/2026
+        # (× 1,36, voir PieceTestVitessesJetEauTests), ni le palpage.
         ParametreCoupe.objects.update(coefficient_ajustement=1)
         ReglageProcede.pour("jet_eau")
         ReglageProcede.objects.update(temps_palpage_s=0)
@@ -1503,7 +1503,7 @@ class ImportMaterialsLuaEtCalibrageTests(TestCase):
         from .services.temps import estimer_temps_decoupe
 
         self.importer()
-        ParametreCoupe.objects.update(coefficient_ajustement=1)  # décomposition du logiciel : sans le coefficient de temps du 14/10/2026
+        ParametreCoupe.objects.update(coefficient_ajustement=1)  # décomposition du logiciel : sans le coefficient de temps réel
         plaque = self.piece_plaque()
         plaque.matiere, plaque.epaisseur = Matiere.objects.get_or_create(nom="Alu 6082", defaults={"densite": 2.7})[0], 50
         e = estimer_temps_decoupe(plaque)
@@ -1534,16 +1534,42 @@ class ImportMaterialsLuaEtCalibrageTests(TestCase):
 
 
 class PieceTestVitessesJetEauTests(TestCase):
-    """Calage sur la pièce test du 14/10/2026 (2 154 mm de coupe, 20 contours) : temps donnés par le logiciel de la machine,
-    extérieur en qualité 3, trous en qualité 4, perçage de 2 s ; le palpage (4 s par perçage) n'y est pas compté."""
+    """Jet d'eau : calage sur des temps réels en qualité 3 (15/10/2026), palpage, petits trous en qualité 4. La pièce test du
+    14/10/2026 (2 154 mm de coupe, 20 contours) sert aux essais de palpage et de qualité des trous."""
 
     DONNEES = Path(__file__).parent / "tests_data"
-    # famille de l'ERP → {épaisseur mm: temps en secondes} (XC70 = acier trempé ; acier = S235 / S355)
-    TEMPS_MACHINE = {
-        "Acier trempé": {1: 198, 2: 318, 3: 446, 4: 589, 5: 749, 8: 1313, 10: 1740, 15: 2968},
-        "Aluminium": {1: 137, 2: 172, 3: 213, 4: 258, 5: 309, 8: 487, 10: 624, 15: 1021, 20: 1481, 25: 2002, 30: 2584, 40: 4009},
-        "Acier": {1: 183, 2: 283, 3: 390, 4: 510, 5: 643, 8: 1115, 10: 1472, 15: 2501, 20: 3692, 25: 5042, 30: 6547, 40: 10237},
-    }
+
+    @staticmethod
+    def rectangle_arrondi(largeur, hauteur, rayon, n=12):
+        points = []
+        for cx, cy, debut in ((largeur - rayon, rayon, -90), (largeur - rayon, hauteur - rayon, 0), (rayon, hauteur - rayon, 90), (rayon, rayon, 180)):
+            points += [[cx + rayon * math.cos(math.radians(debut + 90 * k / n)), cy + rayon * math.sin(math.radians(debut + 90 * k / n))] for k in range(n + 1)]
+        return points
+
+    def test_temps_reels_retrouves(self):
+        from .services.temps import estimer_temps_decoupe
+
+        alu = Matiere.objects.create(nom="Alu 5754 test", famille=FamilleMatiere.objects.get(nom="Aluminium"), densite=2.7)
+        # plaque chaîneau (2 contours de 1 164 mm), alu 15 mm : 12 min 26 s
+        r = extraire_geometrie(self.DONNEES / "plaque_chaineau.dxf", "dxf")
+        chaineau = PieceDecoupe(nom="Plaque chaîneau", statut=PieceDecoupe.Statut.OK, qualite_coupe=3, matiere=alu, epaisseur=15,
+                                contour_json={"exterieur": r.exterior, "trous": r.holes, "autres": r.autres})
+        # placement 2026-288-1, alu 5 mm : 4 × 220 × 220 et 4 × 370 × 140 (coins R5) : 12 min 40 s
+        placement = sum(
+            4 * estimer_temps_decoupe(PieceDecoupe(
+                nom=f"{l}x{h}", statut=PieceDecoupe.Statut.OK, qualite_coupe=3, matiere=alu, epaisseur=5,
+                contour_json={"exterieur": self.rectangle_arrondi(l, h, 5), "trous": []},
+            )).total_s
+            for l, h in ((220, 220), (370, 140))
+        )
+        for calcule, reel in ((estimer_temps_decoupe(chaineau).total_s, 12 * 60 + 26), (placement, 12 * 60 + 40)):
+            self.assertAlmostEqual(calcule / reel, 1, delta=0.03, msg=f"calculé {calcule:.0f} s, réel {reel} s")
+
+    def test_xc70_en_acier_trempe(self):
+        trempe = ParametreCoupe.objects.get(procede="jet_eau", famille__nom="Acier trempé", epaisseur_mm=10)
+        acier = ParametreCoupe.objects.get(procede="jet_eau", famille__nom="Acier", epaisseur_mm=10)
+        self.assertEqual((trempe.usinabilite, trempe.coefficient_ajustement, trempe.vitesses.count()), (75.7, 1.36, 5))
+        self.assertLess(trempe.vitesses.get(qualite=3).vitesse_haute_mm_min, acier.vitesses.get(qualite=3).vitesse_haute_mm_min)
 
     def piece(self, **kwargs):
         r = extraire_geometrie(self.DONNEES / "piece_test_vitesses.dxf", "dxf")
@@ -1555,22 +1581,6 @@ class PieceTestVitessesJetEauTests(TestCase):
     def test_geometrie(self):
         piece = self.piece()
         self.assertEqual(1 + len(piece.contour_json["trous"]), 20)
-
-    def test_temps_du_logiciel_retrouves(self):
-        from .services.temps import estimer_temps_decoupe
-
-        piece, ecarts = self.piece(), []
-        for nom, temps in self.TEMPS_MACHINE.items():
-            for epaisseur, machine in temps.items():
-                parametre = ParametreCoupe.objects.get(procede="jet_eau", famille__nom=nom, epaisseur_mm=epaisseur)
-                # conditions du test : perçage stationnaire de 2 s
-                parametre.mode_percage, parametre.percage_stationnaire_hp_s = ParametreCoupe.ModePercage.STATIONNAIRE_HP, 2
-                parametre.temporisation_pointage_s, parametre.facteur_percage = 0, 1
-                e = estimer_temps_decoupe(piece, parametre=parametre, qualite_interieure=4)
-                calcule = e.total_s - e.palpage_s
-                ecarts.append(calcule / machine - 1)
-                self.assertAlmostEqual(calcule / machine, 1, delta=0.08, msg=f"{nom} {epaisseur} mm : calculé {calcule:.0f} s, machine {machine} s")
-        self.assertLess(sum(abs(e) for e in ecarts) / len(ecarts), 0.035)
 
     def test_palpage_a_chaque_percage_ou_une_fois_par_piece(self):
         from .services.temps import estimer_temps_decoupe

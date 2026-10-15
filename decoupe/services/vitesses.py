@@ -9,12 +9,12 @@ en courbe et le facteur de perçage sont **calés sur neuf temps de découpe ré
 surtout en lignes droites, en acier 25 et 35 mm et en aluminium 50 mm ; un plan de 20 m de coupe (54 cercles) en inox
 25 mm. Le modèle les retrouve à 1,2 % près au maximum.
 
-**Coefficient de temps** (`coefficient_temps`, recopié dans le coefficient d'ajustement des paramètres) : la pièce test
-du 14/10/2026 (tests_data/piece_test_vitesses.dxf : 2 154 mm de coupe, 20 contours, extérieur en qualité 3, trous en
-qualité 4, perçage de 2 s) donne 32 temps du logiciel de la machine, acier S235/S355 et aluminium de 1 à 40 mm, XC70
-(acier trempé) de 1 à 15 mm. Avec les vitesses ci-dessus, le calcul est 5 % (1 mm) à 14 % (40 mm) trop court : le
-coefficient 1,049 + 0,0243 × ln(e) rattrape l'écart (2,6 % en moyenne, 6 % au plus). L'usinabilité de l'XC70 (75,7) est
-calée sur les mêmes temps.
+**Coefficient de temps** (`coefficient_temps`, recopié dans le coefficient d'ajustement des paramètres) : calé sur deux
+temps réels chronométrés en qualité 3 (15/10/2026) : plaque chaîneau en aluminium 15 mm (2 × 1 164 mm, 12 min 26 s) et
+placement 2026-288-1 en aluminium 5 mm (4 × 220 × 220 + 4 × 370 × 140, R5, 12 min 40 s). La machine coupe en réalité
+1,36 fois plus lentement que ce calcul (à 1 % près sur les deux). Le logiciel de la machine, lui, n'est pas une
+référence : il annonçait 19,49 min pour le placement réalisé en 12 min 40 s. L'usinabilité de l'XC70 (75,7) est calée
+sur le rapport XC70 / acier des temps du logiciel pour la pièce test du 14/10/2026.
 
 **Vitesse basse** : rapport vitesse basse / vitesse élevée relevé pour 8, 10 et 20 mm, interpolé sur le logarithme
 de l'épaisseur (et prolongé tel quel au-delà) — approximatif : les vitesses basses du logiciel dépendent d'autres
@@ -37,13 +37,17 @@ RAPPORT_BAS = {
     20: (0.239, 0.299, 0.396, 0.470, 0.528),
 }
 
-# Usinabilité de l'XC70 (acier trempé), calée sur la pièce test du 14/10/2026.
+# Usinabilité de l'XC70 (acier trempé), calée sur la pièce test du 14/10/2026 (rapport XC70 / acier).
 USINABILITE_XC70 = 75.7
 
 
+COEFFICIENT_TEMPS_REEL = 1.36
+
+
 def coefficient_temps(epaisseur_mm):
-    """Coefficient d'ajustement du temps calculé (jet d'eau), calé sur la pièce test du 14/10/2026."""
-    return round(1.049 + 0.0243 * math.log(max(epaisseur_mm, 0.5)), 3)
+    """Coefficient d'ajustement du temps calculé (jet d'eau), calé sur les temps réels du 15/10/2026 (le même pour toutes
+    les épaisseurs : 5 et 15 mm donnent le même écart)."""
+    return COEFFICIENT_TEMPS_REEL
 
 # Usinabilités standard (valeur fournie, mots-clés du nom de matière reconnus — sans accents, en minuscules).
 USINABILITES_STANDARD = [
