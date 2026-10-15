@@ -1,0 +1,20 @@
+{% extends "admin/change_form.html" %}
+{% load i18n admin_urls %}
+
+{% block object-tools-items %}
+    {% if original %}
+        <li>
+            <form action="{% url 'admin:technique_postetravail_renommer' original.pk|admin_urlquote %}" method="post" class="contents">
+                {% csrf_token %}
+                <input type="hidden" name="nouveau_nom" value="">
+                <button type="submit"
+                        onclick="var n = window.prompt('Nouveau nom du poste « {{ original.pk|escapejs }} » (tarifs, gammes, devis, OF et paramètres de coupe suivent) :', '{{ original.pk|escapejs }}'); if (!n || !n.trim()) return false; this.form.nouveau_nom.value = n; return true;"
+                        class="cursor-pointer flex grow items-center gap-2 px-3 py-2 text-left whitespace-nowrap w-full bg-transparent border-0 text-font-default-light dark:text-font-default-dark">
+                <span class="material-symbols-outlined">edit</span>
+                Renommer
+                </button>
+            </form>
+        </li>
+    {% endif %}
+    {{ block.super }}
+{% endblock %}

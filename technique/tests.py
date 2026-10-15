@@ -5,7 +5,7 @@ from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings
 
 from .models import Article, Gamme, Matiere, Nomenclature, PosteTravail, TarifPoste
-from .services import DuplicationError, dupliquer_article, renommer_article
+from .services import DuplicationError, dupliquer_article, renommer_article, renommer_poste
 
 
 class ArticleTests(TestCase):
@@ -423,6 +423,57 @@ class RenommerArticleTests(TestCase):
         r = self.client.post("/admin/technique/article/TOLE-C/renommer/", {"nouvelle_reference": "PIECE-R"}, follow=True)
         self.assertContains(r, "existe déjà")
         self.assertTrue(Article.objects.filter(pk="TOLE-C").exists())
+
+
+class RenommerPosteTests(TestCase):
+    """Renommer un poste change sa clé : tarifs, gammes, plieuses, historique et journal des lots suivent ; le nom n'est plus modifiable dans le formulaire."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        self.user = get_user_model().objects.create_superuser("renom-poste", "rp@example.com", "pass-mot-de-passe-42")
+        self.client.force_login(self.user)
+        self.poste = PosteTravail.objects.create(nom="Plieuse 1", mode_calcul="horaire", nombre_machines=2, taux_marge_defaut=15)
+        PosteTravail.objects.create(nom="Laser", mode_calcul="horaire")
+        self.tarif = TarifPoste.objects.create(poste=self.poste, cout_horaire=60, date_debut=datetime.date(2026, 1, 1))
+        piece = Article.objects.create(reference="PIECE-P", nature=Article.Nature.FABRIQUE)
+        self.etape = Gamme.objects.create(article=piece, poste=self.poste, ordre=10, temps_fixe=5, date_debut=datetime.date(2026, 1, 1))
+
+    def test_les_liens_suivent(self):
+        from comptes.models import LotModification
+        from decoupe.models import Plieuse
+
+        plieuse = Plieuse.objects.create(nom="Amada", poste=self.poste, longueur_max_mm=3000, force_max_t=100)
+        lot_gamme = LotModification.objects.create(modele="technique.Gamme", description="g", modifications=[{"pk": str(self.etape.pk), "avant": {"poste": "Plieuse 1"}, "apres": {"poste": "Laser"}}])
+        lot_poste = LotModification.objects.create(modele="technique.PosteTravail", description="p", modifications=[{"pk": "Plieuse 1", "avant": {"nombre_machines": 1}, "apres": {"nombre_machines": 2}}])
+        nouveau = renommer_poste(self.poste, "  Plieuse Amada ")
+        self.assertEqual((nouveau.pk, nouveau.nombre_machines, nouveau.taux_marge_defaut), ("Plieuse Amada", 2, 15))
+        self.assertFalse(PosteTravail.objects.filter(pk="Plieuse 1").exists())
+        self.assertEqual(TarifPoste.objects.get(pk=self.tarif.pk).poste_id, "Plieuse Amada")
+        self.assertEqual(Gamme.objects.get(pk=self.etape.pk).poste_id, "Plieuse Amada")
+        self.assertEqual(Plieuse.objects.get(pk=plieuse.pk).poste_id, "Plieuse Amada")
+        lot_gamme.refresh_from_db()
+        lot_poste.refresh_from_db()
+        self.assertEqual(lot_gamme.modifications[0]["avant"]["poste"], "Plieuse Amada")
+        self.assertEqual(lot_gamme.modifications[0]["apres"]["poste"], "Laser")
+        self.assertEqual(lot_poste.modifications[0]["pk"], "Plieuse Amada")
+
+    def test_refus_nom_vide_identique_ou_existant(self):
+        for valeur, message in (("  ", "Indiquez"), ("Plieuse 1", "identique"), ("Laser", "existe déjà"), ("X" * 150, "caractères")):
+            with self.assertRaisesMessage(DuplicationError, message):
+                renommer_poste(self.poste, valeur)
+        self.assertTrue(PosteTravail.objects.filter(pk="Plieuse 1").exists())
+
+    def test_vue_et_formulaire(self):
+        page = self.client.get("/admin/technique/postetravail/Plieuse%201/change/")
+        self.assertContains(page, "Renommer")
+        self.assertNotContains(page, 'name="nom"')  # nom en lecture seule : plus de second poste créé par erreur
+        r = self.client.post("/admin/technique/postetravail/Plieuse%201/renommer/", {"nouveau_nom": "Plieuse_2F A"})
+        self.assertRedirects(r, "/admin/technique/postetravail/Plieuse_5F2F%20A/change/", fetch_redirect_response=False)
+        self.assertTrue(PosteTravail.objects.filter(pk="Plieuse_2F A").exists())
+        r = self.client.post("/admin/technique/postetravail/Plieuse_5F2F%20A/renommer/", {"nouveau_nom": "Laser"}, follow=True)
+        self.assertContains(r, "existe déjà")
+        self.assertContains(self.client.get("/admin/technique/postetravail/add/"), 'name="nom"')
 
 
 class CatalogueProfilesTests(TestCase):
