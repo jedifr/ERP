@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pièces sur mesure – DÉCOUPE H2O</title>
+  <meta name="description" content="Configurez votre pièce en tôle découpée au laser ou au jet d'eau, pliée si besoin : prix immédiat.">
+  <link rel="stylesheet" href="style.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="entete">
+    <div class="marque">DÉCOUPE <span>H2O</span></div>
+    <p class="accroche">Découpe laser et jet d'eau, pliage. Votre pièce, votre prix, tout de suite.</p>
+    <a class="lien-panier" href="#panier">Panier <span id="nb-panier" class="pastille">0</span></a>
+  </header>
+
+  <main class="page">
+    <section class="configurateur" aria-labelledby="titre-config">
+      <h1 id="titre-config">Configurer une pièce</h1>
+      <p id="indispo" class="alerte" hidden></p>
+
+      <fieldset class="etape">
+        <legend><span class="num">1</span> Type de pièce</legend>
+        <div class="onglets" role="radiogroup" aria-label="Type de pièce">
+          <label><input type="radio" name="type" value="plane" checked><span>Pièce plane</span></label>
+          <label><input type="radio" name="type" value="profil"><span>Profil plié</span></label>
+          <label><input type="radio" name="type" value="boite"><span>Boîte pliée</span></label>
+        </div>
+      </fieldset>
+
+      <fieldset class="etape">
+        <legend><span class="num">2</span> Forme et cotes <small>en mm</small></legend>
+        <div id="bloc-plane">
+          <div class="champ"><label for="forme">Forme</label><select id="forme"></select></div>
+          <p id="desc-forme" class="aide"></p>
+          <div id="cotes" class="grille-champs"></div>
+        </div>
+        <div id="bloc-profil" hidden>
+          <div class="champ"><label for="modele-profil">Modèle</label>
+            <select id="modele-profil">
+              <option value="L">Cornière (L)</option><option value="U">U</option><option value="Z">Z</option><option value="omega">Oméga (chapeau)</option><option value="libre">Libre</option>
+            </select>
+          </div>
+          <p class="aide">Cotes extérieures. Angle de la pièce entre deux faces : 90 = équerre, 135 = ouvert.</p>
+          <div id="faces" class="faces"></div>
+          <div class="actions-faces"><button type="button" id="ajout-face" class="bouton-secondaire">Ajouter une face</button><button type="button" id="retrait-face" class="bouton-secondaire">Retirer la dernière face</button></div>
+          <div class="champ"><label for="longueur-pli">Longueur du profil</label><input id="longueur-pli" type="number" min="10" step="1" value="500" inputmode="decimal"></div>
+        </div>
+        <div id="bloc-boite" hidden>
+          <p class="aide">Fond et hauteur des bords, en cotes extérieures. Mettez 0 pour un côté sans bord. Coins ouverts (non soudés).</p>
+          <div class="grille-champs">
+            <div class="champ"><label for="fond-l">Longueur du fond</label><input id="fond-l" type="number" min="10" value="300" inputmode="decimal"></div>
+            <div class="champ"><label for="fond-w">Largeur du fond</label><input id="fond-w" type="number" min="10" value="200" inputmode="decimal"></div>
+            <div class="champ"><label for="bord-a">Bord A (le long de la longueur)</label><input id="bord-a" type="number" min="0" value="40" inputmode="decimal"></div>
+            <div class="champ"><label for="bord-c">Bord C (opposé à A)</label><input id="bord-c" type="number" min="0" value="40" inputmode="decimal"></div>
+            <div class="champ"><label for="bord-b">Bord B (le long de la largeur)</label><input id="bord-b" type="number" min="0" value="40" inputmode="decimal"></div>
+            <div class="champ"><label for="bord-d">Bord D (opposé à B)</label><input id="bord-d" type="number" min="0" value="40" inputmode="decimal"></div>
+            <div class="champ"><label for="angle-bords">Angle des bords (°)</label><input id="angle-bords" type="number" min="60" max="170" value="90" inputmode="decimal"></div>
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset class="etape">
+        <legend><span class="num">3</span> Matière et quantité</legend>
+        <div class="grille-champs">
+          <div class="champ"><label for="matiere">Matière</label><select id="matiere"></select></div>
+          <div class="champ"><label for="epaisseur">Épaisseur</label><select id="epaisseur"></select></div>
+          <div class="champ"><label for="quantite">Quantité</label><input id="quantite" type="number" min="1" step="1" value="10" inputmode="numeric"></div>
+        </div>
+      </fieldset>
+    </section>
+
+    <aside class="resume" aria-live="polite">
+      <div class="carte-prix">
+        <p id="etat" class="etat">Choisissez votre pièce.</p>
+        <p class="prix"><span id="prix-total">–</span> <small>€ HT</small></p>
+        <p id="prix-unitaire" class="unitaire"></p>
+        <svg id="apercu" class="apercu" role="img" aria-label="Aperçu de la pièce à plat" viewBox="0 0 100 60"></svg>
+        <dl id="details" class="details"></dl>
+        <ul id="messages" class="messages"></ul>
+        <button id="ajouter" class="bouton" type="button" disabled>Ajouter au panier</button>
+        <p class="aide">Prix hors taxes et hors frais de port. Fichier DXF, autre forme ou cotes normalisées : <a id="lien-devis" href="#form-demande">demandez un devis</a>.</p>
+      </div>
+    </aside>
+
+    <section id="panier" class="panier" aria-labelledby="titre-panier">
+      <h2 id="titre-panier">Panier</h2>
+      <p id="panier-vide" class="aide">Votre panier est vide.</p>
+      <table id="table-panier" hidden>
+        <thead><tr><th>Pièce</th><th>Matière</th><th class="nombre">Qté</th><th class="nombre">Prix HT</th><th><span class="lecteur">Retirer</span></th></tr></thead>
+        <tbody></tbody>
+        <tfoot>
+          <tr><th colspan="3">Total des pièces</th><td class="nombre" id="total-pieces"></td><td></td></tr>
+          <tr id="ligne-minimum" hidden><th colspan="3">Complément au minimum de commande</th><td class="nombre" id="complement"></td><td></td></tr>
+          <tr class="total"><th colspan="3">Total HT hors port</th><td class="nombre" id="total-panier"></td><td></td></tr>
+        </tfoot>
+      </table>
+
+      <form id="form-demande" class="form-demande" hidden novalidate>
+        <h3>Vos coordonnées</h3>
+        <div class="grille-champs">
+          <div class="champ"><label for="c-nom">Nom *</label><input id="c-nom" name="nom" required autocomplete="name"></div>
+          <div class="champ"><label for="c-societe">Société</label><input id="c-societe" name="societe" autocomplete="organization"></div>
+          <div class="champ"><label for="c-email">E-mail *</label><input id="c-email" name="email" type="email" required autocomplete="email"></div>
+          <div class="champ"><label for="c-tel">Téléphone</label><input id="c-tel" name="telephone" type="tel" autocomplete="tel"></div>
+          <div class="champ large"><label for="c-adresse">Adresse de livraison</label><textarea id="c-adresse" name="adresse" rows="2" autocomplete="street-address"></textarea></div>
+          <div class="champ large"><label for="c-message">Message</label><textarea id="c-message" name="message" rows="2"></textarea></div>
+        </div>
+        <p class="aide">Nous vérifions chaque demande et vous confirmons la commande, les frais de port et le délai par e-mail.</p>
+        <button class="bouton" type="submit">Envoyer ma demande</button>
+        <p id="retour-demande" class="retour" role="status"></p>
+      </form>
+    </section>
+  </main>
+  <footer class="pied">DÉCOUPE H2O · découpe laser, jet d'eau, pliage</footer>
+</body>
+</html>

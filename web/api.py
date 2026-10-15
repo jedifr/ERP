@@ -1,4 +1,4 @@
-"""API du configurateur web : lecture du catalogue et prix instantané, rien d'autre.
+"""API du configurateur web : catalogue, prix instantané et envoi du panier (demande à traiter par un commercial).
 
 Elle est faite pour être appelée par le site client (hébergé à part) à travers un tunnel sortant, jamais en ouvrant le NAS :
 chaque appel porte l'en-tête « X-Cle-Web » égal à la variable d'environnement ERP_WEB_CLE_API. Sans cette variable,
@@ -13,6 +13,7 @@ from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
+from .services.demandes import enregistrer_demande
 from .services.prix import ErreurPrixWeb, catalogue, chiffrer
 
 
@@ -45,4 +46,16 @@ class PrixWebVue(_VueWeb):
             resultat = chiffrer(d.get("matiere"), d.get("epaisseur"), d.get("quantite"), forme=d.get("forme"), cotes=d.get("cotes"), pliage=d.get("pliage"))
         except ErreurPrixWeb as exc:
             return Response({"erreur": str(exc)}, status=400)
-        return Response(resultat.en_dict())
+        return Response(resultat.en_dict_public())
+
+
+class DemandeWebVue(_VueWeb):
+    """POST {client: {...}, lignes: [...]} → {numero, total_ht, a_valider}. Prix recalculés par l'ERP."""
+
+    def post(self, request):
+        try:
+            demande = enregistrer_demande(request.data)
+        except ErreurPrixWeb as exc:
+            return Response({"erreur": str(exc)}, status=400)
+        return Response({"numero": demande.numero, "total_pieces_ht": float(demande.total_pieces_ht), "total_ht": float(demande.total_ht),
+                         "a_valider": demande.a_valider}, status=201)

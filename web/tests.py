@@ -7,7 +7,7 @@ from django.test import TestCase, override_settings
 from decoupe.models import FormatTole, ParametreCoupe, Plieuse, VitesseCoupe
 from technique.models import Article, FamilleMatiere, Matiere, PosteTravail, TarifPoste
 
-from .models import ReglageWeb
+from .models import DemandeWeb, ReglageWeb
 from .services.prix import ErreurPrixWeb, _contour_flan_boite, catalogue, chiffrer
 
 
@@ -78,7 +78,8 @@ class PrixWebTests(ConfigurateurBase):
         self.assertIn("trop grande", r.refus[0])
         Plieuse.objects.update(poste=None)
         r = chiffrer("S235-W", 2, 1, pliage={"forme": "profil", "faces": [50, 100], "angles": [90], "longueur": 60})
-        self.assertIn("poste de travail", r.refus[0])
+        self.assertIn("demandez un devis", r.refus[0])
+        self.assertIn("poste de travail", r.notes[-1])
 
     def test_demandes_mal_formees(self):
         for args, kw in (
@@ -120,6 +121,8 @@ class ApiWebTests(ConfigurateurBase):
         self.assertEqual(page.status_code, 200, page.content)
         self.assertEqual(page.json()["statut"], "ok")
         self.assertIsInstance(page.json()["prix_total_ht"], float)
+        for interne in ("cout_revient", "cout_matiere", "taux_marge_pct", "notes", "format_tole"):
+            self.assertNotIn(interne, page.json())  # le client ne voit ni coûts ni marge
         page = self.client.post("/api/web/v1/prix/", {"matiere": "Or", "epaisseur": 2, "quantite": 1, "forme": "disque"},
                                 content_type="application/json", HTTP_X_CLE_WEB="secret-web")
         self.assertEqual(page.status_code, 400)
@@ -141,3 +144,49 @@ class ApercuConfigurateurTests(ConfigurateurBase):
         self.assertContains(page, "Disque Ø80")
         self.assertContains(self.client.get("/admin/parametrage/"), "Essai du configurateur")
         self.assertEqual(self.client.get("/admin/web/reglageweb/").status_code, 200)
+
+
+class DemandeWebTests(ConfigurateurBase):
+    CLIENT = {"nom": "Jeanne Martin", "societe": "Atelier Martin", "email": "jeanne@example.com", "adresse": "1 rue des Forges"}
+    RECT = {"matiere": "S235-W", "epaisseur": 2, "quantite": 10, "forme": "rectangle", "cotes": {"largeur": 100, "hauteur": 50}, "prix_total_ht": 0.01}
+
+    @override_settings(WEB_CLE_API="secret-web")
+    def test_panier_recu_avec_prix_recalcules(self):
+        u = {"matiere": "S235-W", "epaisseur": 2, "quantite": 1, "pliage": {"forme": "profil", "faces": [100, 40, 100], "angles": [90, 90], "longueur": 300}}
+        page = self.client.post("/api/web/v1/demandes/", {"client": self.CLIENT, "lignes": [self.RECT, u]}, content_type="application/json", HTTP_X_CLE_WEB="secret-web")
+        self.assertEqual(page.status_code, 201, page.content)
+        demande = DemandeWeb.objects.get(numero=page.json()["numero"])
+        self.assertRegex(demande.numero, r"^WEB\d{4}-0001$")
+        attendu = chiffrer("S235-W", 2, 10, forme="rectangle", cotes={"largeur": 100, "hauteur": 50}).prix_total_ht
+        self.assertEqual(demande.lignes[0]["prix_total_ht"], float(attendu))  # le prix du navigateur est ignoré
+        self.assertNotIn("prix_total_ht", demande.lignes[0]["demande"])
+        self.assertTrue(demande.a_valider)  # le U a des ailes plus longues que sa largeur
+        self.assertEqual(demande.total_ht, max(demande.total_pieces_ht, Decimal("60")))
+        second = self.client.post("/api/web/v1/demandes/", {"client": self.CLIENT, "lignes": [self.RECT]}, content_type="application/json", HTTP_X_CLE_WEB="secret-web")
+        self.assertTrue(second.json()["numero"].endswith("-0002"))
+        self.assertEqual(second.json()["total_ht"], 60.0)  # minimum de commande
+
+    @override_settings(WEB_CLE_API="secret-web")
+    def test_demandes_refusees(self):
+        refus = {"matiere": "S235-W", "epaisseur": 2, "quantite": 1, "pliage": {"forme": "profil", "faces": [5, 100], "angles": [90], "longueur": 100}}
+        for corps, message in (
+            ({"client": {"nom": "X"}, "lignes": [self.RECT]}, "e-mail"),
+            ({"client": {**self.CLIENT, "email": "pas-un-mail"}, "lignes": [self.RECT]}, "pas valide"),
+            ({"client": self.CLIENT, "lignes": []}, "vide"),
+            ({"client": self.CLIENT, "lignes": [self.RECT] * 51}, "50"),
+            ({"client": self.CLIENT, "lignes": [refus]}, "Pièce 1"),
+        ):
+            page = self.client.post("/api/web/v1/demandes/", corps, content_type="application/json", HTTP_X_CLE_WEB="secret-web")
+            self.assertEqual(page.status_code, 400)
+            self.assertIn(message, page.json()["erreur"])
+        self.assertFalse(DemandeWeb.objects.exists())
+
+    def test_admin(self):
+        self.client.force_login(get_user_model().objects.create_superuser("dw", "dw@example.com", "pass-dw-1234"))
+        from .services.demandes import enregistrer_demande
+
+        demande = enregistrer_demande({"client": self.CLIENT, "lignes": [self.RECT]})
+        self.assertContains(self.client.get("/admin/web/demandeweb/"), demande.numero)
+        page = self.client.get(f"/admin/web/demandeweb/{demande.pk}/change/")
+        self.assertContains(page, "Rectangle")
+        self.assertContains(page, "1 rue des Forges")

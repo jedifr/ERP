@@ -107,6 +107,14 @@ AIDES = {
         "etapes": ["Ajustez les temps de réglage (pli court, pli long) et le temps par pli (unitaire et en série)."],
         "bon_a_savoir": ["Un réglage est compté par réglage distinct : deux plis de même angle entre des faces identiques n'en font qu'un."],
     },
+    "web.demandeweb": {
+        "resume": "Paniers envoyés depuis le site client : coordonnées, pièces et prix recalculés par l'ERP à la réception.",
+        "etapes": [
+            "Ouvrez la demande : chaque pièce a sa matière, sa quantité, son prix et ce qu'un technicien doit valider.",
+            "Faites le devis correspondant, puis passez la demande en « Traitée » (ou « Abandonnée »), avec une note interne si besoin.",
+        ],
+        "bon_a_savoir": ["Le total applique le minimum de commande, hors port. Les prix du navigateur ne sont jamais repris : l'ERP les recalcule."],
+    },
     "web.reglageweb": {
         "resume": "Grille de prix du configurateur web : marge ajoutée au coût de revient, minimum de commande, quantité maximale.",
         "etapes": [
