@@ -92,6 +92,7 @@ INSTALLED_APPS = [
     "tresorerie",
     "soustraitance",
     "pilotage",
+    "web",
 ]
 
 MIDDLEWARE = [
@@ -234,7 +235,12 @@ REST_FRAMEWORK = {
     # suppression du modèle (voir comptes.permissions). Un nouveau ViewSet est donc protégé
     # sans rien ajouter ; une vue sans modèle (APIView) doit déclarer sa propre permission.
     "DEFAULT_PERMISSION_CLASSES": ["comptes.permissions.ModelPermissionsAvecLecture"],
+    # API du configurateur web (web/api.py) : débit par adresse IP.
+    "DEFAULT_THROTTLE_RATES": {"web": os.environ.get("ERP_WEB_DEBIT", "60/min")},
 }
+
+# Clé partagée avec le site client (en-tête « X-Cle-Web ») ; vide = API du configurateur fermée.
+WEB_CLE_API = os.environ.get("ERP_WEB_CLE_API", "")
 
 
 # Synchronisation avec l'outil de planification d'atelier (voir chiffrage/planning_sync.py)

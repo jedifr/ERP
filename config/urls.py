@@ -26,6 +26,7 @@ from comptes.parametrage import parametrage_view
 from comptes.views import logo_connexion, media_protege
 from technique.nomenclature_editeur import nomenclature_editeur_view
 from technique.gamme_editeur import gamme_editeur_options_view, gamme_editeur_view
+from web.admin import apercu_configurateur_view
 
 urlpatterns = [
     path("admin/mes-colonnes/", admin.site.admin_view(mes_colonnes), name="mes_colonnes"),
@@ -36,6 +37,7 @@ urlpatterns = [
     path("admin/gamme-editeur-options/", admin.site.admin_view(gamme_editeur_options_view), name="gamme_editeur_options"),
     path("admin/gamme-editeur/<str:reference>/", admin.site.admin_view(gamme_editeur_view), name="gamme_editeur"),
     path("admin/parametrage/", admin.site.admin_view(parametrage_view), name="parametrage"),
+    path("admin/configurateur-web/", admin.site.admin_view(apercu_configurateur_view), name="apercu_configurateur"),
     path("connexion/logo/", logo_connexion, name="logo_connexion"),
     path("admin/", admin.site.urls),
     path("api/v1/", include("technique.urls")),
@@ -48,6 +50,7 @@ urlpatterns = [
     path("api/v1/", include("achats.urls")),
     path("api/v1/", include("soustraitance.urls")),
     path("api/v1/", include("pilotage.urls")),
+    path("api/web/v1/", include("web.urls")),
     path("api-auth/", include("rest_framework.urls")),
 ]
 
