@@ -15,8 +15,10 @@ npm start              # http://localhost:3000
 npm test
 ```
 
+Hébergement cPanel (o2switch, « Setup Node.js App ») : fichier de démarrage `app.cjs`, variables d'environnement dans l'écran de l'application. Pas à pas complet, passerelle du NAS comprise : `docs/DEPLOIEMENT_SITE_CLIENT.md`.
+
 Ou avec Docker : `docker build -t site-client . && docker run --env-file .env -p 3000:3000 site-client`.
 
 ## Hébergement
 
-Le site s'héberge hors du NAS (VPS, PaaS) derrière HTTPS. Il joint l'ERP par un tunnel sortant depuis l'atelier (Cloudflare Tunnel, Tailscale…) : aucun port n'est ouvert vers le NAS, et seule l'API web (clé, débit limité) est utilisable. Côté ERP : définir `ERP_WEB_CLE_API`, cocher « vendu en ligne » sur les tôles proposées et renseigner les postes de travail (paramètres de coupe, plieuses).
+Le site s'héberge hors du NAS (o2switch, sous-domaine de decoupe.eu). Il joint l'ERP par la passerelle Tailscale Funnel du NAS (`docker-compose.passerelle-web.yml`) : connexion sortante, aucun port ouvert sur la box, seul `/api/web/v1/` est publié (clé, débit limité). Côté ERP : définir `ERP_WEB_CLE_API`, cocher « vendu en ligne » sur les tôles proposées et renseigner les postes de travail (paramètres de coupe, plieuses).

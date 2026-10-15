@@ -46,8 +46,9 @@ export function creerServeur({ erpUrl, cle, debitParMinute = 60, confianceProxy 
       const reponse = await fetchImpl(new URL(`/api/web/v1/${chemin}`, erpUrl), {
         ...options, headers: { "Content-Type": "application/json", "X-Cle-Web": cle, ...(options.headers || {}) }, signal: AbortSignal.timeout(30_000),
       });
-      const corps = await reponse.json().catch(() => ({ erreur: "Réponse illisible de l'ERP." }));
-      if (reponse.status === 403 || reponse.status >= 500) return { status: 503, corps: { erreur: "Configurateur momentanément indisponible." } };
+      const corps = await reponse.json().catch(() => null);
+      // Clé refusée, ERP en panne ou réponse non JSON (hôte refusé par Django, page d'erreur d'un proxy) : indisponible.
+      if (corps === null || reponse.status === 403 || reponse.status >= 500) return { status: 503, corps: { erreur: "Configurateur momentanément indisponible." } };
       return { status: reponse.status, corps };
     } catch {
       return { status: 503, corps: { erreur: "Configurateur momentanément indisponible." } };

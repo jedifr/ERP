@@ -1,0 +1,23 @@
+# Passerelle du site client : publie sur Internet UNIQUEMENT l'API du configurateur (/api/web/v1/), par Tailscale Funnel.
+# Connexion sortante depuis le NAS : aucun port à ouvrir sur la box, l'admin et le reste de l'ERP restent invisibles.
+# Lancement : docker compose -f docker-compose.yml -f docker-compose.passerelle-web.yml up -d
+# Voir docs/DEPLOIEMENT_SITE_CLIENT.md.
+services:
+  passerelle-web:
+    image: tailscale/tailscale:v1.76.6
+    restart: unless-stopped
+    hostname: erp-web
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:?Clé d'authentification Tailscale (TS_AUTHKEY) manquante dans .env}
+      TS_HOSTNAME: erp-web
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_SERVE_CONFIG: /config/serve.json
+      TS_USERSPACE: "true"
+    volumes:
+      - erp_tailscale_etat:/var/lib/tailscale
+      - ./passerelle-web/serve.json:/config/serve.json:ro
+    depends_on:
+      - web
+
+volumes:
+  erp_tailscale_etat:

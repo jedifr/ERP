@@ -75,3 +75,12 @@ test("sert la page et ses fichiers, jamais en dehors du dossier public", async (
   assert.equal((await fetch(`${base}/api/config`).then((r) => r.json())).contact, "devis@example.com");
   await fermer();
 });
+
+test("réponse non JSON de l'ERP (hôte refusé) : indisponible", async () => {
+  const fetchImpl = async () => new Response("<h1>Bad Request (400)</h1>", { status: 400, headers: { "Content-Type": "text/html" } });
+  const serveur = creerServeur({ erpUrl: "http://erp.test", cle: "cle", fetchImpl });
+  await new Promise((r) => serveur.listen(0, r));
+  const r = await fetch(`http://127.0.0.1:${serveur.address().port}/api/catalogue`);
+  assert.equal(r.status, 503);
+  await new Promise((r) => serveur.close(r));
+});

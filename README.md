@@ -3337,6 +3337,6 @@ Chaque appel porte l'en-tête `X-Cle-Web` égal à `ERP_WEB_CLE_API` (`.env`) ; 
 
 `POST demandes/` reçoit le panier du site (coordonnées + pièces) : l'ERP recalcule chaque prix (ceux du navigateur sont ignorés), applique le minimum de commande et crée une **demande web** (numéro WEBaamm-0001, Paramétrage → Vente en ligne → Demandes web) que le commercial transforme en devis. L'API ne renvoie au site ni coût de revient, ni marge, ni notes internes.
 
-Le site client lui-même est dans `site-client/` (Node 20+, sans dépendance, voir son README).
+Le site client lui-même est dans `site-client/` (Node 20+, sans dépendance, voir son README). Mise en ligne (o2switch + passerelle Tailscale Funnel qui ne publie que `/api/web/v1/`) : `docs/DEPLOIEMENT_SITE_CLIENT.md`.
 
 **Paramétrage → Vente en ligne** : marge web (20 %), minimum de commande (60 € HT hors port, appliqué au panier) et quantité max par pièce (500). Les tôles proposées se cochent « vendu en ligne » sur leur fiche article. **Essai du configurateur** montre, dans l'ERP, le prix et l'aperçu qu'aurait le client.
