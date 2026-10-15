@@ -55,6 +55,16 @@ def gamme_active(article, date_reference):
     )
 
 
+def _facteur_serie_pliage(quantite):
+    """Étape de pliage : le temps par pli passe au temps de série (15 s au lieu de 30) à partir du seuil de série."""
+    from decoupe.models import ReglagePliage
+
+    reglage = ReglagePliage.charger()
+    if quantite >= reglage.seuil_serie and reglage.temps_pli_s:
+        return reglage.temps_pli_serie_s / reglage.temps_pli_s
+    return 1
+
+
 def cout_etape_gamme(etape, quantite, date_reference):
     if etape.poste.mode_calcul == PosteTravail.ModeCalcul.HORAIRE:
         tarif = tarif_poste_valide(etape.poste, date_reference)
@@ -63,7 +73,10 @@ def cout_etape_gamme(etape, quantite, date_reference):
         # multiplier est indispensable, sous peine de gonfler le coût x60.
         # Étape de découpe : pas de réglage « par lot » ; la mise en place se compte par tôle (chiffrage/reglage.py).
         reglage = 0 if getattr(etape, "origine", "") == "decoupe" else (etape.temps_fixe or 0)
-        temps_minutes = D(reglage + (etape.temps_variable or 0) * quantite)
+        par_piece = etape.temps_variable or 0
+        if getattr(etape, "origine", "") == "pliage":
+            par_piece *= _facteur_serie_pliage(quantite)
+        temps_minutes = D(reglage + par_piece * quantite)
         return arrondir_prix(temps_minutes / 60 * D(tarif.cout_horaire))
     return arrondir_prix(D0(etape.cout_forfaitaire) * D(quantite))
 

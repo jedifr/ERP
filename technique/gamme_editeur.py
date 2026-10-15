@@ -175,7 +175,7 @@ def ajouter_gamme_type(article, gamme_type, jour=None):
 
 @transaction.atomic
 def reprendre_gamme(article, source, jour=None):
-    """Ajoute à la gamme de `article` les étapes saisies à la main d'un autre article (hors découpe, propre à chaque pièce)."""
+    """Ajoute à la gamme de `article` les étapes saisies à la main d'un autre article (hors découpe et pliage, propres à chaque pièce)."""
     jour = jour or datetime.date.today()
     if article.pk == source.pk:
         raise ErreurGamme("Choisissez une autre pièce.")
@@ -183,7 +183,7 @@ def reprendre_gamme(article, source, jour=None):
     ordre = max([e.ordre for e in etapes_actives(article, jour)] or [0])
     copiees = 0
     for e in etapes_actives(source, jour):
-        if e.origine == "decoupe":
+        if e.origine in ("decoupe", "pliage"):
             continue
         ordre += 1
         copiees += 1

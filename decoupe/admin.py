@@ -17,6 +17,11 @@ from technique.models import FamilleMatiere, Matiere
 
 from .admin_views import analyser_fichier_view, previsualiser_imbrication_view, previsualiser_sciage_view
 from .models import (
+    PliageArticle,
+    Plieuse,
+    Poincon,
+    ReglagePliage,
+    Ve,
     ReglageImbrication,
     FormatTole,
     ImbricationJob,
@@ -33,7 +38,8 @@ from .models import (
     VitesseCoupe,
 )
 from .services.apercu_svg import generer_svg_feuille, generer_svg_piece
-from .services.gamme import alimenter_gamme
+from .services.gamme import alimenter_gamme, alimenter_gamme_pliage
+from .services.pliage import ErreurPliage
 from .services.matiere import ErreurMatiere, cout_matiere_imbrication
 from .services.lua_materiaux import NOMS_FRANCAIS, ErreurLua, importer_materiaux, lire_materials_lua, resume
 from .services.parametres import ErreurParametre, calculer_vitesses, dupliquer_vers_epaisseurs, format_compatible
@@ -1021,3 +1027,133 @@ class OptimisationSciageAdmin(ModelAdmin):
             "sources": [("devis", "Devis"), ("commande", "Commande"), ("of", "Ordre de fabrication")],
         }
         return TemplateResponse(request, "admin/decoupe/sciage_importer.html", contexte)
+
+
+class VeInline(TabularInline):
+    model = Ve
+    extra = 0
+    fields = ["ouverture_mm", "angle_deg", "rayon_epaule_mm", "force_max_angle_kn_m", "force_max_90_kn_m", "actif", "vendable_en_ligne"]
+
+
+class PoinconInline(TabularInline):
+    model = Poincon
+    extra = 0
+    fields = ["nom", "angle_nez_deg", "rayon_mm", "hauteur_mm", "force_max_kn_m", "actif"]
+
+
+@admin.register(Plieuse)
+class PlieuseAdmin(ModelAdmin):
+    """Presses plieuses, leurs vés et leurs poinçons."""
+
+    list_display = ["nom", "longueur_max_mm", "force_max_t", "poste", "actif"]
+    fields = ["nom", "poste", "longueur_max_mm", "force_max_t", "actif"]
+    inlines = [VeInline, PoinconInline]
+
+
+@admin.register(ReglagePliage)
+class ReglagePliageAdmin(ModelAdmin):
+    """Force utilisable des plieuses, temps de réglage et de pli, marge de retour élastique."""
+
+    list_display = ["__str__", "marge_force_pct", "temps_pli_s", "temps_pli_serie_s", "seuil_serie"]
+
+    def get_queryset(self, request):
+        ReglagePliage.charger()
+        return super().get_queryset(request)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+def _liste_nombres(texte, nom):
+    try:
+        return [float(x.replace(",", ".")) for x in texte.replace(";", " ").split()]
+    except ValueError:
+        raise forms.ValidationError(f"{nom} : des nombres séparés par des espaces ou des points-virgules (ex. 50 ; 100).")
+
+
+class PliageArticleForm(forms.ModelForm):
+    faces = forms.CharField(label="Cotes extérieures des faces (mm)", help_text="Séparées par des points-virgules : 50 ; 100 pour une cornière, 20 ; 60 ; 20 pour un U.")
+    angles = forms.CharField(label="Angles des plis (°)", help_text="Un par pli : 90 ; 90 pour un U, 90 ; -90 pour un Z (le signe donne le sens du pli). 90 = équerre.")
+
+    class Meta:
+        model = PliageArticle
+        fields = ["article", "matiere", "epaisseur_mm", "longueur_pli_mm"]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance.pk:
+            self.fields["faces"].initial = " ; ".join(f"{f:g}" for f in self.instance.faces_mm)
+            self.fields["angles"].initial = " ; ".join(f"{a:g}" for a in self.instance.angles_deg)
+
+    def clean_faces(self):
+        return _liste_nombres(self.cleaned_data["faces"], "Faces")
+
+    def clean_angles(self):
+        return _liste_nombres(self.cleaned_data["angles"], "Angles")
+
+    def clean(self):
+        donnees = super().clean()
+        self.instance.faces_mm = donnees.get("faces") or []
+        self.instance.angles_deg = donnees.get("angles") or []
+        return donnees
+
+
+@admin.register(PliageArticle)
+class PliageArticleAdmin(ModelAdmin):
+    """Profil plié d'un article fabriqué : enregistrer calcule le pliage et met à jour l'étape « pliage » de sa gamme."""
+
+    form = PliageArticleForm
+    list_display = ["article", "matiere", "epaisseur_mm", "longueur_pli_mm", "profil", "statut", "developpe"]
+    search_fields = ["article__reference", "article__libelle"]
+    autocomplete_fields = ["article"]
+    readonly_fields = ["resultat_detaille", "date_calcul"]
+    fieldsets = [
+        (None, {"fields": ["article", "matiere", "epaisseur_mm", "longueur_pli_mm", "faces", "angles"]}),
+        ("Résultat", {"fields": ["resultat_detaille", "date_calcul"]}),
+    ]
+
+    @admin.display(description="Profil")
+    def profil(self, obj):
+        return " / ".join(f"{f:g}" for f in obj.faces_mm) + " — " + " / ".join(f"{a:g}°" for a in obj.angles_deg)
+
+    @admin.display(description="Statut")
+    def statut(self, obj):
+        return {"ok": "Faisable", "validation": "À valider", "refus": "Refusé"}.get((obj.resultat or {}).get("statut"), "—")
+
+    @admin.display(description="Développé (mm)")
+    def developpe(self, obj):
+        return (obj.resultat or {}).get("developpe_mm") or "—"
+
+    @admin.display(description="Calcul")
+    def resultat_detaille(self, obj):
+        r = obj.resultat if obj else None
+        if not r:
+            return "Enregistrez pour calculer."
+        lignes = []
+        if r.get("ve"):
+            lignes += [
+                ("Plieuse", r["plieuse"]), ("Vé / poinçon", f"{r['ve']} / {r['poincon']}"),
+                ("Force", f"{r['force_kn_m']:g} kN/m, soit {r['force_t']:g} t sur la longueur de pli"),
+                ("Bord mini / rayon intérieur", f"{r['bord_mini']:g} mm / {r['rayon_interieur']:g} mm"),
+                ("Angle mini", f"{r['angle_mini']:g}°"), ("Développé", f"{r['developpe_mm']:g} mm"),
+                ("Temps", f"{r['nb_reglages']} réglage(s) : {r['temps_reglage_min']:g} min ; {r['nb_plis']} pli(s) : {r['temps_pli_min']:g} min par pièce"),
+            ]
+        lignes += [("Refusé", m) for m in r.get("refus", [])] + [("À valider", m) for m in r.get("validations", [])] + [("Note", m) for m in r.get("notes", [])]
+        return format_html("<table>{}</table>", mark_safe("".join(
+            format_html("<tr><th style='text-align:left;padding-right:1em'>{}</th><td>{}</td></tr>", t, v) for t, v in lignes
+        )))
+
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        try:
+            etape, resultat = alimenter_gamme_pliage(obj)
+        except ErreurPliage as exc:
+            messages.error(request, f"Pliage non ajouté à la gamme : {exc}")
+            return
+        if resultat.statut == "validation":
+            messages.warning(request, "Pliage chiffré, à valider par un technicien : " + " ".join(resultat.validations))
+        else:
+            messages.success(request, f"Pliage chiffré et ajouté à la gamme ({etape.poste}).")
