@@ -17,13 +17,17 @@ import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const RACINE = join(fileURLToPath(new URL(".", import.meta.url)), "public");
-const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".ico": "image/x-icon", ".png": "image/png" };
+const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".ico": "image/x-icon", ".png": "image/png", ".wasm": "application/wasm", ".txt": "text/plain; charset=utf-8" };
 // Taille maximale des corps reçus : un DXF de 1,5 Mo fait 2 Mo en base64 ; une demande porte jusqu'à 50 pièces libres.
 const TAILLES_MAX = { "/api/prix": 256 * 1024, "/api/dxf": 2200 * 1024, "/api/demandes": 1024 * 1024 };
 const RELAIS = { "/api/prix": "prix/", "/api/dxf": "dxf/", "/api/demandes": "demandes/" };
 // Lectures mises en cache 5 min : elles ne changent qu'avec le paramétrage ou une nouvelle version de l'ERP.
 const LECTURES = { "/api/catalogue": "catalogue/", "/api/bibliotheque": "bibliotheque/" };
 const CACHE_TTL_MS = 5 * 60 * 1000;
+// Le worker qui lit les STEP (OpenCascade en WebAssembly) a sa propre politique : occt-import-js compile du WebAssembly et
+// crée des fonctions à la volée (embind). La page, elle, garde une politique stricte.
+const WORKER_OCCT = "vendor/occt-worker.js";
+const CSP_WORKER_OCCT = "default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'";
 
 export function creerServeur({ erpUrl, cle, debitParMinute = 60, confianceProxy = false, contact = "", fetchImpl = fetch } = {}) {
   const compteurs = new Map();
@@ -88,7 +92,7 @@ export function creerServeur({ erpUrl, cle, debitParMinute = 60, confianceProxy 
         "Content-Type": TYPES[extname(relatif)] || "application/octet-stream",
         "Cache-Control": relatif === "index.html" ? "no-cache" : "public, max-age=300",
         "X-Content-Type-Options": "nosniff", "Referrer-Policy": "same-origin",
-        "Content-Security-Policy": "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'",
+        "Content-Security-Policy": relatif === WORKER_OCCT ? CSP_WORKER_OCCT : "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'",
       });
       res.end(contenu);
     } catch {
