@@ -4,6 +4,8 @@ Configurateur de pièces en ligne : le client choisit une pièce plane (biblioth
 
 Pendant la saisie, un **schéma coté** dessine la pièce à l'échelle (`public/schemas.js`) : chaque cote porte une lettre (A, B, C…), la même que devant le champ à remplir. Forme plane : contour, perçages, diamètres, entraxes, angle du premier trou. Profil : la section avec ses faces et ses angles. Boîte : le flan vu de dessus, bords rabattus à plat. Ce schéma est calculé dans le navigateur, sans appel à l'ERP ; si la bibliothèque de formes gagne une forme, ajoutez son dessin dans `schemas.js` et rafraîchissez `test/catalogue-formes.json` (copie du catalogue de l'API).
 
+L'onglet **Vue 3D** montre la pièce en volume (on la fait tourner à la souris ou au doigt) : la pièce plane est le contour chiffré par l'ERP extrudé à l'épaisseur, le profil sa section extrudée à la longueur, la boîte son fond et ses bords relevés à l'angle saisi (`public/vue3d.js`). Elle utilise three.js 0.160 (licence MIT), copié dans `public/vendor/` pour rester sans dépendance ni CDN, et ne se télécharge qu'au premier clic sur l'onglet.
+
 L'ERP reste le seul moteur de prix : ce serveur ne calcule rien, il relaie trois appels vers l'API web de l'ERP (`/api/web/v1/catalogue/`, `prix/`, `demandes/`) en y ajoutant la clé, qui ne part jamais dans le navigateur. Il limite les calculs par visiteur et met le catalogue en cache 5 minutes.
 
 ## Lancer

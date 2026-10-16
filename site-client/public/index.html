@@ -64,7 +64,12 @@
         </div>
         </div>
         <figure class="cadre-schema">
+          <div class="bascule-vue" role="group" aria-label="Affichage de la pièce">
+            <button type="button" id="voir-2d" class="actif" aria-pressed="true">Schéma coté</button>
+            <button type="button" id="voir-3d" aria-pressed="false">Vue 3D</button>
+          </div>
           <svg id="schema" class="schema" role="img" aria-label="Schéma coté de la pièce" viewBox="0 0 100 60"></svg>
+          <div id="vue-3d" class="vue-3d" hidden></div>
           <figcaption id="note-schema" class="aide">Les lettres du schéma repèrent les cotes à saisir.</figcaption>
         </figure>
         </div>

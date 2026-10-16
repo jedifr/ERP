@@ -18,6 +18,8 @@ let profil = structuredClone(MODELES.L);
 let dernier = null; // { demande, resultat } du dernier prix affiché
 let minuterie = null;
 let numeroAppel = 0;
+let vue3d = null; // chargée au premier clic sur « Vue 3D »
+let mode3d = false;
 
 // ------------------------------------------------------------------ panier (navigateur seulement ; l'ERP recalcule tout)
 function lirePanier() {
@@ -141,11 +143,54 @@ function dessinerSchema() {
   else if (d.pliage.forme === "profil") dessin = Schemas.profil(d.pliage.faces, d.pliage.angles, d.pliage.longueur);
   else dessin = Schemas.boite(d.pliage.longueur, d.pliage.largeur, d.pliage.bords);
   const svg = $("schema");
-  $("note-schema").textContent = (dessin && dessin.note) || "Les lettres du schéma repèrent les cotes à saisir.";
+  $("note-schema").textContent = mode3d ? "Faites glisser pour tourner la pièce, molette ou pincement pour zoomer. Vue indicative."
+    : (dessin && dessin.note) || "Les lettres du schéma repèrent les cotes à saisir.";
   if (!dessin) return svg.replaceChildren();
   svg.setAttribute("viewBox", dessin.viewBox);
   svg.innerHTML = dessin.contenu;
+  majVue3d();
 }
+
+// ------------------------------------------------------------------ vue 3D
+function modele3d() {
+  const d = demandeCourante();
+  const m = catalogue.matieres.find((x) => x.matiere === d.matiere);
+  const commun = { epaisseur: d.epaisseur, famille: m ? m.famille : "" };
+  if (!d.pliage) {
+    // contour de référence : celui que l'ERP vient de chiffrer
+    const contour = dernier && !dernier.demande.pliage && dernier.demande.forme === d.forme ? dernier.resultat.contour : null;
+    return contour ? { type: "plaque", contour, ...commun } : null;
+  }
+  if (d.pliage.forme === "profil") return { type: "profil", ...d.pliage, ...commun };
+  return { type: "boite", ...d.pliage, angle: d.pliage.angles[0], ...commun };
+}
+
+function majVue3d() {
+  if (mode3d && vue3d && catalogue) vue3d.afficher(modele3d());
+}
+
+async function basculerVue(en3d) {
+  mode3d = en3d;
+  $("voir-2d").classList.toggle("actif", !en3d);
+  $("voir-3d").classList.toggle("actif", en3d);
+  $("voir-2d").setAttribute("aria-pressed", String(!en3d));
+  $("voir-3d").setAttribute("aria-pressed", String(en3d));
+  $("schema").toggleAttribute("hidden", en3d); // svg : pas de propriété hidden
+  $("vue-3d").hidden = !en3d;
+  if (en3d && !vue3d) {
+    $("vue-3d").textContent = "Chargement de la vue 3D…";
+    try {
+      const { creerVue } = await import("./vue3d.js");
+      vue3d = creerVue($("vue-3d"));
+    } catch {
+      $("vue-3d").textContent = "La vue 3D n'a pas pu se charger.";
+      return;
+    }
+  }
+  dessinerSchema();
+}
+$("voir-2d").addEventListener("click", () => basculerVue(false));
+$("voir-3d").addEventListener("click", () => basculerVue(true));
 
 // ------------------------------------------------------------------ demande de prix
 function demandeCourante() {
@@ -216,6 +261,7 @@ function afficherResultat(r) {
   $("details").replaceChildren(...details.flatMap(([t, v]) => [el("dt", { texte: t }), el("dd", { texte: v })]));
   $("messages").replaceChildren(...[...r.refus, ...r.validations].map((m) => el("li", { texte: m })));
   dessinerApercu(r.contour);
+  majVue3d();
   $("ajouter").disabled = !avecPrix;
 }
 

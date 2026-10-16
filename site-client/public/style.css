@@ -84,6 +84,12 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .schema .axe { stroke: var(--texte-doux); stroke-width: .8; stroke-dasharray: 8 3 2 3; }
 .schema .fleche { fill: var(--texte-doux); stroke: none; }
 .schema .cote-texte { fill: var(--texte); stroke: var(--fond); paint-order: stroke; font-weight: 600; font-family: inherit; }
+.bascule-vue { display: inline-flex; border: 1px solid var(--bord); border-radius: 999px; padding: 2px; margin-bottom: .5rem; background: var(--surface); }
+.bascule-vue button { font: inherit; font-size: .875rem; border: 0; background: transparent; color: var(--texte-doux); padding: .3rem .9rem; border-radius: 999px; cursor: pointer; }
+.bascule-vue button.actif { background: var(--accent); color: var(--accent-texte); font-weight: 600; }
+.vue-3d { width: 100%; aspect-ratio: 4 / 3; max-height: 340px; background: var(--fond); border-radius: 8px; display: grid; place-items: center; color: var(--texte-doux); font-size: .9rem; overflow: hidden; touch-action: none; }
+.vue-3d[hidden], .schema[hidden] { display: none; }
+.vue-3d canvas { width: 100% !important; height: 100% !important; display: block; cursor: grab; }
 .cadre-schema figcaption { margin: .4rem 0 0; }
 .lettre { display: inline-grid; place-items: center; min-width: 1.45em; height: 1.45em; padding: 0 .2em; border-radius: 4px; background: var(--accent); color: var(--accent-texte); font-weight: 700; font-size: .8rem; }
 .faces { display: grid; grid-template-columns: 1fr; gap: .25rem; max-width: 26rem; }
