@@ -101,10 +101,13 @@ def _echelle(valeur):
 
 
 def formats_fichier():
-    """Formats de fichier que le site peut proposer : le DWG seulement si un convertisseur est installé."""
+    """Formats de fichier que le site peut proposer : le DWG seulement si un convertisseur est installé, le STEP si
+    OpenCascade l'est."""
     from .dxf import dwg_lisible
 
-    return ["dxf", "dwg", "svg"] if dwg_lisible() else ["dxf", "svg"]
+    from .step import lisible
+
+    return ["dxf"] + (["dwg"] if dwg_lisible() else []) + ["svg"] + (["step", "stp"] if lisible() else [])
 
 
 def catalogue():
@@ -170,6 +173,38 @@ def _procede(matiere, epaisseur):
     return ProcedeCoupe.JET_EAU
 
 
+def _piece_step(r, fiche, matiere, epaisseur, echelle):
+    """Pièce d'un fichier STEP : contrôle de l'épaisseur, pliage des plis lus dans le fichier, flan déplié avec l'outillage
+    retenu. Retourne (contour, résultat de pliage ou None) ; contour None si le pliage est refusé."""
+    from decoupe.services.pliage import calculer_plis
+
+    from .step import flan_atelier
+
+    if _echelle(echelle) != 1:
+        raise ErreurPrixWeb("Une pièce en 3D (STEP) se fabrique à la taille du fichier.")
+    e = fiche["epaisseur_mm"]
+    if abs(e - epaisseur) > 0.05:
+        raise ErreurPrixWeb(f"Votre pièce est en {e:g} mm d'épaisseur : choisissez {e:g} mm.")
+    plis = fiche.get("plis") or []
+    r.designation = f"Pièce du fichier {fiche['nom']}" + (f" ({len(plis)} pli{'s' if len(plis) > 1 else ''})" if plis else "")
+    if fiche.get("avertissements"):
+        r.validations.append("Fichier à vérifier par l'atelier : " + " ".join(fiche["avertissements"]))
+    if not plis:
+        return fiche["contour"], None
+    resultat = calculer_plis(matiere, epaisseur, plis)
+    if resultat.statut == "refus":
+        return None, resultat
+    ri = resultat.rayon_interieur
+    grands = sorted({p["rayon_mm"] for p in plis if p["rayon_mm"] > 2 * ri + epaisseur})
+    if grands:
+        r.validations.append(f"Rayon de pli de {' / '.join(f'{v:g}' for v in grands)} mm dans le fichier (atelier : {ri:g} mm au vé) : "
+                             "cintrage ou pli en plusieurs coups à valider.")
+    contour = flan_atelier(fiche["jeton"], float(matiere.famille.coef_k), ri)
+    xs, ys = [p[0] for p in contour["exterieur"]], [p[1] for p in contour["exterieur"]]
+    resultat.developpe_mm, resultat.flan_mm = None, [round(max(xs) - min(xs), 2), round(max(ys) - min(ys), 2)]
+    return contour, resultat
+
+
 def chiffrer(matiere_nom, epaisseur, quantite, forme=None, cotes=None, pliage=None, libre=None, dxf=None, echelle=None,
              bibliotheque=None, aujourdhui=None):
     """Prix instantané. `forme` + `cotes` : pièce plane de la bibliothèque. `pliage` : {"forme": "profil", "faces": [...],
@@ -227,6 +262,8 @@ def chiffrer(matiere_nom, epaisseur, quantite, forme=None, cotes=None, pliage=No
                 r.refus.append(f"En {epaisseur:g} mm, cette forme se découpe à partir de {mini} mm de large : "
                                "aucun trait ni jour ne doit être plus fin que l'épaisseur de la tôle.")
                 return r.finaliser()
+        elif dxf and charger(dxf).get("format") == "step":
+            contour_libre, resultat_pliage = _piece_step(r, charger(dxf), matiere, epaisseur, echelle)
         elif dxf:
             fiche = charger(dxf)
             contour_libre = fiche["contour"]
@@ -274,14 +311,15 @@ def chiffrer(matiere_nom, epaisseur, quantite, forme=None, cotes=None, pliage=No
         r.validations += resultat_pliage.validations
         if resultat_pliage.statut == "refus":
             return r.finaliser()
+    if contour_libre is not None:
+        exterieur, trous = contour_libre["exterieur"], contour_libre["trous"]
+    elif resultat_pliage is not None:
         if resultat_pliage.flan_mm:
             exterieur = _contour_flan_boite(*resultat_pliage.flan_mm, resultat_pliage.crans_mm)
         else:
             d = resultat_pliage.developpe_mm
             exterieur = [(0, 0), (d, 0), (d, longueur), (0, longueur)]
         trous = []
-    elif contour_libre is not None:
-        exterieur, trous = contour_libre["exterieur"], contour_libre["trous"]
     else:
         exterieur, trous = contour.exterieur, contour.trous
 

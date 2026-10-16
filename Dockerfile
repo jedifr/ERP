@@ -14,8 +14,14 @@ WORKDIR /app
 # WeasyPrint (modèles de documents PDF personnalisés, app `documents`) a besoin de Pango/HarfBuzz ;
 # `fonts-liberation` fournit des polices métriquement compatibles Arial/Helvetica (sans police, les
 # PDF personnalisés s'afficheraient avec une police de repli de l'image).
+#
+# OpenCascade (`cadquery-ocp-novtk`, lecture et dépliage des fichiers STEP du site client, app `web`) est livré en roue
+# précompilée mais attend libGL et libX11 du système, même sans affichage.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libgeos-dev \
+        libgl1 \
+        libx11-6 \
+        libexpat1 \
         libpango-1.0-0 \
         libpangoft2-1.0-0 \
         libharfbuzz-subset0 \

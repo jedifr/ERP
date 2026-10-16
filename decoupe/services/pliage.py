@@ -372,6 +372,20 @@ def calculer_boite(matiere, epaisseur, longueur, largeur, bords, angles=None, pl
     return r.finaliser()
 
 
+def calculer_plis(matiere, epaisseur, plis, plieuses=None, reglage=None):
+    """Outillage, faisabilité et temps des plis d'une pièce lue dans un fichier 3D (STEP) : `plis` = [{"angle" (angle de
+    la pièce, 90 = équerre), "longueur" (mm), "faces" (cotes extérieures des faces qui encadrent le pli)}]. Le flan est
+    calculé à part (web.services.step), avec le rayon intérieur et le K retenus ici."""
+    from decoupe.models import ReglagePliage
+
+    reglage = reglage or ReglagePliage.charger()
+    r = ResultatPliage()
+    objets = [Pli(f"Pli {i}", float(p["angle"]), float(p["longueur"]), tuple(p.get("faces") or ())) for i, p in enumerate(plis, start=1)]
+    faces = [(f"Face {LETTRES[k]} du pli {i}", float(c)) for i, p in enumerate(plis, start=1) for k, c in enumerate(p.get("faces") or ())]
+    _outillage(r, matiere, epaisseur, faces, objets, plieuses, reglage)
+    return r.finaliser()
+
+
 def calculer_pliage_article(pliage):
     """Calcule le pliage d'un PliageArticle (profil ou boîte) et enregistre le résultat."""
     from django.utils import timezone
