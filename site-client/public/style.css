@@ -120,6 +120,13 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .champ[hidden] { display: none; }
 
 /* fichier DXF */
+.biblio-grille { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: .4rem; max-height: 340px; overflow-y: auto; padding: .2rem; margin: .5rem 0; }
+.biblio-grille button { display: flex; flex-direction: column; align-items: center; gap: .2rem; padding: .4rem .2rem; border: 1px solid var(--bord); border-radius: var(--rayon); background: transparent; color: inherit; font: inherit; font-size: .72rem; line-height: 1.15; cursor: pointer; }
+.biblio-grille button:hover, .biblio-grille button:focus-visible { border-color: var(--accent); }
+.biblio-grille button[aria-selected="true"] { border-color: var(--accent); background: var(--accent-doux); font-weight: 600; }
+.biblio-grille svg { width: 52px; height: 52px; fill: currentColor; }
+.biblio-nom { margin: .5rem 0; }
+.credit { font-size: .8rem; }
 .depot { position: relative; display: flex; flex-direction: column; align-items: center; gap: .3rem; text-align: center; padding: 1.5rem 1rem; border: 2px dashed var(--bord); border-radius: var(--rayon); cursor: pointer; color: var(--texte-doux); }
 .depot strong { color: var(--accent); }
 .depot.survol, .depot:hover { border-color: var(--accent); background: var(--accent-doux); }

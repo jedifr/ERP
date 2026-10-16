@@ -9,6 +9,7 @@ async function demarrer(options, appels = []) {
     const chemin = new URL(url).pathname;
     if (init.headers["X-Cle-Web"] !== "cle") return new Response(JSON.stringify({ detail: "refusé" }), { status: 403 });
     if (chemin.endsWith("/catalogue/")) return Response.json({ matieres: [{ matiere: "S235", epaisseurs: [2] }], formes: [], minimum_commande_ht: 60, quantite_max: 500 });
+    if (chemin.endsWith("/bibliotheque/")) return Response.json({ credit: "game-icons.net, CC BY 3.0", formes: [{ cle: "anchor", nom: "Ancre" }] });
     if (chemin.endsWith("/prix/")) return Response.json({ statut: "ok", prix_total_ht: 12.5, recu: JSON.parse(init.body) });
     if (chemin.endsWith("/dxf/")) return Response.json({ jeton: "a".repeat(64), taille: JSON.parse(init.body).contenu.length });
     if (chemin.endsWith("/demandes/")) return Response.json({ numero: "WEB2610-0001", total_ht: 60 }, { status: 201 });
@@ -30,6 +31,17 @@ test("relaie le catalogue avec la clé, une seule fois grâce au cache", async (
   }
   assert.equal(appels.length, 1);
   assert.equal(appels[0].url, "http://erp.test/api/web/v1/catalogue/");
+  await fermer();
+});
+
+test("relaie la bibliothèque de formes, mise en cache à part du catalogue", async () => {
+  const appels = [];
+  const { base, fermer } = await demarrer({}, appels);
+  for (let i = 0; i < 2; i++) {
+    assert.equal((await (await fetch(`${base}/api/bibliotheque`)).json()).formes[0].nom, "Ancre");
+    assert.ok((await (await fetch(`${base}/api/catalogue`)).json()).matieres);
+  }
+  assert.deepEqual(appels.map((a) => a.url), ["http://erp.test/api/web/v1/bibliotheque/", "http://erp.test/api/web/v1/catalogue/"]);
   await fermer();
 });
 

@@ -1,6 +1,6 @@
 # Site client DÉCOUPE H2O
 
-Configurateur de pièces en ligne : le client choisit une pièce plane (bibliothèque de formes), un profil plié, une boîte pliée, une forme libre ou envoie son fichier DXF, la matière, l'épaisseur et la quantité ; le prix HT s'affiche aussitôt avec l'aperçu à plat. Le panier part à l'ERP comme **demande web** (Paramétrage → Vente en ligne → Demandes web) : le commercial la vérifie et confirme commande, port et délai. Pas de paiement en ligne pour l'instant.
+Configurateur de pièces en ligne : le client choisit une pièce plane (bibliothèque de formes), un profil plié, une boîte pliée, une forme libre, une forme décorative ou envoie son fichier DXF, la matière, l'épaisseur et la quantité ; le prix HT s'affiche aussitôt avec l'aperçu à plat. Le panier part à l'ERP comme **demande web** (Paramétrage → Vente en ligne → Demandes web) : le commercial la vérifie et confirme commande, port et délai. Pas de paiement en ligne pour l'instant.
 
 Pendant la saisie, un **schéma coté** dessine la pièce à l'échelle (`public/schemas.js`) : chaque cote porte une lettre (A, B, C…), la même que devant le champ à remplir. Forme plane : contour, perçages, diamètres, entraxes, angle du premier trou. Profil : la section avec ses faces et ses angles. Boîte : le flan vu de dessus, bords rabattus à plat. Ce schéma est calculé dans le navigateur, sans appel à l'ERP ; si la bibliothèque de formes gagne une forme, ajoutez son dessin dans `schemas.js` et rafraîchissez `test/catalogue-formes.json` (copie du catalogue de l'API).
 
@@ -10,7 +10,9 @@ L'onglet **Vue 3D** montre la pièce en volume (on la fait tourner à la souris 
 
 La **forme libre** (`public/editeur.js`) part d'une plaque rectangle ou disque ; le client y ajoute des trous ronds, oblongs, rectangles ou polygones, en découpe ou en ajout de matière, saisis au clavier (centre X / Y depuis le coin bas gauche) ou glissés sur le schéma (au millimètre, Maj pour le dixième), avec annuler / rétablir (Ctrl+Z / Ctrl+Y). Le navigateur ne fait que dessiner : l'ERP reconstruit la pièce, la contrôle et la chiffre. L'onglet **Fichier** envoie un DXF ou un SVG (et un DWG si l'ERP a un convertisseur : la liste vient du catalogue) à l'ERP (1,5 Mo au plus) ; ses cotes hors tout (A, B) se modifient pour mettre la pièce à l'échelle, qui le lit, le garde pour la fabrication et renvoie le contour affiché en schéma et en 3D.
 
-L'ERP reste le seul moteur de prix : ce serveur ne calcule rien, il relaie ses appels vers l'API web de l'ERP (`/api/web/v1/catalogue/`, `prix/`, `dxf/`, `demandes/`) en y ajoutant la clé, qui ne part jamais dans le navigateur. Il limite les calculs par visiteur et met le catalogue en cache 5 minutes.
+L'onglet **Formes décoratives** propose les 719 silhouettes de game-icons.net retenues par l'ERP (d'un seul tenant), avec une recherche par nom et des vignettes ; le client règle la largeur (ou la hauteur, les proportions sont gardées). La largeur mini à l'épaisseur choisie est rappelée (aucun trait ni jour plus fin que l'épaisseur) et l'ERP refuse le prix en dessous. Licence CC BY 3.0 : le crédit est affiché sous la liste et en pied de page, il ne doit pas être retiré.
+
+L'ERP reste le seul moteur de prix : ce serveur ne calcule rien, il relaie ses appels vers l'API web de l'ERP (`/api/web/v1/catalogue/`, `bibliotheque/`, `prix/`, `dxf/`, `demandes/`) en y ajoutant la clé, qui ne part jamais dans le navigateur. Il limite les calculs par visiteur et met le catalogue et la bibliothèque de formes en cache 5 minutes.
 
 ## Lancer
 

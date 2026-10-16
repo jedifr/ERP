@@ -28,6 +28,10 @@ let ficheDxf = null; // { jeton, nom, contour, largeur_mm, hauteur_mm, avertisse
 const DXF_MAX = 1536 * 1024;
 let formatsFichier = ["dxf"]; // formats que l'ERP sait lire (catalogue)
 let echelleDxf = 1; // agrandissement demandé par le client (1 = taille du fichier)
+// Formes décoratives : liste chargée au premier passage sur l'onglet, forme choisie et sa largeur.
+let bibliotheque = null; // { credit, licence_url, formes: [{ cle, nom, proportion, rapport, apercu }] }
+let formeDeco = null;
+const VIGNETTES_MAX = 150;
 
 // Contour du fichier à l'échelle choisie (affichage seulement : l'ERP refait le calcul).
 function contourDxf() {
@@ -111,6 +115,7 @@ async function demarrer() {
   remplir($("matiere"), catalogue.matieres.map((m) => [m.matiere, m.matiere]));
   $("quantite").max = catalogue.quantite_max;
   majFormatsFichier(catalogue.formats_fichier);
+  afficherCredit(catalogue.bibliotheque);
   majEpaisseurs();
   majCotes();
   dessinerProfil();
@@ -179,11 +184,13 @@ function dessinerSchema() {
     return majVue3d();
   }
   let dessin = null;
-  if (d.dxf !== undefined) dessin = ficheDxf ? Schemas.contour(contourDxf(), ficheDxf.nom, true) : null;
+  if (d.bibliotheque !== undefined) dessin = formeDeco ? Schemas.contour(contourDeco(), formeDeco.nom, true) : null;
+  else if (d.dxf !== undefined) dessin = ficheDxf ? Schemas.contour(contourDxf(), ficheDxf.nom, true) : null;
   else if (!d.pliage) dessin = Schemas.plane(catalogue.formes.find((x) => x.cle === d.forme), d.cotes);
   else if (d.pliage.forme === "profil") dessin = Schemas.profil(d.pliage.faces, d.pliage.angles, d.pliage.longueur);
   else dessin = Schemas.boite(d.pliage.longueur, d.pliage.largeur, d.pliage.bords);
   $("note-schema").textContent = mode3d ? "Faites glisser pour tourner la pièce, molette ou pincement pour zoomer. Vue indicative."
+    : d.bibliotheque !== undefined ? (formeDeco ? "A et B : cotes hors tout. Changez la largeur, la hauteur suit." : "Choisissez une forme dans la liste.")
     : d.dxf !== undefined ? (ficheDxf ? (echelleDxf === 1 ? "Pièce telle que lue dans votre fichier" : `Pièce à ${+(echelleDxf * 100).toFixed(2)} % de votre fichier`) + " ; A et B : cotes hors tout." : "Le dessin de la pièce s'affiche une fois le fichier lu.")
     : (dessin && dessin.note) || "Les lettres du schéma repèrent les cotes à saisir.";
   if (!dessin) return svg.replaceChildren();
@@ -198,6 +205,7 @@ function modele3d() {
   const m = catalogue.matieres.find((x) => x.matiere === d.matiere);
   const commun = { epaisseur: d.epaisseur, famille: m ? m.famille : "" };
   if (d.dxf !== undefined) return ficheDxf ? { type: "plaque", contour: contourDxf(), ...commun } : null;
+  if (d.bibliotheque !== undefined) return formeDeco ? { type: "plaque", contour: contourDeco(), ...commun } : null;
   if (d.libre) {
     // dernier contour reconstruit par l'ERP (il suit la saisie à chaque calcul)
     return dernier && dernier.demande.libre ? { type: "plaque", contour: dernier.resultat.contour, ...commun } : null;
@@ -256,6 +264,7 @@ function demandeCourante() {
     return { ...base, forme: $("forme").value, cotes };
   }
   if (type === "libre") return { ...base, libre: structuredClone(libre) };
+  if (type === "bibliotheque") return { ...base, bibliotheque: formeDeco ? { cle: formeDeco.cle, largeur: Number($("biblio-largeur").value) } : null };
   if (type === "dxf") return { ...base, dxf: ficheDxf ? ficheDxf.jeton : null, ...(echelleDxf !== 1 ? { echelle: echelleDxf } : {}) };
   if (type === "profil") {
     lireProfil();
@@ -281,8 +290,8 @@ function calculerBientot() {
 async function calculer() {
   if (!catalogue || !$("matiere").value) return;
   const demande = demandeCourante();
-  if (demande.dxf === null) {
-    afficherErreur("Choisissez votre fichier.");
+  if (demande.dxf === null || demande.bibliotheque === null) {
+    afficherErreur(demande.dxf === null ? "Choisissez votre fichier." : "Choisissez une forme.");
     $("etat").className = "etat";
     return;
   }
@@ -643,6 +652,103 @@ depot.addEventListener("drop", (ev) => {
   envoyerDxf(ev.dataTransfer.files[0]);
 });
 
+// ------------------------------------------------------------------ formes décoratives (game-icons.net, CC BY 3.0)
+function afficherCredit(c) {
+  if (!c || !c.credit) return;
+  const lien = () => el("a", { href: c.licence_url, rel: "license noopener", target: "_blank", texte: c.licence });
+  $("biblio-credit").replaceChildren(c.credit.replace(/,? ?licence.*$/i, ""), ", licence ", lien(), ".");
+  $("pied-credit").replaceChildren(" · Formes décoratives : ", el("a", { href: c.url, rel: "noopener", target: "_blank", texte: c.source }), ", ", lien());
+}
+
+async function chargerBibliotheque() {
+  if (bibliotheque) return;
+  $("biblio-etat").textContent = "Chargement des formes…";
+  const { ok, corps } = await api("/api/bibliotheque");
+  if (!ok) {
+    $("biblio-etat").textContent = corps.erreur || "Formes indisponibles pour le moment.";
+    return;
+  }
+  bibliotheque = corps;
+  for (const f of bibliotheque.formes) f.recherche = sansAccents(`${f.nom} ${f.cle.replace(/-/g, " ")}`);
+  afficherCredit(corps);
+  afficherVignettes();
+}
+
+const sansAccents = (t) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/œ/g, "oe").toLowerCase();
+
+function vignette(f) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", `0 0 100 ${+(f.proportion * 100).toFixed(1)}`);
+  svg.setAttribute("aria-hidden", "true");
+  const chemin = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  chemin.setAttribute("d", f.apercu);
+  chemin.setAttribute("fill-rule", "evenodd");
+  svg.append(chemin);
+  return svg;
+}
+
+function afficherVignettes() {
+  if (!bibliotheque) return;
+  const mots = sansAccents($("biblio-recherche").value).split(/\s+/).filter(Boolean);
+  const trouvees = bibliotheque.formes.filter((f) => mots.every((m) => f.recherche.includes(m)));
+  const montrees = trouvees.slice(0, VIGNETTES_MAX);
+  if (formeDeco && !montrees.includes(formeDeco) && trouvees.includes(formeDeco)) montrees.unshift(formeDeco);
+  $("biblio-grille").replaceChildren(...montrees.map((f) => {
+    const b = el("button", { type: "button", role: "option", "data-cle": f.cle, "aria-selected": String(f === formeDeco), title: f.nom });
+    b.append(vignette(f), el("span", { texte: f.nom }));
+    return b;
+  }));
+  $("biblio-etat").textContent = !trouvees.length ? "Aucune forme ne correspond : essayez un autre mot."
+    : trouvees.length > montrees.length ? `${trouvees.length} formes : précisez la recherche pour voir les autres.`
+      : `${trouvees.length} forme${trouvees.length > 1 ? "s" : ""}.`;
+}
+
+// Largeur mini à l'épaisseur choisie : aucun trait ni jour plus fin que l'épaisseur (l'ERP refuse en dessous).
+const largeurMiniDeco = () => (formeDeco ? Math.ceil(Number($("epaisseur").value || 0) / formeDeco.rapport - 1e-9) : 1);
+
+function majMiniDeco() {
+  if (!formeDeco) return;
+  const mini = largeurMiniDeco();
+  $("biblio-largeur").min = mini;
+  $("biblio-mini").textContent = `En ${mm(Number($("epaisseur").value))} mm, cette forme se découpe à partir de ${mini} mm de large (aucun trait ni jour plus fin que l'épaisseur).`;
+}
+
+function contourDeco() {
+  if (!formeDeco) return null;
+  const largeur = Number($("biblio-largeur").value);
+  // contour exact de l'ERP s'il vient d'être chiffré à cette largeur, sinon celui de la vignette
+  const d = dernier && dernier.demande.bibliotheque;
+  if (d && d.cle === formeDeco.cle && d.largeur === largeur) return dernier.resultat.contour;
+  return Schemas.depuisApercu(formeDeco.apercu, largeur > 0 ? largeur : 100);
+}
+
+function majHauteurDeco() {
+  const l = Number($("biblio-largeur").value);
+  $("biblio-hauteur").value = formeDeco && l > 0 ? String(+(l * formeDeco.proportion).toFixed(1)) : "";
+}
+
+$("biblio-recherche").addEventListener("input", (ev) => { ev.stopPropagation(); afficherVignettes(); });
+$("biblio-grille").addEventListener("click", (ev) => {
+  const b = ev.target.closest("button[data-cle]");
+  if (!b) return;
+  formeDeco = bibliotheque.formes.find((f) => f.cle === b.dataset.cle);
+  $("biblio-grille").querySelectorAll("button").forEach((x) => x.setAttribute("aria-selected", String(x === b)));
+  $("biblio-nom").textContent = formeDeco.nom;
+  $("biblio-choix").hidden = false;
+  $("biblio-largeur").value = Math.max(200, largeurMiniDeco());
+  majHauteurDeco();
+  majMiniDeco();
+  calculerBientot();
+});
+$("biblio-largeur").addEventListener("input", majHauteurDeco);
+$("biblio-hauteur").addEventListener("input", (ev) => {
+  ev.stopPropagation();
+  const h = Number(ev.target.value);
+  if (!formeDeco || !(h > 0)) return;
+  $("biblio-largeur").value = String(+(h / formeDeco.proportion).toFixed(1));
+  calculerBientot();
+});
+
 // ------------------------------------------------------------------ saisie
 document.querySelectorAll("input[name=type]").forEach((r) => r.addEventListener("change", () => {
   const type = typePiece();
@@ -651,10 +757,13 @@ document.querySelectorAll("input[name=type]").forEach((r) => r.addEventListener(
   $("bloc-boite").hidden = type !== "boite";
   $("bloc-libre").hidden = type !== "libre";
   $("bloc-dxf").hidden = type !== "dxf";
+  $("bloc-bibliotheque").hidden = type !== "bibliotheque";
+  if (type === "bibliotheque") chargerBibliotheque();
   calculerBientot();
 }));
 $("forme").addEventListener("change", () => { majCotes(); calculerBientot(); });
-$("matiere").addEventListener("change", () => { majEpaisseurs(); calculerBientot(); });
+$("matiere").addEventListener("change", () => { majEpaisseurs(); majMiniDeco(); calculerBientot(); });
+$("epaisseur").addEventListener("change", majMiniDeco);
 $("modele-profil").addEventListener("change", (e) => { profil = structuredClone(MODELES[e.target.value]); dessinerProfil(); calculerBientot(); });
 $("ajout-face").addEventListener("click", () => { lireProfil(); profil.faces.push(30); profil.angles.push(90); dessinerProfil(); calculerBientot(); });
 $("retrait-face").addEventListener("click", () => { lireProfil(); profil.faces.pop(); profil.angles.pop(); dessinerProfil(); calculerBientot(); });

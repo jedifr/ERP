@@ -84,5 +84,6 @@ def construire(cle, largeur):
     k = largeur / d["largeur"] / d["resolution"]
     anneaux = [_decoder(c, k) for c in f["contour"]]
     hauteur = f["hauteur"] * largeur / d["largeur"]
-    designation = f"Forme « {f['nom']} » {largeur:g} × {round(hauteur, 1):g} mm"
+    cote = lambda v: f"{round(v, 1):g}".replace(".", ",")
+    designation = f"Forme « {f['nom']} » {cote(largeur)} × {cote(hauteur)} mm"
     return {"exterieur": anneaux[0], "trous": anneaux[1:]}, designation
