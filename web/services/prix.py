@@ -142,9 +142,10 @@ def _procede(matiere, epaisseur):
     return ProcedeCoupe.JET_EAU
 
 
-def chiffrer(matiere_nom, epaisseur, quantite, forme=None, cotes=None, pliage=None, aujourdhui=None):
+def chiffrer(matiere_nom, epaisseur, quantite, forme=None, cotes=None, pliage=None, libre=None, dxf=None, aujourdhui=None):
     """Prix instantané. `forme` + `cotes` : pièce plane de la bibliothèque. `pliage` : {"forme": "profil", "faces": [...],
     "angles": [...], "longueur": L} ou {"forme": "boite", "longueur": L, "largeur": l, "bords": [A, B, C, D], "angles": [...]}.
+    `libre` : recette d'une pièce libre (web.services.libre). `dxf` : jeton d'un fichier déposé (web.services.dxf).
     Lève ErreurPrixWeb pour une demande mal formée ; une pièce infaisable donne un résultat « refus »."""
     from chiffrage.moteur import ChiffrageError, cout_etape_gamme
     from chiffrage.reglage import minutes_mise_en_place
@@ -156,6 +157,9 @@ def chiffrer(matiere_nom, epaisseur, quantite, forme=None, cotes=None, pliage=No
     from technique.models import Gamme
 
     from web.models import ReglageWeb
+
+    from .dxf import ErreurDxf, charger
+    from .libre import ErreurLibre, construire as construire_libre
 
     aujourdhui = aujourdhui or datetime.date.today()
     reglage = ReglageWeb.charger()
@@ -177,8 +181,18 @@ def chiffrer(matiere_nom, epaisseur, quantite, forme=None, cotes=None, pliage=No
 
     # Contour à découper : forme plane, ou flan de la pièce pliée.
     resultat_pliage = None
+    contour_libre = None
     try:
-        if pliage:
+        if libre:
+            contour_libre, r.designation, validations = construire_libre(libre, epaisseur)
+            r.validations += validations
+        elif dxf:
+            fiche = charger(dxf)
+            contour_libre = fiche["contour"]
+            r.designation = f"Pièce DXF {fiche['nom']}"
+            if fiche.get("avertissements"):
+                r.validations.append("Fichier à vérifier par l'atelier : " + " ".join(fiche["avertissements"]))
+        elif pliage:
             if pliage.get("forme") == "boite":
                 longueur, largeur = float(pliage["longueur"]), float(pliage["largeur"])
                 resultat_pliage = calculer_boite(matiere, epaisseur, longueur, largeur, [float(h or 0) for h in pliage["bords"]],
@@ -202,7 +216,7 @@ def chiffrer(matiere_nom, epaisseur, quantite, forme=None, cotes=None, pliage=No
             raise ErreurPrixWeb("Indiquez une forme ou une pièce pliée.")
     except (KeyError, TypeError, ValueError):
         raise ErreurPrixWeb("Cotes de pliage incomplètes ou non numériques.")
-    except formes.ErreurForme as exc:
+    except (formes.ErreurForme, ErreurLibre, ErreurDxf) as exc:
         raise ErreurPrixWeb(str(exc))
     except ErreurPliage as exc:
         r.refus.append(str(exc))
@@ -220,6 +234,8 @@ def chiffrer(matiere_nom, epaisseur, quantite, forme=None, cotes=None, pliage=No
             d = resultat_pliage.developpe_mm
             exterieur = [(0, 0), (d, 0), (d, longueur), (0, longueur)]
         trous = []
+    elif contour_libre is not None:
+        exterieur, trous = contour_libre["exterieur"], contour_libre["trous"]
     else:
         exterieur, trous = contour.exterieur, contour.trous
 

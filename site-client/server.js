@@ -1,4 +1,5 @@
-// Site client DÉCOUPE H2O : sert la page du configurateur et relaie trois appels vers l'API web de l'ERP.
+// Site client DÉCOUPE H2O : sert la page du configurateur et relaie ses appels (catalogue, prix, fichier DXF, demande)
+// vers l'API web de l'ERP.
 // La clé de l'ERP reste ici, jamais dans le navigateur. Aucune dépendance : Node 20+ (http, fetch).
 //
 // Variables d'environnement :
@@ -16,7 +17,9 @@ import { fileURLToPath } from "node:url";
 
 const RACINE = join(fileURLToPath(new URL(".", import.meta.url)), "public");
 const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".ico": "image/x-icon", ".png": "image/png" };
-const TAILLE_MAX = 64 * 1024;
+// Taille maximale des corps reçus : un DXF de 1,5 Mo fait 2 Mo en base64 ; une demande porte jusqu'à 50 pièces libres.
+const TAILLES_MAX = { "/api/prix": 256 * 1024, "/api/dxf": 2200 * 1024, "/api/demandes": 1024 * 1024 };
+const RELAIS = { "/api/prix": "prix/", "/api/dxf": "dxf/", "/api/demandes": "demandes/" };
 const CATALOGUE_TTL_MS = 5 * 60 * 1000;
 
 export function creerServeur({ erpUrl, cle, debitParMinute = 60, confianceProxy = false, contact = "", fetchImpl = fetch } = {}) {
@@ -60,14 +63,16 @@ export function creerServeur({ erpUrl, cle, debitParMinute = 60, confianceProxy 
     res.end(JSON.stringify(corps));
   }
 
-  async function lireCorps(req) {
+  async function lireCorps(req, tailleMax) {
     let taille = 0;
     const morceaux = [];
     for await (const m of req) {
       taille += m.length;
-      if (taille > TAILLE_MAX) throw new Error("trop gros");
-      morceaux.push(m);
+      // au-delà de la limite on lit sans garder, pour pouvoir répondre 413 proprement ; bien au-delà, on coupe
+      if (taille > tailleMax * 4) throw new Error("trop gros");
+      if (taille <= tailleMax) morceaux.push(m);
     }
+    if (taille > tailleMax) throw new Error("trop gros");
     return JSON.parse(Buffer.concat(morceaux).toString("utf-8") || "{}");
   }
 
@@ -100,15 +105,15 @@ export function creerServeur({ erpUrl, cle, debitParMinute = 60, confianceProxy 
         }
         return json(res, 200, catalogue.corps);
       }
-      if ((pathname === "/api/prix" || pathname === "/api/demandes") && req.method === "POST") {
+      if (RELAIS[pathname] && req.method === "POST") {
         if (limite(req)) return json(res, 429, { erreur: "Trop de calculs d'affilée : patientez une minute." });
         let corps;
         try {
-          corps = await lireCorps(req);
-        } catch {
-          return json(res, 400, { erreur: "Demande illisible." });
+          corps = await lireCorps(req, TAILLES_MAX[pathname]);
+        } catch (e) {
+          return json(res, e.message === "trop gros" ? 413 : 400, { erreur: e.message === "trop gros" ? "Envoi trop volumineux." : "Demande illisible." });
         }
-        const r = await erp(pathname === "/api/prix" ? "prix/" : "demandes/", { method: "POST", body: JSON.stringify(corps) });
+        const r = await erp(RELAIS[pathname], { method: "POST", body: JSON.stringify(corps) });
         return json(res, r.status, r.corps);
       }
       if (pathname.startsWith("/api/")) return json(res, 404, { erreur: "Introuvable." });

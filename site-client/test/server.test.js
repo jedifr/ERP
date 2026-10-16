@@ -10,6 +10,7 @@ async function demarrer(options, appels = []) {
     if (init.headers["X-Cle-Web"] !== "cle") return new Response(JSON.stringify({ detail: "refusé" }), { status: 403 });
     if (chemin.endsWith("/catalogue/")) return Response.json({ matieres: [{ matiere: "S235", epaisseurs: [2] }], formes: [], minimum_commande_ht: 60, quantite_max: 500 });
     if (chemin.endsWith("/prix/")) return Response.json({ statut: "ok", prix_total_ht: 12.5, recu: JSON.parse(init.body) });
+    if (chemin.endsWith("/dxf/")) return Response.json({ jeton: "a".repeat(64), taille: JSON.parse(init.body).contenu.length });
     if (chemin.endsWith("/demandes/")) return Response.json({ numero: "WEB2610-0001", total_ht: 60 }, { status: 201 });
     return new Response("{}", { status: 404 });
   };
@@ -83,4 +84,17 @@ test("réponse non JSON de l'ERP (hôte refusé) : indisponible", async () => {
   const r = await fetch(`http://127.0.0.1:${serveur.address().port}/api/catalogue`);
   assert.equal(r.status, 503);
   await new Promise((r) => serveur.close(r));
+});
+
+test("relaie un fichier DXF jusqu'à 2 Mo en base64, refuse au-delà", async () => {
+  const { base, fermer } = await demarrer({});
+  const contenu = "A".repeat(2 * 1024 * 1024);
+  const r = await fetch(`${base}/api/dxf`, { method: "POST", body: JSON.stringify({ nom: "p.dxf", contenu }) });
+  assert.equal(r.status, 200);
+  assert.equal((await r.json()).taille, contenu.length);
+  const trop = await fetch(`${base}/api/dxf`, { method: "POST", body: JSON.stringify({ nom: "p.dxf", contenu: contenu + "A".repeat(300 * 1024) }) });
+  assert.equal(trop.status, 413);
+  const prix = await fetch(`${base}/api/prix`, { method: "POST", body: JSON.stringify({ x: "A".repeat(300 * 1024) }) });
+  assert.equal(prix.status, 413);
+  await fermer();
 });

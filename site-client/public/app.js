@@ -20,6 +20,12 @@ let minuterie = null;
 let numeroAppel = 0;
 let vue3d = null; // chargée au premier clic sur « Vue 3D »
 let mode3d = false;
+// Forme libre : recette envoyée telle quelle à l'ERP, élément choisi, historique pour annuler / rétablir.
+let libre = { base: { forme: "rectangle", largeur: 300, hauteur: 200, rayon_angle: 0 }, elements: [] };
+let choisi = -1;
+const historique = { etats: [JSON.stringify(libre)], position: 0 };
+let ficheDxf = null; // { jeton, nom, contour, largeur_mm, hauteur_mm, avertissements } rendue par l'ERP
+const DXF_MAX = 1536 * 1024;
 
 // ------------------------------------------------------------------ panier (navigateur seulement ; l'ERP recalcule tout)
 function lirePanier() {
@@ -85,6 +91,9 @@ async function demarrer() {
   majEpaisseurs();
   majCotes();
   dessinerProfil();
+  afficherBase();
+  afficherElements();
+  majHistorique();
   afficherPanier();
   calculerBientot();
 }
@@ -138,12 +147,20 @@ function lireProfil() {
 function dessinerSchema() {
   if (!catalogue) return;
   const d = demandeCourante();
+  const svg = $("schema");
+  if (d.libre) {
+    $("note-schema").textContent = mode3d ? "Faites glisser pour tourner la pièce, molette ou pincement pour zoomer. Vue indicative."
+      : "Faites glisser un élément pour le placer (Maj : au dixième de mm). Trait plein : matière ajoutée ; pointillés : découpe.";
+    EditeurLibre.dessiner(svg, libre, choisi);
+    return majVue3d();
+  }
   let dessin = null;
-  if (!d.pliage) dessin = Schemas.plane(catalogue.formes.find((x) => x.cle === d.forme), d.cotes);
+  if (d.dxf !== undefined) dessin = ficheDxf ? Schemas.contour(ficheDxf.contour, ficheDxf.nom) : null;
+  else if (!d.pliage) dessin = Schemas.plane(catalogue.formes.find((x) => x.cle === d.forme), d.cotes);
   else if (d.pliage.forme === "profil") dessin = Schemas.profil(d.pliage.faces, d.pliage.angles, d.pliage.longueur);
   else dessin = Schemas.boite(d.pliage.longueur, d.pliage.largeur, d.pliage.bords);
-  const svg = $("schema");
   $("note-schema").textContent = mode3d ? "Faites glisser pour tourner la pièce, molette ou pincement pour zoomer. Vue indicative."
+    : d.dxf !== undefined ? (ficheDxf ? "Pièce telle que lue dans votre fichier, encombrement coté." : "Le dessin de la pièce s'affiche une fois le fichier lu.")
     : (dessin && dessin.note) || "Les lettres du schéma repèrent les cotes à saisir.";
   if (!dessin) return svg.replaceChildren();
   svg.setAttribute("viewBox", dessin.viewBox);
@@ -156,6 +173,11 @@ function modele3d() {
   const d = demandeCourante();
   const m = catalogue.matieres.find((x) => x.matiere === d.matiere);
   const commun = { epaisseur: d.epaisseur, famille: m ? m.famille : "" };
+  if (d.dxf !== undefined) return ficheDxf ? { type: "plaque", contour: ficheDxf.contour, ...commun } : null;
+  if (d.libre) {
+    // dernier contour reconstruit par l'ERP (il suit la saisie à chaque calcul)
+    return dernier && dernier.demande.libre ? { type: "plaque", contour: dernier.resultat.contour, ...commun } : null;
+  }
   if (!d.pliage) {
     // contour de référence : celui que l'ERP vient de chiffrer
     const contour = dernier && !dernier.demande.pliage && dernier.demande.forme === d.forme ? dernier.resultat.contour : null;
@@ -201,6 +223,8 @@ function demandeCourante() {
     document.querySelectorAll("#cotes [data-cle]").forEach((i) => { if (i.value !== "") cotes[i.dataset.cle] = Number(i.value); });
     return { ...base, forme: $("forme").value, cotes };
   }
+  if (type === "libre") return { ...base, libre: structuredClone(libre) };
+  if (type === "dxf") return { ...base, dxf: ficheDxf ? ficheDxf.jeton : null };
   if (type === "profil") {
     lireProfil();
     return { ...base, pliage: { forme: "profil", faces: [...profil.faces], angles: [...profil.angles], longueur: Number($("longueur-pli").value) } };
@@ -225,6 +249,11 @@ function calculerBientot() {
 async function calculer() {
   if (!catalogue || !$("matiere").value) return;
   const demande = demandeCourante();
+  if (demande.dxf === null) {
+    afficherErreur("Choisissez un fichier DXF.");
+    $("etat").className = "etat";
+    return;
+  }
   const appel = ++numeroAppel;
   const { ok, corps } = await api("/api/prix", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(demande) });
   if (appel !== numeroAppel) return; // une saisie plus récente est en cours
@@ -346,12 +375,214 @@ $("form-demande").addEventListener("submit", async (e) => {
   retour.textContent = `Merci ! Demande ${corps.numero} reçue (${euros(corps.total_ht)} € HT hors port). Nous vous confirmons la commande, le port et le délai par e-mail.`;
 });
 
+// ------------------------------------------------------------------ forme libre
+const nombre = (v) => (v === "" || v == null ? "" : Number(v));
+
+function retenir() {
+  const etat = JSON.stringify(libre);
+  if (etat === historique.etats[historique.position]) return majHistorique();
+  historique.etats.splice(historique.position + 1, Infinity, etat);
+  if (historique.etats.length > 100) historique.etats.shift();
+  historique.position = historique.etats.length - 1;
+  majHistorique();
+}
+function majHistorique() {
+  $("annuler").disabled = historique.position <= 0;
+  $("refaire").disabled = historique.position >= historique.etats.length - 1;
+}
+function revenir(pas) {
+  const p = historique.position + pas;
+  if (p < 0 || p >= historique.etats.length) return;
+  historique.position = p;
+  libre = JSON.parse(historique.etats[p]);
+  if (choisi >= libre.elements.length) choisi = libre.elements.length - 1;
+  afficherBase();
+  afficherElements();
+  majHistorique();
+  calculerBientot();
+}
+
+function afficherBase() {
+  const b = libre.base;
+  $("libre-forme").value = b.forme;
+  document.querySelectorAll("#bloc-libre [data-base]").forEach((c) => { c.hidden = c.dataset.base !== b.forme; });
+  document.querySelectorAll("#bloc-libre [data-base-cle]").forEach((i) => {
+    if (b[i.dataset.baseCle] !== undefined) i.value = b[i.dataset.baseCle];
+  });
+}
+
+function lireBase() {
+  const forme = $("libre-forme").value, v = (id) => nombre($(id).value);
+  libre.base = forme === "disque" ? { forme, diametre: v("libre-diametre") }
+    : { forme, largeur: v("libre-largeur"), hauteur: v("libre-hauteur"), rayon_angle: v("libre-rayon") || 0 };
+}
+
+function afficherElements() {
+  const { TYPES } = EditeurLibre;
+  $("elements").replaceChildren(...libre.elements.map((e, i) => {
+    const champ = (cle, libelle, attrs = {}) => el("div", { class: "champ" },
+      el("label", { for: `el-${i}-${cle}`, texte: libelle }),
+      el("input", { id: `el-${i}-${cle}`, "data-el": i, "data-champ": cle, type: "number", inputmode: "decimal", step: "any", value: e[cle], ...attrs }));
+    return el("li", { class: `element-ligne${i === choisi ? " choisi" : ""}`, "data-ligne": i },
+      el("div", { class: "element-tete" },
+        el("span", { class: "lettre", texte: String(i + 1) }),
+        el("strong", { texte: TYPES[e.type].libelle }),
+        el("select", { "data-el": i, "data-champ": "mode", "aria-label": `Élément ${i + 1} : retirer ou ajouter` },
+          el("option", { value: "retirer", texte: "Découpe", selected: e.mode !== "ajouter" }),
+          el("option", { value: "ajouter", texte: "Ajout de matière", selected: e.mode === "ajouter" })),
+        el("button", { type: "button", class: "dupliquer", "data-dupliquer": i, title: "Dupliquer", "aria-label": `Dupliquer l'élément ${i + 1}`, texte: "⧉" }),
+        el("button", { type: "button", class: "retirer", "data-supprimer": i, title: "Supprimer", "aria-label": `Supprimer l'élément ${i + 1}`, texte: "×" })),
+      el("div", { class: "element-champs" },
+        champ("x", "X centre"), champ("y", "Y centre"),
+        ...TYPES[e.type].champs.map(([cle, libelle]) => champ(cle, libelle, cle === "nb_cotes" ? { min: 3, max: 64, step: 1 } : cle === "angle" ? {} : { min: 0 }))));
+  }));
+  if (!libre.elements.length) $("elements").append(el("li", { class: "aide vide", texte: "Aucun élément : la plaque est découpée telle quelle." }));
+}
+
+function choisir(i) {
+  if (choisi === i) return;
+  choisi = i;
+  document.querySelectorAll("#elements [data-ligne]").forEach((l) => l.classList.toggle("choisi", Number(l.dataset.ligne) === i));
+  dessinerSchema();
+}
+
+$("libre-forme").addEventListener("change", () => { lireBase(); afficherBase(); retenir(); calculerBientot(); });
+$("bloc-libre").addEventListener("input", (ev) => {
+  const t = ev.target;
+  if (t.dataset.baseCle) lireBase();
+  else if (t.dataset.el !== undefined) {
+    const e = libre.elements[t.dataset.el];
+    e[t.dataset.champ] = t.dataset.champ === "mode" ? t.value : nombre(t.value);
+    choisir(Number(t.dataset.el));
+  }
+});
+$("bloc-libre").addEventListener("change", (ev) => { if (ev.target.dataset.baseCle || ev.target.dataset.el !== undefined) retenir(); });
+$("bloc-libre").addEventListener("focusin", (ev) => { if (ev.target.dataset.el !== undefined) choisir(Number(ev.target.dataset.el)); });
+$("bloc-libre").addEventListener("click", (ev) => {
+  const b = ev.target.closest("button");
+  if (!b) return;
+  if (b.dataset.ajout) {
+    if (libre.elements.length >= 200) return;
+    libre.elements.push(EditeurLibre.nouvelElement(b.dataset.ajout, libre));
+    choisi = libre.elements.length - 1;
+  } else if (b.dataset.supprimer !== undefined) {
+    libre.elements.splice(Number(b.dataset.supprimer), 1);
+    choisi = Math.min(choisi, libre.elements.length - 1);
+  } else if (b.dataset.dupliquer !== undefined) {
+    const copie = structuredClone(libre.elements[b.dataset.dupliquer]);
+    const pas = Math.max(5, Math.round(Math.min(...EditeurLibre.dimensions(libre.base)) / 20));
+    copie.x = +(Number(copie.x) + pas).toFixed(1);
+    copie.y = +(Number(copie.y) - pas).toFixed(1);
+    libre.elements.push(copie);
+    choisi = libre.elements.length - 1;
+  } else if (b.id === "annuler") return revenir(-1);
+  else if (b.id === "refaire") return revenir(1);
+  else return;
+  afficherElements();
+  retenir();
+  calculerBientot();
+});
+document.addEventListener("keydown", (ev) => {
+  if (typePiece() !== "libre" || !(ev.ctrlKey || ev.metaKey) || ev.target.matches("input, textarea")) return;
+  const touche = ev.key.toLowerCase();
+  if (touche === "z" && !ev.shiftKey) revenir(-1);
+  else if (touche === "y" || (touche === "z" && ev.shiftKey)) revenir(1);
+  else return;
+  ev.preventDefault();
+});
+
+EditeurLibre.brancher($("schema"), {
+  actif: () => typePiece() === "libre" && !mode3d,
+  element: (i) => libre.elements[i],
+  choisir,
+  deplacer(i, x, y) {
+    // centre gardé dans l'encombrement de la plaque : un élément peut déborder (encoche), pas s'en détacher
+    const [W, H] = EditeurLibre.dimensions(libre.base);
+    x = Math.min(Math.max(x, 0), W);
+    y = Math.min(Math.max(y, 0), H);
+    const e = libre.elements[i];
+    e.x = x;
+    e.y = y;
+    const ix = $(`el-${i}-x`), iy = $(`el-${i}-y`);
+    if (ix) ix.value = x;
+    if (iy) iy.value = y;
+    calculerBientot();
+  },
+  fin: () => retenir(),
+});
+
+// ------------------------------------------------------------------ fichier DXF : lu par l'ERP, qui garde l'original
+function lireEnBase64(fichier) {
+  return new Promise((ok, echec) => {
+    const r = new FileReader();
+    r.onload = () => ok(String(r.result).split(",", 2)[1] || "");
+    r.onerror = () => echec(r.error);
+    r.readAsDataURL(fichier);
+  });
+}
+
+async function envoyerDxf(fichier) {
+  if (!fichier) return;
+  const etat = $("etat-dxf");
+  etat.className = "aide";
+  if (!/\.dxf$/i.test(fichier.name)) {
+    etat.className = "aide erreur";
+    etat.textContent = "Choisissez un fichier .dxf (exportez-le depuis votre logiciel de dessin).";
+    return;
+  }
+  if (fichier.size > DXF_MAX) {
+    etat.className = "aide erreur";
+    etat.textContent = "Fichier trop gros (1,5 Mo au plus) : envoyez-le avec une demande de devis.";
+    return;
+  }
+  etat.textContent = `Lecture de ${fichier.name}…`;
+  let contenu;
+  try {
+    contenu = await lireEnBase64(fichier);
+  } catch {
+    etat.className = "aide erreur";
+    etat.textContent = "Le fichier n'a pas pu être lu.";
+    return;
+  }
+  const { ok, corps } = await api("/api/dxf", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ nom: fichier.name, contenu }) });
+  if (!ok) {
+    etat.className = "aide erreur";
+    etat.textContent = corps.erreur || "Fichier refusé.";
+    return;
+  }
+  ficheDxf = corps;
+  etat.textContent = "";
+  afficherFicheDxf();
+  calculerBientot();
+}
+
+function afficherFicheDxf() {
+  const f = ficheDxf, infos = $("infos-dxf");
+  infos.hidden = !f;
+  if (!f) return infos.replaceChildren();
+  const lignes = [["Fichier", f.nom], ["Encombrement", `${mm(f.largeur_mm)} × ${mm(f.hauteur_mm)} mm`], ["Découpes intérieures", String((f.contour.trous || []).length)]];
+  if (f.avertissements && f.avertissements.length) lignes.push(["À vérifier", f.avertissements.join(" ")]);
+  infos.replaceChildren(...lignes.flatMap(([t, v]) => [el("dt", { texte: t }), el("dd", { texte: v })]));
+}
+
+$("fichier-dxf").addEventListener("change", (ev) => { envoyerDxf(ev.target.files[0]); ev.target.value = ""; });
+const depot = $("depot-dxf");
+depot.addEventListener("dragover", (ev) => { ev.preventDefault(); depot.classList.add("survol"); });
+depot.addEventListener("dragleave", () => depot.classList.remove("survol"));
+depot.addEventListener("drop", (ev) => {
+  ev.preventDefault();
+  depot.classList.remove("survol");
+  envoyerDxf(ev.dataTransfer.files[0]);
+});
+
 // ------------------------------------------------------------------ saisie
 document.querySelectorAll("input[name=type]").forEach((r) => r.addEventListener("change", () => {
   const type = typePiece();
   $("bloc-plane").hidden = type !== "plane";
   $("bloc-profil").hidden = type !== "profil";
   $("bloc-boite").hidden = type !== "boite";
+  $("bloc-libre").hidden = type !== "libre";
+  $("bloc-dxf").hidden = type !== "dxf";
   calculerBientot();
 }));
 $("forme").addEventListener("change", () => { majCotes(); calculerBientot(); });

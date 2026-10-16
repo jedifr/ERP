@@ -7,6 +7,7 @@
   <meta name="description" content="Configurez votre pièce en tôle découpée au laser ou au jet d'eau, pliée si besoin : prix immédiat.">
   <link rel="stylesheet" href="style.css">
   <script src="schemas.js" defer></script>
+  <script src="editeur.js" defer></script>
   <script src="app.js" defer></script>
 </head>
 <body>
@@ -27,6 +28,8 @@
           <label><input type="radio" name="type" value="plane" checked><span>Pièce plane</span></label>
           <label><input type="radio" name="type" value="profil"><span>Profil plié</span></label>
           <label><input type="radio" name="type" value="boite"><span>Boîte pliée</span></label>
+          <label><input type="radio" name="type" value="libre"><span>Forme libre</span></label>
+          <label><input type="radio" name="type" value="dxf"><span>Fichier DXF</span></label>
         </div>
       </fieldset>
 
@@ -62,6 +65,37 @@
             <div class="champ"><label for="angle-bords">Angle des bords (°)</label><input id="angle-bords" type="number" min="60" max="170" value="90" inputmode="decimal"></div>
           </div>
         </div>
+        <div id="bloc-libre" hidden>
+          <div class="grille-champs">
+            <div class="champ"><label for="libre-forme">Plaque de base</label>
+              <select id="libre-forme"><option value="rectangle">Rectangle</option><option value="disque">Disque</option></select></div>
+            <div class="champ" data-base="rectangle"><label for="libre-largeur">Largeur</label><input id="libre-largeur" data-base-cle="largeur" type="number" min="1" value="300" inputmode="decimal"></div>
+            <div class="champ" data-base="rectangle"><label for="libre-hauteur">Hauteur</label><input id="libre-hauteur" data-base-cle="hauteur" type="number" min="1" value="200" inputmode="decimal"></div>
+            <div class="champ" data-base="rectangle"><label for="libre-rayon">Rayon des angles</label><input id="libre-rayon" data-base-cle="rayon_angle" type="number" min="0" value="0" inputmode="decimal"></div>
+            <div class="champ" data-base="disque" hidden><label for="libre-diametre">Diamètre</label><input id="libre-diametre" data-base-cle="diametre" type="number" min="1" value="200" inputmode="decimal"></div>
+          </div>
+          <p class="aide">Ajoutez des découpes ou des formes à souder à la plaque, puis faites-les glisser sur le schéma. X et Y : centre de l'élément, depuis le coin bas gauche.</p>
+          <div class="barre-libre">
+            <span class="barre-titre">Ajouter :</span>
+            <button type="button" class="bouton-secondaire" data-ajout="rond">Trou rond</button>
+            <button type="button" class="bouton-secondaire" data-ajout="oblong">Oblong</button>
+            <button type="button" class="bouton-secondaire" data-ajout="rectangle">Rectangle</button>
+            <button type="button" class="bouton-secondaire" data-ajout="polygone">Polygone</button>
+            <span class="barre-espace"></span>
+            <button type="button" id="annuler" class="bouton-secondaire" title="Annuler (Ctrl+Z)" aria-label="Annuler">↶</button>
+            <button type="button" id="refaire" class="bouton-secondaire" title="Rétablir (Ctrl+Y)" aria-label="Rétablir">↷</button>
+          </div>
+          <ol id="elements" class="elements"></ol>
+        </div>
+        <div id="bloc-dxf" hidden>
+          <label class="depot" id="depot-dxf">
+            <input id="fichier-dxf" type="file" accept=".dxf">
+            <strong>Choisissez un fichier DXF</strong> ou déposez-le ici
+            <small>Une pièce par fichier, cotes en mm, 1,5 Mo au plus. Le DWG n'est pas lu en ligne.</small>
+          </label>
+          <p id="etat-dxf" class="aide" role="status"></p>
+          <dl id="infos-dxf" class="details" hidden></dl>
+        </div>
         </div>
         <figure class="cadre-schema">
           <div class="bascule-vue" role="group" aria-label="Affichage de la pièce">
@@ -94,7 +128,7 @@
         <dl id="details" class="details"></dl>
         <ul id="messages" class="messages"></ul>
         <button id="ajouter" class="bouton" type="button" disabled>Ajouter au panier</button>
-        <p class="aide">Prix hors taxes et hors frais de port. Fichier DXF, autre forme ou cotes normalisées : <a id="lien-devis" href="#form-demande">demandez un devis</a>.</p>
+        <p class="aide">Prix hors taxes et hors frais de port. Autre forme ou cotes normalisées : <a id="lien-devis" href="#form-demande">demandez un devis</a>.</p>
       </div>
     </aside>
 
