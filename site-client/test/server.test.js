@@ -110,3 +110,16 @@ test("relaie un fichier DXF jusqu'à 2 Mo en base64, refuse au-delà", async () 
   assert.equal(prix.status, 413);
   await fermer();
 });
+
+test("sert OpenCascade (STEP) : wasm typé, politique élargie pour son seul worker", async () => {
+  const { base, fermer } = await demarrer({});
+  const page = await fetch(`${base}/`);
+  assert.doesNotMatch(page.headers.get("content-security-policy"), /unsafe-eval/);
+  const wasm = await fetch(`${base}/vendor/occt-import-js.wasm`);
+  assert.equal(wasm.headers.get("content-type"), "application/wasm");
+  await wasm.arrayBuffer();
+  const worker = await fetch(`${base}/vendor/occt-worker.js`);
+  assert.match(worker.headers.get("content-security-policy"), /script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'/);
+  await worker.text();
+  await fermer();
+});
