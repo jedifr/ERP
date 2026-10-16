@@ -1,0 +1,642 @@
+{
+ "formes": [
+  {
+   "cle": "rectangle",
+   "libelle": "Rectangle",
+   "description": "Angles vifs, arrondis (rayon) ou chanfreinés.",
+   "groupe": "Formes simples",
+   "normalisee": false,
+   "parametres": [
+    {
+     "cle": "largeur",
+     "libelle": "Largeur (mm)",
+     "defaut": 200,
+     "minimum": 1,
+     "entier": false,
+     "aide": "",
+     "maximum": null,
+     "texte": false
+    },
+    {
+     "cle": "hauteur",
+     "libelle": "Hauteur (mm)",
+     "defaut": 100,
+     "minimum": 1,
+     "entier": false,
+     "aide": "",
+     "maximum": null,
+     "texte": false
+    },
+    {
+     "cle": "rayon_angle",
+     "libelle": "Rayon d'angle (mm)",
+     "defaut": 0,
+     "minimum": 0,
+     "entier": false,
+     "aide": "0 : angle vif",
+     "maximum": null,
+     "texte": false
+    },
+    {
+     "cle": "chanfrein",
+     "libelle": "Chanfrein d'angle (mm)",
+     "defaut": 0,
+     "minimum": 0,
+     "entier": false,
+     "aide": "0 : pas de chanfrein",
+     "maximum": null,
+     "texte": false
+    }
+   ]
+  },
+  {
+   "cle": "disque",
+   "libelle": "Disque",
+   "description": "Disque plein.",
+   "groupe": "Formes simples",
+   "normalisee": false,
+   "parametres": [
+    {
+     "cle": "diametre",
+     "libelle": "Diamètre (mm)",
+     "defaut": 100,
+     "minimum": 1,
+     "entier": false,
+     "aide": "",
+     "maximum": null,
+     "texte": false
+    }
+   ]
+  },
+  {
+   "cle": "anneau",
+   "libelle": "Anneau",
+   "description": "Disque percé au centre.",
+   "groupe": "Formes simples",
+   "normalisee": false,
+   "parametres": [
+    {
+     "cle": "diametre_ext",
+     "libelle": "Diamètre extérieur (mm)",
+     "defaut": 100,
+     "minimum": 1,
+     "entier": false,
+     "aide": "",
+     "maximum": null,
+     "texte": false
+    },
+    {
+     "cle": "diametre_int",
+     "libelle": "Diamètre intérieur (mm)",
+     "defaut": 50,
+     "minimum": 1,
+     "entier": false,
+     "aide": "",
+     "maximum": null,
+     "texte": false
+    }
+   ]
+  },
+  {
+   "cle": "oblong",
+   "libelle": "Oblong",
+   "description": "Deux demi-cercles reliés (forme de stade).",
+   "groupe": "Formes simples",
+   "normalisee": false,
+   "parametres": [
+    {
+     "cle": "longueur",
+     "libelle": "Longueur (mm)",
+     "defaut": 100,
+     "minimum": 1,
+     "entier": false,
+     "aide": "",
+     "maximum": null,
+     "texte": false
+    },
+    {
+     "cle": "largeur",
+     "libelle": "Largeur (mm)",
+     "defaut": 40,
+     "minimum": 1,
+     "entier": false,
+     "aide": "",
+     "maximum": null,
+     "texte": false
+    }
+   ]
+  },
+  {
+   "cle": "equerre",
+   "libelle": "Équerre en L",
+   "description": "Équerre à deux branches.",
+   "groupe": "Formes simples",
+   "normalisee": false,
+   "parametres": [
+    {
+     "cle": "largeur",
+     "libelle": "Largeur (mm)",
+     "defaut": 200,
+     "minimum": 1,
+     "entier": false,
+     "aide": "",
+     "maximum": null,
+     "texte": false
+    },
+    {
+     "cle": "hauteur",
+     "libelle": "Hauteur (mm)",
+     "defaut": 150,
+     "minimum": 1,
+     "entier": false,
+     "aide": "",
+     "maximum": null,
+     "texte": false
+    },
+    {
+     "cle": "epaisseur_horizontale",
+     "libelle": "Largeur de la branche horizontale (mm)",
+     "defaut": 40,
+     "minimum": 1,
+     "entier": false,
+     "aide": "",
+     "maximum": null,
+     "texte": false
+    },
+    {
+     "cle": "epaisseur_verticale",
+     "libelle": "Largeur de la branche verticale (mm)",
+     "defaut": 40,
+     "minimum": 1,
+     "entier": false,
+     "aide": "",
+     "maximum": null,
+     "texte": false
+    }
+   ]
+  },
+  {
+   "cle": "u",
+   "libelle": "U",
+   "description": "Fond et deux branches.",
+   "groupe": "Formes simples",
+   "normalisee": false,
+   "parametres": [
+    {
+     "cle": "largeur",
+     "libelle": "Largeur (mm)",
+     "defaut": 200,
+     "minimum": 1,
+     "entier": false,
+     "aide": "",
+     "maximum": null,
+     "texte": false
+    },
+    {
+     "cle": "hauteur",
+     "libelle": "Hauteur (mm)",
+     "defaut": 150,
+     "minimum": 1,
+     "entier": false,
+     "aide": "",
+     "maximum": null,
+     "texte": false
+    },
+    {
+     "cle": "epaisseur_fond",
+     "libelle": "Largeur du fond (mm)",
+     "defaut": 40,
+     "minimum": 1,
+     "entier": false,
+     "aide": "",
+     "maximum": null,
+     "texte": false
+    },
+    {
+     "cle": "epaisseur_branches",
+     "libelle": "Largeur des branches (mm)",
+     "defaut": 40,
+     "minimum": 1,
+     "entier": false,
+     "aide": "",
+     "maximum": null,
+     "texte": false
+    }
+   ]
+  },
+  {
+   "cle": "trapeze",
+   "libelle": "Trapèze",
+   "description": "Trapèze isocèle.",
+   "groupe": "Formes simples",
+   "normalisee": false,
+   "parametres": [
+    {
+     "cle": "base_grande",
+     "libelle": "Grande base (mm)",
+     "defaut": 200,
+     "minimum": 1,
+     "entier": false,
+     "aide": "",
+     "maximum": null,
+     "texte": false
+    },
+    {
+     "cle": "base_petite",
+     "libelle": "Petite base (mm)",
+     "defaut": 100,
+     "minimum": 0,
+     "entier": false,
+     "aide": "",
+     "maximum": null,
+     "texte": false
+    },
+    {
+     "cle": "hauteur",
+     "libelle": "Hauteur (mm)",
+     "defaut": 100,
+     "minimum": 1,
+     "entier": false,
+     "aide": "",
+     "maximum": null,
+     "texte": false
+    }
+   ]
+  },
+  {
+   "cle": "polygone",
+   "libelle": "Polygone régulier",
+   "description": "Polygone régulier, un sommet vers le haut.",
+   "groupe": "Formes simples",
+   "normalisee": false,
+   "parametres": [
+    {
+     "cle": "nb_cotes",
+     "libelle": "Nombre de côtés",
+     "defaut": 6,
+     "minimum": 3,
+     "entier": true,
+     "aide": "",
+     "maximum": 64,
+     "texte": false
+    },
+    {
+     "cle": "diametre",
+     "libelle": "Diamètre du cercle circonscrit (mm)",
+     "defaut": 100,
+     "minimum": 1,
+     "entier": false,
+     "aide": "",
+     "maximum": null,
+     "texte": false
+    }
+   ]
+  },
+  {
+   "cle": "platine_grille",
+   "libelle": "Platine, perçages en grille",
+   "description": "Plaque rectangulaire avec une grille de trous centrée.",
+   "groupe": "Platines et brides",
+   "normalisee": false,
+   "parametres": [
+    {
+     "cle": "largeur",
+     "libelle": "Largeur (mm)",
+     "defaut": 200,
+     "minimum": 1,
+     "entier": false,
+     "aide": "",
+     "maximum": null,
+     "texte": false
+    },
+    {
+     "cle": "hauteur",
+     "libelle": "Hauteur (mm)",
+     "defaut": 150,
+     "minimum": 1,
+     "entier": false,
+     "aide": "",
+     "maximum": null,
+     "texte": false
+    },
+    {
+     "cle": "rayon_angle",
+     "libelle": "Rayon d'angle (mm)",
+     "defaut": 0,
+     "minimum": 0,
+     "entier": false,
+     "aide": "",
+     "maximum": null,
+     "texte": false
+    },
+    {
+     "cle": "nb_x",
+     "libelle": "Nombre de trous en largeur",
+     "defaut": 2,
+     "minimum": 1,
+     "entier": true,
+     "aide": "",
+     "maximum": null,
+     "texte": false
+    },
+    {
+     "cle": "nb_y",
+     "libelle": "Nombre de trous en hauteur",
+     "defaut": 2,
+     "minimum": 1,
+     "entier": true,
+     "aide": "",
+     "maximum": null,
+     "texte": false
+    },
+    {
+     "cle": "pas_x",
+     "libelle": "Entraxe en largeur (mm)",
+     "defaut": 150,
+     "minimum": 0,
+     "entier": false,
+     "aide": "",
+     "maximum": null,
+     "texte": false
+    },
+    {
+     "cle": "pas_y",
+     "libelle": "Entraxe en hauteur (mm)",
+     "defaut": 100,
+     "minimum": 0,
+     "entier": false,
+     "aide": "",
+     "maximum": null,
+     "texte": false
+    },
+    {
+     "cle": "diametre_trou",
+     "libelle": "Diamètre des trous (mm)",
+     "defaut": 13,
+     "minimum": 1,
+     "entier": false,
+     "aide": "",
+     "maximum": null,
+     "texte": false
+    }
+   ]
+  },
+  {
+   "cle": "platine_cercle",
+   "libelle": "Platine, perçages sur un cercle",
+   "description": "Plaque rectangulaire avec des trous régulièrement répartis sur un cercle centré.",
+   "groupe": "Platines et brides",
+   "normalisee": false,
+   "parametres": [
+    {
+     "cle": "largeur",
+     "libelle": "Largeur (mm)",
+     "defaut": 200,
+     "minimum": 1,
+     "entier": false,
+     "aide": "",
+     "maximum": null,
+     "texte": false
+    },
+    {
+     "cle": "hauteur",
+     "libelle": "Hauteur (mm)",
+     "defaut": 200,
+     "minimum": 1,
+     "entier": false,
+     "aide": "",
+     "maximum": null,
+     "texte": false
+    },
+    {
+     "cle": "rayon_angle",
+     "libelle": "Rayon d'angle (mm)",
+     "defaut": 0,
+     "minimum": 0,
+     "entier": false,
+     "aide": "",
+     "maximum": null,
+     "texte": false
+    },
+    {
+     "cle": "nb_trous",
+     "libelle": "Nombre de trous",
+     "defaut": 4,
+     "minimum": 1,
+     "entier": true,
+     "aide": "",
+     "maximum": null,
+     "texte": false
+    },
+    {
+     "cle": "diametre_cercle",
+     "libelle": "Diamètre du cercle de perçage (mm)",
+     "defaut": 120,
+     "minimum": 1,
+     "entier": false,
+     "aide": "",
+     "maximum": null,
+     "texte": false
+    },
+    {
+     "cle": "diametre_trou",
+     "libelle": "Diamètre des trous (mm)",
+     "defaut": 13,
+     "minimum": 1,
+     "entier": false,
+     "aide": "",
+     "maximum": null,
+     "texte": false
+    },
+    {
+     "cle": "angle_depart",
+     "libelle": "Angle du premier trou (°)",
+     "defaut": 45,
+     "minimum": -360,
+     "entier": false,
+     "aide": "",
+     "maximum": 360,
+     "texte": false
+    }
+   ]
+  },
+  {
+   "cle": "bride",
+   "libelle": "Bride (cotes libres)",
+   "description": "Disque avec alésage central et cercle de perçage.",
+   "groupe": "Platines et brides",
+   "normalisee": false,
+   "parametres": [
+    {
+     "cle": "diametre_ext",
+     "libelle": "Diamètre extérieur (mm)",
+     "defaut": 165,
+     "minimum": 1,
+     "entier": false,
+     "aide": "",
+     "maximum": null,
+     "texte": false
+    },
+    {
+     "cle": "alesage",
+     "libelle": "Alésage (mm)",
+     "defaut": 61,
+     "minimum": 0,
+     "entier": false,
+     "aide": "0 : bride pleine",
+     "maximum": null,
+     "texte": false
+    },
+    {
+     "cle": "diametre_percage",
+     "libelle": "Diamètre du cercle de perçage (mm)",
+     "defaut": 125,
+     "minimum": 1,
+     "entier": false,
+     "aide": "",
+     "maximum": null,
+     "texte": false
+    },
+    {
+     "cle": "nb_trous",
+     "libelle": "Nombre de trous",
+     "defaut": 4,
+     "minimum": 0,
+     "entier": true,
+     "aide": "",
+     "maximum": null,
+     "texte": false
+    },
+    {
+     "cle": "diametre_trou",
+     "libelle": "Diamètre des trous (mm)",
+     "defaut": 18,
+     "minimum": 1,
+     "entier": false,
+     "aide": "",
+     "maximum": null,
+     "texte": false
+    },
+    {
+     "cle": "angle_depart",
+     "libelle": "Angle du premier trou (°)",
+     "defaut": 0,
+     "minimum": -360,
+     "entier": false,
+     "aide": "",
+     "maximum": 360,
+     "texte": false
+    }
+   ]
+  },
+  {
+   "cle": "flasque",
+   "libelle": "Flasque",
+   "description": "Disque avec alésage central et jusqu'à deux cercles de perçage.",
+   "groupe": "Platines et brides",
+   "normalisee": false,
+   "parametres": [
+    {
+     "cle": "diametre",
+     "libelle": "Diamètre (mm)",
+     "defaut": 300,
+     "minimum": 1,
+     "entier": false,
+     "aide": "",
+     "maximum": null,
+     "texte": false
+    },
+    {
+     "cle": "alesage",
+     "libelle": "Alésage central (mm)",
+     "defaut": 80,
+     "minimum": 0,
+     "entier": false,
+     "aide": "0 : pas d'alésage",
+     "maximum": null,
+     "texte": false
+    },
+    {
+     "cle": "nb_trous_1",
+     "libelle": "Cercle 1 : nombre de trous",
+     "defaut": 8,
+     "minimum": 0,
+     "entier": true,
+     "aide": "",
+     "maximum": null,
+     "texte": false
+    },
+    {
+     "cle": "cercle_1",
+     "libelle": "Cercle 1 : diamètre de perçage (mm)",
+     "defaut": 240,
+     "minimum": 1,
+     "entier": false,
+     "aide": "",
+     "maximum": null,
+     "texte": false
+    },
+    {
+     "cle": "diametre_trou_1",
+     "libelle": "Cercle 1 : diamètre des trous (mm)",
+     "defaut": 14,
+     "minimum": 1,
+     "entier": false,
+     "aide": "",
+     "maximum": null,
+     "texte": false
+    },
+    {
+     "cle": "angle_depart_1",
+     "libelle": "Cercle 1 : angle du premier trou (°)",
+     "defaut": 0,
+     "minimum": -360,
+     "entier": false,
+     "aide": "",
+     "maximum": 360,
+     "texte": false
+    },
+    {
+     "cle": "nb_trous_2",
+     "libelle": "Cercle 2 : nombre de trous",
+     "defaut": 0,
+     "minimum": 0,
+     "entier": true,
+     "aide": "0 : pas de second cercle",
+     "maximum": null,
+     "texte": false
+    },
+    {
+     "cle": "cercle_2",
+     "libelle": "Cercle 2 : diamètre de perçage (mm)",
+     "defaut": 140,
+     "minimum": 1,
+     "entier": false,
+     "aide": "",
+     "maximum": null,
+     "texte": false
+    },
+    {
+     "cle": "diametre_trou_2",
+     "libelle": "Cercle 2 : diamètre des trous (mm)",
+     "defaut": 10,
+     "minimum": 1,
+     "entier": false,
+     "aide": "",
+     "maximum": null,
+     "texte": false
+    },
+    {
+     "cle": "angle_depart_2",
+     "libelle": "Cercle 2 : angle du premier trou (°)",
+     "defaut": 0,
+     "minimum": -360,
+     "entier": false,
+     "aide": "",
+     "maximum": 360,
+     "texte": false
+    }
+   ]
+  }
+ ]
+}

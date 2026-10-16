@@ -96,9 +96,10 @@ function majEpaisseurs() {
 function majCotes() {
   const f = catalogue.formes.find((x) => x.cle === $("forme").value);
   $("desc-forme").textContent = f ? f.description : "";
+  const lettres = f ? Schemas.lettres(f.parametres) : {};
   $("cotes").replaceChildren(...(f ? f.parametres : []).map((p) =>
     el("div", { class: "champ" },
-      el("label", { for: `cote-${p.cle}`, texte: p.libelle }),
+      el("label", { for: `cote-${p.cle}` }, ...(lettres[p.cle] ? [el("span", { class: "lettre", texte: lettres[p.cle] }), " "] : []), p.libelle),
       el("input", { id: `cote-${p.cle}`, "data-cle": p.cle, type: "number", inputmode: "decimal", value: p.defaut, min: p.minimum, max: p.maximum, step: p.entier ? 1 : "any", title: p.aide || false }),
     )));
 }
@@ -107,7 +108,7 @@ function dessinerProfil() {
   const lignes = [];
   profil.faces.forEach((f, i) => {
     lignes.push(el("div", { class: "champ" },
-      el("label", { for: `face-${i}`, texte: `Face ${String.fromCharCode(65 + i)}` }),
+      el("label", { for: `face-${i}` }, el("span", { class: "lettre", texte: String.fromCharCode(65 + i) }), " Face"),
       el("input", { id: `face-${i}`, "data-face": i, type: "number", min: 1, inputmode: "decimal", value: f })));
     if (i < profil.angles.length) {
       const a = profil.angles[i];
@@ -129,6 +130,21 @@ function lireProfil() {
     const sens = Number(document.querySelector(`[data-sens="${i.dataset.angle}"]`).value);
     profil.angles[i.dataset.angle] = Number(i.value) * sens;
   });
+}
+
+// ------------------------------------------------------------------ schéma coté (immédiat, sans attendre le prix)
+function dessinerSchema() {
+  if (!catalogue) return;
+  const d = demandeCourante();
+  let dessin = null;
+  if (!d.pliage) dessin = Schemas.plane(catalogue.formes.find((x) => x.cle === d.forme), d.cotes);
+  else if (d.pliage.forme === "profil") dessin = Schemas.profil(d.pliage.faces, d.pliage.angles, d.pliage.longueur);
+  else dessin = Schemas.boite(d.pliage.longueur, d.pliage.largeur, d.pliage.bords);
+  const svg = $("schema");
+  $("note-schema").textContent = (dessin && dessin.note) || "Les lettres du schéma repèrent les cotes à saisir.";
+  if (!dessin) return svg.replaceChildren();
+  svg.setAttribute("viewBox", dessin.viewBox);
+  svg.innerHTML = dessin.contenu;
 }
 
 // ------------------------------------------------------------------ demande de prix
@@ -154,6 +170,7 @@ function demandeCourante() {
 }
 
 function calculerBientot() {
+  dessinerSchema();
   clearTimeout(minuterie);
   $("etat").textContent = "Calcul en cours…";
   $("etat").className = "etat";
