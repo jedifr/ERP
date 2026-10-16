@@ -222,22 +222,12 @@ def _piece_step(r, fiche, matiere, epaisseur, echelle):
     return contour, resultat
 
 
-def chiffrer(matiere_nom, epaisseur, quantite, forme=None, cotes=None, pliage=None, libre=None, dxf=None, echelle=None,
-             bibliotheque=None, aujourdhui=None):
-    """Prix instantané. `forme` + `cotes` : pièce plane de la bibliothèque. `pliage` : {"forme": "profil", "faces": [...],
-    "angles": [...], "longueur": L} ou {"forme": "boite", "longueur": L, "largeur": l, "bords": [A, B, C, D], "angles": [...]}.
-    `libre` : recette d'une pièce libre (web.services.libre). `dxf` : jeton d'un fichier déposé (web.services.dxf),
-    agrandi ou réduit par `echelle` (1 = taille du fichier). `bibliotheque` : {"cle": forme décorative, "largeur": mm}
-    (web.services.bibliotheque), refusée en dessous de sa largeur mini à cette épaisseur.
-    Lève ErreurPrixWeb pour une demande mal formée ; une pièce infaisable donne un résultat « refus »."""
-    from chiffrage.moteur import ChiffrageError, cout_etape_gamme
-    from chiffrage.reglage import minutes_mise_en_place
-    from decoupe.models import Plieuse
+def _preparer(matiere_nom, epaisseur, quantite, forme=None, cotes=None, pliage=None, libre=None, dxf=None, echelle=None, bibliotheque=None):
+    """Pièce à chiffrer, avant matière et coûts : (résultat, contexte), contexte None si la pièce est déjà refusée.
+    Voir `chiffrer` pour les arguments."""
     from decoupe.services import formes
-    from decoupe.services.matiere import ErreurMatiere, cout_matiere_imbrication
     from decoupe.services.pliage import ErreurPliage, calculer_boite, calculer_pliage
     from decoupe.services.temps import ErreurTemps, estimer_temps_decoupe
-    from technique.models import Gamme
 
     from web.models import ReglageWeb
 
@@ -245,7 +235,6 @@ def chiffrer(matiere_nom, epaisseur, quantite, forme=None, cotes=None, pliage=No
     from .dxf import ErreurDxf, charger
     from .libre import ErreurLibre, construire as construire_libre
 
-    aujourdhui = aujourdhui or datetime.date.today()
     reglage = ReglageWeb.charger()
     try:
         quantite, epaisseur = int(quantite), float(epaisseur)
@@ -261,7 +250,7 @@ def chiffrer(matiere_nom, epaisseur, quantite, forme=None, cotes=None, pliage=No
                 minimum_commande_ht=reglage.minimum_commande_ht)
     if quantite > reglage.quantite_max:
         r.refus.append(f"Au-delà de {reglage.quantite_max} pièces, demandez un devis.")
-        return r.finaliser()
+        return r.finaliser(), None
 
     # Contour à découper : forme plane, ou flan de la pièce pliée.
     resultat_pliage = None
@@ -278,7 +267,7 @@ def chiffrer(matiere_nom, epaisseur, quantite, forme=None, cotes=None, pliage=No
             if float(bibliotheque["largeur"]) < mini:
                 r.refus.append(f"En {epaisseur:g} mm, cette forme se découpe à partir de {mini} mm de large : "
                                "aucun trait ni jour ne doit être plus fin que l'épaisseur de la tôle.")
-                return r.finaliser()
+                return r.finaliser(), None
         elif dxf and charger(dxf).get("format") == "step":
             contour_libre, resultat_pliage = _piece_step(r, charger(dxf), matiere, epaisseur, echelle)
         elif dxf:
@@ -320,14 +309,14 @@ def chiffrer(matiere_nom, epaisseur, quantite, forme=None, cotes=None, pliage=No
         raise ErreurPrixWeb(str(exc))
     except ErreurPliage as exc:
         r.refus.append(str(exc))
-        return r.finaliser()
+        return r.finaliser(), None
 
     if resultat_pliage is not None:
         r.pliage = resultat_pliage.en_dict()
         r.refus += resultat_pliage.refus
         r.validations += resultat_pliage.validations
         if resultat_pliage.statut == "refus":
-            return r.finaliser()
+            return r.finaliser(), None
     if contour_libre is not None:
         exterieur, trous = contour_libre["exterieur"], contour_libre["trous"]
     elif resultat_pliage is not None:
@@ -351,8 +340,32 @@ def chiffrer(matiere_nom, epaisseur, quantite, forme=None, cotes=None, pliage=No
         temps = estimer_temps_decoupe(piece)
     except ErreurTemps as exc:
         r.refus.append(str(exc))
-        return r.finaliser()
+        return r.finaliser(), None
     r.notes += temps.avertissements
+    return r, {"piece": piece, "temps": temps, "toles": toles, "matiere": matiere, "quantite": quantite, "reglage": reglage,
+               "pliage": resultat_pliage}
+
+
+def chiffrer(matiere_nom, epaisseur, quantite, forme=None, cotes=None, pliage=None, libre=None, dxf=None, echelle=None,
+             bibliotheque=None, aujourdhui=None):
+    """Prix instantané. `forme` + `cotes` : pièce plane de la bibliothèque. `pliage` : {"forme": "profil", "faces": [...],
+    "angles": [...], "longueur": L} ou {"forme": "boite", "longueur": L, "largeur": l, "bords": [A, B, C, D], "angles": [...]}.
+    `libre` : recette d'une pièce libre (web.services.libre). `dxf` : jeton d'un fichier déposé (web.services.dxf),
+    agrandi ou réduit par `echelle` (1 = taille du fichier). `bibliotheque` : {"cle": forme décorative, "largeur": mm}
+    (web.services.bibliotheque), refusée en dessous de sa largeur mini à cette épaisseur.
+    Lève ErreurPrixWeb pour une demande mal formée ; une pièce infaisable donne un résultat « refus »."""
+    from chiffrage.moteur import ChiffrageError, cout_etape_gamme
+    from chiffrage.reglage import minutes_mise_en_place
+    from decoupe.models import Plieuse
+    from decoupe.services.matiere import ErreurMatiere, cout_matiere_imbrication
+    from technique.models import Gamme
+
+    aujourdhui = aujourdhui or datetime.date.today()
+    r, ctx = _preparer(matiere_nom, epaisseur, quantite, forme=forme, cotes=cotes, pliage=pliage, libre=libre, dxf=dxf, echelle=echelle,
+                       bibliotheque=bibliotheque)
+    if ctx is None:
+        return r
+    piece, temps, toles, quantite, reglage, resultat_pliage = (ctx[k] for k in ("piece", "temps", "toles", "quantite", "reglage", "pliage"))
     parametre = temps.parametre
 
     # Matière : le format le moins cher parmi les tôles vendues en ligne de cette matière et de cette épaisseur.
@@ -397,3 +410,190 @@ def chiffrer(matiere_nom, epaisseur, quantite, forme=None, cotes=None, pliage=No
     r.prix_total_ttc = ttc(r.prix_total_ht, r.taux_tva)
     r.prix_unitaire_ttc = ttc(r.prix_unitaire_ht, r.taux_tva)
     return r.finaliser()
+
+
+@dataclass
+class PrixJeu:
+    """Prix d'un jeu de pièces découpées ensemble dans la même tôle (un dessin vectorisé en plusieurs pièces) : une seule
+    imbrication, le temps de coupe cumulé et une seule mise en place par tôle. `pieces` : le résultat de chaque pièce, avec
+    sa part du prix du jeu (ou {"erreur"} pour une demande mal formée)."""
+    statut: str = "ok"
+    refus: list = field(default_factory=list)
+    validations: list = field(default_factory=list)
+    notes: list = field(default_factory=list)
+    pieces: list = field(default_factory=list)
+    matiere: str = ""
+    epaisseur_mm: float = None
+    procede: str = ""
+    quantite: int = 0
+    poids_kg: float = None
+    nb_feuilles: int = None
+    format_tole: str = ""
+    taux_utilisation_pct: float = None
+    cout_matiere: Decimal = None
+    cout_decoupe: Decimal = None
+    cout_pliage: Decimal = None
+    cout_revient: Decimal = None
+    taux_marge_pct: Decimal = None
+    prix_total_ht: Decimal = None
+    prix_unitaire_ht: Decimal = None
+    taux_tva: Decimal = None
+    prix_total_ttc: Decimal = None
+    prix_unitaire_ttc: Decimal = None
+    minimum_commande_ht: Decimal = None
+
+    def finaliser(self):
+        for i, p in enumerate(self.pieces, start=1):
+            if isinstance(p, dict):
+                self.refus.append(f"Pièce {i} : {p['erreur']}")
+            else:
+                self.refus += [f"Pièce {i} : {m}" for m in p.refus]
+                self.validations += [f"Pièce {i} : {m}" for m in p.validations]
+        self.statut = "refus" if self.refus else "validation" if self.validations else "ok"
+        if self.refus:
+            self.prix_total_ht = self.prix_unitaire_ht = self.prix_total_ttc = self.prix_unitaire_ttc = None
+            for p in self.pieces:
+                if not isinstance(p, dict):
+                    p.prix_total_ht = p.prix_unitaire_ht = p.prix_total_ttc = p.prix_unitaire_ttc = None
+        return self
+
+    def en_dict_public(self):
+        d = {k: (float(v) if isinstance(v, Decimal) else v) for k, v in self.__dict__.items() if k in PUBLIC_JEU}
+        d["pieces"] = [p if isinstance(p, dict) else p.en_dict_public() for p in self.pieces]
+        return d
+
+
+PUBLIC_JEU = ("statut", "refus", "validations", "matiere", "epaisseur_mm", "procede", "quantite", "poids_kg", "nb_feuilles",
+              "taux_utilisation_pct", "prix_total_ht", "prix_unitaire_ht", "taux_tva", "prix_total_ttc", "prix_unitaire_ttc",
+              "minimum_commande_ht")
+
+
+def _matiere_jeu(pieces, quantite, tole):
+    """Coût matière de `quantite` jeux : toutes les pièces imbriquées ensemble dans le format de la tôle, même calcul que
+    decoupe.services.matiere.cout_matiere_imbrication (dernière feuille comptée jusqu'à la bande entamée)."""
+    from decoupe.services.imbrication import ItemANester, etendue_derniere_feuille_mm, imbriquer_meilleur
+    from decoupe.services.matiere import ErreurMatiere, espacement_pieces_mm, prix_au_mm2
+
+    f = tole.format_tole
+    marge = max(p.marge_bord_mm for p in pieces)
+    items = [ItemANester(piece_id=i, largeur_mm=p.largeur_mm, hauteur_mm=p.hauteur_mm, surface_mm2=p.surface_mm2, quantite=quantite,
+                         pas_rotation_deg=p.pas_rotation_deg, symetrie_autorisee=p.symetrie_autorisee,
+                         exterieur=p.contour_json["exterieur"], trous=p.contour_json["trous"])
+             for i, p in enumerate(pieces, start=1)]
+    resultat = imbriquer_meilleur(items, f.largeur_mm, f.longueur_mm, marge_bord_mm=marge,
+                                  espacement_pieces_mm=max(espacement_pieces_mm(p) for p in pieces))
+    if resultat.pieces_non_placees:
+        raise ErreurMatiere(f"Une pièce est trop grande pour la tôle {f} (marges de bord comprises).")
+    surface_feuille = f.largeur_mm * f.longueur_mm
+    etendue = min(etendue_derniere_feuille_mm(resultat, marge), f.longueur_mm)
+    consommee = min(max(resultat.nb_feuilles - 1, 0) * surface_feuille + f.largeur_mm * etendue, resultat.nb_feuilles * surface_feuille)
+    chutes = max(consommee - resultat.surface_pieces_mm2, 0.0)
+    facturee = resultat.surface_pieces_mm2 + chutes * float(D(1) - D(pieces[0].taux_chute_recuperable) / 100)
+    return resultat, arrondir(D(facturee) * prix_au_mm2(tole, f.largeur_mm, f.longueur_mm))
+
+
+def chiffrer_jeu(demandes, aujourdhui=None):
+    """Prix d'un jeu de pièces de la même tôle (même matière, épaisseur et quantité de jeux), découpées ensemble : mini
+    imbrication de toutes les pièces dans chaque format vendu en ligne (le moins cher est retenu), temps de coupe cumulé,
+    mise en place comptée une fois par tôle. Le prix du jeu est réparti sur les pièces (matière au prorata de la surface,
+    découpe au prorata du temps de coupe) ; la somme des parts vaut le prix du jeu.
+    Lève ErreurPrixWeb si le jeu est mal formé ; une pièce mal formée ou infaisable met le jeu en « refus »."""
+    from chiffrage.moteur import ChiffrageError, cout_etape_gamme
+    from chiffrage.reglage import minutes_mise_en_place
+    from decoupe.models import Plieuse
+    from decoupe.services.matiere import ErreurMatiere
+    from technique.models import Gamme
+
+    aujourdhui = aujourdhui or datetime.date.today()
+    if not demandes:
+        raise ErreurPrixWeb("Le jeu ne contient aucune pièce.")
+    communs = {(str(d.get("matiere")), str(d.get("epaisseur")), str(d.get("quantite"))) for d in demandes}
+    if len(communs) > 1:
+        raise ErreurPrixWeb("Les pièces d'un même jeu partagent la matière, l'épaisseur et la quantité.")
+    j = PrixJeu()
+    contextes = []
+    for d in demandes:
+        try:
+            r, ctx = _preparer(d.get("matiere"), d.get("epaisseur"), d.get("quantite"), forme=d.get("forme"), cotes=d.get("cotes"),
+                               pliage=d.get("pliage"), libre=d.get("libre"), dxf=d.get("dxf"), echelle=d.get("echelle"),
+                               bibliotheque=d.get("bibliotheque"))
+        except ErreurPrixWeb as exc:
+            j.pieces.append({"erreur": str(exc)})
+            continue
+        j.pieces.append(r)
+        contextes.append(ctx)
+        j.matiere, j.epaisseur_mm, j.quantite = r.matiere, r.epaisseur_mm, r.quantite
+        j.taux_marge_pct, j.minimum_commande_ht = r.taux_marge_pct, r.minimum_commande_ht
+    if len(contextes) < len(j.pieces) or any(c is None for c in contextes):
+        return j.finaliser()
+
+    pieces = [c["piece"] for c in contextes]
+    quantite, toles = contextes[0]["quantite"], contextes[0]["toles"]
+    j.procede = pieces[0].procede
+    j.poids_kg = round(sum(p.poids_kg for p in j.pieces), 3)
+
+    meilleur, erreurs = None, []
+    for tole in toles:
+        try:
+            resultat, cout = _matiere_jeu(pieces, quantite, tole)
+        except ErreurMatiere as exc:
+            erreurs.append(str(exc))
+            continue
+        if meilleur is None or cout < meilleur[2]:
+            meilleur = (tole, resultat, cout)
+    if meilleur is None:
+        j.refus.append(erreurs[0] if erreurs else "Aucune tôle ne convient.")
+        return j.finaliser()
+    tole, resultat, j.cout_matiere = meilleur
+    j.nb_feuilles, j.format_tole, j.taux_utilisation_pct = resultat.nb_feuilles, str(tole.format_tole), resultat.taux_utilisation_pct
+
+    temps = [c["temps"] for c in contextes]
+    parametre = temps[0].parametre
+    couts_pliage = []
+    try:
+        if parametre.poste_id is None:
+            raise ChiffrageError(f"Le paramètre de coupe « {parametre} » n'a pas de poste de travail.")
+        decoupe = Gamme(poste=parametre.poste, temps_fixe=resultat.nb_feuilles * minutes_mise_en_place(parametre),
+                        temps_variable=sum(t.total_min for t in temps))
+        j.cout_decoupe = cout_etape_gamme(decoupe, quantite, aujourdhui)
+        for c in contextes:
+            pli = c["pliage"]
+            if pli is None:
+                couts_pliage.append(D(0))
+                continue
+            plieuse = Plieuse.objects.select_related("poste").get(pk=pli.plieuse_id)
+            if plieuse.poste is None:
+                raise ChiffrageError(f"La plieuse « {plieuse} » n'a pas de poste de travail.")
+            etape = Gamme(poste=plieuse.poste, temps_fixe=pli.temps_reglage_min, temps_variable=pli.temps_pli_min, origine="pliage")
+            couts_pliage.append(cout_etape_gamme(etape, quantite, aujourdhui))
+    except ChiffrageError as exc:
+        j.refus.append("Prix indisponible en ligne pour ce jeu de pièces : demandez un devis.")
+        j.notes.append(f"Paramétrage incomplet : {exc}")
+        return j.finaliser()
+    j.cout_pliage = sum(couts_pliage, D(0))
+
+    coef = 1 + D(j.taux_marge_pct) / 100
+    j.cout_revient = arrondir(j.cout_matiere + j.cout_decoupe + j.cout_pliage)
+    j.prix_total_ht = arrondir(j.cout_revient * coef)
+    j.prix_unitaire_ht = arrondir(j.prix_total_ht / quantite)
+    j.taux_tva = taux_tva()
+    j.prix_total_ttc, j.prix_unitaire_ttc = ttc(j.prix_total_ht, j.taux_tva), ttc(j.prix_unitaire_ht, j.taux_tva)
+
+    # Part de chaque pièce : matière au prorata de la surface, découpe au prorata du temps ; l'arrondi va à la plus grande.
+    surface = sum(p.surface_mm2 for p in pieces) or 1
+    minutes = sum(t.total_min for t in temps) or 1
+    for r, p, t, pli in zip(j.pieces, pieces, temps, couts_pliage):
+        r.nb_feuilles, r.format_tole = j.nb_feuilles, j.format_tole
+        r.cout_matiere = arrondir(j.cout_matiere * D(p.surface_mm2 / surface))
+        r.cout_decoupe = arrondir(j.cout_decoupe * D(t.total_min / minutes))
+        r.cout_pliage = pli
+        r.cout_revient = arrondir(r.cout_matiere + r.cout_decoupe + r.cout_pliage)
+        r.prix_total_ht = arrondir(r.cout_revient * coef)
+    plus_grande = max(range(len(pieces)), key=lambda i: pieces[i].surface_mm2)
+    j.pieces[plus_grande].prix_total_ht += j.prix_total_ht - sum(r.prix_total_ht for r in j.pieces)
+    for r in j.pieces:
+        r.prix_unitaire_ht = arrondir(r.prix_total_ht / quantite)
+        r.taux_tva = j.taux_tva
+        r.prix_total_ttc, r.prix_unitaire_ttc = ttc(r.prix_total_ht, r.taux_tva), ttc(r.prix_unitaire_ht, r.taux_tva)
+        r.finaliser()
+    return j.finaliser()
