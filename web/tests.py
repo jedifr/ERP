@@ -93,6 +93,11 @@ class PrixWebTests(ConfigurateurBase):
             with self.assertRaises(ErreurPrixWeb, msg=(args, kw)):
                 chiffrer(*args, **kw)
 
+    def test_messages_du_profil(self):
+        for faces, angles, message in (([50], [90], "1 face saisie"), ([50, 50, 50], [90], "3 faces demandent 2 angle(s), 1 saisi(s)"), ([50, 50], [180], "entre 0 et 180°")):
+            with self.assertRaisesMessage(ErreurPrixWeb, message):
+                chiffrer("S235-W", 2, 1, pliage={"forme": "profil", "faces": faces, "angles": angles, "longueur": 50})
+
     def test_catalogue(self):
         c = catalogue()
         self.assertEqual(c["matieres"], [{"matiere": "S235-W", "famille": "Acier", "epaisseurs": [2.0]}])

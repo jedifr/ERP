@@ -3,17 +3,17 @@
 {% block extrastyle %}{{ block.super }}
 <style>
   .cfg { display: grid; grid-template-columns: minmax(280px, 460px) 1fr; gap: 2rem; align-items: start; }
-  .cfg form { display: grid; grid-template-columns: 11rem 1fr; gap: .5rem 1rem; align-items: center; }
+  .cfg form { display: grid; grid-template-columns: 14rem 1fr; gap: .5rem 1rem; align-items: center; }
   .cfg form label { font-size: .875rem; }
-  .cfg form input, .cfg form select { width: 100%; padding: .35rem .5rem; border: 1px solid rgb(var(--color-base-300)); border-radius: .375rem; background: transparent; }
+  .cfg form input, .cfg form select { width: 100%; padding: .35rem .5rem; border: 1px solid var(--color-base-300); border-radius: .375rem; background: transparent; }
   .cfg .groupe { display: contents; }
   .cfg .groupe[hidden] { display: none; }
-  .cfg button { grid-column: 2; justify-self: start; padding: .45rem 1rem; border-radius: .375rem; background: rgb(var(--color-primary-600)); color: #fff; }
+  .cfg button { grid-column: 2; justify-self: start; padding: .45rem 1rem; border-radius: .375rem; background: var(--color-primary-600); color: #fff; }
   .cfg table th { text-align: left; padding-right: 1.5rem; font-weight: 500; }
   .cfg .statut-ok { color: rgb(22 163 74); } .cfg .statut-validation { color: rgb(217 119 6); } .cfg .statut-refus { color: rgb(220 38 38); }
   .cfg .prix { font-size: 1.75rem; font-weight: 600; margin: .5rem 0 1rem; }
   .cfg svg { max-width: 100%; height: 260px; margin-top: 1rem; }
-  .cfg svg path { fill: rgb(var(--color-primary-100)); stroke: rgb(var(--color-primary-700)); vector-effect: non-scaling-stroke; fill-rule: evenodd; }
+  .cfg svg path { fill: var(--color-primary-100); stroke: var(--color-primary-700); vector-effect: non-scaling-stroke; fill-rule: evenodd; }
   @media (max-width: 900px) { .cfg { grid-template-columns: 1fr; } }
 </style>
 {% endblock %}
@@ -51,8 +51,8 @@
     </div>
     <div class="groupe" data-type="profil">
       <label for="longueur_pli">Longueur de pli (mm)</label><input id="longueur_pli" name="longueur_pli" value="{{ saisie.longueur_pli }}">
-      <label for="faces">Faces (mm)</label><input id="faces" name="faces" placeholder="50 ; 100" value="{{ saisie.faces }}">
-      <label for="angles">Angles (°)</label><input id="angles" name="angles" placeholder="90" value="{{ saisie.angles }}">
+      <label for="faces">Faces (mm), séparées par ;</label><input id="faces" name="faces" placeholder="50 ; 100 (cornière)" value="{{ saisie.faces }}">
+      <label for="angles">Angles (°), un de moins que de faces</label><input id="angles" name="angles" placeholder="90 (cornière), 90 ; 90 (U)" value="{{ saisie.angles }}">
     </div>
     <div class="groupe" data-type="boite">
       <label for="longueur_fond">Longueur du fond (mm)</label><input id="longueur_fond" name="longueur_fond" value="{{ saisie.longueur_fond }}">
