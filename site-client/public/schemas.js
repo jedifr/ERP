@@ -15,8 +15,13 @@
   }
 
   // ------------------------------------------------------------------ dessin (repère mm, y vers le haut ; SVG y vers le bas)
+  // Facteur de taille du texte : 1 pour un schéma d'environ 440 px de large ; plus petit quand le schéma s'affiche en
+  // grand (écran large), pour que les cotes gardent la même taille à l'écran.
+  let facteurTexte = 1;
+  const reglerTexte = (f) => { facteurTexte = Number.isFinite(f) && f > 0 ? f : 1; };
+
   function Dessin(taille) {
-    const s = taille * 0.07; // hauteur de texte
+    const s = taille * 0.07 * facteurTexte; // hauteur de texte
     const morceaux = [];
     const boite = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
     const etendre = (x, y) => { boite.x0 = Math.min(boite.x0, x); boite.x1 = Math.max(boite.x1, x); boite.y0 = Math.min(boite.y0, y); boite.y1 = Math.max(boite.y1, y); };
@@ -324,5 +329,5 @@
     return d.svg("", legende);
   }
 
-  racine.Schemas = { lettres, plane, profil, boite, contour, FORMES, Dessin, cercle, rectangle };
+  racine.Schemas = { lettres, plane, profil, boite, contour, FORMES, Dessin, cercle, rectangle, reglerTexte };
 })(typeof window !== "undefined" ? window : globalThis);

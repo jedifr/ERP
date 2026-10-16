@@ -161,6 +161,18 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 
 .pied { text-align: center; color: var(--texte-doux); font-size: .85rem; padding: 1.5rem; }
 
+/* Grand écran : toute la largeur, et la place gagnée va au schéma et à la vue 3D. */
+@media (min-width: 1400px) {
+  .page { max-width: none; grid-template-columns: minmax(0, 1fr) 380px; }
+  .forme-et-schema { grid-template-columns: minmax(340px, 2fr) minmax(0, 3fr); }
+  .schema, .vue-3d { max-height: min(60vh, 720px); }
+  .grille-champs { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+}
+@media (min-width: 2200px) {
+  .page { grid-template-columns: minmax(0, 1fr) 420px; }
+  .forme-et-schema { grid-template-columns: minmax(380px, 1fr) minmax(0, 2fr); }
+}
+
 @media (max-width: 1100px) {
   .forme-et-schema { grid-template-columns: minmax(0, 1fr); }
   .cadre-schema { position: static; order: -1; }

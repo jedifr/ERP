@@ -148,6 +148,7 @@ function dessinerSchema() {
   if (!catalogue) return;
   const d = demandeCourante();
   const svg = $("schema");
+  if (svg.clientWidth) Schemas.reglerTexte(Math.min(1, Math.max(0.4, 440 / svg.clientWidth)));
   if (d.libre) {
     $("note-schema").textContent = mode3d ? "Faites glisser pour tourner la pièce, molette ou pincement pour zoomer. Vue indicative."
       : "Faites glisser un élément pour le placer (Maj : au dixième de mm). Trait plein : matière ajoutée ; pointillés : découpe.";
@@ -212,6 +213,14 @@ async function basculerVue(en3d) {
   dessinerSchema();
 }
 $("voir-2d").addEventListener("click", () => basculerVue(false));
+// Le schéma change de largeur (fenêtre redimensionnée, plein écran) : on le redessine pour garder des cotes lisibles.
+let largeurSchema = 0;
+new ResizeObserver(() => {
+  const l = $("schema").clientWidth;
+  if (!l || Math.abs(l - largeurSchema) < 20) return;
+  largeurSchema = l;
+  requestAnimationFrame(dessinerSchema);
+}).observe($("schema"));
 $("voir-3d").addEventListener("click", () => basculerVue(true));
 
 // ------------------------------------------------------------------ demande de prix
