@@ -368,7 +368,8 @@ function afficherResultat(r) {
   $("details").replaceChildren(...details.flatMap(([t, v]) => [el("dt", { texte: t }), el("dd", { texte: v })]));
   $("messages").replaceChildren(...[...r.refus, ...r.validations].map((m) => el("li", { texte: m })));
   dessinerApercu(r.contour);
-  if (estStep()) dessinerSchema(); // le flan chiffré (outillage de l'atelier) remplace l'aperçu du dépôt
+  // contour exact de l'ERP à la place de la vignette (bibliothèque) ou du dépôt (flan STEP chiffré avec l'outillage de l'atelier)
+  if ((dernier && dernier.demande.bibliotheque) || estStep()) dessinerSchema();
   else majVue3d();
   $("ajouter").disabled = !avecPrix;
 }

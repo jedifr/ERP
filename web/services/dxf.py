@@ -2,7 +2,7 @@
 devis, garde le fichier d'origine et sa version DXF (pour la fabrication) et rend un jeton. Le prix et la demande
 désignent ensuite la pièce par ce jeton : le fichier ne transite qu'une fois. Un fichier = une pièce.
 
-Le SVG est converti en DXF ici (courbes aplaties en segments de 0,5 mm, échelle tirée des unités du fichier : mm, cm, in, pt, et
+Le SVG est converti en DXF ici (courbes aplaties en segments de 0,5 mm puis réécrites en arcs, échelle tirée des unités du fichier : mm, cm, in, pt, et
 96 px par pouce sinon). Le DWG passe par un convertisseur installé sur le serveur : `dwg2dxf` (LibreDWG) ou ODA File
 Converter ; sans convertisseur, le client est invité à envoyer un DXF.
 
@@ -139,6 +139,8 @@ def svg_vers_dxf(contenu):
     import ezdxf
     from svgelements import SVG, Close, Image, Line, Move, Path, Shape, Text
 
+    from decoupe.services import formes
+
     try:
         svg = SVG.parse(io.BytesIO(contenu), reify=True, ppi=96)
     except Exception:
@@ -178,7 +180,11 @@ def svg_vers_dxf(contenu):
             if len(points) >= 2 and math.dist(points[0], points[-1]) < 1e-3:
                 points.pop()
                 ferme = True
-            if len(points) >= 2:
+            if len(points) >= 4 and ferme:
+                # courbes du SVG réécrites en vrais arcs pour la machine (cercles exacts, Bézier à 0,02 mm près)
+                msp.add_lwpolyline(formes.sommets_avec_arcs(points), format="xyb", close=True)
+                traces += 1
+            elif len(points) >= 2:
                 msp.add_lwpolyline(points, close=ferme)
                 traces += 1
     if not traces:
