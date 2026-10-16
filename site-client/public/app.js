@@ -26,6 +26,7 @@ let choisi = -1;
 const historique = { etats: [JSON.stringify(libre)], position: 0 };
 let ficheDxf = null; // { jeton, nom, contour, largeur_mm, hauteur_mm, avertissements } rendue par l'ERP
 const DXF_MAX = 1536 * 1024;
+let formatsFichier = ["dxf"]; // formats que l'ERP sait lire (catalogue)
 
 // ------------------------------------------------------------------ panier (navigateur seulement ; l'ERP recalcule tout)
 function lirePanier() {
@@ -88,6 +89,7 @@ async function demarrer() {
   $("forme").replaceChildren(...groupes.values());
   remplir($("matiere"), catalogue.matieres.map((m) => [m.matiere, m.matiere]));
   $("quantite").max = catalogue.quantite_max;
+  majFormatsFichier(catalogue.formats_fichier);
   majEpaisseurs();
   majCotes();
   dessinerProfil();
@@ -250,7 +252,7 @@ async function calculer() {
   if (!catalogue || !$("matiere").value) return;
   const demande = demandeCourante();
   if (demande.dxf === null) {
-    afficherErreur("Choisissez un fichier DXF.");
+    afficherErreur("Choisissez votre fichier.");
     $("etat").className = "etat";
     return;
   }
@@ -521,13 +523,26 @@ function lireEnBase64(fichier) {
   });
 }
 
+function majFormatsFichier(formats) {
+  if (Array.isArray(formats) && formats.length) formatsFichier = formats;
+  const liste = formatsFichier.map((f) => f.toUpperCase());
+  const texte = liste.length > 1 ? `${liste.slice(0, -1).join(", ")} ou ${liste[liste.length - 1]}` : liste[0];
+  $("onglet-fichier").textContent = `Fichier ${liste.join(", ")}`;
+  $("titre-depot").textContent = `Choisissez un fichier ${texte}`;
+  $("fichier-dxf").accept = formatsFichier.map((f) => `.${f}`).join(",");
+  $("aide-depot").textContent = "Une pièce par fichier, cotes en mm, 1,5 Mo au plus."
+    + (formatsFichier.includes("svg") ? " SVG : convertissez les textes en tracés." : "")
+    + (formatsFichier.includes("dwg") ? "" : " Le DWG n'est pas lu en ligne : exportez-le en DXF.");
+}
+
 async function envoyerDxf(fichier) {
   if (!fichier) return;
   const etat = $("etat-dxf");
   etat.className = "aide";
-  if (!/\.dxf$/i.test(fichier.name)) {
+  const extension = (fichier.name.match(/\.([a-z0-9]+)$/i) || [])[1];
+  if (!extension || !formatsFichier.includes(extension.toLowerCase())) {
     etat.className = "aide erreur";
-    etat.textContent = "Choisissez un fichier .dxf (exportez-le depuis votre logiciel de dessin).";
+    etat.textContent = `Choisissez un fichier ${formatsFichier.map((f) => `.${f}`).join(", ")} (exporté depuis votre logiciel de dessin).`;
     return;
   }
   if (fichier.size > DXF_MAX) {

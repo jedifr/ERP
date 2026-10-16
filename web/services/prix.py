@@ -83,6 +83,13 @@ def toles_en_ligne():
     )
 
 
+def formats_fichier():
+    """Formats de fichier que le site peut proposer : le DWG seulement si un convertisseur est installé."""
+    from .dxf import dwg_lisible
+
+    return ["dxf", "dwg", "svg"] if dwg_lisible() else ["dxf", "svg"]
+
+
 def catalogue():
     """Ce que le configurateur peut proposer : matières et épaisseurs vendues en ligne, formes, pliage, grille web."""
     from decoupe.services import formes
@@ -104,6 +111,7 @@ def catalogue():
         },
         "minimum_commande_ht": float(reglage.minimum_commande_ht),
         "quantite_max": reglage.quantite_max,
+        "formats_fichier": formats_fichier(),
     }
 
 
@@ -189,7 +197,7 @@ def chiffrer(matiere_nom, epaisseur, quantite, forme=None, cotes=None, pliage=No
         elif dxf:
             fiche = charger(dxf)
             contour_libre = fiche["contour"]
-            r.designation = f"Pièce DXF {fiche['nom']}"
+            r.designation = f"Pièce du fichier {fiche['nom']}"
             if fiche.get("avertissements"):
                 r.validations.append("Fichier à vérifier par l'atelier : " + " ".join(fiche["avertissements"]))
         elif pliage:

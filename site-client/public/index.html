@@ -29,7 +29,7 @@
           <label><input type="radio" name="type" value="profil"><span>Profil plié</span></label>
           <label><input type="radio" name="type" value="boite"><span>Boîte pliée</span></label>
           <label><input type="radio" name="type" value="libre"><span>Forme libre</span></label>
-          <label><input type="radio" name="type" value="dxf"><span>Fichier DXF</span></label>
+          <label><input type="radio" name="type" value="dxf"><span id="onglet-fichier">Fichier DXF</span></label>
         </div>
       </fieldset>
 
@@ -90,8 +90,8 @@
         <div id="bloc-dxf" hidden>
           <label class="depot" id="depot-dxf">
             <input id="fichier-dxf" type="file" accept=".dxf">
-            <strong>Choisissez un fichier DXF</strong> ou déposez-le ici
-            <small>Une pièce par fichier, cotes en mm, 1,5 Mo au plus. Le DWG n'est pas lu en ligne.</small>
+            <strong id="titre-depot">Choisissez un fichier DXF</strong> ou déposez-le ici
+            <small id="aide-depot">Une pièce par fichier, cotes en mm, 1,5 Mo au plus.</small>
           </label>
           <p id="etat-dxf" class="aide" role="status"></p>
           <dl id="infos-dxf" class="details" hidden></dl>
