@@ -137,6 +137,7 @@ class ResultatPliage:
     bord_mini: float = None
     developpe_mm: float = None
     flan_mm: list = None  # boîte : [x, y] du flan avant crantage des coins
+    crans_mm: list = None  # boîte : profondeur des crans de coin côté A, B, C, D (développé de chaque bord)
     nb_plis: int = 0
     nb_reglages: int = 0
     temps_reglage_min: float = 0
@@ -349,19 +350,24 @@ def calculer_boite(matiere, epaisseur, longueur, largeur, bords, angles=None, pl
 
     ri, k = r.rayon_interieur, float(ctx["famille"].coef_k)
 
-    def flan(cote_fond, paire):
-        """Étendue du flan dans une direction : développé bord / fond / bord (bords absents omis)."""
+    def flan(cote_fond, paire, sans=None):
+        """Étendue du flan dans une direction : développé bord / fond / bord (bords absents ou `sans` omis)."""
         faces_dir, angles_dir = [], []
-        if h[paire[0]]:
+        if h[paire[0]] and paire[0] != sans:
             faces_dir.append(h[paire[0]])
             angles_dir.append(a[paire[0]])
         faces_dir.append(cote_fond)
-        if h[paire[1]]:
+        if h[paire[1]] and paire[1] != sans:
             faces_dir.append(h[paire[1]])
             angles_dir.append(a[paire[1]])
         return developpe(faces_dir, angles_dir, epaisseur, ri, k)
 
     r.flan_mm = [round(flan(longueur, "DB"), 2), round(flan(largeur, "AC"), 2)]
+    # Cran de coin : ce que chaque bord ajoute au flan dans sa direction.
+    r.crans_mm = [
+        round(flan(largeur, "AC") - flan(largeur, "AC", c), 2) if c in "AC" else round(flan(longueur, "DB") - flan(longueur, "DB", c), 2)
+        for c in COTES_BOITE
+    ]
     r.developpe_mm = r.flan_mm[0]
     return r.finaliser()
 

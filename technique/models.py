@@ -213,6 +213,10 @@ class Article(models.Model):
             "que soit ce taux (voir chiffrage.moteur.resoudre_taux_tva)."
         ),
     )
+    vendu_en_ligne = models.BooleanField(
+        "vendu en ligne", default=False,
+        help_text="Tôle : proposée au configurateur web (sa matière et son épaisseur, dans son format).",
+    )
     gere_en_stock = models.BooleanField(
         "géré en stock",
         null=True,

@@ -107,6 +107,18 @@ AIDES = {
         "etapes": ["Ajustez les temps de réglage (pli court, pli long) et le temps par pli (unitaire et en série)."],
         "bon_a_savoir": ["Un réglage est compté par réglage distinct : deux plis de même angle entre des faces identiques n'en font qu'un."],
     },
+    "web.reglageweb": {
+        "resume": "Grille de prix du configurateur web : marge ajoutée au coût de revient, minimum de commande, quantité maximale.",
+        "etapes": [
+            "Cochez « vendu en ligne » sur les fiches des tôles à proposer (matière, épaisseur, format).",
+            "Réglez la marge web (20 % par défaut) et le minimum de commande (60 € HT hors port).",
+            "Essayez un prix dans Paramétrage → Vente en ligne → Essai du configurateur.",
+        ],
+        "bon_a_savoir": [
+            "Le site client interroge l'API /api/web/v1/ avec la clé ERP_WEB_CLE_API ; sans cette variable l'API est fermée.",
+            "Un prix « à valider » est affiché au client, mais la commande est vérifiée par un technicien avant lancement.",
+        ],
+    },
     "decoupe.pliagearticle": {
         "resume": "Pièce pliée d'un article fabriqué, profil (cornière, U, Z…) ou boîte : vé, plieuse, force, angle mini, développé et temps de pliage.",
         "etapes": [

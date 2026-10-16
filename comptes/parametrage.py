@@ -18,6 +18,9 @@ CARTES = [
     ("pliage", "Pliage", "architecture", "Plieuses, vés, poinçons, temps et marge de force", [
         ("Plieuses et outillage", "decoupe", "plieuse"), ("Réglage de pliage", "decoupe", "reglagepliage"), ("Pièces pliées", "decoupe", "pliagearticle"),
     ], None),
+    ("vente_en_ligne", "Vente en ligne", "storefront", "Marge web, minimum de commande, essai du prix du configurateur", [
+        ("Réglage de la vente en ligne", "web", "reglageweb"), ("Essai du configurateur", "web", "reglageweb", "apercu_configurateur"),
+    ], None),
     ("formes", "Formes et profilés", "straighten", "Cotes normalisées, profils d'import DXF", [
         ("Cotes normalisées", "decoupe", "normecote"),
         ("Profils d'import DXF", "decoupe", "profilimportdecoupe"),
