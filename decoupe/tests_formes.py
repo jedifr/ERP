@@ -115,6 +115,22 @@ class FormesTests(TestCase):
         self.assertEqual(len(lu.holes), 4)
         self.assertAlmostEqual(lu.surface_mm2, aire(c), delta=1)
 
+    def test_courbes_ecrites_en_arcs(self):
+        disque = formes.sommets_avec_arcs(construire("disque", {"diametre": 100}).exterieur)
+        self.assertEqual(len(disque), 2)  # deux demi-cercles
+        self.assertTrue(all(abs(abs(b) - 1) < 1e-6 for *_, b in disque))  # renflement 1 = demi-tour
+        oblong = formes.sommets_avec_arcs(construire("oblong", {"longueur": 100, "largeur": 40}).exterieur)
+        self.assertEqual(sorted(round(abs(b), 6) for *_, b in oblong), [0, 0, 1, 1])  # deux droites, deux demi-cercles
+        hexagone = formes.sommets_avec_arcs(construire("polygone", {"nb_cotes": 6, "diametre": 100}).exterieur)
+        self.assertEqual((len(hexagone), {b for *_, b in hexagone}), (6, {0.0}))  # un polygone reste un polygone
+        c = construire("flasque", {})
+        with tempfile.TemporaryDirectory() as dossier:
+            chemin = Path(dossier) / "forme.dxf"
+            chemin.write_bytes(formes.dxf_bytes(c))
+            lu = extraire_geometrie(str(chemin), "dxf")
+        self.assertEqual(len(lu.holes), len(c.trous))
+        self.assertAlmostEqual(lu.surface_mm2, aire(c), delta=aire(c) * 0.002)  # arcs vrais : un peu plus que les cordes
+
     def test_noms_suggeres(self):
         self.assertEqual(formes.nom_suggere("disque", {"diametre": 100}), "Disque Ø100")
         self.assertEqual(formes.nom_suggere("rectangle", {"largeur": 200, "hauteur": 100.5}), "Rectangle 200×100.5")

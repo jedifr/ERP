@@ -393,14 +393,111 @@ def nom_suggere(cle, saisies):
     return famille.libelle
 
 
+ARC_TOLERANCE_MM = 0.02  # écart maxi des sommets au cercle pour regrouper des segments en un arc
+ARC_TOLERANCE_CORDE_MM = 0.1  # écart maxi du milieu de chaque segment (au-delà, c'est un polygone, pas un arc discrétisé)
+ARC_TOLERANCE_RELATIVE = 1e-4  # sur une grande pièce, la corde tolérée suit sa taille (0,3 mm pour 3 m)
+
+
+def _cercle_3_points(a, b, c):
+    (ax, ay), (bx, by), (cx, cy) = a, b, c
+    d = 2 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by))
+    if abs(d) < 1e-9:
+        return None
+    ux = ((ax * ax + ay * ay) * (by - cy) + (bx * bx + by * by) * (cy - ay) + (cx * cx + cy * cy) * (ay - by)) / d
+    uy = ((ax * ax + ay * ay) * (cx - bx) + (bx * bx + by * by) * (ax - cx) + (cx * cx + cy * cy) * (bx - ax)) / d
+    return ux, uy, math.hypot(ax - ux, ay - uy)
+
+
+def _balayage_arc(pts, i, j, tol, tol_corde):
+    """Angle balayé (radians, signé, un demi-tour au plus) si les points i..j sont sur un même arc, sinon None."""
+    cercle = _cercle_3_points(pts[i], pts[(i + j) // 2], pts[j])
+    if cercle is None or cercle[2] > 1e5:
+        return None
+    ux, uy, r = cercle
+    total, sens = 0.0, 0
+    for k in range(i, j + 1):
+        x, y = pts[k]
+        if abs(math.hypot(x - ux, y - uy) - r) > tol:
+            return None
+        if k == i:
+            continue
+        px, py = pts[k - 1]
+        if abs(math.hypot((x + px) / 2 - ux, (y + py) / 2 - uy) - r) > tol_corde:
+            return None
+        pas = math.atan2((px - ux) * (y - uy) - (py - uy) * (x - ux), (px - ux) * (x - ux) + (py - uy) * (y - uy))
+        s = 1 if pas > 0 else -1
+        if sens and s != sens:
+            return None
+        sens = s
+        total += pas
+    return total if abs(total) <= math.pi + 1e-6 else None
+
+
+def _aligne(pts, i, j, tol):
+    (ax, ay), (bx, by) = pts[i], pts[j]
+    longueur = math.hypot(bx - ax, by - ay)
+    if longueur < 1e-9:
+        return False
+    return all(abs((bx - ax) * (pts[k][1] - ay) - (by - ay) * (pts[k][0] - ax)) / longueur <= tol for k in range(i + 1, j))
+
+
+def sommets_avec_arcs(anneau):
+    """Polyligne fermée → sommets (x, y, renflement) : les suites de segments qui suivent un cercle deviennent un arc
+    (renflement DXF = tan(angle / 4)), les suites alignées un seul segment. Un polygone (hexagone…) reste un polygone."""
+    pts = [tuple(p) for p in anneau]
+    if len(pts) > 1 and pts[0] == pts[-1]:
+        pts.pop()
+    n = len(pts)
+    if n < 4:
+        return [(x, y, 0.0) for x, y in pts]
+
+    # départ sur l'angle le plus vif : un arc ne commence pas au milieu d'une courbe
+    def virage(k):
+        (ax, ay), (bx, by), (cx, cy) = pts[k - 1], pts[k], pts[(k + 1) % n]
+        return abs(math.atan2((bx - ax) * (cy - by) - (by - ay) * (cx - bx), (bx - ax) * (cx - bx) + (by - ay) * (cy - by)))
+
+    xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+    taille = max(max(xs) - min(xs), max(ys) - min(ys))
+    tol = max(ARC_TOLERANCE_MM, taille * ARC_TOLERANCE_RELATIVE / 5)
+    tol_corde = max(ARC_TOLERANCE_CORDE_MM, taille * ARC_TOLERANCE_RELATIVE)
+    depart = max(range(n), key=virage)
+    if virage(depart) < math.radians(20):
+        # contour sans angle vif (oblong, disque…) : départ au bout du plus long segment, souvent une jonction droite / courbe
+        depart = max(range(n), key=lambda k: math.dist(pts[k - 1], pts[k]))
+    pts = pts[depart:] + pts[:depart]
+    pts.append(pts[0])
+    sommets, i = [], 0
+    while i < n:
+        j_ligne = i + 1
+        while j_ligne + 1 <= n and _aligne(pts, i, j_ligne + 1, tol):
+            j_ligne += 1
+        j_arc, balayage = i, 0.0
+        j = i + 3
+        while j <= n:
+            b = _balayage_arc(pts, i, j, tol, tol_corde)
+            if b is None:
+                break
+            j_arc, balayage = j, b
+            j += 1
+        x, y = pts[i]
+        if j_arc > j_ligne:
+            sommets.append((x, y, math.tan(balayage / 4)))
+            i = j_arc
+        else:
+            sommets.append((x, y, 0.0))
+            i = j_ligne
+    return sommets
+
+
 def dxf_bytes(contour):
-    """Contour en DXF (polylignes fermées : extérieur puis trous), lisible par l'import de pièces comme par la machine."""
+    """Contour en DXF (polylignes fermées : extérieur puis trous), lisible par l'import de pièces comme par la machine.
+    Les courbes discrétisées sont réécrites en vrais arcs (renflements de la polyligne)."""
     import ezdxf
 
     doc = ezdxf.new("R2010")
     msp = doc.modelspace()
     for anneau in [contour.exterieur, *contour.trous]:
-        msp.add_lwpolyline([(round(x, 4), round(y, 4)) for x, y in anneau], close=True)
+        msp.add_lwpolyline([(round(x, 4), round(y, 4), round(b, 8)) for x, y, b in sommets_avec_arcs(anneau)], format="xyb", close=True)
     flux = io.StringIO()
     doc.write(flux)
     return flux.getvalue().encode("utf-8")

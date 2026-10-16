@@ -331,7 +331,8 @@ function afficherResultat(r) {
   $("details").replaceChildren(...details.flatMap(([t, v]) => [el("dt", { texte: t }), el("dd", { texte: v })]));
   $("messages").replaceChildren(...[...r.refus, ...r.validations].map((m) => el("li", { texte: m })));
   dessinerApercu(r.contour);
-  majVue3d();
+  if (dernier && dernier.demande.bibliotheque) dessinerSchema(); // contour exact de l'ERP à la place de la vignette
+  else majVue3d();
   $("ajouter").disabled = !avecPrix;
 }
 
