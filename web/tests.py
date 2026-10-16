@@ -195,3 +195,112 @@ class DemandeWebTests(ConfigurateurBase):
         page = self.client.get(f"/admin/web/demandeweb/{demande.pk}/change/")
         self.assertContains(page, "Rectangle")
         self.assertContains(page, "1 rue des Forges")
+
+
+PLAQUE = {"forme": "rectangle", "largeur": 300, "hauteur": 200, "rayon_angle": 10}
+
+
+class PieceLibreTests(ConfigurateurBase):
+    def test_plaque_et_decoupes(self):
+        recette = {"base": PLAQUE, "elements": [
+            {"type": "rond", "x": 50, "y": 50, "diametre": 20},
+            {"type": "oblong", "x": 150, "y": 100, "longueur": 80, "largeur": 20, "angle": 30},
+            {"type": "rectangle", "x": 300, "y": 100, "largeur": 40, "hauteur": 60},  # encoche dans le bord droit
+            {"type": "polygone", "x": 250, "y": 50, "nb_cotes": 6, "diametre": 30},
+            {"type": "rectangle", "x": 150, "y": 210, "largeur": 40, "hauteur": 30, "mode": "ajouter"},  # patte
+        ]}
+        r = chiffrer("S235-W", 2, 10, libre=recette)
+        self.assertEqual(r.statut, "ok", r.refus + r.validations)
+        self.assertEqual(r.designation, "Pièce libre 300 × 200, 5 éléments")
+        self.assertEqual(len(r.contour["trous"]), 3)
+        self.assertEqual((r.largeur_mm, r.hauteur_mm), (300, 225))  # la patte dépasse de 25 mm
+        plein = chiffrer("S235-W", 2, 10, forme="rectangle", cotes={"largeur": 300, "hauteur": 200, "rayon_angle": 10})
+        self.assertGreater(r.cout_decoupe, plein.cout_decoupe)  # plus de contours à découper
+
+    def test_disque_perce(self):
+        r = chiffrer("S235-W", 2, 1, libre={"base": {"forme": "disque", "diametre": 150}, "elements": [{"type": "rond", "x": 75, "y": 75, "diametre": 40}]})
+        self.assertEqual((r.statut, r.designation, len(r.contour["trous"])), ("ok", "Pièce libre Ø150, 1 élément", 1))
+
+    def test_points_a_verifier(self):
+        petit = chiffrer("S235-W", 2, 1, libre={"base": PLAQUE, "elements": [{"type": "rond", "x": 50, "y": 50, "diametre": 1.5}]})
+        self.assertEqual(petit.statut, "validation")
+        self.assertIn("plus petite(s) que l'épaisseur", petit.validations[0])
+        pont = chiffrer("S235-W", 2, 1, libre={"base": PLAQUE, "elements": [
+            {"type": "rond", "x": 50, "y": 50, "diametre": 20}, {"type": "rond", "x": 71, "y": 50, "diametre": 20}]})
+        self.assertEqual(pont.statut, "validation")  # 1 mm de matière entre les deux trous, pour 2 mm d'épaisseur
+        self.assertIn("plus fine que l'épaisseur", " ".join(pont.validations))
+
+    def test_recettes_refusees(self):
+        for recette, message in (
+            ({"base": {"forme": "etoile"}}, "rectangle ou un disque"),
+            ({"base": PLAQUE, "elements": [{"type": "rond", "x": 900, "y": 50, "diametre": 20}]}, "en dehors"),
+            ({"base": PLAQUE, "elements": [{"type": "rectangle", "x": 150, "y": 100, "largeur": 10, "hauteur": 400}]}, "plusieurs morceaux"),
+            ({"base": PLAQUE, "elements": [{"type": "rond", "x": "a", "y": 1, "diametre": 2}]}, "nombre"),
+            ({"base": PLAQUE, "elements": [{"type": "rond", "x": 1, "y": 1, "diametre": 2}] * 201}, "200"),
+            ({"base": PLAQUE, "elements": [{"type": "rectangle", "x": 500, "y": 500, "largeur": 10, "hauteur": 10, "mode": "ajouter"}]}, "toucher"),
+        ):
+            with self.subTest(message=message), self.assertRaisesMessage(ErreurPrixWeb, message):
+                chiffrer("S235-W", 2, 1, libre=recette)
+
+
+@override_settings(WEB_CLE_API="secret-web")
+class DxfWebTests(ConfigurateurBase):
+    def setUp(self):
+        import tempfile
+
+        self.media = tempfile.TemporaryDirectory()
+        self.addCleanup(self.media.cleanup)
+        self.enterContext(override_settings(MEDIA_ROOT=self.media.name))
+
+    def envoyer(self, contenu, nom="platine.dxf"):
+        import base64
+
+        return self.client.post("/api/web/v1/dxf/", {"nom": nom, "contenu": base64.b64encode(contenu).decode()},
+                                content_type="application/json", HTTP_X_CLE_WEB="secret-web")
+
+    def test_depot_prix_et_demande(self):
+        from decoupe.services import formes
+
+        contenu = formes.dxf_bytes(formes.construire("platine_grille", {"largeur": 200, "hauteur": 150}))
+        page = self.envoyer(contenu)
+        self.assertEqual(page.status_code, 200, page.content)
+        fiche = page.json()
+        self.assertEqual((fiche["largeur_mm"], fiche["hauteur_mm"], len(fiche["contour"]["trous"])), (200, 150, 4))
+        self.assertEqual(self.envoyer(contenu).json()["jeton"], fiche["jeton"])  # même fichier, même jeton
+        prix = self.client.post("/api/web/v1/prix/", {"matiere": "S235-W", "epaisseur": 2, "quantite": 4, "dxf": fiche["jeton"]},
+                                content_type="application/json", HTTP_X_CLE_WEB="secret-web")
+        self.assertEqual(prix.status_code, 200, prix.content)
+        self.assertEqual((prix.json()["statut"], prix.json()["designation"]), ("ok", "Pièce DXF platine.dxf"))
+        page = self.client.post("/api/web/v1/demandes/", {"client": DemandeWebTests.CLIENT, "lignes": [
+            {"matiere": "S235-W", "epaisseur": 2, "quantite": 4, "dxf": fiche["jeton"]},
+            {"matiere": "S235-W", "epaisseur": 2, "quantite": 1, "libre": {"base": PLAQUE, "elements": [{"type": "rond", "x": 50, "y": 50, "diametre": 20}]}},
+        ]}, content_type="application/json", HTTP_X_CLE_WEB="secret-web")
+        self.assertEqual(page.status_code, 201, page.content)
+        demande = DemandeWeb.objects.get()
+        self.client.force_login(get_user_model().objects.create_superuser("dx", "dx@example.com", "pass-dx-1234"))
+        self.assertContains(self.client.get(f"/admin/web/demandeweb/{demande.pk}/change/"), "/dxf/1/")
+        original = self.client.get(f"/admin/web/demandeweb/{demande.pk}/dxf/0/")
+        self.assertEqual(b"".join(original.streaming_content), contenu)  # le fichier du client, tel quel
+        genere = self.client.get(f"/admin/web/demandeweb/{demande.pk}/dxf/1/")
+        self.assertIn(b"LWPOLYLINE", genere.content)  # pièce libre : DXF recalculé depuis le contour
+        self.assertEqual(self.client.get(f"/admin/web/demandeweb/{demande.pk}/dxf/9/").status_code, 404)
+
+    def test_fichiers_refuses(self):
+        from decoupe.services import formes
+
+        deux = formes.dxf_bytes(formes.Contour([(0, 0), (10, 0), (10, 10), (0, 10)], [[(20, 0), (30, 0), (30, 10), (20, 10)]]))
+        for contenu, nom, message in (
+            (deux, "deux.dxf", "pièces séparées"),
+            (b"pas un dxf", "piece.dxf", "illisible"),
+            (b"0\nSECTION", "piece.dwg", ".dxf"),
+            (b"", "piece.dxf", "vide"),
+            (b"x" * (1536 * 1024 + 1), "piece.dxf", "trop gros"),
+        ):
+            with self.subTest(message=message):
+                page = self.envoyer(contenu, nom)
+                self.assertEqual(page.status_code, 400)
+                self.assertIn(message, page.json()["erreur"])
+                self.assertNotIn(self.media.name, page.json()["erreur"])  # jamais de chemin du serveur
+        prix = self.client.post("/api/web/v1/prix/", {"matiere": "S235-W", "epaisseur": 2, "quantite": 1, "dxf": "0" * 64},
+                                content_type="application/json", HTTP_X_CLE_WEB="secret-web")
+        self.assertIn("renvoyez-le", prix.json()["erreur"])

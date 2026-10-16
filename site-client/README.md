@@ -1,10 +1,14 @@
 # Site client DÉCOUPE H2O
 
-Configurateur de pièces en ligne : le client choisit une pièce plane (bibliothèque de formes), un profil plié ou une boîte pliée, la matière, l'épaisseur et la quantité ; le prix HT s'affiche aussitôt avec l'aperçu à plat. Le panier part à l'ERP comme **demande web** (Paramétrage → Vente en ligne → Demandes web) : le commercial la vérifie et confirme commande, port et délai. Pas de paiement en ligne pour l'instant.
+Configurateur de pièces en ligne : le client choisit une pièce plane (bibliothèque de formes), un profil plié, une boîte pliée, une forme libre ou envoie son fichier DXF, la matière, l'épaisseur et la quantité ; le prix HT s'affiche aussitôt avec l'aperçu à plat. Le panier part à l'ERP comme **demande web** (Paramétrage → Vente en ligne → Demandes web) : le commercial la vérifie et confirme commande, port et délai. Pas de paiement en ligne pour l'instant.
 
 Pendant la saisie, un **schéma coté** dessine la pièce à l'échelle (`public/schemas.js`) : chaque cote porte une lettre (A, B, C…), la même que devant le champ à remplir. Forme plane : contour, perçages, diamètres, entraxes, angle du premier trou. Profil : la section avec ses faces et ses angles. Boîte : le flan vu de dessus, bords rabattus à plat. Ce schéma est calculé dans le navigateur, sans appel à l'ERP ; si la bibliothèque de formes gagne une forme, ajoutez son dessin dans `schemas.js` et rafraîchissez `test/catalogue-formes.json` (copie du catalogue de l'API).
 
-L'ERP reste le seul moteur de prix : ce serveur ne calcule rien, il relaie trois appels vers l'API web de l'ERP (`/api/web/v1/catalogue/`, `prix/`, `demandes/`) en y ajoutant la clé, qui ne part jamais dans le navigateur. Il limite les calculs par visiteur et met le catalogue en cache 5 minutes.
+L'onglet **Vue 3D** montre la pièce en volume (on la fait tourner à la souris ou au doigt) : la pièce plane est le contour chiffré par l'ERP extrudé à l'épaisseur, le profil sa section extrudée à la longueur, la boîte son fond et ses bords relevés à l'angle saisi (`public/vue3d.js`). Elle utilise three.js 0.160 (licence MIT), copié dans `public/vendor/` pour rester sans dépendance ni CDN, et ne se télécharge qu'au premier clic sur l'onglet.
+
+La **forme libre** (`public/editeur.js`) part d'une plaque rectangle ou disque ; le client y ajoute des trous ronds, oblongs, rectangles ou polygones, en découpe ou en ajout de matière, saisis au clavier (centre X / Y depuis le coin bas gauche) ou glissés sur le schéma (au millimètre, Maj pour le dixième), avec annuler / rétablir (Ctrl+Z / Ctrl+Y). Le navigateur ne fait que dessiner : l'ERP reconstruit la pièce, la contrôle et la chiffre. L'onglet **Fichier DXF** envoie le fichier à l'ERP (1,5 Mo au plus), qui le lit, le garde pour la fabrication et renvoie le contour affiché en schéma et en 3D.
+
+L'ERP reste le seul moteur de prix : ce serveur ne calcule rien, il relaie ses appels vers l'API web de l'ERP (`/api/web/v1/catalogue/`, `prix/`, `dxf/`, `demandes/`) en y ajoutant la clé, qui ne part jamais dans le navigateur. Il limite les calculs par visiteur et met le catalogue en cache 5 minutes.
 
 ## Lancer
 

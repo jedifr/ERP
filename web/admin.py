@@ -1,6 +1,9 @@
 from django.contrib import admin, messages
-from django.shortcuts import render
+from django.http import FileResponse, Http404, HttpResponse
+from django.shortcuts import get_object_or_404, render
+from django.urls import path, reverse
 from django.utils.html import format_html, format_html_join
+from django.utils.text import slugify
 from unfold.admin import ModelAdmin
 
 from .models import DemandeWeb, ReglageWeb
@@ -41,12 +44,41 @@ class DemandeWebAdmin(ModelAdmin):
     def nb_pieces(self, obj):
         return len(obj.lignes)
 
+    def get_urls(self):
+        return [path("<int:pk>/dxf/<int:index>/", self.admin_site.admin_view(self.dxf_view), name="web_demandeweb_dxf")] + super().get_urls()
+
+    def dxf_view(self, request, pk, index):
+        """DXF de fabrication d'une ligne : le fichier envoyé par le client, sinon le contour recalculé (pièce libre, forme)."""
+        from decoupe.services import formes
+
+        from .services.dxf import chemin_fichier
+
+        demande = get_object_or_404(DemandeWeb, pk=pk)
+        if not self.has_view_permission(request, demande) or not 0 <= index < len(demande.lignes):
+            raise Http404
+        ligne = demande.lignes[index]
+        nom = f"{demande.numero}-{index + 1}-{slugify(ligne['designation'])[:60] or 'piece'}.dxf"
+        fichier = chemin_fichier(ligne["demande"].get("dxf"))
+        if fichier:
+            return FileResponse(open(fichier, "rb"), as_attachment=True, filename=nom)
+        contour = ligne.get("contour")
+        if not contour:
+            raise Http404("Pas de contour pour cette ligne (pièce pliée : flan calculé au devis).")
+        reponse = HttpResponse(formes.dxf_bytes(formes.Contour(contour["exterieur"], contour.get("trous") or [])), content_type="application/dxf")
+        reponse["Content-Disposition"] = f'attachment; filename="{nom}"'
+        return reponse
+
     @admin.display(description="Pièces")
     def pieces(self, obj):
-        return format_html("<table>{}</table>", format_html_join("", "<tr><td style='padding-right:1em'>{}</td><td style='padding-right:1em'>{} × {} mm</td><td style='padding-right:1em'>{} pièce(s)</td><td style='padding-right:1em'>{} € HT</td><td>{}</td></tr>", (
+        def lien(i, l):
+            if not (l.get("contour") or l["demande"].get("dxf")):
+                return ""
+            return format_html("<a href='{}'>DXF</a>", reverse("admin:web_demandeweb_dxf", args=[obj.pk, i]))
+
+        return format_html("<table>{}</table>", format_html_join("", "<tr><td style='padding-right:1em'>{}</td><td style='padding-right:1em'>{} × {} mm</td><td style='padding-right:1em'>{} pièce(s)</td><td style='padding-right:1em'>{} € HT</td><td style='padding-right:1em'>{}</td><td>{}</td></tr>", (
             (l["designation"], l["demande"].get("matiere"), l["demande"].get("epaisseur"), l["demande"].get("quantite"), f"{l['prix_total_ht']:.2f}",
-             "À valider : " + " ".join(l["validations"]) if l["validations"] else "")
-            for l in obj.lignes
+             lien(i, l), "À valider : " + " ".join(l["validations"]) if l["validations"] else "")
+            for i, l in enumerate(obj.lignes)
         )))
 
 

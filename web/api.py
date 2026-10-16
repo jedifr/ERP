@@ -13,7 +13,11 @@ from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
+import base64
+import binascii
+
 from .services.demandes import enregistrer_demande
+from .services.dxf import ErreurDxf, deposer
 from .services.prix import ErreurPrixWeb, catalogue, chiffrer
 
 
@@ -38,15 +42,32 @@ class CatalogueWeb(_VueWeb):
 
 
 class PrixWebVue(_VueWeb):
-    """POST {matiere, epaisseur, quantite, forme + cotes | pliage} → prix (voir web.services.prix.chiffrer)."""
+    """POST {matiere, epaisseur, quantite, forme + cotes | pliage | libre | dxf} → prix (voir web.services.prix.chiffrer)."""
 
     def post(self, request):
         d = request.data
         try:
-            resultat = chiffrer(d.get("matiere"), d.get("epaisseur"), d.get("quantite"), forme=d.get("forme"), cotes=d.get("cotes"), pliage=d.get("pliage"))
+            resultat = chiffrer(d.get("matiere"), d.get("epaisseur"), d.get("quantite"), forme=d.get("forme"), cotes=d.get("cotes"),
+                                pliage=d.get("pliage"), libre=d.get("libre"), dxf=d.get("dxf"))
         except ErreurPrixWeb as exc:
             return Response({"erreur": str(exc)}, status=400)
         return Response(resultat.en_dict_public())
+
+
+class DxfWebVue(_VueWeb):
+    """POST {nom, contenu (base64)} → {jeton, nom, contour, largeur_mm, hauteur_mm, avertissements}. Le prix se demande
+    ensuite avec {"dxf": jeton}."""
+
+    def post(self, request):
+        try:
+            contenu = base64.b64decode(str(request.data.get("contenu") or ""), validate=True)
+        except (binascii.Error, ValueError):
+            return Response({"erreur": "Fichier illisible."}, status=400)
+        try:
+            fiche = deposer(request.data.get("nom"), contenu)
+        except ErreurDxf as exc:
+            return Response({"erreur": str(exc)}, status=400)
+        return Response(fiche)
 
 
 class DemandeWebVue(_VueWeb):

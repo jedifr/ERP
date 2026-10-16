@@ -35,16 +35,18 @@ def enregistrer_demande(donnees):
         if not isinstance(ligne, dict):
             raise ErreurPrixWeb(f"Pièce {i} illisible.")
         r = chiffrer(ligne.get("matiere"), ligne.get("epaisseur"), ligne.get("quantite"), forme=ligne.get("forme"),
-                     cotes=ligne.get("cotes"), pliage=ligne.get("pliage"))
+                     cotes=ligne.get("cotes"), pliage=ligne.get("pliage"), libre=ligne.get("libre"), dxf=ligne.get("dxf"))
         if r.statut == "refus":
             raise ErreurPrixWeb(f"Pièce {i} ({r.designation or 'sans nom'}) : pas de prix en ligne. " + " ".join(r.refus))
         a_valider |= r.statut == "validation"
         total += r.prix_total_ht
-        demande = {k: ligne.get(k) for k in ("matiere", "epaisseur", "quantite", "forme", "cotes", "pliage")}
+        demande = {k: ligne.get(k) for k in ("matiere", "epaisseur", "quantite", "forme", "cotes", "pliage", "libre", "dxf") if ligne.get(k) is not None}
         enregistrees.append({
             "demande": demande, "designation": r.designation, "statut": r.statut, "validations": r.validations,
             "procede": r.procede, "prix_unitaire_ht": float(r.prix_unitaire_ht), "prix_total_ht": float(r.prix_total_ht),
             "cout_revient": float(r.cout_revient), "poids_kg": r.poids_kg,
+            # contour découpé : de quoi sortir le DXF de fabrication depuis la demande (pièce libre ou forme)
+            "contour": r.contour if not ligne.get("pliage") else None,
         })
     minimum = ReglageWeb.charger().minimum_commande_ht
     champ = lambda cle, n: str(client.get(cle) or "").strip()[:n]

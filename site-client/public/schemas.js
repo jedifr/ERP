@@ -21,7 +21,8 @@
     const boite = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
     const etendre = (x, y) => { boite.x0 = Math.min(boite.x0, x); boite.x1 = Math.max(boite.x1, x); boite.y0 = Math.min(boite.y0, y); boite.y1 = Math.max(boite.y1, y); };
     const pt = ([x, y]) => { etendre(x, y); return `${+x.toFixed(3)},${+(-y).toFixed(3)}`; };
-    const chemin = (anneaux, classe) => morceaux.push(`<path class="${classe}" fill-rule="evenodd" d="${anneaux.map((a) => "M" + a.map(pt).join("L") + "Z").join(" ")}"/>`);
+    // attrs : attributs supplémentaires déjà sûrs (nombres, mots-clés), ex. data-i="3" pour l'éditeur de forme libre
+    const chemin = (anneaux, classe, attrs = "") => morceaux.push(`<path class="${classe}" fill-rule="evenodd" ${attrs} d="${anneaux.map((a) => "M" + a.map(pt).join("L") + "Z").join(" ")}"/>`);
     const ligne = (a, b, classe = "cote") => morceaux.push(`<path class="${classe}" d="M${pt(a)}L${pt(b)}"/>`);
     const fleche = (pointe, depuis) => {
       const [dx, dy] = [depuis[0] - pointe[0], depuis[1] - pointe[1]];
@@ -311,5 +312,17 @@
     return d.svg("", "Boîte vue de dessus, bords rabattus à plat : L × l pour le fond, A à D pour la hauteur des bords. Pointillés : lignes de pli.");
   }
 
-  racine.Schemas = { lettres, plane, profil, boite, FORMES };
+  // ------------------------------------------------------------------ contour quelconque (fichier DXF) : encombrement coté
+  function contour(c, legende = "") {
+    if (!c || !c.exterieur || !c.exterieur.length) return null;
+    const xs = c.exterieur.map((p) => p[0]), ys = c.exterieur.map((p) => p[1]);
+    const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+    const d = Dessin(Math.max(x1 - x0, y1 - y0, 1));
+    d.chemin([c.exterieur, ...(c.trous || [])], "piece");
+    d.lineaire([x0, y0], [x1, y0], -d.s * 1.6, "", x1 - x0);
+    d.lineaire([x0, y1], [x0, y0], -d.s * 1.6, "", y1 - y0);
+    return d.svg("", legende);
+  }
+
+  racine.Schemas = { lettres, plane, profil, boite, contour, FORMES, Dessin, cercle, rectangle };
 })(typeof window !== "undefined" ? window : globalThis);
