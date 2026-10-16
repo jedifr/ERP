@@ -68,6 +68,7 @@ h3 { font-size: 1.05rem; margin: 1.5rem 0 .75rem; }
 .champ label, .pli label { font-size: .875rem; color: var(--texte-doux); }
 input, select, textarea { font: inherit; color: var(--texte); background: var(--fond); border: 1px solid var(--bord); border-radius: 8px; padding: .5rem .6rem; width: 100%; min-width: 0; }
 input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 0; border-color: var(--accent); }
+input:disabled { opacity: .5; cursor: not-allowed; }
 .aide { color: var(--texte-doux); font-size: .875rem; margin: .25rem 0 .75rem; }
 
 .forme-et-schema { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1rem 1.5rem; align-items: start; }
@@ -152,6 +153,8 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .etat.refus { color: var(--refus); }
 .prix { font-size: 2.2rem; font-weight: 750; margin: .25rem 0 0; font-variant-numeric: tabular-nums; }
 .prix small { font-size: 1rem; font-weight: 500; color: var(--texte-doux); }
+.prix-ttc { font-size: 1.15rem; font-weight: 600; margin: 0 0 .15rem; font-variant-numeric: tabular-nums; }
+.prix-ttc:empty { display: none; }
 .unitaire { color: var(--texte-doux); margin: 0 0 .75rem; }
 .apercu { width: 100%; height: 180px; background: var(--fond); border-radius: 8px; }
 .apercu path { fill: var(--accent-doux); stroke: var(--accent); stroke-width: 1.5; }

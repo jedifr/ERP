@@ -149,7 +149,24 @@ function majCotes() {
       el("label", { for: `cote-${p.cle}` }, ...(lettres[p.cle] ? [el("span", { class: "lettre", texte: lettres[p.cle] }), " "] : []), p.libelle),
       el("input", { id: `cote-${p.cle}`, "data-cle": p.cle, type: "number", inputmode: "decimal", value: p.defaut, min: p.minimum, max: p.maximum, step: p.entier ? 1 : "any", title: p.aide || false }),
     )));
+  verrouCotes();
 }
+
+// Rayon d'angle OU chanfrein, jamais les deux (l'ERP refuse aussi) : saisir l'un verrouille l'autre à 0.
+const EXCLUSIFS = [["rayon_angle", "chanfrein"]];
+function verrouCotes() {
+  for (const [x, y] of EXCLUSIFS) {
+    const a = $(`cote-${x}`), b = $(`cote-${y}`);
+    if (!a || !b) continue;
+    for (const [champ, autre] of [[a, b], [b, a]]) {
+      const bloque = Number(autre.value) > 0;
+      if (bloque) champ.value = 0;
+      champ.disabled = bloque;
+      champ.closest(".champ").title = bloque ? `Remettez « ${autre.labels[0].textContent.replace(/^[A-Z] /, "")} » à 0 pour saisir cette cote.` : "";
+    }
+  }
+}
+$("cotes").addEventListener("input", verrouCotes);
 
 function dessinerProfil() {
   const lignes = [];
@@ -335,6 +352,7 @@ function afficherErreur(message) {
   $("etat").textContent = message;
   $("etat").className = "etat refus";
   $("prix-total").textContent = "–";
+  $("prix-ttc").textContent = "";
   $("prix-unitaire").textContent = "";
   $("details").replaceChildren();
   $("messages").replaceChildren();
@@ -349,8 +367,10 @@ function afficherResultat(r) {
   $("etat").className = `etat ${r.statut}`;
   const avecPrix = r.prix_total_ht != null;
   $("prix-total").textContent = avecPrix ? euros(r.prix_total_ht) : "–";
-  $("prix-unitaire").textContent = !avecPrix ? "" : r.lot ? `soit ${euros(r.prix_unitaire_ht)} € HT le jeu de ${r.lot.length} pièces`
-    : `soit ${euros(r.prix_unitaire_ht)} € HT la pièce`;
+  $("prix-ttc").textContent = avecPrix && r.prix_total_ttc != null ? `${euros(r.prix_total_ttc)} € TTC` : "";
+  const unite = r.lot ? `le jeu de ${r.lot.length} pièces` : "la pièce";
+  $("prix-unitaire").textContent = !avecPrix ? "" : `soit ${euros(r.prix_unitaire_ht)} € HT`
+    + (r.prix_unitaire_ttc != null ? ` (${euros(r.prix_unitaire_ttc)} € TTC)` : "") + ` ${unite}`;
   const details = [[r.lot ? "Pièces" : "Pièce", r.designation]];
   if (r.lot) {
     r.lot.slice(0, 8).forEach((l, i) => details.push([`Pièce ${i + 1}`, (l.largeur_mm ? `${mm(l.largeur_mm)} × ${mm(l.hauteur_mm)} mm` : "–")
@@ -404,7 +424,16 @@ function afficherPanier() {
   $("total-pieces").textContent = `${euros(total)} €`;
   $("ligne-minimum").hidden = total >= minimum;
   $("complement").textContent = `${euros(Math.max(minimum - total, 0))} €`;
-  $("total-panier").textContent = `${euros(Math.max(total, minimum))} €`;
+  const totalHt = Math.max(total, minimum), taux = catalogue && catalogue.taux_tva != null ? catalogue.taux_tva : null;
+  $("total-panier").textContent = `${euros(totalHt)} €`;
+  // TVA sur le total du panier, comme sur la facture
+  $("ligne-tva").hidden = $("ligne-ttc").hidden = taux == null;
+  if (taux != null) {
+    const totalTtc = Math.round(totalHt * (100 + taux)) / 100;
+    $("libelle-tva").textContent = `TVA ${String(taux).replace(".", ",")} %`;
+    $("tva-panier").textContent = `${euros(totalTtc - totalHt)} €`;
+    $("total-ttc").textContent = `${euros(totalTtc)} €`;
+  }
 }
 
 $("ajouter").addEventListener("click", () => {
@@ -453,7 +482,7 @@ $("form-demande").addEventListener("submit", async (e) => {
   $("form-demande").hidden = false;
   form.reset();
   retour.className = "retour succes";
-  retour.textContent = `Merci ! Demande ${corps.numero} reçue (${euros(corps.total_ht)} € HT hors port). Nous vous confirmons la commande, le port et le délai par e-mail.`;
+  retour.textContent = `Merci ! Demande ${corps.numero} reçue (${euros(corps.total_ht)} € HT${corps.total_ttc != null ? `, ${euros(corps.total_ttc)} € TTC` : ""} hors port). Nous vous confirmons la commande, le port et le délai par e-mail.`;
 });
 
 // ------------------------------------------------------------------ forme libre

@@ -45,6 +45,21 @@ class PrixWebTests(ConfigurateurBase):
         self.assertEqual(r.cout_pliage, 0)
         self.assertEqual(r.prix_total_ht, (r.cout_revient * Decimal("1.2")).quantize(Decimal("0.01")))
         self.assertEqual(r.minimum_commande_ht, Decimal("60"))
+        self.assertEqual((r.taux_tva, r.prix_total_ttc), (Decimal("20"), (r.prix_total_ht * Decimal("1.2")).quantize(Decimal("0.01"))))
+        self.assertEqual(r.prix_unitaire_ttc, (r.prix_unitaire_ht * Decimal("1.2")).quantize(Decimal("0.01")))
+
+    def test_tva_du_referentiel(self):
+        from commercial.models import TauxTVA
+
+        TauxTVA.objects.update(est_defaut=False)
+        TauxTVA.objects.create(nom="DOM", taux=Decimal("8.5"), est_defaut=True)
+        r = chiffrer("S235-W", 2, 10, forme="rectangle", cotes={"largeur": 100, "hauteur": 50})
+        self.assertEqual(r.prix_total_ttc, (r.prix_total_ht * Decimal("1.085")).quantize(Decimal("0.01")))
+        self.assertEqual(catalogue()["taux_tva"], 8.5)
+
+    def test_rayon_ou_chanfrein(self):
+        with self.assertRaisesMessage(ErreurPrixWeb, "pas les deux"):  # l'ERP refuse même si le site laissait passer
+            chiffrer("S235-W", 2, 10, forme="rectangle", cotes={"largeur": 100, "hauteur": 50, "rayon_angle": 5, "chanfrein": 5})
 
     def test_profil_plie(self):
         r = chiffrer("S235-W", 2, 10, pliage={"forme": "profil", "faces": [50, 100], "angles": [90], "longueur": 60})
@@ -127,6 +142,7 @@ class ApiWebTests(ConfigurateurBase):
         self.assertEqual(page.status_code, 200, page.content)
         self.assertEqual(page.json()["statut"], "ok")
         self.assertIsInstance(page.json()["prix_total_ht"], float)
+        self.assertGreater(page.json()["prix_total_ttc"], page.json()["prix_total_ht"])
         for interne in ("cout_revient", "cout_matiere", "taux_marge_pct", "notes", "format_tole"):
             self.assertNotIn(interne, page.json())  # le client ne voit ni coûts ni marge
         page = self.client.post("/api/web/v1/prix/", {"matiere": "Or", "epaisseur": 2, "quantite": 1, "forme": "disque"},
@@ -326,6 +342,7 @@ class DxfWebTests(ConfigurateurBase):
         # une seule mise en place et une seule imbrication : bien moins cher que six pièces chiffrées chacune seule
         self.assertLess(jeu.prix_total_ht, sum(r.prix_total_ht for r in seules) * D("0.8"))
         self.assertEqual(sum(r.prix_total_ht for r in jeu.pieces), jeu.prix_total_ht)
+        self.assertGreater(jeu.prix_total_ttc, jeu.prix_total_ht)
         self.assertGreater(jeu.pieces[0].prix_total_ht, jeu.pieces[1].prix_total_ht)
         # un jeu d'une pièce coûte exactement la pièce seule
         self.assertEqual(chiffrer_jeu([{**base, "dxf": jetons[0]}]).prix_total_ht, seules[0].prix_total_ht)
