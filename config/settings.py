@@ -235,8 +235,8 @@ REST_FRAMEWORK = {
     # suppression du modèle (voir comptes.permissions). Un nouveau ViewSet est donc protégé
     # sans rien ajouter ; une vue sans modèle (APIView) doit déclarer sa propre permission.
     "DEFAULT_PERMISSION_CLASSES": ["comptes.permissions.ModelPermissionsAvecLecture"],
-    # API du configurateur web (web/api.py) : débit par adresse IP.
-    "DEFAULT_THROTTLE_RATES": {"web": os.environ.get("ERP_WEB_DEBIT", "60/min")},
+    # API du configurateur web (web/api.py) : débit total admis depuis le site client (qui limite lui-même chaque visiteur).
+    "DEFAULT_THROTTLE_RATES": {"web": os.environ.get("ERP_WEB_DEBIT", "600/min")},
 }
 
 # Clé partagée avec le site client (en-tête « X-Cle-Web ») ; vide = API du configurateur fermée.

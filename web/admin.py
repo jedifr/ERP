@@ -1,8 +1,9 @@
 from django.contrib import admin, messages
 from django.shortcuts import render
+from django.utils.html import format_html, format_html_join
 from unfold.admin import ModelAdmin
 
-from .models import ReglageWeb
+from .models import DemandeWeb, ReglageWeb
 from .services.prix import ErreurPrixWeb, catalogue, chiffrer
 
 
@@ -21,6 +22,32 @@ class ReglageWebAdmin(ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+
+@admin.register(DemandeWeb)
+class DemandeWebAdmin(ModelAdmin):
+    """Paniers envoyés depuis le site client, prix recalculés par l'ERP : à transformer en devis."""
+
+    list_display = ["numero", "date", "statut", "societe", "nom", "email", "nb_pieces", "total_ht", "a_valider"]
+    list_filter = ["statut", "a_valider"]
+    search_fields = ["numero", "nom", "societe", "email"]
+    readonly_fields = ["numero", "date", "nom", "societe", "email", "telephone", "adresse", "message", "pieces", "total_pieces_ht", "total_ht", "a_valider"]
+    fields = ["numero", "date", "statut", "nom", "societe", "email", "telephone", "adresse", "message", "pieces", "total_pieces_ht", "total_ht", "a_valider", "note_interne"]
+
+    def has_add_permission(self, request):
+        return False
+
+    @admin.display(description="Pièces")
+    def nb_pieces(self, obj):
+        return len(obj.lignes)
+
+    @admin.display(description="Pièces")
+    def pieces(self, obj):
+        return format_html("<table>{}</table>", format_html_join("", "<tr><td style='padding-right:1em'>{}</td><td style='padding-right:1em'>{} × {} mm</td><td style='padding-right:1em'>{} pièce(s)</td><td style='padding-right:1em'>{} € HT</td><td>{}</td></tr>", (
+            (l["designation"], l["demande"].get("matiere"), l["demande"].get("epaisseur"), l["demande"].get("quantite"), f"{l['prix_total_ht']:.2f}",
+             "À valider : " + " ".join(l["validations"]) if l["validations"] else "")
+            for l in obj.lignes
+        )))
 
 
 def _nombres(texte):

@@ -60,6 +60,18 @@ class PrixWeb:
     def en_dict(self):
         return {k: (float(v) if isinstance(v, Decimal) else v) for k, v in self.__dict__.items()}
 
+    def en_dict_public(self):
+        """Ce que voit le client : ni coûts de revient, ni marge, ni notes internes, ni outillage."""
+        d = self.en_dict()
+        public = {k: d[k] for k in PUBLIC}
+        if self.pliage:
+            public["pliage"] = {k: self.pliage.get(k) for k in ("nb_plis", "angle_mini", "developpe_mm", "flan_mm")}
+        return public
+
+
+PUBLIC = ("statut", "refus", "validations", "designation", "matiere", "epaisseur_mm", "procede", "quantite", "largeur_mm", "hauteur_mm",
+          "poids_kg", "contour", "pliage", "prix_total_ht", "prix_unitaire_ht", "minimum_commande_ht")
+
 
 def toles_en_ligne():
     from technique.models import Article
@@ -85,7 +97,7 @@ def catalogue():
     reglage = ReglageWeb.charger()
     return {
         "matieres": list(matieres.values()),
-        "formes": formes.catalogue()["familles"],
+        "formes": [f for f in formes.catalogue()["familles"] if not f["normalisee"]],  # cotes normalisées : sur devis
         "pliage": {
             "formes": ["profil", "boite"],
             "aide": "Cotes extérieures. Profil : faces et angles (90 = équerre, signe = sens du pli). Boîte : fond et bords A, B, C, D.",
@@ -253,7 +265,8 @@ def chiffrer(matiere_nom, epaisseur, quantite, forme=None, cotes=None, pliage=No
             r.cout_pliage = cout_etape_gamme(etape, quantite, aujourdhui)
     except ChiffrageError as exc:
         # Paramétrage incomplet côté atelier : pas de prix en ligne, la demande part en devis.
-        r.refus.append(f"Prix indisponible ({exc}).")
+        r.refus.append("Prix indisponible en ligne pour cette pièce : demandez un devis.")
+        r.notes.append(f"Paramétrage incomplet : {exc}")
         return r.finaliser()
 
     r.cout_revient = arrondir(r.cout_matiere + r.cout_decoupe + r.cout_pliage)
