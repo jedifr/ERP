@@ -19,7 +19,7 @@ import binascii
 from .services.bibliotheque import liste as liste_bibliotheque
 from .services.demandes import enregistrer_demande
 from .services.dxf import ErreurDxf, deposer
-from .services.prix import ErreurPrixWeb, catalogue, chiffrer, taux_tva, ttc
+from .services.prix import ErreurPrixWeb, catalogue, chiffrer, chiffrer_jeu, taux_tva, ttc
 
 
 class CleWeb(BasePermission):
@@ -58,7 +58,9 @@ def _lot(request):
 
 class PrixWebVue(_VueWeb):
     """POST {matiere, epaisseur, quantite, forme + cotes | pliage | libre | dxf (+ echelle) | bibliotheque} → prix (voir web.services.prix.chiffrer).
-    POST {lot: [demande, ...]} → {lot: [prix | {erreur}]} : plusieurs pièces en un appel (un dessin découpé en plusieurs pièces)."""
+    POST {lot: [demande, ...]} → {lot: [prix | {erreur}]} : plusieurs pièces en un appel, chiffrées chacune seule.
+    POST {lot: [...], jeu: true} → prix du jeu (web.services.prix.chiffrer_jeu) : les pièces d'un dessin vectorisé, découpées ensemble
+    dans la même tôle, avec la part de chacune dans `pieces`."""
 
     @staticmethod
     def _chiffrer(d):
@@ -71,6 +73,8 @@ class PrixWebVue(_VueWeb):
             lot = _lot(request)
             if lot is None:
                 return Response(self._chiffrer(request.data))
+            if request.data.get("jeu"):
+                return Response(chiffrer_jeu(lot).en_dict_public())
         except ErreurPrixWeb as exc:
             return Response({"erreur": str(exc)}, status=400)
         resultats = []
