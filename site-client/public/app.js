@@ -149,7 +149,24 @@ function majCotes() {
       el("label", { for: `cote-${p.cle}` }, ...(lettres[p.cle] ? [el("span", { class: "lettre", texte: lettres[p.cle] }), " "] : []), p.libelle),
       el("input", { id: `cote-${p.cle}`, "data-cle": p.cle, type: "number", inputmode: "decimal", value: p.defaut, min: p.minimum, max: p.maximum, step: p.entier ? 1 : "any", title: p.aide || false }),
     )));
+  verrouCotes();
 }
+
+// Rayon d'angle OU chanfrein, jamais les deux (l'ERP refuse aussi) : saisir l'un verrouille l'autre à 0.
+const EXCLUSIFS = [["rayon_angle", "chanfrein"]];
+function verrouCotes() {
+  for (const [x, y] of EXCLUSIFS) {
+    const a = $(`cote-${x}`), b = $(`cote-${y}`);
+    if (!a || !b) continue;
+    for (const [champ, autre] of [[a, b], [b, a]]) {
+      const bloque = Number(autre.value) > 0;
+      if (bloque) champ.value = 0;
+      champ.disabled = bloque;
+      champ.closest(".champ").title = bloque ? `Remettez « ${autre.labels[0].textContent.replace(/^[A-Z] /, "")} » à 0 pour saisir cette cote.` : "";
+    }
+  }
+}
+$("cotes").addEventListener("input", verrouCotes);
 
 function dessinerProfil() {
   const lignes = [];

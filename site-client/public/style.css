@@ -68,6 +68,7 @@ h3 { font-size: 1.05rem; margin: 1.5rem 0 .75rem; }
 .champ label, .pli label { font-size: .875rem; color: var(--texte-doux); }
 input, select, textarea { font: inherit; color: var(--texte); background: var(--fond); border: 1px solid var(--bord); border-radius: 8px; padding: .5rem .6rem; width: 100%; min-width: 0; }
 input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 0; border-color: var(--accent); }
+input:disabled { opacity: .5; cursor: not-allowed; }
 .aide { color: var(--texte-doux); font-size: .875rem; margin: .25rem 0 .75rem; }
 
 .forme-et-schema { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1rem 1.5rem; align-items: start; }

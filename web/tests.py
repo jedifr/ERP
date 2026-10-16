@@ -46,6 +46,10 @@ class PrixWebTests(ConfigurateurBase):
         self.assertEqual(r.prix_total_ht, (r.cout_revient * Decimal("1.2")).quantize(Decimal("0.01")))
         self.assertEqual(r.minimum_commande_ht, Decimal("60"))
 
+    def test_rayon_ou_chanfrein(self):
+        with self.assertRaisesMessage(ErreurPrixWeb, "pas les deux"):  # l'ERP refuse même si le site laissait passer
+            chiffrer("S235-W", 2, 10, forme="rectangle", cotes={"largeur": 100, "hauteur": 50, "rayon_angle": 5, "chanfrein": 5})
+
     def test_profil_plie(self):
         r = chiffrer("S235-W", 2, 10, pliage={"forme": "profil", "faces": [50, 100], "angles": [90], "longueur": 60})
         self.assertEqual(r.statut, "ok")
