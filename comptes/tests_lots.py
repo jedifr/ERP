@@ -228,3 +228,16 @@ class FormatsEtCreationsTests(LotsBase):
         lot = LotModification.objects.order_by("-date").first()
         lots.annuler(lot)
         self.assertEqual(ArticleCompteVente.objects.count(), 0)
+
+    def test_vendu_en_ligne_reserve_aux_toles(self):
+        champs = champs_article()
+        tole = Article.objects.create(reference="T-3 1000x2000", nature=Article.Nature.MATIERE_PREMIERE, matiere=self.matiere, epaisseur=3)
+        self.assertIsNotNone(tole.format_tole_id)
+        lignes = self.lancer(Article.objects.filter(pk__in=[tole.pk, "PIECE-L"]), champs, [("vendu_en_ligne", "oui", "fixe", None)])
+        par_ref = {l["objet"].pk: l for l in lignes}
+        self.assertIn("pas une tôle", par_ref["PIECE-L"]["ignore"])
+        lots.appliquer(Article, lignes, self.user, "En ligne")
+        self.assertTrue(Article.objects.get(pk=tole.pk).vendu_en_ligne)
+        lignes = self.lancer(Article.objects.filter(pk=tole.pk), champs, [("vendu_en_ligne", "non", "fixe", None)])
+        lots.appliquer(Article, lignes, self.user, "Hors ligne")
+        self.assertFalse(Article.objects.get(pk=tole.pk).vendu_en_ligne)

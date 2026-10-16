@@ -75,6 +75,14 @@ def calcul_unite(objet, valeur, mode, unite):
     return {"unite_cout": cible, "cout_unitaire": _arrondi(Article._meta.get_field("cout_unitaire"), nouveau)}
 
 
+def calcul_vendu_en_ligne(objet, valeur, mode, unite):
+    """Vendu en ligne : seule une tôle (matière, épaisseur et format) peut être proposée au configurateur web."""
+    vendu = valeur == "oui"
+    if vendu and not (objet.nature == Article.Nature.MATIERE_PREMIERE and objet.matiere_id and objet.epaisseur and objet.format_tole_id):
+        raise Inapplicable("pas une tôle (matière, épaisseur et format nécessaires)")
+    return {"vendu_en_ligne": vendu}
+
+
 def champs_article():
     from commercial.models import TauxTVA
 
@@ -85,6 +93,8 @@ def champs_article():
                  aide="Convertit aussi le prix pour garder la même valeur (€/kg ↔ €/m²)."),
         ChampLot("taux_marge_defaut", "Taux de marge par défaut (%)"),
         ChampLot("taux_tva", "Taux de TVA", genre="fk", queryset=lambda: TauxTVA.objects.order_by("taux"), vide_permis=True),
+        ChampLot("vendu_en_ligne", "Vendu en ligne", genre="tristate", choix=[("oui", "Oui"), ("non", "Non")], modes=("fixe",),
+                 calcul=calcul_vendu_en_ligne, aide="Tôle proposée au configurateur web (matière, épaisseur et format nécessaires)."),
         ChampLot("gere_en_stock", "Géré en stock", genre="tristate", choix=[("oui", "Oui"), ("non", "Non"), ("defaut", "Défaut de la nature")], modes=("fixe",)),
         ChampLot("stock_mini", "Stock minimum"),
         ChampLot("quantite_reappro", "Quantité de réapprovisionnement"),

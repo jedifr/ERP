@@ -320,15 +320,16 @@ class ArticleAdmin(ImportTableauMixin, ModificationParLotsMixin, ColonnesPersonn
         "unite_cout",
         "cout_unitaire",
         "prix_au_kg",
+        "vendu_en_ligne",
         "gere_en_stock",
         "stock_mini",
     ]
     COLONNES_FAMILLE = {
         "fabrique": ["reference", "miniature", "libelle", "taux_marge_defaut", "gere_en_stock", "stock_mini"],
         "achete": ["reference", "libelle", "nature", "unite_cout", "cout_unitaire", "prix_au_kg", "gere_en_stock", "stock_mini"],
-        "matiere": ["reference", "libelle", "matiere", "unite_cout", "cout_unitaire", "prix_au_kg", "gere_en_stock", "stock_mini"],
+        "matiere": ["reference", "libelle", "matiere", "unite_cout", "cout_unitaire", "prix_au_kg", "vendu_en_ligne", "gere_en_stock", "stock_mini"],
     }
-    list_filter = ["nature", "unite_cout", "type_profil", "gere_en_stock"]
+    list_filter = ["nature", "unite_cout", "type_profil", "vendu_en_ligne", "gere_en_stock"]
     actions = ["action_modifier_par_lots", "action_ajouter_gamme_type", "action_affecter_compte"]
     champs_lot = lots_champs.champs_article()
     actions_list = ["action_importer_tableau"]
