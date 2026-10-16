@@ -186,8 +186,12 @@ def chiffrer(matiere_nom, epaisseur, quantite, forme=None, cotes=None, pliage=No
                 r.designation = f"Boîte {longueur:g} × {largeur:g}, bords " + " / ".join(f"{float(h or 0):g}" for h in pliage["bords"])
             else:
                 faces, angles = [float(f) for f in pliage["faces"]], [float(a) for a in pliage["angles"]]
-                if len(faces) < 2 or len(angles) != len(faces) - 1 or any(f <= 0 for f in faces) or any(not 0 < abs(a) < 180 for a in angles):
-                    raise ErreurPrixWeb("Profil : au moins deux faces positives et un angle (entre 0 et 180°) de moins que de faces.")
+                if len(faces) < 2:
+                    raise ErreurPrixWeb(f"Profil : {len(faces)} face saisie, il en faut au moins deux (ex. 50 ; 50 pour une cornière).")
+                if len(angles) != len(faces) - 1:
+                    raise ErreurPrixWeb(f"Profil : {len(faces)} faces demandent {len(faces) - 1} angle(s), {len(angles)} saisi(s) (ex. 90 ; 90 pour un U).")
+                if any(f <= 0 for f in faces) or any(not 0 < abs(a) < 180 for a in angles):
+                    raise ErreurPrixWeb("Profil : chaque face est positive et chaque angle compris entre 0 et 180° (90 = équerre).")
                 longueur = float(pliage["longueur"])
                 resultat_pliage = calculer_pliage(matiere, epaisseur, faces, angles, longueur)
                 r.designation = f"Profil plié {' / '.join(f'{f:g}' for f in faces)} × {longueur:g}"
