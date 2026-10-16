@@ -108,13 +108,14 @@ AIDES = {
         "bon_a_savoir": ["Un réglage est compté par réglage distinct : deux plis de même angle entre des faces identiques n'en font qu'un."],
     },
     "decoupe.pliagearticle": {
-        "resume": "Profil plié d'un article fabriqué (cornière, U, Z…) : vé, plieuse, force, angle mini, développé et temps de pliage.",
+        "resume": "Pièce pliée d'un article fabriqué, profil (cornière, U, Z…) ou boîte : vé, plieuse, force, angle mini, développé et temps de pliage.",
         "etapes": [
-            "Choisissez l'article, la matière, l'épaisseur et la longueur de pli.",
-            "Saisissez les cotes extérieures des faces et l'angle de chaque pli (90 = équerre, -90 = pli dans l'autre sens).",
+            "Choisissez l'article, la matière, l'épaisseur et la forme.",
+            "Profil : longueur de pli, cotes extérieures des faces et angle de chaque pli (90 = équerre, -90 = pli dans l'autre sens).",
+            "Boîte : longueur et largeur du fond, hauteurs extérieures des bords A ; B ; C ; D (A et C le long de la longueur, 0 = pas de bord), et leurs angles si ce n'est pas 90°.",
             "Enregistrez : le calcul s'affiche et l'étape « pliage » de la gamme de l'article est créée ou mise à jour.",
         ],
-        "bon_a_savoir": ["Un résultat « À valider » est chiffré mais doit être vérifié par un technicien (aile haute, face courte entre deux plis, forte épaisseur…)."],
+        "bon_a_savoir": ["Un résultat « À valider » est chiffré mais doit être vérifié par un technicien (aile haute, face courte entre deux plis, forte épaisseur…).", "Boîte : le flan affiché (longueur × largeur) est à cranter aux coins ; les bords pliés en premier doivent passer sous le poinçon."],
     },
     "technique.famillematiere": {
         "resume": "Une famille regroupe des nuances (Acier, Inox, Aluminium…) : elles partagent leurs paramètres de coupe et leur usinabilité.",

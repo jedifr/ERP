@@ -10,7 +10,7 @@ from technique.models import Article, FamilleMatiere, Gamme, Matiere, PosteTrava
 
 from .models import PliageArticle, Plieuse, ReglagePliage
 from .services.gamme import alimenter_gamme_pliage
-from .services.pliage import ErreurPliage, calculer_pliage, developpe, force_abaque, table_pour
+from .services.pliage import ErreurPliage, calculer_boite, calculer_pliage, developpe, force_abaque, table_pour
 
 
 class PliageCalculTests(TestCase):
@@ -94,6 +94,61 @@ class PliageCalculTests(TestCase):
             PliageArticle(article=article, matiere=self.acier, epaisseur_mm=2, longueur_pli_mm=100, faces_mm=[50], angles_deg=[]).full_clean()
 
 
+class PliageBoiteTests(TestCase):
+    """Boîtes pliées dans deux directions : fond L × l, bords A et C le long de L, B et D le long de l."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.acier = Matiere.objects.create(nom="S235-B", densite=7.85, famille=FamilleMatiere.objects.get(nom="Acier"))
+
+    def test_boite_200_150_40(self):
+        r = calculer_boite(self.acier, 2, 200, 150, [40, 40, 40, 40])
+        self.assertEqual((r.statut, r.ve, r.plieuse, r.nb_plis), ("ok", "V12/30°", "Plieuse 2 m / 50 t", 4))
+        # 146,54 pour une cornière 50 / 100 : chaque pli à 90° retire 3,46 mm
+        self.assertEqual(r.flan_mm, [273.08, 223.08])
+        # deux réglages distincts (bords A/C sur 200, bords B/D sur 150), 4 plis par pièce
+        self.assertEqual((r.nb_reglages, r.temps_reglage_min, r.temps_pli_min), (2, 10.0, 2.0))
+        self.assertIn("poinçon en segments", r.notes[-1])
+
+    def test_boite_carree_un_seul_reglage(self):
+        r = calculer_boite(self.acier, 2, 400, 400, [50, 50, 50, 50])
+        self.assertEqual((r.nb_reglages, r.temps_reglage_min), (1, 5.0))
+
+    def test_deux_bords_opposes_comme_un_u(self):
+        r = calculer_boite(self.acier, 2, 200, 150, [40, 0, 40, 0])
+        u = calculer_pliage(self.acier, 2, [40, 150, 40], [90, 90], 200)
+        self.assertEqual(r.flan_mm, [200, u.developpe_mm])
+        self.assertEqual((r.nb_reglages, r.temps_pli_min, r.notes), (u.nb_reglages, u.temps_pli_min, []))
+
+    def test_force_et_plieuse_selon_le_pli_le_plus_long(self):
+        r = calculer_boite(self.acier, 3, 2500, 500, [50, 50, 50, 50])
+        self.assertEqual((r.ve, r.plieuse), ("V24/30°", "Plieuse 3 m / 200 t"))
+        self.assertEqual(r.temps_reglage_min, 12.5)  # 7,5 min pour le pli de 2 500, 5 pour celui de 500
+
+    def test_validations(self):
+        r = calculer_boite(self.acier, 2, 300, 100, [120, 0, 120, 0])
+        self.assertEqual(r.statut, "validation")
+        self.assertIn("Bord A (120 mm) plus haut que la largeur du fond", r.validations[0])
+        r = calculer_boite(self.acier, 2, 600, 600, [300, 300, 300, 300])  # P7 H250 trop court pour les derniers plis
+        self.assertIn("P7 RF-A H250", r.validations[0])
+        r = calculer_boite(self.acier, 2, 200, 150, [40, 40, 40, 40], [80, 90, 90, 90])
+        self.assertIn("Bord A rentrant", r.validations[0])
+        self.assertIn("Bord B trop courte", calculer_boite(self.acier, 2, 200, 150, [40, 5, 40, 40]).refus[0])
+
+    def test_bac_evase(self):
+        r = calculer_boite(self.acier, 2, 200, 150, [40, 40, 40, 40], [100, 100, 100, 100])
+        self.assertEqual(r.statut, "ok")
+        self.assertGreater(r.flan_mm[0], 273.08)
+
+    def test_saisie_controlee(self):
+        article = Article.objects.create(reference="PB-0", nature="fabrique", libelle="Boîte")
+        base = dict(article=article, matiere=self.acier, epaisseur_mm=2, forme="boite", longueur_fond_mm=200, largeur_fond_mm=150)
+        PliageArticle(**base, bords_mm=[40, 40, 40, 40]).full_clean()
+        for bords, angles in (([40, 40, 40], []), ([0, 0, 0, 0], []), ([40, 40, 40, 40], [90, 180, 90, 90])):
+            with self.assertRaises(ValidationError):
+                PliageArticle(**base, bords_mm=bords, angles_bords_deg=angles).full_clean()
+
+
 class PliageGammeTests(TestCase):
     @classmethod
     def setUpTestData(cls):
@@ -123,6 +178,14 @@ class PliageGammeTests(TestCase):
         with self.assertRaisesMessage(ErreurPliage, "poste de travail"):
             alimenter_gamme_pliage(pliage)
 
+    def test_boite_dans_la_gamme(self):
+        article = Article.objects.create(reference="PB-1", nature="fabrique", libelle="Boîte")
+        pliage = PliageArticle.objects.create(article=article, matiere=self.acier, epaisseur_mm=2, forme="boite",
+                                              longueur_fond_mm=200, largeur_fond_mm=150, bords_mm=[40, 40, 40, 40])
+        etape, resultat = alimenter_gamme_pliage(pliage)
+        self.assertEqual((etape.poste, etape.temps_fixe, etape.temps_variable), (self.poste, 10.0, 2.0))
+        self.assertEqual(pliage.resultat["flan_mm"], [273.08, 223.08])
+
     def test_reglage_unique(self):
         self.assertEqual(ReglagePliage.charger().marge_force_pct, 70)
 
@@ -135,12 +198,21 @@ class PliageAdminTests(TestCase):
         acier = Matiere.objects.create(nom="S235-A", densite=7.85, famille=FamilleMatiere.objects.get(nom="Acier"))
         article = Article.objects.create(reference="PL-2", nature="fabrique", libelle="U")
         page = self.client.post("/admin/decoupe/pliagearticle/add/", {
-            "article": article.pk, "matiere": acier.pk, "epaisseur_mm": "2", "longueur_pli_mm": "500", "faces": "20 ; 60 ; 20", "angles": "90 ; 90",
+            "article": article.pk, "matiere": acier.pk, "epaisseur_mm": "2", "forme": "profil", "longueur_pli_mm": "500", "faces": "20 ; 60 ; 20", "angles": "90 ; 90",
         }, follow=True)
         self.assertEqual(page.status_code, 200)
         pliage = PliageArticle.objects.get(article=article)
         self.assertEqual((pliage.faces_mm, pliage.angles_deg, pliage.resultat["statut"]), ([20, 60, 20], [90, 90], "ok"))
         self.assertContains(page, "poste de travail")  # plieuse sans poste : message d'erreur, mais le calcul est enregistré
         self.assertContains(self.client.get(f"/admin/decoupe/pliagearticle/{pliage.pk}/change/"), "V12/30°")
+        boite = Article.objects.create(reference="PB-2", nature="fabrique", libelle="Bac")
+        page = self.client.post("/admin/decoupe/pliagearticle/add/", {
+            "article": boite.pk, "matiere": acier.pk, "epaisseur_mm": "2", "forme": "boite", "longueur_fond_mm": "200",
+            "largeur_fond_mm": "150", "bords": "40 ; 40 ; 40 ; 40", "angles_bords": "",
+        }, follow=True)
+        pliage = PliageArticle.objects.get(article=boite)
+        self.assertEqual((pliage.bords_mm, pliage.faces_mm, pliage.resultat["flan_mm"]), ([40, 40, 40, 40], [], [273.08, 223.08]))
+        self.assertContains(self.client.get(f"/admin/decoupe/pliagearticle/{pliage.pk}/change/"), "273.08 × 223.08")
+        self.assertContains(self.client.get("/admin/decoupe/pliagearticle/"), "Boîte 200 × 150")
         for url in ("/admin/decoupe/plieuse/", "/admin/decoupe/reglagepliage/", "/admin/decoupe/pliagearticle/"):
             self.assertEqual(self.client.get(url).status_code, 200, url)
