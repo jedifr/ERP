@@ -4,8 +4,12 @@ désignent ensuite la pièce par ce jeton : le fichier ne transite qu'une fois. 
 
 Le SVG est converti en DXF ici (courbes aplaties en segments de 0,5 mm, échelle tirée des unités du fichier : mm, cm, in, pt, et
 96 px par pouce sinon). Le DWG passe par un convertisseur installé sur le serveur : `dwg2dxf` (LibreDWG) ou ODA File
-Converter ; sans convertisseur, le client est invité à envoyer un DXF."""
+Converter ; sans convertisseur, le client est invité à envoyer un DXF.
 
+Le STEP (pièce en 3D, plane ou pliée) est lu par web.services.step : épaisseur, plis et flan déplié. Le navigateur peut
+l'envoyer compressé (gzip) : un STEP pèse souvent plusieurs Mo, mais se compresse bien."""
+
+import gzip
 import hashlib
 import io
 import json
@@ -19,7 +23,8 @@ from pathlib import Path
 from django.conf import settings
 
 TAILLE_MAX = 1536 * 1024  # 2 Mo une fois en base64, sous la limite de Django (2,5 Mo)
-FORMATS = (".dxf", ".dwg", ".svg")
+FORMATS = (".dxf", ".dwg", ".svg", ".step", ".stp")
+STEP_MAX = 30 * 1024 * 1024  # STEP une fois décompressé
 PX_PAR_MM = 96 / 25.4  # unité utilisateur SVG (px CSS)
 PAS_SVG_MM = 0.5  # longueur des segments qui remplacent courbes et arcs du SVG
 JETON = re.compile(r"^[0-9a-f]{64}$")
@@ -43,17 +48,31 @@ def deposer(nom, contenu):
     nom = Path(str(nom or "piece.dxf")).name[:120]
     extension = Path(nom).suffix.lower()
     if extension not in FORMATS:
-        raise ErreurDxf("Envoyez un fichier DXF, DWG ou SVG (exporté depuis votre logiciel de dessin).")
-    if not contenu:
-        raise ErreurDxf("Le fichier est vide.")
+        raise ErreurDxf("Envoyez un fichier DXF, DWG, SVG ou STEP (exporté depuis votre logiciel de dessin).")
     if len(contenu) > TAILLE_MAX:
         raise ErreurDxf("Fichier trop gros (1,5 Mo au plus) : envoyez-le avec une demande de devis.")
+    if extension in (".step", ".stp") and contenu[:2] == b"\x1f\x8b":
+        try:
+            with gzip.GzipFile(fileobj=io.BytesIO(contenu)) as g:
+                contenu = g.read(STEP_MAX + 1)
+        except (OSError, EOFError):
+            raise ErreurDxf("Fichier illisible.")
+        if len(contenu) > STEP_MAX:
+            raise ErreurDxf("Fichier STEP trop gros : envoyez-le avec une demande de devis.")
+    if not contenu:
+        raise ErreurDxf("Le fichier est vide.")
     jeton = hashlib.sha256(contenu).hexdigest()
     d = dossier()
     fiche_chemin = d / f"{jeton}.json"
     if fiche_chemin.exists():
         fiche = json.loads(fiche_chemin.read_text("utf-8"))
         return {**fiche, "nom": nom}
+    if extension in (".step", ".stp"):
+        from .step import deposer_step
+
+        fiche = deposer_step(nom, contenu, jeton, d)
+        fiche_chemin.write_text(json.dumps(fiche), "utf-8")
+        return fiche
     chemin = d / f"{jeton}.dxf"
     avertissements = []
     if extension == ".dxf":
@@ -102,10 +121,11 @@ def charger(jeton):
 
 
 def chemin_fichier(jeton, original=False):
-    """DXF de fabrication du fichier déposé ; `original=True` : le fichier envoyé (SVG, DWG ou DXF)."""
+    """DXF de fabrication du fichier déposé ; `original=True` : le fichier envoyé (SVG, DWG, STEP ou DXF). Un STEP n'a pas
+    de DXF enregistré : son flan dépend de la matière et de l'outillage, il est recalculé au prix."""
     if not JETON.match(str(jeton or "")):
         return None
-    for extension in ((".svg", ".dwg", ".dxf") if original else (".dxf",)):
+    for extension in ((".svg", ".dwg", ".step", ".dxf") if original else (".dxf",)):
         chemin = dossier() / f"{jeton}{extension}"
         if chemin.exists():
             return chemin

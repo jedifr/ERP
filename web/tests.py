@@ -340,7 +340,7 @@ class DxfWebTests(ConfigurateurBase):
         from unittest import mock
 
         with mock.patch("web.services.dxf.dwg_lisible", return_value=False), mock.patch("shutil.which", return_value=None), \
-                mock.patch("ezdxf.addons.odafc.is_installed", return_value=False):
+                mock.patch("ezdxf.addons.odafc.is_installed", return_value=False), mock.patch("web.services.step.lisible", return_value=False):
             page = self.envoyer(b"AC1032 pas un vrai dwg", "piece.dwg")
             self.assertEqual(page.status_code, 400)
             self.assertIn("exportez votre pièce en DXF", page.json()["erreur"])
@@ -354,7 +354,7 @@ class DxfWebTests(ConfigurateurBase):
         for contenu, nom, message in (
             (deux, "deux.dxf", "pièces séparées"),
             (b"pas un dxf", "piece.dxf", "illisible"),
-            (b"0\nSECTION", "piece.step", "DXF, DWG ou SVG"),
+            (b"0\nSECTION", "piece.iges", "DXF, DWG, SVG ou STEP"),
             (b"<svg xmlns='http://www.w3.org/2000/svg'><text>a</text></svg>", "texte.svg", "aucun tracé"),
             (b"", "piece.dxf", "vide"),
             (b"x" * (1536 * 1024 + 1), "piece.dxf", "trop gros"),
@@ -442,3 +442,86 @@ class BibliothequeWebTests(ConfigurateurBase):
         self.client.force_login(get_user_model().objects.create_superuser("bi", "bi@example.com", "pass-bi-1234"))
         dxf = self.client.get(f"/admin/web/demandeweb/{demande.pk}/dxf/0/")
         self.assertIn(b"LWPOLYLINE", dxf.content)  # DXF de fabrication à la largeur commandée
+
+
+@override_settings(WEB_CLE_API="secret-web")
+class StepWebTests(ConfigurateurBase):
+    """Pièces 3D (STEP) : épaisseur et plis lus dans le fichier, flan déplié avec l'outillage de l'atelier."""
+
+    envoyer = DxfWebTests.envoyer
+
+    def setUp(self):
+        DxfWebTests.setUp(self)
+        from .pieces_step_essai import bac, ecrire_step, plaque, profil
+
+        self.ecrire, self.profil, self.plaque, self.bac = ecrire_step, profil, plaque, bac
+
+    def prix(self, jeton, **autres):
+        return self.client.post("/api/web/v1/prix/", {"matiere": "S235-W", "epaisseur": 2, "quantite": 10, "dxf": jeton, **autres},
+                                content_type="application/json", HTTP_X_CLE_WEB="secret-web")
+
+    def test_corniere_comme_le_profil_saisi(self):
+        # Cornière 50 × 100 cotes extérieures, rayon intérieur 2 dans le modèle, 60 de long, percée de deux trous.
+        solide = self.profil([46, 96], [90], 2, 2, 60, trous=[(20, 0, 30, (0, 1, 0), 8), (48, 50, 30, (1, 0, 0), 10)])
+        page = self.envoyer(self.ecrire(solide), "corniere.stp")
+        self.assertEqual(page.status_code, 200, page.content)
+        fiche = page.json()
+        self.assertEqual((fiche["format"], fiche["epaisseur_mm"], len(fiche["plis"]), len(fiche["contour"]["trous"])), ("step", 2, 1, 2))
+        self.assertEqual((fiche["plis"][0]["angle"], fiche["plis"][0]["longueur"], fiche["plis"][0]["faces"]), (90, 60, [50, 100]))
+        r = self.prix(fiche["jeton"]).json()
+        self.assertEqual(r["statut"], "ok", r)
+        saisi = chiffrer("S235-W", 2, 10, pliage={"forme": "profil", "faces": [50, 100], "angles": [90], "longueur": 60})
+        # même flan que le profil saisi à la main (développé au rayon du vé de l'atelier, pas à celui du modèle)
+        self.assertAlmostEqual(r["largeur_mm"], saisi.largeur_mm, places=1)
+        self.assertEqual(r["hauteur_mm"], 60)
+        self.assertEqual((r["pliage"]["nb_plis"], len(r["contour"]["trous"])), (1, 2))
+        self.assertIn("(1 pli)", r["designation"])
+        Article.objects.create(reference="S235-W-3", nature=Article.Nature.MATIERE_PREMIERE, matiere=self.matiere, epaisseur=3,
+                               unite_cout=Article.UniteCout.SURFACE, cout_unitaire=30, format_tole=self.tole.format_tole, vendu_en_ligne=True)
+        self.assertIn("choisissez 2 mm", self.prix(fiche["jeton"], epaisseur=3).json()["erreur"])  # épaisseur imposée par le fichier
+        self.assertEqual(self.prix(fiche["jeton"], echelle=2).status_code, 400)
+
+    def test_plaque_plane_compressee_et_demande(self):
+        import gzip
+
+        contenu = self.ecrire(self.plaque(200, 100, 2, [(50, 50, 20), (150, 50, 10)]))
+        fiche = self.envoyer(gzip.compress(contenu), "platine.step").json()
+        self.assertEqual((fiche["largeur_mm"], fiche["hauteur_mm"], fiche["plis"], len(fiche["contour"]["trous"])), (200, 100, [], 2))
+        self.assertEqual(self.prix(fiche["jeton"]).json()["statut"], "ok")
+        page = self.client.post("/api/web/v1/demandes/", {"client": DemandeWebTests.CLIENT, "lignes": [
+            {"matiere": "S235-W", "epaisseur": 2, "quantite": 2, "dxf": fiche["jeton"]}]}, content_type="application/json", HTTP_X_CLE_WEB="secret-web")
+        self.assertEqual(page.status_code, 201, page.content)
+        demande = DemandeWeb.objects.get()
+        self.client.force_login(get_user_model().objects.create_superuser("st", "st@example.com", "pass-st-1234"))
+        self.assertContains(self.client.get(f"/admin/web/demandeweb/{demande.pk}/change/"), ">STEP<")
+        original = self.client.get(f"/admin/web/demandeweb/{demande.pk}/dxf/0/?original=1")
+        self.assertEqual(b"".join(original.streaming_content), contenu)  # le STEP décompressé, tel qu'exporté par le client
+        dxf = self.client.get(f"/admin/web/demandeweb/{demande.pk}/dxf/0/")
+        self.assertIn(b"LWPOLYLINE", dxf.content)  # flan chiffré, en DXF
+
+    def test_bac_plie_dans_deux_directions(self):
+        fiche = self.envoyer(self.ecrire(self.bac(100, 60, 20, 2, 2)), "bac.step").json()
+        self.assertEqual(len(fiche["plis"]), 4)
+        self.assertAlmostEqual(fiche["largeur_mm"], 148.8, places=1)  # 20 + 100 + 20 + 2 arcs neutres (K 0,4 en aperçu)
+        self.assertTrue(any("plusieurs directions" in a for a in fiche["avertissements"]))
+        r = self.prix(fiche["jeton"]).json()
+        self.assertEqual(r["statut"], "validation", r)
+        self.assertEqual(len(r["contour"]["exterieur"]), 12)  # flan en croix, coins crantés
+
+    def test_fichiers_step_refuses(self):
+        from .pieces_step_essai import assembler, bossage
+
+        for solide, nom, message in (
+            (assembler(self.plaque(50, 50, 2), self.profil([10, 10], [90], 2, 2, 50)), "deux.step", "pièces séparées"),
+            (bossage(), "bossage.step", "épaisseur constante"),
+        ):
+            with self.subTest(message=message):
+                page = self.envoyer(self.ecrire(solide), nom)
+                self.assertEqual(page.status_code, 400, page.content)
+                self.assertIn(message, page.json()["erreur"])
+        page = self.envoyer(b"ISO-10303-21; pas vraiment", "faux.step")
+        self.assertIn("STEP illisible", page.json()["erreur"])
+
+    def test_catalogue_propose_le_step(self):
+        formats = self.client.get("/api/web/v1/catalogue/", HTTP_X_CLE_WEB="secret-web").json()["formats_fichier"]
+        self.assertIn("step", formats)
