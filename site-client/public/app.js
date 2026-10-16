@@ -311,24 +311,20 @@ async function calculer() {
     return;
   }
   const appel = ++numeroAppel;
-  const { ok, corps } = await api("/api/prix", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(demande.lot ? { lot: demande.lot } : demande) });
+  const { ok, corps } = await api("/api/prix", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(demande.lot ? { lot: demande.lot, jeu: true } : demande) });
   if (appel !== numeroAppel) return; // une saisie plus récente est en cours
   if (!ok) return afficherErreur(corps.erreur || "Calcul impossible.");
-  const resultat = demande.lot ? resultatLot(corps.lot || []) : corps;
+  const resultat = demande.lot ? resultatJeu(corps) : corps;
   dernier = { demande, resultat };
   afficherResultat(resultat);
 }
 
-// Prix des pièces d'un dessin vectorisé, réunies en un « jeu » : chacune garde son prix, le total les additionne.
-function resultatLot(reponses) {
-  const lignes = reponses.map((r, i) => (r.erreur ? { statut: "refus", refus: [r.erreur], validations: [], prix_total_ht: null, designation: `Pièce ${i + 1}` } : r));
-  const statut = lignes.some((l) => l.statut === "refus") ? "refus" : lignes.some((l) => l.statut === "validation") ? "validation" : "ok";
-  const avecPrix = lignes.length > 0 && lignes.every((l) => l.prix_total_ht != null);
-  const somme = (cle) => lignes.reduce((s, l) => s + l[cle], 0);
-  const prefixe = (cle) => lignes.flatMap((l, i) => (l[cle] || []).map((m) => `Pièce ${i + 1} : ${m}`));
+// Prix des pièces d'un dessin vectorisé, chiffrées par l'ERP comme un seul jeu : toutes imbriquées dans la même tôle,
+// temps de coupe cumulé, mise en place comptée une fois. Chaque pièce porte sa part du prix du jeu.
+function resultatJeu(jeu) {
+  const lignes = (jeu.pieces || []).map((r, i) => (r.erreur ? { statut: "refus", refus: [r.erreur], validations: [], prix_total_ht: null, designation: `Pièce ${i + 1}` } : r));
   return {
-    statut, lot: lignes, designation: `${lignes.length} pièces de ${vecto.nom || "votre dessin"}`, refus: prefixe("refus"), validations: prefixe("validations"),
-    prix_total_ht: avecPrix ? somme("prix_total_ht") : null, prix_unitaire_ht: avecPrix ? somme("prix_unitaire_ht") : null,
+    ...jeu, lot: lignes, designation: `${lignes.length} pièces de ${vecto.nom || "votre dessin"}`,
     largeur_mm: vecto.resultat ? vecto.resultat.largeurMm : null, hauteur_mm: vecto.resultat ? vecto.resultat.hauteurMm : null,
     contour: lignes[0] && lignes[0].contour,
   };
@@ -360,6 +356,7 @@ function afficherResultat(r) {
     r.lot.slice(0, 8).forEach((l, i) => details.push([`Pièce ${i + 1}`, (l.largeur_mm ? `${mm(l.largeur_mm)} × ${mm(l.hauteur_mm)} mm` : "–")
       + (l.prix_total_ht != null ? ` : ${euros(l.prix_total_ht)} €` : "")]));
     if (r.lot.length > 8) details.push(["…", `et ${r.lot.length - 8} autres`]);
+    if (r.nb_feuilles) details.push(["Découpe groupée", `les ${r.lot.length} pièces imbriquées ensemble dans ${r.nb_feuilles > 1 ? `${r.nb_feuilles} tôles` : "la même tôle"}`]);
   }
   if (r.procede) details.push(["Découpe", PROCEDES[r.procede] || r.procede]);
   if (r.largeur_mm) details.push([r.pliage ? "Flan à plat" : r.lot ? "Encombrement du dessin" : "Encombrement", `${mm(r.largeur_mm)} × ${mm(r.hauteur_mm)} mm`]);
@@ -413,9 +410,11 @@ function afficherPanier() {
 $("ajouter").addEventListener("click", () => {
   if (!dernier || dernier.resultat.prix_total_ht == null) return;
   const r = dernier.resultat;
-  // un dessin en plusieurs pièces : une ligne par pièce (chacune a son fichier et son prix)
-  if (dernier.demande.lot) dernier.demande.lot.forEach((d, i) => panier.push({ demande: d, designation: r.lot[i].designation, prix_total_ht: r.lot[i].prix_total_ht, statut: r.lot[i].statut }));
-  else panier.push({ demande: dernier.demande, designation: r.designation, prix_total_ht: r.prix_total_ht, statut: r.statut });
+  // un dessin en plusieurs pièces : une ligne pour le jeu ; ses pièces partent ensemble, marquées du même jeu, et l'ERP les rechiffre ensemble
+  if (dernier.demande.lot) {
+    const jeu = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+    panier.push({ demande: { ...dernier.demande, lot: dernier.demande.lot.map((d) => ({ ...d, jeu })) }, designation: r.designation, prix_total_ht: r.prix_total_ht, statut: r.statut });
+  } else panier.push({ demande: dernier.demande, designation: r.designation, prix_total_ht: r.prix_total_ht, statut: r.statut });
   enregistrerPanier();
   afficherPanier();
   $("ajouter").textContent = "Ajouté ✓";
@@ -440,7 +439,7 @@ $("form-demande").addEventListener("submit", async (e) => {
   retour.className = "retour";
   retour.textContent = "Envoi…";
   const { ok, corps } = await api("/api/demandes", {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ client, lignes: panier.map((l) => l.demande) }),
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ client, lignes: panier.flatMap((l) => l.demande.lot || [l.demande]) }),
   });
   bouton.disabled = false;
   if (!ok) {

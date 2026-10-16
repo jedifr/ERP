@@ -312,6 +312,43 @@ class DxfWebTests(ConfigurateurBase):
             chemin = "/api/web/v1/dxf/" if "fichiers" in corps else "/api/web/v1/prix/"
             self.assertEqual(self.client.post(chemin, corps, content_type="application/json", HTTP_X_CLE_WEB="secret-web").status_code, 400)
 
+    def test_jeu_de_pieces_chiffre_comme_une_seule_decoupe(self):
+        from web.services.prix import chiffrer_jeu
+
+        D = Decimal
+        petit = b'<svg xmlns="http://www.w3.org/2000/svg" width="30mm" height="20mm" viewBox="0 0 30 20"><path d="M0 0H30V20H0Z"/></svg>'
+        jetons = [self.envoyer(c, f"logo-{i}.svg").json()["jeton"] for i, c in enumerate([self.SVG_MM] + [petit] * 5)]
+        base = {"matiere": "S235-W", "epaisseur": 2, "quantite": 3}
+        seules = [chiffrer("S235-W", 2, 3, dxf=j) for j in jetons]
+        jeu = chiffrer_jeu([{**base, "dxf": j} for j in jetons])
+        self.assertIn(jeu.statut, ("ok", "validation"), jeu.refus)
+        self.assertEqual(jeu.nb_feuilles, 1)
+        # une seule mise en place et une seule imbrication : bien moins cher que six pièces chiffrées chacune seule
+        self.assertLess(jeu.prix_total_ht, sum(r.prix_total_ht for r in seules) * D("0.8"))
+        self.assertEqual(sum(r.prix_total_ht for r in jeu.pieces), jeu.prix_total_ht)
+        self.assertGreater(jeu.pieces[0].prix_total_ht, jeu.pieces[1].prix_total_ht)
+        # un jeu d'une pièce coûte exactement la pièce seule
+        self.assertEqual(chiffrer_jeu([{**base, "dxf": jetons[0]}]).prix_total_ht, seules[0].prix_total_ht)
+        with self.assertRaises(ErreurPrixWeb):
+            chiffrer_jeu([{**base, "dxf": jetons[0]}, {**base, "quantite": 4, "dxf": jetons[1]}])
+        refus = chiffrer_jeu([{**base, "dxf": jetons[0]}, {**base, "dxf": "inconnu"}])
+        self.assertEqual((refus.statut, refus.prix_total_ht), ("refus", None))
+
+        page = self.client.post("/api/web/v1/prix/", {"jeu": True, "lot": [{**base, "dxf": j} for j in jetons]},
+                                content_type="application/json", HTTP_X_CLE_WEB="secret-web")
+        self.assertEqual(page.status_code, 200, page.content)
+        corps = page.json()
+        self.assertEqual(corps["prix_total_ht"], float(jeu.prix_total_ht))
+        self.assertEqual(len(corps["pieces"]), 6)
+        self.assertNotIn("cout_revient", corps)
+
+        # la demande recalcule le jeu ensemble : même total que le prix affiché
+        lignes = [{**base, "dxf": j, "jeu": "logo"} for j in jetons]
+        reponse = self.client.post("/api/web/v1/demandes/", {"client": DemandeWebTests.CLIENT, "lignes": lignes + [{**base, "dxf": jetons[1]}]},
+                                   content_type="application/json", HTTP_X_CLE_WEB="secret-web")
+        self.assertEqual(reponse.status_code, 201, reponse.content)
+        self.assertAlmostEqual(reponse.json()["total_pieces_ht"], float(jeu.prix_total_ht + seules[1].prix_total_ht), places=2)
+
     SVG_MM = (b'<svg xmlns="http://www.w3.org/2000/svg" width="200mm" height="100mm" viewBox="0 0 200 100">'
               b'<path d="M0,0 H200 V70 A30 30 0 0 1 170 100 H0 Z"/><circle cx="40" cy="50" r="15"/>'
               b'<rect x="90" y="30" width="40" height="20" rx="5"/><text x="5" y="5">Logo</text></svg>')
