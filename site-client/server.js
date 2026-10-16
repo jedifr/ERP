@@ -1,4 +1,5 @@
-// Site client DÉCOUPE H2O : sert la page du configurateur et relaie ses appels (catalogue, prix, fichier DXF, demande)
+// Site client DÉCOUPE H2O : sert la page du configurateur et relaie ses appels (catalogue, bibliothèque de formes, prix,
+// fichier DXF, demande)
 // vers l'API web de l'ERP.
 // La clé de l'ERP reste ici, jamais dans le navigateur. Aucune dépendance : Node 20+ (http, fetch).
 //
@@ -20,11 +21,13 @@ const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; ch
 // Taille maximale des corps reçus : un DXF de 1,5 Mo fait 2 Mo en base64 ; une demande porte jusqu'à 50 pièces libres.
 const TAILLES_MAX = { "/api/prix": 256 * 1024, "/api/dxf": 2200 * 1024, "/api/demandes": 1024 * 1024 };
 const RELAIS = { "/api/prix": "prix/", "/api/dxf": "dxf/", "/api/demandes": "demandes/" };
-const CATALOGUE_TTL_MS = 5 * 60 * 1000;
+// Lectures mises en cache 5 min : elles ne changent qu'avec le paramétrage ou une nouvelle version de l'ERP.
+const LECTURES = { "/api/catalogue": "catalogue/", "/api/bibliotheque": "bibliotheque/" };
+const CACHE_TTL_MS = 5 * 60 * 1000;
 
 export function creerServeur({ erpUrl, cle, debitParMinute = 60, confianceProxy = false, contact = "", fetchImpl = fetch } = {}) {
   const compteurs = new Map();
-  let catalogue = null;
+  const cache = new Map();
 
   function adresse(req) {
     if (confianceProxy && req.headers["x-forwarded-for"]) return String(req.headers["x-forwarded-for"]).split(",")[0].trim();
@@ -97,13 +100,15 @@ export function creerServeur({ erpUrl, cle, debitParMinute = 60, confianceProxy 
     const { pathname } = new URL(req.url, "http://site");
     try {
       if (pathname === "/api/config" && req.method === "GET") return json(res, 200, { contact });
-      if (pathname === "/api/catalogue" && req.method === "GET") {
-        if (!catalogue || Date.now() - catalogue.date > CATALOGUE_TTL_MS) {
-          const r = await erp("catalogue/");
+      if (LECTURES[pathname] && req.method === "GET") {
+        let lu = cache.get(pathname);
+        if (!lu || Date.now() - lu.date > CACHE_TTL_MS) {
+          const r = await erp(LECTURES[pathname]);
           if (r.status !== 200) return json(res, r.status, r.corps);
-          catalogue = { date: Date.now(), corps: r.corps };
+          lu = { date: Date.now(), corps: r.corps };
+          cache.set(pathname, lu);
         }
-        return json(res, 200, catalogue.corps);
+        return json(res, 200, lu.corps);
       }
       if (RELAIS[pathname] && req.method === "POST") {
         if (limite(req)) return json(res, 429, { erreur: "Trop de calculs d'affilée : patientez une minute." });

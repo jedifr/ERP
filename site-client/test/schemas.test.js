@@ -45,3 +45,10 @@ test("saisie vide ou absurde : pas d'erreur", () => {
   assert.doesNotMatch(Schemas.profil([0, 0], [0], 0).contenu, /NaN/);
   assert.doesNotMatch(Schemas.boite(0, 0, [0, 0, 0, 0]).contenu, /NaN/);
 });
+
+test("vignette d'une forme décorative → contour en mm, Y vers le haut", () => {
+  const c = Schemas.depuisApercu("M0.0 0.0L100.0 0.0L100.0 50.0L0.0 50.0ZM40.0 10.0L60.0 10.0L60.0 20.0Z", 300);
+  assert.equal(JSON.stringify(c.exterieur), "[[0,150],[300,150],[300,0],[0,0]]");
+  assert.equal(JSON.stringify(c.trous), "[[[120,120],[180,120],[180,90]]]");
+  assert.equal(Schemas.depuisApercu("", 100), null);
+});

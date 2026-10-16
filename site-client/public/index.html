@@ -30,6 +30,7 @@
           <label><input type="radio" name="type" value="profil"><span>Profil plié</span></label>
           <label><input type="radio" name="type" value="boite"><span>Boîte pliée</span></label>
           <label><input type="radio" name="type" value="libre"><span>Forme libre</span></label>
+          <label><input type="radio" name="type" value="bibliotheque"><span>Formes décoratives</span></label>
           <label><input type="radio" name="type" value="dxf"><span id="onglet-fichier">Fichier DXF</span></label>
         </div>
       </fieldset>
@@ -87,6 +88,21 @@
             <button type="button" id="refaire" class="bouton-secondaire" title="Rétablir (Ctrl+Y)" aria-label="Rétablir">↷</button>
           </div>
           <ol id="elements" class="elements"></ol>
+        </div>
+        <div id="bloc-bibliotheque" hidden>
+          <div class="champ"><label for="biblio-recherche">Rechercher une forme</label>
+            <input id="biblio-recherche" type="search" placeholder="ancre, feuille, cœur, tête de cerf…" autocomplete="off"></div>
+          <p id="biblio-etat" class="aide" role="status"></p>
+          <div id="biblio-grille" class="biblio-grille" role="listbox" aria-label="Formes décoratives"></div>
+          <div id="biblio-choix" hidden>
+            <p class="biblio-nom"><strong id="biblio-nom"></strong></p>
+            <div class="grille-champs">
+              <div class="champ"><label for="biblio-largeur"><span class="lettre">A</span> Largeur</label><input id="biblio-largeur" type="number" min="1" max="3000" step="1" value="200" inputmode="decimal"></div>
+              <div class="champ"><label for="biblio-hauteur"><span class="lettre">B</span> Hauteur</label><input id="biblio-hauteur" type="number" min="1" step="any" inputmode="decimal"></div>
+            </div>
+            <p id="biblio-mini" class="aide"></p>
+          </div>
+          <p id="biblio-credit" class="aide credit"></p>
         </div>
         <div id="bloc-dxf" hidden>
           <label class="depot" id="depot-dxf">
@@ -184,6 +200,6 @@
       </form>
     </section>
   </main>
-  <footer class="pied">DÉCOUPE H2O · découpe laser, jet d'eau, pliage</footer>
+  <footer class="pied">DÉCOUPE H2O · découpe laser, jet d'eau, pliage<span id="pied-credit"></span></footer>
 </body>
 </html>

@@ -1,4 +1,5 @@
-"""Prix instantané du configurateur web : une pièce (forme de la bibliothèque, ou profil / boîte pliés), une tôle vendue en
+"""Prix instantané du configurateur web : une pièce (forme paramétrée, forme décorative de la bibliothèque, pièce libre,
+fichier déposé, ou profil / boîte pliés), une tôle vendue en
 ligne et une quantité donnent un prix HT, sans rien enregistrer.
 
 Le calcul reprend les briques du chiffrage des devis, pour que le prix en ligne et le prix d'un devis ne divergent pas :
@@ -112,6 +113,8 @@ def catalogue():
 
     from web.models import ReglageWeb
 
+    from .bibliotheque import resume as resume_bibliotheque
+
     matieres = {}
     for tole in toles_en_ligne():
         m = matieres.setdefault(tole.matiere_id, {"matiere": tole.matiere.nom, "famille": str(tole.matiere.famille or ""), "epaisseurs": []})
@@ -128,6 +131,7 @@ def catalogue():
         "minimum_commande_ht": float(reglage.minimum_commande_ht),
         "quantite_max": reglage.quantite_max,
         "formats_fichier": formats_fichier(),
+        "bibliotheque": resume_bibliotheque(),
     }
 
 
@@ -167,11 +171,12 @@ def _procede(matiere, epaisseur):
 
 
 def chiffrer(matiere_nom, epaisseur, quantite, forme=None, cotes=None, pliage=None, libre=None, dxf=None, echelle=None,
-             aujourdhui=None):
+             bibliotheque=None, aujourdhui=None):
     """Prix instantané. `forme` + `cotes` : pièce plane de la bibliothèque. `pliage` : {"forme": "profil", "faces": [...],
     "angles": [...], "longueur": L} ou {"forme": "boite", "longueur": L, "largeur": l, "bords": [A, B, C, D], "angles": [...]}.
     `libre` : recette d'une pièce libre (web.services.libre). `dxf` : jeton d'un fichier déposé (web.services.dxf),
-    agrandi ou réduit par `echelle` (1 = taille du fichier).
+    agrandi ou réduit par `echelle` (1 = taille du fichier). `bibliotheque` : {"cle": forme décorative, "largeur": mm}
+    (web.services.bibliotheque), refusée en dessous de sa largeur mini à cette épaisseur.
     Lève ErreurPrixWeb pour une demande mal formée ; une pièce infaisable donne un résultat « refus »."""
     from chiffrage.moteur import ChiffrageError, cout_etape_gamme
     from chiffrage.reglage import minutes_mise_en_place
@@ -184,6 +189,7 @@ def chiffrer(matiere_nom, epaisseur, quantite, forme=None, cotes=None, pliage=No
 
     from web.models import ReglageWeb
 
+    from .bibliotheque import ErreurBibliotheque, construire as construire_bibliotheque, largeur_mini
     from .dxf import ErreurDxf, charger
     from .libre import ErreurLibre, construire as construire_libre
 
@@ -212,6 +218,15 @@ def chiffrer(matiere_nom, epaisseur, quantite, forme=None, cotes=None, pliage=No
         if libre:
             contour_libre, r.designation, validations = construire_libre(libre, epaisseur)
             r.validations += validations
+        elif bibliotheque:
+            if not isinstance(bibliotheque, dict):
+                raise ErreurPrixWeb("Forme de la bibliothèque : clé et largeur attendues.")
+            contour_libre, r.designation = construire_bibliotheque(bibliotheque.get("cle"), bibliotheque.get("largeur"))
+            mini = largeur_mini(bibliotheque["cle"], epaisseur)
+            if float(bibliotheque["largeur"]) < mini:
+                r.refus.append(f"En {epaisseur:g} mm, cette forme se découpe à partir de {mini} mm de large : "
+                               "aucun trait ni jour ne doit être plus fin que l'épaisseur de la tôle.")
+                return r.finaliser()
         elif dxf:
             fiche = charger(dxf)
             contour_libre = fiche["contour"]
@@ -247,7 +262,7 @@ def chiffrer(matiere_nom, epaisseur, quantite, forme=None, cotes=None, pliage=No
             raise ErreurPrixWeb("Indiquez une forme ou une pièce pliée.")
     except (KeyError, TypeError, ValueError):
         raise ErreurPrixWeb("Cotes de pliage incomplètes ou non numériques.")
-    except (formes.ErreurForme, ErreurLibre, ErreurDxf) as exc:
+    except (formes.ErreurForme, ErreurLibre, ErreurDxf, ErreurBibliotheque) as exc:
         raise ErreurPrixWeb(str(exc))
     except ErreurPliage as exc:
         r.refus.append(str(exc))

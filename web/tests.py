@@ -367,3 +367,78 @@ class DxfWebTests(ConfigurateurBase):
         prix = self.client.post("/api/web/v1/prix/", {"matiere": "S235-W", "epaisseur": 2, "quantite": 1, "dxf": "0" * 64},
                                 content_type="application/json", HTTP_X_CLE_WEB="secret-web")
         self.assertIn("renvoyez-le", prix.json()["erreur"])
+
+
+class BibliothequeWebTests(ConfigurateurBase):
+    """Formes décoratives game-icons : un seul tenant, largeur mini selon l'épaisseur, prix et demande."""
+
+    def test_formes_d_un_seul_tenant_et_credit(self):
+        from shapely.geometry import Polygon
+
+        from .services import bibliotheque
+
+        liste = bibliotheque.liste()
+        self.assertIn("CC BY 3.0", liste["credit"])
+        cles = {f["cle"]: f for f in liste["formes"]}
+        self.assertGreater(len(cles), 500)
+        self.assertEqual(cles["anchor"]["nom"], "Ancre")
+        self.assertNotIn("bat", cles)  # ailes accrochées par un point : deux morceaux à la découpe
+        self.assertNotIn("suicide", cles)
+        contour, designation = bibliotheque.construire("anchor", 250)
+        poly = Polygon(contour["exterieur"], contour["trous"])
+        self.assertTrue(poly.is_valid)
+        minx, _, maxx, _ = poly.bounds
+        self.assertAlmostEqual(maxx - minx, 250, places=1)
+        self.assertTrue(designation.startswith("Forme « Ancre » 250 × "))
+
+    def test_aucun_trait_ni_jour_plus_fin_que_l_epaisseur(self):
+        from shapely.geometry import Polygon
+
+        from .services import bibliotheque
+
+        for cle in ("anchor", "turtle", "spider-web", "card-king-clubs"):
+            largeur = bibliotheque.largeur_mini(cle, 3)
+            contour, _ = bibliotheque.construire(cle, largeur)
+            piece = Polygon(contour["exterieur"], contour["trous"])
+            ouverte = piece.buffer(-1.5).buffer(1.5)  # efface les traits de moins de 3 mm
+            fermee = piece.buffer(1.5).buffer(-1.5)  # bouche les jours de moins de 3 mm
+            self.assertEqual(ouverte.geom_type, "Polygon", cle)
+            self.assertEqual((len(ouverte.interiors), len(fermee.interiors)), (len(piece.interiors),) * 2, cle)
+            self.assertGreater(ouverte.area / piece.area, 0.97, cle)
+        self.assertGreaterEqual(bibliotheque.largeur_mini("anchor", 6), 2 * bibliotheque.largeur_mini("anchor", 3) - 1)  # proportionnelle
+
+    def test_prix_largeur_mini_et_demande(self):
+        from .services import bibliotheque
+
+        mini = bibliotheque.largeur_mini("anchor", 2)
+        r = chiffrer("S235-W", 2, 3, bibliotheque={"cle": "anchor", "largeur": 200})
+        self.assertEqual((r.statut, r.largeur_mm), ("ok", 200))
+        self.assertIn("Ancre", r.designation)
+        trop_petit = chiffrer("S235-W", 2, 3, bibliotheque={"cle": "anchor", "largeur": mini - 1})
+        self.assertEqual(trop_petit.statut, "refus")
+        self.assertIn(f"à partir de {mini} mm", trop_petit.refus[0])
+        self.assertEqual(chiffrer("S235-W", 2, 3, bibliotheque={"cle": "anchor", "largeur": mini}).statut, "ok")
+        for mauvaise in ({"cle": "inconnue", "largeur": 100}, {"cle": "anchor", "largeur": "large"}, {"cle": "anchor", "largeur": 0}, "anchor"):
+            with self.assertRaises(ErreurPrixWeb):
+                chiffrer("S235-W", 2, 1, bibliotheque=mauvaise)
+
+    @override_settings(WEB_CLE_API="secret-web")
+    def test_api(self):
+        page = self.client.get("/api/web/v1/bibliotheque/", HTTP_X_CLE_WEB="secret-web")
+        self.assertEqual(page.status_code, 200)
+        ancre = next(f for f in page.json()["formes"] if f["cle"] == "anchor")
+        self.assertEqual(set(ancre), {"cle", "nom", "proportion", "rapport", "apercu"})
+        self.assertTrue(ancre["apercu"].startswith("M"))
+        self.assertEqual(self.client.get("/api/web/v1/bibliotheque/", HTTP_X_CLE_WEB="mauvaise").status_code, 403)
+        self.assertGreater(self.client.get("/api/web/v1/catalogue/", HTTP_X_CLE_WEB="secret-web").json()["bibliotheque"]["nombre"], 500)
+        ligne = {"matiere": "S235-W", "epaisseur": 2, "quantite": 2, "bibliotheque": {"cle": "anchor", "largeur": 300}}
+        prix = self.client.post("/api/web/v1/prix/", ligne, content_type="application/json", HTTP_X_CLE_WEB="secret-web")
+        self.assertEqual((prix.status_code, prix.json()["statut"], prix.json()["largeur_mm"]), (200, "ok", 300))
+        page = self.client.post("/api/web/v1/demandes/", {"client": DemandeWebTests.CLIENT, "lignes": [ligne]},
+                                content_type="application/json", HTTP_X_CLE_WEB="secret-web")
+        self.assertEqual(page.status_code, 201, page.content)
+        demande = DemandeWeb.objects.get()
+        self.assertEqual(demande.lignes[0]["demande"]["bibliotheque"], {"cle": "anchor", "largeur": 300})
+        self.client.force_login(get_user_model().objects.create_superuser("bi", "bi@example.com", "pass-bi-1234"))
+        dxf = self.client.get(f"/admin/web/demandeweb/{demande.pk}/dxf/0/")
+        self.assertIn(b"LWPOLYLINE", dxf.content)  # DXF de fabrication à la largeur commandée

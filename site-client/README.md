@@ -1,6 +1,6 @@
 # Site client DÉCOUPE H2O
 
-Configurateur de pièces en ligne : le client choisit une pièce plane (bibliothèque de formes), un profil plié, une boîte pliée, une forme libre ou envoie son fichier DXF, la matière, l'épaisseur et la quantité ; le prix HT s'affiche aussitôt avec l'aperçu à plat. Le panier part à l'ERP comme **demande web** (Paramétrage → Vente en ligne → Demandes web) : le commercial la vérifie et confirme commande, port et délai. Pas de paiement en ligne pour l'instant.
+Configurateur de pièces en ligne : le client choisit une pièce plane (bibliothèque de formes), un profil plié, une boîte pliée, une forme libre, une forme décorative ou envoie son fichier DXF, la matière, l'épaisseur et la quantité ; le prix HT s'affiche aussitôt avec l'aperçu à plat. Le panier part à l'ERP comme **demande web** (Paramétrage → Vente en ligne → Demandes web) : le commercial la vérifie et confirme commande, port et délai. Pas de paiement en ligne pour l'instant.
 
 Pendant la saisie, un **schéma coté** dessine la pièce à l'échelle (`public/schemas.js`) : chaque cote porte une lettre (A, B, C…), la même que devant le champ à remplir. Forme plane : contour, perçages, diamètres, entraxes, angle du premier trou. Profil : la section avec ses faces et ses angles. Boîte : le flan vu de dessus, bords rabattus à plat. Ce schéma est calculé dans le navigateur, sans appel à l'ERP ; si la bibliothèque de formes gagne une forme, ajoutez son dessin dans `schemas.js` et rafraîchissez `test/catalogue-formes.json` (copie du catalogue de l'API).
 
@@ -12,7 +12,9 @@ La **forme libre** (`public/editeur.js`) part d'une plaque rectangle ou disque ;
 
 Le même onglet accepte un **dessin ou une photo** (PNG, JPG…) dès que l'ERP lit le SVG : `public/vectoriseur.js` le vectorise dans le navigateur (seuil de contraste, inversion, lissage, trait grossi, largeur voulue de la pièce). La règle de découpe est appliquée d'office : ni jour ni trait plus fin que l'épaisseur de la tôle choisie (fermeture puis ouverture morphologiques), et seul le plus grand morceau d'un seul tenant est gardé (les îlots tomberaient à la découpe ; le client en est averti). Le contour part à l'ERP en SVG coté en mm, par le même dépôt qu'un fichier du client : l'ERP le contrôle, le garde pour la fabrication et le chiffre ; il est refait et renvoyé si l'épaisseur change. Aucun envoi de l'image elle-même.
 
-L'ERP reste le seul moteur de prix : ce serveur ne calcule rien, il relaie ses appels vers l'API web de l'ERP (`/api/web/v1/catalogue/`, `prix/`, `dxf/`, `demandes/`) en y ajoutant la clé, qui ne part jamais dans le navigateur. Il limite les calculs par visiteur et met le catalogue en cache 5 minutes.
+L'onglet **Formes décoratives** propose les 719 silhouettes de game-icons.net retenues par l'ERP (d'un seul tenant), avec une recherche par nom et des vignettes ; le client règle la largeur (ou la hauteur, les proportions sont gardées). La largeur mini à l'épaisseur choisie est rappelée (aucun trait ni jour plus fin que l'épaisseur) et l'ERP refuse le prix en dessous. Licence CC BY 3.0 : le crédit est affiché sous la liste et en pied de page, il ne doit pas être retiré.
+
+L'ERP reste le seul moteur de prix : ce serveur ne calcule rien, il relaie ses appels vers l'API web de l'ERP (`/api/web/v1/catalogue/`, `bibliotheque/`, `prix/`, `dxf/`, `demandes/`) en y ajoutant la clé, qui ne part jamais dans le navigateur. Il limite les calculs par visiteur et met le catalogue et la bibliothèque de formes en cache 5 minutes.
 
 ## Lancer
 

@@ -330,5 +330,16 @@
     return d.svg("", legende);
   }
 
-  racine.Schemas = { lettres, plane, profil, boite, contour, FORMES, Dessin, cercle, rectangle, reglerTexte };
+  // Vignette d'une forme de la bibliothèque (chemin « M x y L … Z », viewBox 0 0 100 h, Y vers le bas) → contour en mm,
+  // Y vers le haut, à la largeur voulue. Indicatif : l'ERP renvoie le contour exact avec le prix.
+  function depuisApercu(apercu, largeur) {
+    const anneaux = String(apercu || "").split("Z").map((a) => a.replace(/^M/, "")).filter((a) => a.trim())
+      .map((a) => a.split("L").map((p) => p.trim().split(/\s+/).map(Number)));
+    if (!anneaux.length) return null;
+    const k = largeur / 100, h = Math.max(...anneaux.flat().map((p) => p[1]));
+    const [exterieur, ...trous] = anneaux.map((a) => a.map(([x, y]) => [x * k, (h - y) * k]));
+    return { exterieur, trous };
+  }
+
+  racine.Schemas = { lettres, plane, profil, boite, contour, depuisApercu, FORMES, Dessin, cercle, rectangle, reglerTexte };
 })(typeof window !== "undefined" ? window : globalThis);
