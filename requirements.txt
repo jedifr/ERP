@@ -14,3 +14,4 @@ reportlab==5.0.1
 pillow==12.3.0
 weasyprint==70.0
 factur-x==7.4
+svgelements==1.9.6

@@ -48,7 +48,8 @@ class DemandeWebAdmin(ModelAdmin):
         return [path("<int:pk>/dxf/<int:index>/", self.admin_site.admin_view(self.dxf_view), name="web_demandeweb_dxf")] + super().get_urls()
 
     def dxf_view(self, request, pk, index):
-        """DXF de fabrication d'une ligne : le fichier envoyé par le client, sinon le contour recalculé (pièce libre, forme)."""
+        """DXF de fabrication d'une ligne : le fichier envoyé par le client (converti en DXF s'il était en SVG ou DWG ;
+        `?original=1` rend le fichier tel qu'envoyé), sinon le contour recalculé (pièce libre, forme)."""
         from decoupe.services import formes
 
         from .services.dxf import chemin_fichier
@@ -58,9 +59,11 @@ class DemandeWebAdmin(ModelAdmin):
             raise Http404
         ligne = demande.lignes[index]
         nom = f"{demande.numero}-{index + 1}-{slugify(ligne['designation'])[:60] or 'piece'}.dxf"
-        fichier = chemin_fichier(ligne["demande"].get("dxf"))
-        if fichier:
-            return FileResponse(open(fichier, "rb"), as_attachment=True, filename=nom)
+        original = bool(request.GET.get("original"))
+        fichier = chemin_fichier(ligne["demande"].get("dxf"), original=original)
+        # Fichier mis à l'échelle par le client : le DXF de fabrication est recalculé depuis le contour chiffré.
+        if fichier and (original or float(ligne["demande"].get("echelle") or 1) == 1):
+            return FileResponse(open(fichier, "rb"), as_attachment=True, filename=nom[:-4] + fichier.suffix)
         contour = ligne.get("contour")
         if not contour:
             raise Http404("Pas de contour pour cette ligne (pièce pliée : flan calculé au devis).")
@@ -70,10 +73,16 @@ class DemandeWebAdmin(ModelAdmin):
 
     @admin.display(description="Pièces")
     def pieces(self, obj):
+        from .services.dxf import chemin_fichier
+
         def lien(i, l):
             if not (l.get("contour") or l["demande"].get("dxf")):
                 return ""
-            return format_html("<a href='{}'>DXF</a>", reverse("admin:web_demandeweb_dxf", args=[obj.pk, i]))
+            url = reverse("admin:web_demandeweb_dxf", args=[obj.pk, i])
+            original = chemin_fichier(l["demande"].get("dxf"), original=True)
+            if original and original.suffix != ".dxf":
+                return format_html("<a href='{}'>DXF</a> · <a href='{}?original=1'>{}</a>", url, url, original.suffix[1:].upper())
+            return format_html("<a href='{}'>DXF</a>", url)
 
         return format_html("<table>{}</table>", format_html_join("", "<tr><td style='padding-right:1em'>{}</td><td style='padding-right:1em'>{} × {} mm</td><td style='padding-right:1em'>{} pièce(s)</td><td style='padding-right:1em'>{} € HT</td><td style='padding-right:1em'>{}</td><td>{}</td></tr>", (
             (l["designation"], l["demande"].get("matiere"), l["demande"].get("epaisseur"), l["demande"].get("quantite"), f"{l['prix_total_ht']:.2f}",

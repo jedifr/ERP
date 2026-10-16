@@ -26,6 +26,15 @@ let choisi = -1;
 const historique = { etats: [JSON.stringify(libre)], position: 0 };
 let ficheDxf = null; // { jeton, nom, contour, largeur_mm, hauteur_mm, avertissements } rendue par l'ERP
 const DXF_MAX = 1536 * 1024;
+let formatsFichier = ["dxf"]; // formats que l'ERP sait lire (catalogue)
+let echelleDxf = 1; // agrandissement demandé par le client (1 = taille du fichier)
+
+// Contour du fichier à l'échelle choisie (affichage seulement : l'ERP refait le calcul).
+function contourDxf() {
+  if (!ficheDxf) return null;
+  const k = echelleDxf, c = ficheDxf.contour;
+  return k === 1 ? c : { exterieur: c.exterieur.map(([x, y]) => [x * k, y * k]), trous: (c.trous || []).map((t) => t.map(([x, y]) => [x * k, y * k])) };
+}
 
 // ------------------------------------------------------------------ panier (navigateur seulement ; l'ERP recalcule tout)
 function lirePanier() {
@@ -60,9 +69,22 @@ const typePiece = () => document.querySelector("input[name=type]:checked").value
 
 // ------------------------------------------------------------------ chargement
 async function api(chemin, options) {
-  const r = await fetch(chemin, options);
-  const corps = await r.json().catch(() => ({ erreur: "Réponse illisible." }));
-  return { ok: r.ok, status: r.status, corps };
+  let r;
+  try {
+    r = await fetch(chemin, options);
+  } catch {
+    return { ok: false, status: 0, corps: { erreur: "Connexion impossible : rechargez la page (F5)." } };
+  }
+  const texte = await r.text();
+  try {
+    return { ok: r.ok, status: r.status, corps: JSON.parse(texte) };
+  } catch {
+    // Page HTML à la place de la réponse : en général le contrôle anti-robots de l'hébergeur (Tiger Protect chez o2switch).
+    const controle = /security-challenge|o2s-browser-check|Security check/i.test(texte);
+    return { ok: false, status: r.status, corps: { erreur: controle
+      ? "Le contrôle de sécurité de l'hébergeur a bloqué le calcul : rechargez la page (F5). Si cela continue, demandez un devis par e-mail."
+      : "Réponse illisible : rechargez la page (F5)." } };
+  }
 }
 
 async function demarrer() {
@@ -88,6 +110,7 @@ async function demarrer() {
   $("forme").replaceChildren(...groupes.values());
   remplir($("matiere"), catalogue.matieres.map((m) => [m.matiere, m.matiere]));
   $("quantite").max = catalogue.quantite_max;
+  majFormatsFichier(catalogue.formats_fichier);
   majEpaisseurs();
   majCotes();
   dessinerProfil();
@@ -156,12 +179,12 @@ function dessinerSchema() {
     return majVue3d();
   }
   let dessin = null;
-  if (d.dxf !== undefined) dessin = ficheDxf ? Schemas.contour(ficheDxf.contour, ficheDxf.nom) : null;
+  if (d.dxf !== undefined) dessin = ficheDxf ? Schemas.contour(contourDxf(), ficheDxf.nom, true) : null;
   else if (!d.pliage) dessin = Schemas.plane(catalogue.formes.find((x) => x.cle === d.forme), d.cotes);
   else if (d.pliage.forme === "profil") dessin = Schemas.profil(d.pliage.faces, d.pliage.angles, d.pliage.longueur);
   else dessin = Schemas.boite(d.pliage.longueur, d.pliage.largeur, d.pliage.bords);
   $("note-schema").textContent = mode3d ? "Faites glisser pour tourner la pièce, molette ou pincement pour zoomer. Vue indicative."
-    : d.dxf !== undefined ? (ficheDxf ? "Pièce telle que lue dans votre fichier, encombrement coté." : "Le dessin de la pièce s'affiche une fois le fichier lu.")
+    : d.dxf !== undefined ? (ficheDxf ? (echelleDxf === 1 ? "Pièce telle que lue dans votre fichier" : `Pièce à ${+(echelleDxf * 100).toFixed(2)} % de votre fichier`) + " ; A et B : cotes hors tout." : "Le dessin de la pièce s'affiche une fois le fichier lu.")
     : (dessin && dessin.note) || "Les lettres du schéma repèrent les cotes à saisir.";
   if (!dessin) return svg.replaceChildren();
   svg.setAttribute("viewBox", dessin.viewBox);
@@ -174,7 +197,7 @@ function modele3d() {
   const d = demandeCourante();
   const m = catalogue.matieres.find((x) => x.matiere === d.matiere);
   const commun = { epaisseur: d.epaisseur, famille: m ? m.famille : "" };
-  if (d.dxf !== undefined) return ficheDxf ? { type: "plaque", contour: ficheDxf.contour, ...commun } : null;
+  if (d.dxf !== undefined) return ficheDxf ? { type: "plaque", contour: contourDxf(), ...commun } : null;
   if (d.libre) {
     // dernier contour reconstruit par l'ERP (il suit la saisie à chaque calcul)
     return dernier && dernier.demande.libre ? { type: "plaque", contour: dernier.resultat.contour, ...commun } : null;
@@ -233,7 +256,7 @@ function demandeCourante() {
     return { ...base, forme: $("forme").value, cotes };
   }
   if (type === "libre") return { ...base, libre: structuredClone(libre) };
-  if (type === "dxf") return { ...base, dxf: ficheDxf ? ficheDxf.jeton : null };
+  if (type === "dxf") return { ...base, dxf: ficheDxf ? ficheDxf.jeton : null, ...(echelleDxf !== 1 ? { echelle: echelleDxf } : {}) };
   if (type === "profil") {
     lireProfil();
     return { ...base, pliage: { forme: "profil", faces: [...profil.faces], angles: [...profil.angles], longueur: Number($("longueur-pli").value) } };
@@ -259,7 +282,7 @@ async function calculer() {
   if (!catalogue || !$("matiere").value) return;
   const demande = demandeCourante();
   if (demande.dxf === null) {
-    afficherErreur("Choisissez un fichier DXF.");
+    afficherErreur("Choisissez votre fichier.");
     $("etat").className = "etat";
     return;
   }
@@ -530,13 +553,26 @@ function lireEnBase64(fichier) {
   });
 }
 
+function majFormatsFichier(formats) {
+  if (Array.isArray(formats) && formats.length) formatsFichier = formats;
+  const liste = formatsFichier.map((f) => f.toUpperCase());
+  const texte = liste.length > 1 ? `${liste.slice(0, -1).join(", ")} ou ${liste[liste.length - 1]}` : liste[0];
+  $("onglet-fichier").textContent = `Fichier ${liste.join(", ")}`;
+  $("titre-depot").textContent = `Choisissez un fichier ${texte}`;
+  $("fichier-dxf").accept = formatsFichier.map((f) => `.${f}`).join(",");
+  $("aide-depot").textContent = "Une pièce par fichier, cotes en mm, 1,5 Mo au plus."
+    + (formatsFichier.includes("svg") ? " SVG : convertissez les textes en tracés." : "")
+    + (formatsFichier.includes("dwg") ? "" : " Le DWG n'est pas lu en ligne : exportez-le en DXF.");
+}
+
 async function envoyerDxf(fichier) {
   if (!fichier) return;
   const etat = $("etat-dxf");
   etat.className = "aide";
-  if (!/\.dxf$/i.test(fichier.name)) {
+  const extension = (fichier.name.match(/\.([a-z0-9]+)$/i) || [])[1];
+  if (!extension || !formatsFichier.includes(extension.toLowerCase())) {
     etat.className = "aide erreur";
-    etat.textContent = "Choisissez un fichier .dxf (exportez-le depuis votre logiciel de dessin).";
+    etat.textContent = `Choisissez un fichier ${formatsFichier.map((f) => `.${f}`).join(", ")} (exporté depuis votre logiciel de dessin).`;
     return;
   }
   if (fichier.size > DXF_MAX) {
@@ -560,20 +596,43 @@ async function envoyerDxf(fichier) {
     return;
   }
   ficheDxf = corps;
+  echelleDxf = 1;
   etat.textContent = "";
   afficherFicheDxf();
   calculerBientot();
 }
 
+function majCotesDxf(sauf) {
+  if (!ficheDxf) return;
+  const arrondi = (v) => String(+v.toFixed(2));
+  if (sauf !== "largeur") $("dxf-largeur").value = arrondi(ficheDxf.largeur_mm * echelleDxf);
+  if (sauf !== "hauteur") $("dxf-hauteur").value = arrondi(ficheDxf.hauteur_mm * echelleDxf);
+  if (sauf !== "pourcent") $("dxf-echelle").value = arrondi(echelleDxf * 100);
+}
+
 function afficherFicheDxf() {
   const f = ficheDxf, infos = $("infos-dxf");
   infos.hidden = !f;
+  $("echelle-dxf").hidden = !f;
+  majCotesDxf();
   if (!f) return infos.replaceChildren();
-  const lignes = [["Fichier", f.nom], ["Encombrement", `${mm(f.largeur_mm)} × ${mm(f.hauteur_mm)} mm`], ["Découpes intérieures", String((f.contour.trous || []).length)]];
+  const lignes = [["Fichier", f.nom], ["Taille du fichier", `${mm(f.largeur_mm)} × ${mm(f.hauteur_mm)} mm`], ["Découpes intérieures", String((f.contour.trous || []).length)]];
   if (f.avertissements && f.avertissements.length) lignes.push(["À vérifier", f.avertissements.join(" ")]);
   infos.replaceChildren(...lignes.flatMap(([t, v]) => [el("dt", { texte: t }), el("dd", { texte: v })]));
 }
 
+$("echelle-dxf").addEventListener("input", (ev) => {
+  const champ = ev.target.dataset.echelle, v = Number(ev.target.value);
+  if (!ficheDxf || !champ || !(v > 0)) return;
+  const k = champ === "largeur" ? v / ficheDxf.largeur_mm : champ === "hauteur" ? v / ficheDxf.hauteur_mm : v / 100;
+  echelleDxf = Math.min(Math.max(+k.toFixed(4), 0.01), 100);
+  majCotesDxf(champ);
+});
+$("dxf-taille-fichier").addEventListener("click", () => {
+  echelleDxf = 1;
+  majCotesDxf();
+  calculerBientot();
+});
 $("fichier-dxf").addEventListener("change", (ev) => { envoyerDxf(ev.target.files[0]); ev.target.value = ""; });
 const depot = $("depot-dxf");
 depot.addEventListener("dragover", (ev) => { ev.preventDefault(); depot.classList.add("survol"); });

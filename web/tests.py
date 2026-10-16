@@ -1,4 +1,5 @@
 import datetime
+import io
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
@@ -270,7 +271,7 @@ class DxfWebTests(ConfigurateurBase):
         prix = self.client.post("/api/web/v1/prix/", {"matiere": "S235-W", "epaisseur": 2, "quantite": 4, "dxf": fiche["jeton"]},
                                 content_type="application/json", HTTP_X_CLE_WEB="secret-web")
         self.assertEqual(prix.status_code, 200, prix.content)
-        self.assertEqual((prix.json()["statut"], prix.json()["designation"]), ("ok", "Pièce DXF platine.dxf"))
+        self.assertEqual((prix.json()["statut"], prix.json()["designation"]), ("ok", "Pièce du fichier platine.dxf"))
         page = self.client.post("/api/web/v1/demandes/", {"client": DemandeWebTests.CLIENT, "lignes": [
             {"matiere": "S235-W", "epaisseur": 2, "quantite": 4, "dxf": fiche["jeton"]},
             {"matiere": "S235-W", "epaisseur": 2, "quantite": 1, "libre": {"base": PLAQUE, "elements": [{"type": "rond", "x": 50, "y": 50, "diametre": 20}]}},
@@ -285,6 +286,67 @@ class DxfWebTests(ConfigurateurBase):
         self.assertIn(b"LWPOLYLINE", genere.content)  # pièce libre : DXF recalculé depuis le contour
         self.assertEqual(self.client.get(f"/admin/web/demandeweb/{demande.pk}/dxf/9/").status_code, 404)
 
+    SVG_MM = (b'<svg xmlns="http://www.w3.org/2000/svg" width="200mm" height="100mm" viewBox="0 0 200 100">'
+              b'<path d="M0,0 H200 V70 A30 30 0 0 1 170 100 H0 Z"/><circle cx="40" cy="50" r="15"/>'
+              b'<rect x="90" y="30" width="40" height="20" rx="5"/><text x="5" y="5">Logo</text></svg>')
+
+    def test_svg_converti_en_dxf(self):
+        page = self.envoyer(self.SVG_MM, "platine.svg")
+        self.assertEqual(page.status_code, 200, page.content)
+        fiche = page.json()
+        self.assertEqual((fiche["format"], fiche["largeur_mm"], fiche["hauteur_mm"], len(fiche["contour"]["trous"])), ("svg", 200, 100, 2))
+        self.assertTrue(any("texte" in a for a in fiche["avertissements"]))
+        # Sans unité : 96 px par pouce, et le client est prévenu.
+        px = self.envoyer(b'<svg xmlns="http://www.w3.org/2000/svg" width="378" height="189"><rect width="378" height="189"/></svg>', "px.svg").json()
+        self.assertAlmostEqual(px["largeur_mm"], 100, places=1)
+        self.assertTrue(any("96 px" in a for a in px["avertissements"]))
+        page = self.client.post("/api/web/v1/demandes/", {"client": DemandeWebTests.CLIENT, "lignes": [
+            {"matiere": "S235-W", "epaisseur": 2, "quantite": 2, "dxf": fiche["jeton"]}]}, content_type="application/json", HTTP_X_CLE_WEB="secret-web")
+        self.assertEqual(page.status_code, 201, page.content)
+        demande = DemandeWeb.objects.get()
+        self.client.force_login(get_user_model().objects.create_superuser("sv", "sv@example.com", "pass-sv-1234"))
+        self.assertContains(self.client.get(f"/admin/web/demandeweb/{demande.pk}/change/"), "?original=1")
+        dxf = self.client.get(f"/admin/web/demandeweb/{demande.pk}/dxf/0/")
+        self.assertIn(b"LWPOLYLINE", b"".join(dxf.streaming_content))
+        original = self.client.get(f"/admin/web/demandeweb/{demande.pk}/dxf/0/?original=1")
+        self.assertEqual(b"".join(original.streaming_content), self.SVG_MM)
+
+    def test_mise_a_l_echelle(self):
+        from decoupe.services import formes
+
+        fiche = self.envoyer(formes.dxf_bytes(formes.construire("platine_grille", {"largeur": 200, "hauteur": 150}))).json()
+        prix = lambda **e: self.client.post("/api/web/v1/prix/", {"matiere": "S235-W", "epaisseur": 2, "quantite": 4, "dxf": fiche["jeton"], **e},
+                                            content_type="application/json", HTTP_X_CLE_WEB="secret-web")
+        normal, double = prix().json(), prix(echelle=1.5).json()
+        self.assertEqual((double["largeur_mm"], double["hauteur_mm"]), (300, 225))
+        self.assertIn("à l'échelle 150 %", double["designation"])
+        self.assertGreater(double["prix_total_ht"], normal["prix_total_ht"])
+        self.assertEqual(prix(echelle=0).status_code, 400)
+        page = self.client.post("/api/web/v1/demandes/", {"client": DemandeWebTests.CLIENT, "lignes": [
+            {"matiere": "S235-W", "epaisseur": 2, "quantite": 4, "dxf": fiche["jeton"], "echelle": 1.5}]},
+            content_type="application/json", HTTP_X_CLE_WEB="secret-web")
+        self.assertEqual(page.status_code, 201, page.content)
+        demande = DemandeWeb.objects.get()
+        self.assertEqual(demande.lignes[0]["demande"]["echelle"], 1.5)
+        self.client.force_login(get_user_model().objects.create_superuser("ec", "ec@example.com", "pass-ec-1234"))
+        import ezdxf
+
+        dxf = self.client.get(f"/admin/web/demandeweb/{demande.pk}/dxf/0/")
+        doc = ezdxf.read(io.StringIO(dxf.content.decode()))
+        xs = [x for e in doc.modelspace().query("LWPOLYLINE") for x, *_ in e.get_points()]
+        self.assertAlmostEqual(max(xs) - min(xs), 300, places=1)  # DXF de fabrication à la taille commandée
+
+    def test_dwg_sans_convertisseur(self):
+        from unittest import mock
+
+        with mock.patch("web.services.dxf.dwg_lisible", return_value=False), mock.patch("shutil.which", return_value=None), \
+                mock.patch("ezdxf.addons.odafc.is_installed", return_value=False):
+            page = self.envoyer(b"AC1032 pas un vrai dwg", "piece.dwg")
+            self.assertEqual(page.status_code, 400)
+            self.assertIn("exportez votre pièce en DXF", page.json()["erreur"])
+            formats = self.client.get("/api/web/v1/catalogue/", HTTP_X_CLE_WEB="secret-web").json()["formats_fichier"]
+            self.assertEqual(formats, ["dxf", "svg"])
+
     def test_fichiers_refuses(self):
         from decoupe.services import formes
 
@@ -292,7 +354,8 @@ class DxfWebTests(ConfigurateurBase):
         for contenu, nom, message in (
             (deux, "deux.dxf", "pièces séparées"),
             (b"pas un dxf", "piece.dxf", "illisible"),
-            (b"0\nSECTION", "piece.dwg", ".dxf"),
+            (b"0\nSECTION", "piece.step", "DXF, DWG ou SVG"),
+            (b"<svg xmlns='http://www.w3.org/2000/svg'><text>a</text></svg>", "texte.svg", "aucun tracé"),
             (b"", "piece.dxf", "vide"),
             (b"x" * (1536 * 1024 + 1), "piece.dxf", "trop gros"),
         ):

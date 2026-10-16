@@ -318,14 +318,15 @@
   }
 
   // ------------------------------------------------------------------ contour quelconque (fichier DXF) : encombrement coté
-  function contour(c, legende = "") {
+  // lettres : repère les cotes hors tout A (largeur) et B (hauteur), saisissables pour mettre la pièce à l'échelle.
+  function contour(c, legende = "", lettres = false) {
     if (!c || !c.exterieur || !c.exterieur.length) return null;
     const xs = c.exterieur.map((p) => p[0]), ys = c.exterieur.map((p) => p[1]);
     const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
     const d = Dessin(Math.max(x1 - x0, y1 - y0, 1));
     d.chemin([c.exterieur, ...(c.trous || [])], "piece");
-    d.lineaire([x0, y0], [x1, y0], -d.s * 1.6, "", x1 - x0);
-    d.lineaire([x0, y1], [x0, y0], -d.s * 1.6, "", y1 - y0);
+    d.lineaire([x0, y0], [x1, y0], -d.s * 1.6, lettres ? "A" : "", x1 - x0);
+    d.lineaire([x0, y1], [x0, y0], -d.s * 1.6, lettres ? "B" : "", y1 - y0);
     return d.svg("", legende);
   }
 
