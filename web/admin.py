@@ -59,8 +59,10 @@ class DemandeWebAdmin(ModelAdmin):
             raise Http404
         ligne = demande.lignes[index]
         nom = f"{demande.numero}-{index + 1}-{slugify(ligne['designation'])[:60] or 'piece'}.dxf"
-        fichier = chemin_fichier(ligne["demande"].get("dxf"), original=bool(request.GET.get("original")))
-        if fichier:
+        original = bool(request.GET.get("original"))
+        fichier = chemin_fichier(ligne["demande"].get("dxf"), original=original)
+        # Fichier mis à l'échelle par le client : le DXF de fabrication est recalculé depuis le contour chiffré.
+        if fichier and (original or float(ligne["demande"].get("echelle") or 1) == 1):
             return FileResponse(open(fichier, "rb"), as_attachment=True, filename=nom[:-4] + fichier.suffix)
         contour = ligne.get("contour")
         if not contour:

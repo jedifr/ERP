@@ -1,4 +1,5 @@
 import datetime
+import io
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
@@ -309,6 +310,31 @@ class DxfWebTests(ConfigurateurBase):
         self.assertIn(b"LWPOLYLINE", b"".join(dxf.streaming_content))
         original = self.client.get(f"/admin/web/demandeweb/{demande.pk}/dxf/0/?original=1")
         self.assertEqual(b"".join(original.streaming_content), self.SVG_MM)
+
+    def test_mise_a_l_echelle(self):
+        from decoupe.services import formes
+
+        fiche = self.envoyer(formes.dxf_bytes(formes.construire("platine_grille", {"largeur": 200, "hauteur": 150}))).json()
+        prix = lambda **e: self.client.post("/api/web/v1/prix/", {"matiere": "S235-W", "epaisseur": 2, "quantite": 4, "dxf": fiche["jeton"], **e},
+                                            content_type="application/json", HTTP_X_CLE_WEB="secret-web")
+        normal, double = prix().json(), prix(echelle=1.5).json()
+        self.assertEqual((double["largeur_mm"], double["hauteur_mm"]), (300, 225))
+        self.assertIn("à l'échelle 150 %", double["designation"])
+        self.assertGreater(double["prix_total_ht"], normal["prix_total_ht"])
+        self.assertEqual(prix(echelle=0).status_code, 400)
+        page = self.client.post("/api/web/v1/demandes/", {"client": DemandeWebTests.CLIENT, "lignes": [
+            {"matiere": "S235-W", "epaisseur": 2, "quantite": 4, "dxf": fiche["jeton"], "echelle": 1.5}]},
+            content_type="application/json", HTTP_X_CLE_WEB="secret-web")
+        self.assertEqual(page.status_code, 201, page.content)
+        demande = DemandeWeb.objects.get()
+        self.assertEqual(demande.lignes[0]["demande"]["echelle"], 1.5)
+        self.client.force_login(get_user_model().objects.create_superuser("ec", "ec@example.com", "pass-ec-1234"))
+        import ezdxf
+
+        dxf = self.client.get(f"/admin/web/demandeweb/{demande.pk}/dxf/0/")
+        doc = ezdxf.read(io.StringIO(dxf.content.decode()))
+        xs = [x for e in doc.modelspace().query("LWPOLYLINE") for x, *_ in e.get_points()]
+        self.assertAlmostEqual(max(xs) - min(xs), 300, places=1)  # DXF de fabrication à la taille commandée
 
     def test_dwg_sans_convertisseur(self):
         from unittest import mock

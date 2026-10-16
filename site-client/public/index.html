@@ -95,6 +95,15 @@
           </label>
           <p id="etat-dxf" class="aide" role="status"></p>
           <dl id="infos-dxf" class="details" hidden></dl>
+          <div id="echelle-dxf" hidden>
+            <p class="aide">Cotes hors tout de la pièce. Changez-en une pour agrandir ou réduire la pièce (les proportions sont gardées).</p>
+            <div class="grille-champs">
+              <div class="champ"><label for="dxf-largeur"><span class="lettre">A</span> Largeur hors tout</label><input id="dxf-largeur" data-echelle="largeur" type="number" min="0.1" step="any" inputmode="decimal"></div>
+              <div class="champ"><label for="dxf-hauteur"><span class="lettre">B</span> Hauteur hors tout</label><input id="dxf-hauteur" data-echelle="hauteur" type="number" min="0.1" step="any" inputmode="decimal"></div>
+              <div class="champ"><label for="dxf-echelle">Échelle (%)</label><input id="dxf-echelle" data-echelle="pourcent" type="number" min="1" max="10000" step="any" inputmode="decimal" value="100"></div>
+            </div>
+            <button type="button" id="dxf-taille-fichier" class="bouton-secondaire">Revenir à la taille du fichier</button>
+          </div>
         </div>
         </div>
         <figure class="cadre-schema">

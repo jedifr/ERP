@@ -83,6 +83,22 @@ def toles_en_ligne():
     )
 
 
+ECHELLE_MIN, ECHELLE_MAX = 0.01, 100
+
+
+def _echelle(valeur):
+    """Facteur d'agrandissement d'un fichier déposé (1 par défaut), arrondi au dix-millième."""
+    if valeur in (None, ""):
+        return 1
+    try:
+        k = round(float(valeur), 4)
+    except (TypeError, ValueError):
+        raise ErreurPrixWeb("Échelle : un nombre est attendu.")
+    if not ECHELLE_MIN <= k <= ECHELLE_MAX:
+        raise ErreurPrixWeb(f"Échelle entre {ECHELLE_MIN * 100:g} % et {ECHELLE_MAX * 100:g} %.")
+    return k
+
+
 def formats_fichier():
     """Formats de fichier que le site peut proposer : le DWG seulement si un convertisseur est installé."""
     from .dxf import dwg_lisible
@@ -150,10 +166,12 @@ def _procede(matiere, epaisseur):
     return ProcedeCoupe.JET_EAU
 
 
-def chiffrer(matiere_nom, epaisseur, quantite, forme=None, cotes=None, pliage=None, libre=None, dxf=None, aujourdhui=None):
+def chiffrer(matiere_nom, epaisseur, quantite, forme=None, cotes=None, pliage=None, libre=None, dxf=None, echelle=None,
+             aujourdhui=None):
     """Prix instantané. `forme` + `cotes` : pièce plane de la bibliothèque. `pliage` : {"forme": "profil", "faces": [...],
     "angles": [...], "longueur": L} ou {"forme": "boite", "longueur": L, "largeur": l, "bords": [A, B, C, D], "angles": [...]}.
-    `libre` : recette d'une pièce libre (web.services.libre). `dxf` : jeton d'un fichier déposé (web.services.dxf).
+    `libre` : recette d'une pièce libre (web.services.libre). `dxf` : jeton d'un fichier déposé (web.services.dxf),
+    agrandi ou réduit par `echelle` (1 = taille du fichier).
     Lève ErreurPrixWeb pour une demande mal formée ; une pièce infaisable donne un résultat « refus »."""
     from chiffrage.moteur import ChiffrageError, cout_etape_gamme
     from chiffrage.reglage import minutes_mise_en_place
@@ -198,6 +216,11 @@ def chiffrer(matiere_nom, epaisseur, quantite, forme=None, cotes=None, pliage=No
             fiche = charger(dxf)
             contour_libre = fiche["contour"]
             r.designation = f"Pièce du fichier {fiche['nom']}"
+            k = _echelle(echelle)
+            if k != 1:
+                contour_libre = {"exterieur": [(x * k, y * k) for x, y in contour_libre["exterieur"]],
+                                 "trous": [[(x * k, y * k) for x, y in t] for t in contour_libre["trous"]]}
+                r.designation += f" à l'échelle {k * 100:g} %"
             if fiche.get("avertissements"):
                 r.validations.append("Fichier à vérifier par l'atelier : " + " ".join(fiche["avertissements"]))
         elif pliage:

@@ -35,12 +35,13 @@ def enregistrer_demande(donnees):
         if not isinstance(ligne, dict):
             raise ErreurPrixWeb(f"Pièce {i} illisible.")
         r = chiffrer(ligne.get("matiere"), ligne.get("epaisseur"), ligne.get("quantite"), forme=ligne.get("forme"),
-                     cotes=ligne.get("cotes"), pliage=ligne.get("pliage"), libre=ligne.get("libre"), dxf=ligne.get("dxf"))
+                     cotes=ligne.get("cotes"), pliage=ligne.get("pliage"), libre=ligne.get("libre"), dxf=ligne.get("dxf"),
+                     echelle=ligne.get("echelle"))
         if r.statut == "refus":
             raise ErreurPrixWeb(f"Pièce {i} ({r.designation or 'sans nom'}) : pas de prix en ligne. " + " ".join(r.refus))
         a_valider |= r.statut == "validation"
         total += r.prix_total_ht
-        demande = {k: ligne.get(k) for k in ("matiere", "epaisseur", "quantite", "forme", "cotes", "pliage", "libre", "dxf") if ligne.get(k) is not None}
+        demande = {k: ligne.get(k) for k in ("matiere", "epaisseur", "quantite", "forme", "cotes", "pliage", "libre", "dxf", "echelle") if ligne.get(k) is not None}
         enregistrees.append({
             "demande": demande, "designation": r.designation, "statut": r.statut, "validations": r.validations,
             "procede": r.procede, "prix_unitaire_ht": float(r.prix_unitaire_ht), "prix_total_ht": float(r.prix_total_ht),

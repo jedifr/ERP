@@ -27,6 +27,14 @@ const historique = { etats: [JSON.stringify(libre)], position: 0 };
 let ficheDxf = null; // { jeton, nom, contour, largeur_mm, hauteur_mm, avertissements } rendue par l'ERP
 const DXF_MAX = 1536 * 1024;
 let formatsFichier = ["dxf"]; // formats que l'ERP sait lire (catalogue)
+let echelleDxf = 1; // agrandissement demandé par le client (1 = taille du fichier)
+
+// Contour du fichier à l'échelle choisie (affichage seulement : l'ERP refait le calcul).
+function contourDxf() {
+  if (!ficheDxf) return null;
+  const k = echelleDxf, c = ficheDxf.contour;
+  return k === 1 ? c : { exterieur: c.exterieur.map(([x, y]) => [x * k, y * k]), trous: (c.trous || []).map((t) => t.map(([x, y]) => [x * k, y * k])) };
+}
 
 // ------------------------------------------------------------------ panier (navigateur seulement ; l'ERP recalcule tout)
 function lirePanier() {
@@ -157,12 +165,12 @@ function dessinerSchema() {
     return majVue3d();
   }
   let dessin = null;
-  if (d.dxf !== undefined) dessin = ficheDxf ? Schemas.contour(ficheDxf.contour, ficheDxf.nom) : null;
+  if (d.dxf !== undefined) dessin = ficheDxf ? Schemas.contour(contourDxf(), ficheDxf.nom, true) : null;
   else if (!d.pliage) dessin = Schemas.plane(catalogue.formes.find((x) => x.cle === d.forme), d.cotes);
   else if (d.pliage.forme === "profil") dessin = Schemas.profil(d.pliage.faces, d.pliage.angles, d.pliage.longueur);
   else dessin = Schemas.boite(d.pliage.longueur, d.pliage.largeur, d.pliage.bords);
   $("note-schema").textContent = mode3d ? "Faites glisser pour tourner la pièce, molette ou pincement pour zoomer. Vue indicative."
-    : d.dxf !== undefined ? (ficheDxf ? "Pièce telle que lue dans votre fichier, encombrement coté." : "Le dessin de la pièce s'affiche une fois le fichier lu.")
+    : d.dxf !== undefined ? (ficheDxf ? (echelleDxf === 1 ? "Pièce telle que lue dans votre fichier" : `Pièce à ${+(echelleDxf * 100).toFixed(2)} % de votre fichier`) + " ; A et B : cotes hors tout." : "Le dessin de la pièce s'affiche une fois le fichier lu.")
     : (dessin && dessin.note) || "Les lettres du schéma repèrent les cotes à saisir.";
   if (!dessin) return svg.replaceChildren();
   svg.setAttribute("viewBox", dessin.viewBox);
@@ -175,7 +183,7 @@ function modele3d() {
   const d = demandeCourante();
   const m = catalogue.matieres.find((x) => x.matiere === d.matiere);
   const commun = { epaisseur: d.epaisseur, famille: m ? m.famille : "" };
-  if (d.dxf !== undefined) return ficheDxf ? { type: "plaque", contour: ficheDxf.contour, ...commun } : null;
+  if (d.dxf !== undefined) return ficheDxf ? { type: "plaque", contour: contourDxf(), ...commun } : null;
   if (d.libre) {
     // dernier contour reconstruit par l'ERP (il suit la saisie à chaque calcul)
     return dernier && dernier.demande.libre ? { type: "plaque", contour: dernier.resultat.contour, ...commun } : null;
@@ -226,7 +234,7 @@ function demandeCourante() {
     return { ...base, forme: $("forme").value, cotes };
   }
   if (type === "libre") return { ...base, libre: structuredClone(libre) };
-  if (type === "dxf") return { ...base, dxf: ficheDxf ? ficheDxf.jeton : null };
+  if (type === "dxf") return { ...base, dxf: ficheDxf ? ficheDxf.jeton : null, ...(echelleDxf !== 1 ? { echelle: echelleDxf } : {}) };
   if (type === "profil") {
     lireProfil();
     return { ...base, pliage: { forme: "profil", faces: [...profil.faces], angles: [...profil.angles], longueur: Number($("longueur-pli").value) } };
@@ -566,20 +574,43 @@ async function envoyerDxf(fichier) {
     return;
   }
   ficheDxf = corps;
+  echelleDxf = 1;
   etat.textContent = "";
   afficherFicheDxf();
   calculerBientot();
 }
 
+function majCotesDxf(sauf) {
+  if (!ficheDxf) return;
+  const arrondi = (v) => String(+v.toFixed(2));
+  if (sauf !== "largeur") $("dxf-largeur").value = arrondi(ficheDxf.largeur_mm * echelleDxf);
+  if (sauf !== "hauteur") $("dxf-hauteur").value = arrondi(ficheDxf.hauteur_mm * echelleDxf);
+  if (sauf !== "pourcent") $("dxf-echelle").value = arrondi(echelleDxf * 100);
+}
+
 function afficherFicheDxf() {
   const f = ficheDxf, infos = $("infos-dxf");
   infos.hidden = !f;
+  $("echelle-dxf").hidden = !f;
+  majCotesDxf();
   if (!f) return infos.replaceChildren();
-  const lignes = [["Fichier", f.nom], ["Encombrement", `${mm(f.largeur_mm)} × ${mm(f.hauteur_mm)} mm`], ["Découpes intérieures", String((f.contour.trous || []).length)]];
+  const lignes = [["Fichier", f.nom], ["Taille du fichier", `${mm(f.largeur_mm)} × ${mm(f.hauteur_mm)} mm`], ["Découpes intérieures", String((f.contour.trous || []).length)]];
   if (f.avertissements && f.avertissements.length) lignes.push(["À vérifier", f.avertissements.join(" ")]);
   infos.replaceChildren(...lignes.flatMap(([t, v]) => [el("dt", { texte: t }), el("dd", { texte: v })]));
 }
 
+$("echelle-dxf").addEventListener("input", (ev) => {
+  const champ = ev.target.dataset.echelle, v = Number(ev.target.value);
+  if (!ficheDxf || !champ || !(v > 0)) return;
+  const k = champ === "largeur" ? v / ficheDxf.largeur_mm : champ === "hauteur" ? v / ficheDxf.hauteur_mm : v / 100;
+  echelleDxf = Math.min(Math.max(+k.toFixed(4), 0.01), 100);
+  majCotesDxf(champ);
+});
+$("dxf-taille-fichier").addEventListener("click", () => {
+  echelleDxf = 1;
+  majCotesDxf();
+  calculerBientot();
+});
 $("fichier-dxf").addEventListener("change", (ev) => { envoyerDxf(ev.target.files[0]); ev.target.value = ""; });
 const depot = $("depot-dxf");
 depot.addEventListener("dragover", (ev) => { ev.preventDefault(); depot.classList.add("survol"); });

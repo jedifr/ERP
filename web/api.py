@@ -42,13 +42,13 @@ class CatalogueWeb(_VueWeb):
 
 
 class PrixWebVue(_VueWeb):
-    """POST {matiere, epaisseur, quantite, forme + cotes | pliage | libre | dxf} → prix (voir web.services.prix.chiffrer)."""
+    """POST {matiere, epaisseur, quantite, forme + cotes | pliage | libre | dxf (+ echelle)} → prix (voir web.services.prix.chiffrer)."""
 
     def post(self, request):
         d = request.data
         try:
             resultat = chiffrer(d.get("matiere"), d.get("epaisseur"), d.get("quantite"), forme=d.get("forme"), cotes=d.get("cotes"),
-                                pliage=d.get("pliage"), libre=d.get("libre"), dxf=d.get("dxf"))
+                                pliage=d.get("pliage"), libre=d.get("libre"), dxf=d.get("dxf"), echelle=d.get("echelle"))
         except ErreurPrixWeb as exc:
             return Response({"erreur": str(exc)}, status=400)
         return Response(resultat.en_dict_public())
