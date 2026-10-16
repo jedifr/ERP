@@ -69,9 +69,22 @@ const typePiece = () => document.querySelector("input[name=type]:checked").value
 
 // ------------------------------------------------------------------ chargement
 async function api(chemin, options) {
-  const r = await fetch(chemin, options);
-  const corps = await r.json().catch(() => ({ erreur: "Réponse illisible." }));
-  return { ok: r.ok, status: r.status, corps };
+  let r;
+  try {
+    r = await fetch(chemin, options);
+  } catch {
+    return { ok: false, status: 0, corps: { erreur: "Connexion impossible : rechargez la page (F5)." } };
+  }
+  const texte = await r.text();
+  try {
+    return { ok: r.ok, status: r.status, corps: JSON.parse(texte) };
+  } catch {
+    // Page HTML à la place de la réponse : en général le contrôle anti-robots de l'hébergeur (Tiger Protect chez o2switch).
+    const controle = /security-challenge|o2s-browser-check|Security check/i.test(texte);
+    return { ok: false, status: r.status, corps: { erreur: controle
+      ? "Le contrôle de sécurité de l'hébergeur a bloqué le calcul : rechargez la page (F5). Si cela continue, demandez un devis par e-mail."
+      : "Réponse illisible : rechargez la page (F5)." } };
+  }
 }
 
 async function demarrer() {
@@ -158,6 +171,7 @@ function dessinerSchema() {
   if (!catalogue) return;
   const d = demandeCourante();
   const svg = $("schema");
+  if (svg.clientWidth) Schemas.reglerTexte(Math.min(1, Math.max(0.4, 440 / svg.clientWidth)));
   if (d.libre) {
     $("note-schema").textContent = mode3d ? "Faites glisser pour tourner la pièce, molette ou pincement pour zoomer. Vue indicative."
       : "Faites glisser un élément pour le placer (Maj : au dixième de mm). Trait plein : matière ajoutée ; pointillés : découpe.";
@@ -222,6 +236,14 @@ async function basculerVue(en3d) {
   dessinerSchema();
 }
 $("voir-2d").addEventListener("click", () => basculerVue(false));
+// Le schéma change de largeur (fenêtre redimensionnée, plein écran) : on le redessine pour garder des cotes lisibles.
+let largeurSchema = 0;
+new ResizeObserver(() => {
+  const l = $("schema").clientWidth;
+  if (!l || Math.abs(l - largeurSchema) < 20) return;
+  largeurSchema = l;
+  requestAnimationFrame(dessinerSchema);
+}).observe($("schema"));
 $("voir-3d").addEventListener("click", () => basculerVue(true));
 
 // ------------------------------------------------------------------ demande de prix

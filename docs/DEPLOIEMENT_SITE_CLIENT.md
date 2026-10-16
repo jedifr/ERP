@@ -78,3 +78,11 @@ Mise à jour du site : remplacez les fichiers, puis **Restart** dans Setup Node.
 | « Configurateur momentanément indisponible » | NAS ou passerelle arrêtés, clé différente des deux côtés, ou hôte absent de `DJANGO_ALLOWED_HOSTS` (l'ERP répond 400). |
 | « Aucune matière n'est encore proposée en ligne » | Aucune tôle cochée « vendu en ligne ». |
 | « Prix indisponible en ligne pour cette pièce » | Poste ou tarif manquant (paramètre de coupe ou plieuse). Le détail est dans Essai du configurateur. |
+
+
+## Tiger Protect (anti-robots d'o2switch)
+
+Tiger Protect peut répondre aux calculs de prix du navigateur (`POST /api/prix`, `/api/dxf`, `/api/demandes`) par sa page
+« Test de sécurité » au lieu de laisser passer la requête : le site affiche alors « Le contrôle de sécurité de l'hébergeur
+a bloqué le calcul ». Dans cPanel → **Tiger Protect**, désactivez la protection pour le sous-domaine du configurateur
+(le site limite déjà les calculs par visiteur, l'ERP exige sa clé et limite son débit total).
