@@ -114,12 +114,13 @@
             <p class="aide"><strong id="vecto-nom"></strong> : le dessin est transformé ici en contour à découper (en bleu). Réglez le contraste jusqu'à ce que la pièce corresponde à votre dessin ; le prix suit.</p>
             <svg id="vecto-apercu" class="schema vecto-apercu" role="img" aria-label="Dessin et contour obtenu" viewBox="0 0 100 60"></svg>
             <div class="grille-champs">
-              <div class="champ"><label for="vecto-largeur">Largeur de la pièce (mm)</label><input id="vecto-largeur" type="number" min="5" max="3000" step="any" value="200" inputmode="decimal"></div>
+              <div class="champ"><label for="vecto-largeur" id="vecto-largeur-titre">Largeur de la pièce (mm)</label><input id="vecto-largeur" type="number" min="5" max="3000" step="any" value="200" inputmode="decimal"></div>
               <div class="champ"><label for="vecto-seuil">Contraste</label><input id="vecto-seuil" type="range" min="1" max="254" step="1" value="128"></div>
               <div class="champ"><label for="vecto-lissage">Lissage</label><input id="vecto-lissage" type="range" min="0" max="4" step="1" value="1"></div>
               <div class="champ"><label for="vecto-grossir">Grossir le trait (mm)</label><input id="vecto-grossir" type="number" min="0" max="20" step="0.5" value="0" inputmode="decimal"></div>
             </div>
             <label class="case"><input id="vecto-inverser" type="checkbox"> Inverser : les zones claires deviennent la matière</label>
+            <label class="case"><input id="vecto-plusieurs" type="checkbox" checked> Découper chaque morceau du dessin (une pièce par morceau)</label>
             <p id="vecto-info" class="aide"></p>
             <ul id="vecto-messages" class="messages"></ul>
           </div>

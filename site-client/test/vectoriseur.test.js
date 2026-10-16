@@ -94,3 +94,22 @@ test("image basse résolution agrandie : bords droits sans escalier, angles gard
   assert.ok(c.coins.filter(Boolean).length >= 4, "les quatre angles du parallélogramme restent vifs");
   assert.match(Vectoriseur.chemin(r), /^M[^NaZ]*Z$/);
 });
+
+test("plusieurs pièces : chaque morceau est une pièce, îlot d'un trou compris, poussières écartées", () => {
+  // rectangle, disque percé d'un trou qui contient un îlot, et une poussière de 0,5 mm
+  const img = image(200, 100, (x, y) => (x >= 10 && x <= 90 && y >= 10 && y <= 90)
+    || (Math.hypot(x - 150, y - 50) <= 40 && (Math.hypot(x - 150, y - 50) >= 25 || Math.hypot(x - 150, y - 50) <= 10))
+    || (x >= 195 && x <= 195.5 && y >= 5 && y <= 5.5));
+  const seul = Vectoriseur.vectoriser(img, PX, { epaisseurMm: 2 });
+  assert.equal(seul.pieces.length, 1);
+  assert.equal(seul.ecartes, 2);
+  const r = Vectoriseur.vectoriser(img, PX, { epaisseurMm: 2, plusieurs: true });
+  assert.equal(r.pieces.length, 3, "rectangle, anneau, îlot");
+  assert.equal(r.ecartes, 0, "la poussière plus petite que la tôle disparaît dès la règle d'épaisseur");
+  const [a, b, c] = r.pieces;
+  assert.ok(a.aireMm2 >= b.aireMm2 && b.aireMm2 >= c.aireMm2);
+  assert.equal(r.pieces.filter((p) => p.contours.some((k) => k.trou)).length, 1, "seul l'anneau a un trou");
+  assert.ok(Math.abs(r.largeurMm - 180) < 1.5, `ensemble ${r.largeurMm}`);
+  for (const p of r.pieces) assert.match(Vectoriseur.enSvg(p), /^<\?xml[^]*<path[^]*Z"\/><\/svg>\n$/);
+  assert.ok(Math.abs(c.largeurMm - 20) < 1, `îlot ${c.largeurMm}`);
+});

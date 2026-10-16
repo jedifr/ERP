@@ -42,18 +42,44 @@ class CatalogueWeb(_VueWeb):
         return Response(catalogue())
 
 
+LOT_MAX = 30  # pièces d'un même envoi (dessin vectorisé en plusieurs pièces)
+
+
+def _lot(request):
+    """Liste {"lot": [...]} ou {"fichiers": [...]} d'un appel groupé ; None pour un appel simple."""
+    for cle in ("lot", "fichiers"):
+        if cle in request.data:
+            liste = request.data.get(cle)
+            if not isinstance(liste, list) or not liste or len(liste) > LOT_MAX or not all(isinstance(x, dict) for x in liste):
+                raise ErreurPrixWeb(f"Envoi groupé : de 1 à {LOT_MAX} pièces.")
+            return liste
+    return None
+
+
 class PrixWebVue(_VueWeb):
-    """POST {matiere, epaisseur, quantite, forme + cotes | pliage | libre | dxf (+ echelle) | bibliotheque} → prix (voir web.services.prix.chiffrer)."""
+    """POST {matiere, epaisseur, quantite, forme + cotes | pliage | libre | dxf (+ echelle) | bibliotheque} → prix (voir web.services.prix.chiffrer).
+    POST {lot: [demande, ...]} → {lot: [prix | {erreur}]} : plusieurs pièces en un appel (un dessin découpé en plusieurs pièces)."""
+
+    @staticmethod
+    def _chiffrer(d):
+        return chiffrer(d.get("matiere"), d.get("epaisseur"), d.get("quantite"), forme=d.get("forme"), cotes=d.get("cotes"),
+                        pliage=d.get("pliage"), libre=d.get("libre"), dxf=d.get("dxf"), echelle=d.get("echelle"),
+                        bibliotheque=d.get("bibliotheque")).en_dict_public()
 
     def post(self, request):
-        d = request.data
         try:
-            resultat = chiffrer(d.get("matiere"), d.get("epaisseur"), d.get("quantite"), forme=d.get("forme"), cotes=d.get("cotes"),
-                                pliage=d.get("pliage"), libre=d.get("libre"), dxf=d.get("dxf"), echelle=d.get("echelle"),
-                                bibliotheque=d.get("bibliotheque"))
+            lot = _lot(request)
+            if lot is None:
+                return Response(self._chiffrer(request.data))
         except ErreurPrixWeb as exc:
             return Response({"erreur": str(exc)}, status=400)
-        return Response(resultat.en_dict_public())
+        resultats = []
+        for d in lot:
+            try:
+                resultats.append(self._chiffrer(d))
+            except ErreurPrixWeb as exc:
+                resultats.append({"erreur": str(exc)})
+        return Response({"lot": resultats})
 
 
 class BibliothequeWebVue(_VueWeb):
@@ -66,18 +92,30 @@ class BibliothequeWebVue(_VueWeb):
 
 class DxfWebVue(_VueWeb):
     """POST {nom, contenu (base64)} → {jeton, nom, contour, largeur_mm, hauteur_mm, avertissements}. Le prix se demande
-    ensuite avec {"dxf": jeton}."""
+    ensuite avec {"dxf": jeton}. POST {fichiers: [{nom, contenu}, ...]} → {fichiers: [fiche | {erreur}]} : une pièce par fichier."""
+
+    @staticmethod
+    def _deposer(d):
+        try:
+            contenu = base64.b64decode(str(d.get("contenu") or ""), validate=True)
+        except (binascii.Error, ValueError):
+            raise ErreurDxf("Fichier illisible.")
+        return deposer(d.get("nom"), contenu)
 
     def post(self, request):
         try:
-            contenu = base64.b64decode(str(request.data.get("contenu") or ""), validate=True)
-        except (binascii.Error, ValueError):
-            return Response({"erreur": "Fichier illisible."}, status=400)
-        try:
-            fiche = deposer(request.data.get("nom"), contenu)
-        except ErreurDxf as exc:
+            fichiers = _lot(request)
+            if fichiers is None:
+                return Response(self._deposer(request.data))
+        except (ErreurDxf, ErreurPrixWeb) as exc:
             return Response({"erreur": str(exc)}, status=400)
-        return Response(fiche)
+        resultats = []
+        for d in fichiers:
+            try:
+                resultats.append(self._deposer(d))
+            except ErreurDxf as exc:
+                resultats.append({"erreur": str(exc)})
+        return Response({"fichiers": resultats})
 
 
 class DemandeWebVue(_VueWeb):

@@ -286,6 +286,32 @@ class DxfWebTests(ConfigurateurBase):
         self.assertIn(b"LWPOLYLINE", genere.content)  # pièce libre : DXF recalculé depuis le contour
         self.assertEqual(self.client.get(f"/admin/web/demandeweb/{demande.pk}/dxf/9/").status_code, 404)
 
+    def test_envoi_groupe_fichiers_et_prix(self):
+        import base64
+
+        carre = b'<svg xmlns="http://www.w3.org/2000/svg" width="50mm" height="50mm" viewBox="0 0 50 50"><path d="M0 0H50V50H0Z"/></svg>'
+        page = self.client.post("/api/web/v1/dxf/", {"fichiers": [
+            {"nom": "logo-1.svg", "contenu": base64.b64encode(self.SVG_MM).decode()},
+            {"nom": "logo-2.svg", "contenu": base64.b64encode(carre).decode()},
+            {"nom": "logo-3.svg", "contenu": "pas du base64 !"},
+        ]}, content_type="application/json", HTTP_X_CLE_WEB="secret-web")
+        self.assertEqual(page.status_code, 200, page.content)
+        fiches = page.json()["fichiers"]
+        self.assertEqual([f.get("largeur_mm") for f in fiches], [200, 50, None])
+        self.assertIn("illisible", fiches[2]["erreur"])
+        base = {"matiere": "S235-W", "epaisseur": 2, "quantite": 3}
+        prix = self.client.post("/api/web/v1/prix/", {"lot": [{**base, "dxf": fiches[0]["jeton"]}, {**base, "dxf": fiches[1]["jeton"]},
+                                                              {**base, "matiere": "Or", "dxf": fiches[1]["jeton"]}]},
+                                content_type="application/json", HTTP_X_CLE_WEB="secret-web")
+        self.assertEqual(prix.status_code, 200, prix.content)
+        lot = prix.json()["lot"]
+        self.assertTrue(all(r.get("statut") in ("ok", "validation") and r["prix_total_ht"] for r in lot[:2]), lot)
+        self.assertGreater(lot[0]["prix_total_ht"], lot[1]["prix_total_ht"])
+        self.assertIn("pas vendu en ligne", lot[2]["erreur"])
+        for corps in ({"lot": []}, {"lot": [base] * 31}, {"fichiers": "x"}):
+            chemin = "/api/web/v1/dxf/" if "fichiers" in corps else "/api/web/v1/prix/"
+            self.assertEqual(self.client.post(chemin, corps, content_type="application/json", HTTP_X_CLE_WEB="secret-web").status_code, 400)
+
     SVG_MM = (b'<svg xmlns="http://www.w3.org/2000/svg" width="200mm" height="100mm" viewBox="0 0 200 100">'
               b'<path d="M0,0 H200 V70 A30 30 0 0 1 170 100 H0 Z"/><circle cx="40" cy="50" r="15"/>'
               b'<rect x="90" y="30" width="40" height="20" rx="5"/><text x="5" y="5">Logo</text></svg>')
