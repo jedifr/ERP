@@ -152,6 +152,8 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .etat.refus { color: var(--refus); }
 .prix { font-size: 2.2rem; font-weight: 750; margin: .25rem 0 0; font-variant-numeric: tabular-nums; }
 .prix small { font-size: 1rem; font-weight: 500; color: var(--texte-doux); }
+.prix-ttc { font-size: 1.15rem; font-weight: 600; margin: 0 0 .15rem; font-variant-numeric: tabular-nums; }
+.prix-ttc:empty { display: none; }
 .unitaire { color: var(--texte-doux); margin: 0 0 .75rem; }
 .apercu { width: 100%; height: 180px; background: var(--fond); border-radius: 8px; }
 .apercu path { fill: var(--accent-doux); stroke: var(--accent); stroke-width: 1.5; }

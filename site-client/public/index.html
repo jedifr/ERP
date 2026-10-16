@@ -163,12 +163,13 @@
       <div class="carte-prix">
         <p id="etat" class="etat">Choisissez votre pièce.</p>
         <p class="prix"><span id="prix-total">–</span> <small>€ HT</small></p>
+        <p id="prix-ttc" class="prix-ttc"></p>
         <p id="prix-unitaire" class="unitaire"></p>
         <svg id="apercu" class="apercu" role="img" aria-label="Aperçu de la pièce à plat" viewBox="0 0 100 60"></svg>
         <dl id="details" class="details"></dl>
         <ul id="messages" class="messages"></ul>
         <button id="ajouter" class="bouton" type="button" disabled>Ajouter au panier</button>
-        <p class="aide">Prix hors taxes et hors frais de port. Autre forme ou cotes normalisées : <a id="lien-devis" href="#form-demande">demandez un devis</a>.</p>
+        <p class="aide">Prix hors frais de port. Autre forme ou cotes normalisées : <a id="lien-devis" href="#form-demande">demandez un devis</a>.</p>
       </div>
     </aside>
 
@@ -182,6 +183,8 @@
           <tr><th colspan="3">Total des pièces</th><td class="nombre" id="total-pieces"></td><td></td></tr>
           <tr id="ligne-minimum" hidden><th colspan="3">Complément au minimum de commande</th><td class="nombre" id="complement"></td><td></td></tr>
           <tr class="total"><th colspan="3">Total HT hors port</th><td class="nombre" id="total-panier"></td><td></td></tr>
+          <tr id="ligne-tva" hidden><th colspan="3" id="libelle-tva">TVA</th><td class="nombre" id="tva-panier"></td><td></td></tr>
+          <tr id="ligne-ttc" class="total" hidden><th colspan="3">Total TTC hors port</th><td class="nombre" id="total-ttc"></td><td></td></tr>
         </tfoot>
       </table>
 

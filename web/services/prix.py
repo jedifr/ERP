@@ -50,12 +50,15 @@ class PrixWeb:
     taux_marge_pct: Decimal = None
     prix_total_ht: Decimal = None
     prix_unitaire_ht: Decimal = None
+    taux_tva: Decimal = None
+    prix_total_ttc: Decimal = None
+    prix_unitaire_ttc: Decimal = None
     minimum_commande_ht: Decimal = None
 
     def finaliser(self):
         self.statut = "refus" if self.refus else "validation" if self.validations else "ok"
         if self.refus:
-            self.prix_total_ht = self.prix_unitaire_ht = None
+            self.prix_total_ht = self.prix_unitaire_ht = self.prix_total_ttc = self.prix_unitaire_ttc = None
         return self
 
     def en_dict(self):
@@ -71,7 +74,20 @@ class PrixWeb:
 
 
 PUBLIC = ("statut", "refus", "validations", "designation", "matiere", "epaisseur_mm", "procede", "quantite", "largeur_mm", "hauteur_mm",
-          "poids_kg", "contour", "pliage", "prix_total_ht", "prix_unitaire_ht", "minimum_commande_ht")
+          "poids_kg", "contour", "pliage", "prix_total_ht", "prix_unitaire_ht", "taux_tva", "prix_total_ttc", "prix_unitaire_ttc",
+          "minimum_commande_ht")
+
+
+def taux_tva():
+    """Taux de TVA du prix TTC affiché en ligne : le taux coché « par défaut » dans le référentiel, sinon 20 %."""
+    from commercial.models import TauxTVA
+
+    defaut = TauxTVA.objects.filter(est_defaut=True).first()
+    return D(defaut.taux) if defaut else D("20")
+
+
+def ttc(montant_ht, taux):
+    return arrondir(D(montant_ht) * (1 + D(taux) / 100))
 
 
 def toles_en_ligne():
@@ -132,6 +148,7 @@ def catalogue():
             "aide": "Cotes extérieures. Profil : faces et angles (90 = équerre, signe = sens du pli). Boîte : fond et bords A, B, C, D.",
         },
         "minimum_commande_ht": float(reglage.minimum_commande_ht),
+        "taux_tva": float(taux_tva()),
         "quantite_max": reglage.quantite_max,
         "formats_fichier": formats_fichier(),
         "bibliotheque": resume_bibliotheque(),
@@ -376,4 +393,7 @@ def chiffrer(matiere_nom, epaisseur, quantite, forme=None, cotes=None, pliage=No
     r.cout_revient = arrondir(r.cout_matiere + r.cout_decoupe + r.cout_pliage)
     r.prix_total_ht = arrondir(r.cout_revient * (1 + D(reglage.taux_marge_pct) / 100))
     r.prix_unitaire_ht = arrondir(r.prix_total_ht / quantite)
+    r.taux_tva = taux_tva()
+    r.prix_total_ttc = ttc(r.prix_total_ht, r.taux_tva)
+    r.prix_unitaire_ttc = ttc(r.prix_unitaire_ht, r.taux_tva)
     return r.finaliser()

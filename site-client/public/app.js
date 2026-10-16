@@ -329,6 +329,7 @@ function resultatLot(reponses) {
   return {
     statut, lot: lignes, designation: `${lignes.length} pièces de ${vecto.nom || "votre dessin"}`, refus: prefixe("refus"), validations: prefixe("validations"),
     prix_total_ht: avecPrix ? somme("prix_total_ht") : null, prix_unitaire_ht: avecPrix ? somme("prix_unitaire_ht") : null,
+    prix_total_ttc: avecPrix ? somme("prix_total_ttc") : null, prix_unitaire_ttc: avecPrix ? somme("prix_unitaire_ttc") : null,
     largeur_mm: vecto.resultat ? vecto.resultat.largeurMm : null, hauteur_mm: vecto.resultat ? vecto.resultat.hauteurMm : null,
     contour: lignes[0] && lignes[0].contour,
   };
@@ -339,6 +340,7 @@ function afficherErreur(message) {
   $("etat").textContent = message;
   $("etat").className = "etat refus";
   $("prix-total").textContent = "–";
+  $("prix-ttc").textContent = "";
   $("prix-unitaire").textContent = "";
   $("details").replaceChildren();
   $("messages").replaceChildren();
@@ -353,8 +355,10 @@ function afficherResultat(r) {
   $("etat").className = `etat ${r.statut}`;
   const avecPrix = r.prix_total_ht != null;
   $("prix-total").textContent = avecPrix ? euros(r.prix_total_ht) : "–";
-  $("prix-unitaire").textContent = !avecPrix ? "" : r.lot ? `soit ${euros(r.prix_unitaire_ht)} € HT le jeu de ${r.lot.length} pièces`
-    : `soit ${euros(r.prix_unitaire_ht)} € HT la pièce`;
+  $("prix-ttc").textContent = avecPrix && r.prix_total_ttc != null ? `${euros(r.prix_total_ttc)} € TTC` : "";
+  const unite = r.lot ? `le jeu de ${r.lot.length} pièces` : "la pièce";
+  $("prix-unitaire").textContent = !avecPrix ? "" : `soit ${euros(r.prix_unitaire_ht)} € HT`
+    + (r.prix_unitaire_ttc != null ? ` (${euros(r.prix_unitaire_ttc)} € TTC)` : "") + ` ${unite}`;
   const details = [[r.lot ? "Pièces" : "Pièce", r.designation]];
   if (r.lot) {
     r.lot.slice(0, 8).forEach((l, i) => details.push([`Pièce ${i + 1}`, (l.largeur_mm ? `${mm(l.largeur_mm)} × ${mm(l.hauteur_mm)} mm` : "–")
@@ -407,7 +411,16 @@ function afficherPanier() {
   $("total-pieces").textContent = `${euros(total)} €`;
   $("ligne-minimum").hidden = total >= minimum;
   $("complement").textContent = `${euros(Math.max(minimum - total, 0))} €`;
-  $("total-panier").textContent = `${euros(Math.max(total, minimum))} €`;
+  const totalHt = Math.max(total, minimum), taux = catalogue && catalogue.taux_tva != null ? catalogue.taux_tva : null;
+  $("total-panier").textContent = `${euros(totalHt)} €`;
+  // TVA sur le total du panier, comme sur la facture
+  $("ligne-tva").hidden = $("ligne-ttc").hidden = taux == null;
+  if (taux != null) {
+    const totalTtc = Math.round(totalHt * (100 + taux)) / 100;
+    $("libelle-tva").textContent = `TVA ${String(taux).replace(".", ",")} %`;
+    $("tva-panier").textContent = `${euros(totalTtc - totalHt)} €`;
+    $("total-ttc").textContent = `${euros(totalTtc)} €`;
+  }
 }
 
 $("ajouter").addEventListener("click", () => {
@@ -454,7 +467,7 @@ $("form-demande").addEventListener("submit", async (e) => {
   $("form-demande").hidden = false;
   form.reset();
   retour.className = "retour succes";
-  retour.textContent = `Merci ! Demande ${corps.numero} reçue (${euros(corps.total_ht)} € HT hors port). Nous vous confirmons la commande, le port et le délai par e-mail.`;
+  retour.textContent = `Merci ! Demande ${corps.numero} reçue (${euros(corps.total_ht)} € HT${corps.total_ttc != null ? `, ${euros(corps.total_ttc)} € TTC` : ""} hors port). Nous vous confirmons la commande, le port et le délai par e-mail.`;
 });
 
 // ------------------------------------------------------------------ forme libre
