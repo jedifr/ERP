@@ -6,6 +6,7 @@
   <title>Pièces sur mesure – DÉCOUPE H2O</title>
   <meta name="description" content="Configurez votre pièce en tôle découpée au laser ou au jet d'eau, pliée si besoin : prix immédiat.">
   <link rel="stylesheet" href="style.css">
+  <script src="schemas.js" defer></script>
   <script src="app.js" defer></script>
 </head>
 <body>
@@ -31,6 +32,8 @@
 
       <fieldset class="etape">
         <legend><span class="num">2</span> Forme et cotes <small>en mm</small></legend>
+        <div class="forme-et-schema">
+        <div class="saisie">
         <div id="bloc-plane">
           <div class="champ"><label for="forme">Forme</label><select id="forme"></select></div>
           <p id="desc-forme" class="aide"></p>
@@ -50,14 +53,20 @@
         <div id="bloc-boite" hidden>
           <p class="aide">Fond et hauteur des bords, en cotes extérieures. Mettez 0 pour un côté sans bord. Coins ouverts (non soudés).</p>
           <div class="grille-champs">
-            <div class="champ"><label for="fond-l">Longueur du fond</label><input id="fond-l" type="number" min="10" value="300" inputmode="decimal"></div>
-            <div class="champ"><label for="fond-w">Largeur du fond</label><input id="fond-w" type="number" min="10" value="200" inputmode="decimal"></div>
-            <div class="champ"><label for="bord-a">Bord A (le long de la longueur)</label><input id="bord-a" type="number" min="0" value="40" inputmode="decimal"></div>
-            <div class="champ"><label for="bord-c">Bord C (opposé à A)</label><input id="bord-c" type="number" min="0" value="40" inputmode="decimal"></div>
-            <div class="champ"><label for="bord-b">Bord B (le long de la largeur)</label><input id="bord-b" type="number" min="0" value="40" inputmode="decimal"></div>
-            <div class="champ"><label for="bord-d">Bord D (opposé à B)</label><input id="bord-d" type="number" min="0" value="40" inputmode="decimal"></div>
+            <div class="champ"><label for="fond-l"><span class="lettre">L</span> Longueur du fond</label><input id="fond-l" type="number" min="10" value="300" inputmode="decimal"></div>
+            <div class="champ"><label for="fond-w"><span class="lettre">l</span> Largeur du fond</label><input id="fond-w" type="number" min="10" value="200" inputmode="decimal"></div>
+            <div class="champ"><label for="bord-a"><span class="lettre">A</span> Bord le long de la longueur</label><input id="bord-a" type="number" min="0" value="40" inputmode="decimal"></div>
+            <div class="champ"><label for="bord-c"><span class="lettre">C</span> Bord opposé à A</label><input id="bord-c" type="number" min="0" value="40" inputmode="decimal"></div>
+            <div class="champ"><label for="bord-b"><span class="lettre">B</span> Bord le long de la largeur</label><input id="bord-b" type="number" min="0" value="40" inputmode="decimal"></div>
+            <div class="champ"><label for="bord-d"><span class="lettre">D</span> Bord opposé à B</label><input id="bord-d" type="number" min="0" value="40" inputmode="decimal"></div>
             <div class="champ"><label for="angle-bords">Angle des bords (°)</label><input id="angle-bords" type="number" min="60" max="170" value="90" inputmode="decimal"></div>
           </div>
+        </div>
+        </div>
+        <figure class="cadre-schema">
+          <svg id="schema" class="schema" role="img" aria-label="Schéma coté de la pièce" viewBox="0 0 100 60"></svg>
+          <figcaption id="note-schema" class="aide">Les lettres du schéma repèrent les cotes à saisir.</figcaption>
+        </figure>
         </div>
       </fieldset>
 

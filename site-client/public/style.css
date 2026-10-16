@@ -70,6 +70,22 @@ input, select, textarea { font: inherit; color: var(--texte); background: var(--
 input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 0; border-color: var(--accent); }
 .aide { color: var(--texte-doux); font-size: .875rem; margin: .25rem 0 .75rem; }
 
+.forme-et-schema { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1rem 1.5rem; align-items: start; }
+.cadre-schema { margin: 0; position: sticky; top: 1rem; }
+.schema { width: 100%; height: auto; max-height: 340px; aspect-ratio: 4 / 3; background: var(--fond); border-radius: 8px; display: block; }
+.schema path { vector-effect: non-scaling-stroke; fill: none; }
+.schema .piece { fill: var(--accent-doux); stroke: var(--accent); stroke-width: 1.5; }
+.schema .piece-trait { stroke: var(--accent); stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; }
+.schema .fond-plat { fill: var(--accent-doux); stroke: none; }
+.schema .arete { stroke: var(--accent); stroke-width: 1.5; }
+.schema .pli { stroke: var(--accent); stroke-width: 1.2; stroke-dasharray: 5 4; }
+.schema .cote { stroke: var(--texte-doux); stroke-width: 1; }
+.schema .rappel { stroke: var(--texte-doux); stroke-width: .6; }
+.schema .axe { stroke: var(--texte-doux); stroke-width: .8; stroke-dasharray: 8 3 2 3; }
+.schema .fleche { fill: var(--texte-doux); stroke: none; }
+.schema .cote-texte { fill: var(--texte); stroke: var(--fond); paint-order: stroke; font-weight: 600; font-family: inherit; }
+.cadre-schema figcaption { margin: .4rem 0 0; }
+.lettre { display: inline-grid; place-items: center; min-width: 1.45em; height: 1.45em; padding: 0 .2em; border-radius: 4px; background: var(--accent); color: var(--accent-texte); font-weight: 700; font-size: .8rem; }
 .faces { display: grid; grid-template-columns: 1fr; gap: .25rem; max-width: 26rem; }
 .faces .champ { margin-bottom: 0; }
 .pli { display: grid; grid-template-columns: 4rem 5rem 1fr; gap: .5rem; align-items: center; padding: .25rem 0 .25rem 1rem; border-left: 3px solid var(--accent-doux); margin: .25rem 0; }
@@ -109,6 +125,10 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 
 .pied { text-align: center; color: var(--texte-doux); font-size: .85rem; padding: 1.5rem; }
 
+@media (max-width: 1100px) {
+  .forme-et-schema { grid-template-columns: minmax(0, 1fr); }
+  .cadre-schema { position: static; order: -1; }
+}
 @media (max-width: 880px) {
   .page { grid-template-columns: minmax(0, 1fr); }
   .resume { grid-column: 1; grid-row: auto; }
