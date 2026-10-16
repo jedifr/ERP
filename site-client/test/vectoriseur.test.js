@@ -79,3 +79,18 @@ test("seuil d'Otsu entre deux niveaux", () => {
   const s = Vectoriseur.seuilOtsu(Float32Array.from([...Array(50).fill(30), ...Array(50).fill(220)]));
   assert.ok(s > 30 && s < 220);
 });
+
+test("image basse résolution agrandie : bords droits sans escalier, angles gardés vifs", () => {
+  // parallélogramme dessiné sur 60 × 30 pixels puis agrandi 5 fois (pixels en gros carrés, comme un petit logo)
+  const S = 5, w = 60 * S, h = 30 * S, gris = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const sx = Math.floor(x / S) + 0.5, sy = Math.floor(y / S) + 0.5;
+    gris[y * w + x] = sy >= 5 && sy <= 25 && sx >= 5 + (25 - sy) && sx <= 35 + (25 - sy) ? 0 : 255;
+  }
+  const r = Vectoriseur.vectoriser({ gris, w, h }, 2, { lissage: 1, pxSource: S, seuil: 128 });
+  assert.equal(r.contours.length, 1);
+  const c = r.contours[0];
+  assert.ok(c.sommets.length <= 8, `${c.sommets.length} sommets : l'escalier des pixels est resté`);
+  assert.ok(c.coins.filter(Boolean).length >= 4, "les quatre angles du parallélogramme restent vifs");
+  assert.match(Vectoriseur.chemin(r), /^M[^NaZ]*Z$/);
+});
