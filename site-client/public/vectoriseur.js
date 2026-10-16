@@ -3,7 +3,8 @@
  * Étapes : niveaux de gris (le transparent compte comme du blanc) → lissage (flou) → seuil (foncé = matière, ou
  * l'inverse) → trait grossi si demandé → règle de découpe : ni jour ni trait plus fin que l'épaisseur de la tôle
  * (fermeture puis ouverture morphologiques au disque de diamètre = épaisseur) → on ne garde que le plus grand morceau
- * d'un seul tenant (une pièce par fichier) → contours suivis sur les bords des pixels, simplifiés (Douglas-Peucker).
+ * d'un seul tenant, ou chaque morceau comme une pièce à part (option « plusieurs ») → contours suivis sur les bords des pixels, simplifiés (Douglas-Peucker) puis
+ * lissés en courbes de Bézier, les angles vifs gardés vifs.
  *
  * Le résultat part à l'ERP en SVG (cotes en mm) par le même chemin qu'un fichier envoyé par le client : l'ERP le lit,
  * le contrôle, le garde pour la fabrication et le chiffre. Aucun appel réseau ici ; testé sous Node (test/vectoriseur.test.js). */
@@ -12,6 +13,7 @@
 
   const PX_MAX = 1000; // plus grand côté de l'image de travail, en pixels
   const PX_PAR_MM_MAX = 8; // au-delà, aucun gain pour la découpe
+  const PIECES_MAX = 30; // pièces d'un même dessin (une ligne de panier chacune)
 
   // Résolution de travail : assez fine pour l'épaisseur, bornée pour rester rapide sur un téléphone.
   function resolution(largeurMm, hauteurMm) {
@@ -110,30 +112,31 @@
     return out;
   }
 
-  // Composantes 4-connexes du masque ; rend le plus grand morceau seul et le nombre de morceaux écartés.
-  function plusGrandMorceau(m, w, h) {
-    const etiq = new Int32Array(m.length), pile = new Int32Array(m.length), tailles = [0];
+  // Composantes 4-connexes du masque : étiquette de chaque pixel, taille et encombrement (x0, y0, x1, y1) de chaque morceau.
+  function morceaux(m, w, h) {
+    const etiq = new Int32Array(m.length), pile = new Int32Array(m.length), tailles = [0], boites = [null];
     for (let depart = 0; depart < m.length; depart++) {
       if (!m[depart] || etiq[depart]) continue;
-      const e = tailles.length;
+      const e = tailles.length, boite = [w, h, 0, 0];
       let haut = 0, n = 0;
       pile[haut++] = depart;
       etiq[depart] = e;
       while (haut) {
-        const p = pile[--haut], x = p % w;
+        const p = pile[--haut], x = p % w, y = (p - x) / w;
         n++;
+        if (x < boite[0]) boite[0] = x;
+        if (y < boite[1]) boite[1] = y;
+        if (x > boite[2]) boite[2] = x;
+        if (y > boite[3]) boite[3] = y;
         if (x > 0 && m[p - 1] && !etiq[p - 1]) { etiq[p - 1] = e; pile[haut++] = p - 1; }
         if (x < w - 1 && m[p + 1] && !etiq[p + 1]) { etiq[p + 1] = e; pile[haut++] = p + 1; }
         if (p >= w && m[p - w] && !etiq[p - w]) { etiq[p - w] = e; pile[haut++] = p - w; }
         if (p < m.length - w && m[p + w] && !etiq[p + w]) { etiq[p + w] = e; pile[haut++] = p + w; }
       }
       tailles.push(n);
+      boites.push(boite);
     }
-    let garde = 0;
-    for (let e = 1; e < tailles.length; e++) if (tailles[e] > (tailles[garde] || 0)) garde = e;
-    const out = new Uint8Array(m.length);
-    if (garde) for (let i = 0; i < m.length; i++) out[i] = etiq[i] === garde ? 1 : 0;
-    return { masque: out, ecartes: Math.max(tailles.length - 2, 0), pixels: tailles[garde] || 0 };
+    return { etiq, tailles, boites };
   }
 
   // Contours sur les bords des pixels, matière à droite du sens de parcours (écran, y vers le bas).
@@ -232,13 +235,64 @@
     return points;
   }
 
+  // Vrais angles, gardés vifs ; les autres sommets sont arrondis (courbe de Bézier). Un sommet est un angle si son virage
+  // dépasse ANGLE_VIF, ou si le virage est trop franc pour une courbe simplifiée : sur un arc simplifié à la tolérance t,
+  // côté × virage reste sous 8 t (flèche ≤ t) ; au-delà, ce sont deux droites qui se coupent (losange, chanfrein).
+  const ANGLE_VIF = 55 * Math.PI / 180;
+  function anglesVifs(p, tolerance) {
+    const n = p.length;
+    return p.map((b, i) => {
+      const a = p[(i + n - 1) % n], c = p[(i + 1) % n];
+      const v = Math.abs(Math.atan2((b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]), (b[0] - a[0]) * (c[0] - b[0]) + (b[1] - a[1]) * (c[1] - b[1])));
+      const cote = Math.min(Math.hypot(b[0] - a[0], b[1] - a[1]), Math.hypot(c[0] - b[0], c[1] - b[1]));
+      return v > ANGLE_VIF || cote * v > 12 * tolerance;
+    });
+  }
+
+  // Contour lissé : de milieu de côté en milieu de côté, une courbe quadratique tirée vers chaque sommet (B-spline),
+  // ou deux droites par le sommet si c'est un angle vif. `rendu(x, y)` met un point en texte.
+  function tracer(sommets, coins, rendu) {
+    const n = sommets.length, milieu = (i) => { const a = sommets[i], b = sommets[(i + 1) % n]; return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]; };
+    let d = "M" + rendu(...milieu(n - 1));
+    for (let i = 0; i < n; i++) d += (coins[i] ? "L" + rendu(...sommets[i]) + "L" : "Q" + rendu(...sommets[i]) + " ") + rendu(...milieu(i));
+    return d + "Z";
+  }
+
+  // Le même contour en segments d'au plus `pas` (mm) : aire, encombrement, aperçu.
+  function aplatir(sommets, coins, pas) {
+    const n = sommets.length, out = [];
+    for (let i = 0; i < n; i++) {
+      const a = sommets[(i + n - 1) % n], b = sommets[i], c = sommets[(i + 1) % n];
+      const m0 = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], m1 = [(b[0] + c[0]) / 2, (b[1] + c[1]) / 2];
+      if (coins[i]) { out.push(m0, b); continue; }
+      const k = Math.max(2, Math.min(64, Math.ceil((Math.hypot(b[0] - m0[0], b[1] - m0[1]) + Math.hypot(c[0] - b[0], c[1] - b[1]) / 2) / pas)));
+      for (let j = 0; j < k; j++) {
+        const t = j / k, u = 1 - t;
+        out.push([u * u * m0[0] + 2 * u * t * b[0] + t * t * m1[0], u * u * m0[1] + 2 * u * t * b[1] + t * t * m1[1]]);
+      }
+    }
+    return out;
+  }
+
+  // Tracé SVG (attribut d) d'un résultat, décalé de (dx, dy) mm.
+  function chemin(resultat, dx = 0, dy = 0, decimales = 3) {
+    const f = (x, y) => `${+(x - dx).toFixed(decimales)} ${+(y - dy).toFixed(decimales)}`;
+    return resultat.contours.map((c) => tracer(c.sommets, c.coins, f)).join("");
+  }
+
   /* image : { gris: Float32Array|Uint8Array (0 = noir, 255 = blanc), w, h } à la résolution `pxParMm`.
-   * options : { seuil (0..255, sinon Otsu), inverser, lissage (0..4), grossirMm, epaisseurMm }.
-   * Rend { contours: [{ points: [[x, y] mm, repère écran], trou }], largeurMm, hauteurMm, seuil, ecartes, combles, retires, vide }. */
+   * options : { seuil (0..255, sinon Otsu), inverser, plusieurs (garder chaque morceau comme une pièce), lissage (0..4), grossirMm, epaisseurMm, pxSource (pixels de travail par
+   * pixel de l'image d'origine : le flou et la simplification suivent la finesse réelle du dessin, pas l'agrandissement) }.
+   * Rend { pieces: [{ contours, largeurMm, hauteurMm, boite, aireMm2 }] (de la plus grande à la plus petite), contours (toutes
+   * pièces : [{ points: [[x, y] mm, repère écran], sommets, coins, trou }]), largeurMm, hauteurMm, boite (de l'ensemble), seuil,
+   * ecartes, combles, retires, vide }. enSvg(piece) donne le fichier d'une pièce. */
   function vectoriser(image, pxParMm, options = {}) {
     const { w, h } = image;
     const lissage = Math.max(0, Math.min(4, Number(options.lissage) || 0));
-    const gris = flouter(image.gris, w, h, lissage * Math.max(1, pxParMm * 0.2));
+    const pxSource = Math.max(1, Number(options.pxSource) || 1);
+    const gris = flouter(image.gris, w, h, Math.max(lissage, lissage * 0.5 * pxSource));
+    // tolérance de simplification : grain de l'image d'origine (bruit JPEG, pixels agrandis), plus large si l'on lisse
+    const tolerance = Math.max(0.6, 0.5 * pxSource * (1 + lissage / 2));
     const seuil = Number.isFinite(options.seuil) ? options.seuil : seuilOtsu(gris);
     // marge blanche autour : les morphologies et le suivi de contour ne butent jamais sur le bord de l'image
     const rRegle = Math.max(0, (Number(options.epaisseurMm) || 0) * pxParMm / 2);
@@ -258,35 +312,58 @@
     const apresFermeture = ferme.reduce((s, v) => s + v, 0);
     const ouvert = dilater(eroder(ferme, W, H, rRegle), W, H, rRegle);
     const apresOuverture = ouvert.reduce((s, v) => s + v, 0);
-    const morceau = plusGrandMorceau(ouvert, W, H);
     const pxCarre = pxParMm * pxParMm;
+    const { etiq, tailles, boites } = morceaux(ouvert, W, H);
+    // morceaux gardés : le plus grand seul, ou (plusieurs) tous ceux qui ne sont pas des poussières, du plus grand au plus petit
+    const epaisseur = Number(options.epaisseurMm) || 0;
+    const mini = Math.max(1, 4 * epaisseur * epaisseur) * pxCarre;
+    const tries = tailles.map((n, e) => e).slice(1).sort((a, b) => tailles[b] - tailles[a]);
+    const gardes = options.plusieurs ? tries.filter((e) => tailles[e] >= mini).slice(0, PIECES_MAX) : tries.slice(0, 1);
     const resultat = {
-      contours: [], largeurMm: 0, hauteurMm: 0, seuil, ecartes: morceau.ecartes,
+      contours: [], pieces: [], largeurMm: 0, hauteurMm: 0, seuil, ecartes: tries.length - gardes.length,
       combles: Math.max(0, apresFermeture - avant) / pxCarre, retires: Math.max(0, apresFermeture - apresOuverture) / pxCarre,
-      vide: !morceau.pixels,
+      vide: !gardes.length,
     };
     if (resultat.vide) return resultat;
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const boucle of contours(morceau.masque, W, H)) {
-      const points = simplifier(lisser(boucle), 0.6).map(([x, y]) => [(x - marge) / pxParMm, (y - marge) / pxParMm]);
-      if (points.length < 3) continue;
-      for (const [x, y] of points) { minX = Math.min(minX, x); minY = Math.min(minY, y); maxX = Math.max(maxX, x); maxY = Math.max(maxY, y); }
-      resultat.contours.push({ points, trou: aire(points) < 0 });
+    for (const e of gardes) {
+      // le morceau seul, dans son encombrement plus un pixel de marge
+      const [bx0, by0, bx1, by1] = boites[e], cw = bx1 - bx0 + 3, ch = by1 - by0 + 3, ox = bx0 - 1, oy = by0 - 1;
+      const masque = new Uint8Array(cw * ch);
+      for (let y = by0; y <= by1; y++) for (let x = bx0; x <= bx1; x++) if (etiq[y * W + x] === e) masque[(y - oy) * cw + x - ox] = 1;
+      const piece = { contours: [], aireMm2: tailles[e] / pxCarre };
+      for (const boucle of contours(masque, cw, ch)) {
+        const sommets = simplifier(lisser(boucle), tolerance).map(([x, y]) => [(x + ox - marge) / pxParMm, (y + oy - marge) / pxParMm]);
+        if (sommets.length < 3) continue;
+        const coins = anglesVifs(sommets, tolerance / pxParMm);
+        const points = aplatir(sommets, coins, 0.25 / pxParMm + 0.1);
+        piece.contours.push({ points, sommets, coins, trou: aire(points) < 0 });
+      }
+      if (!piece.contours.length) continue;
+      encombrement(piece);
+      resultat.pieces.push(piece);
+      resultat.contours.push(...piece.contours);
     }
-    resultat.largeurMm = maxX - minX;
-    resultat.hauteurMm = maxY - minY;
-    resultat.boite = [minX, minY, maxX, maxY];
+    resultat.vide = !resultat.pieces.length;
+    if (!resultat.vide) encombrement(resultat);
     return resultat;
+  }
+
+  function encombrement(objet) {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const c of objet.contours) for (const [x, y] of c.points) { minX = Math.min(minX, x); minY = Math.min(minY, y); maxX = Math.max(maxX, x); maxY = Math.max(maxY, y); }
+    objet.largeurMm = maxX - minX;
+    objet.hauteurMm = maxY - minY;
+    objet.boite = [minX, minY, maxX, maxY];
   }
 
   // SVG en millimètres (largeur / hauteur en mm : l'ERP en tire l'échelle sans deviner).
   function enSvg(resultat) {
     const [x0, y0] = resultat.boite, W = resultat.largeurMm, H = resultat.hauteurMm;
     const f = (v) => String(+v.toFixed(3));
-    const d = resultat.contours.map((c) => "M" + c.points.map(([x, y]) => `${f(x - x0)} ${f(y - y0)}`).join("L") + "Z").join("");
+    const d = chemin(resultat, x0, y0);
     return `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="${f(W)}mm" height="${f(H)}mm" viewBox="0 0 ${f(W)} ${f(H)}">`
       + `<path fill="#000" fill-rule="evenodd" d="${d}"/></svg>\n`;
   }
 
-  racine.Vectoriseur = { resolution, seuilOtsu, vectoriser, enSvg, _interne: { dilater, eroder, plusGrandMorceau, contours, simplifier, aire } };
+  racine.Vectoriseur = { resolution, seuilOtsu, vectoriser, enSvg, chemin, _interne: { dilater, eroder, morceaux, contours, simplifier, aire } };
 })(typeof window !== "undefined" ? window : globalThis);

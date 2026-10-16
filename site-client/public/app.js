@@ -25,13 +25,21 @@ let libre = { base: { forme: "rectangle", largeur: 300, hauteur: 200, rayon_angl
 let choisi = -1;
 const historique = { etats: [JSON.stringify(libre)], position: 0 };
 let ficheDxf = null; // { jeton, nom, contour, largeur_mm, hauteur_mm, avertissements } rendue par l'ERP
+let lotDxf = null; // dessin vectorisé en plusieurs pièces : une fiche par pièce (ficheDxf = la plus grande)
 const DXF_MAX = 1536 * 1024;
+const STEP_MAX = 30 * 1024 * 1024; // STEP avant compression (il part compressé, 1,5 Mo au plus une fois compressé)
+const estStep = () => Boolean(ficheDxf && ficheDxf.format === "step");
 let formatsFichier = ["dxf"]; // formats que l'ERP sait lire (catalogue)
 let echelleDxf = 1; // agrandissement demandé par le client (1 = taille du fichier)
 // Formes décoratives : liste chargée au premier passage sur l'onglet, forme choisie et sa largeur.
 let bibliotheque = null; // { credit, licence_url, formes: [{ cle, nom, proportion, rapport, apercu }] }
 let formeDeco = null;
 const VIGNETTES_MAX = 150;
+
+// Flan d'un STEP : celui que l'ERP vient de chiffrer (outillage de l'atelier), sinon l'aperçu rendu au dépôt.
+function flanStep() {
+  return dernier && dernier.demande.dxf === ficheDxf.jeton && dernier.resultat.contour ? dernier.resultat.contour : ficheDxf.contour;
+}
 
 // Contour du fichier à l'échelle choisie (affichage seulement : l'ERP refait le calcul).
 function contourDxf() {
@@ -185,12 +193,16 @@ function dessinerSchema() {
   }
   let dessin = null;
   if (d.bibliotheque !== undefined) dessin = formeDeco ? Schemas.contour(contourDeco(), formeDeco.nom, true) : null;
+  else if (d.lot) dessin = Schemas.contour(contourLot(), vecto.nom, true);
+  else if (d.dxf !== undefined && estStep()) dessin = Schemas.contour(flanStep(), `Flan de ${ficheDxf.nom}`, true);
   else if (d.dxf !== undefined) dessin = ficheDxf ? Schemas.contour(contourDxf(), ficheDxf.nom, true) : null;
   else if (!d.pliage) dessin = Schemas.plane(catalogue.formes.find((x) => x.cle === d.forme), d.cotes);
   else if (d.pliage.forme === "profil") dessin = Schemas.profil(d.pliage.faces, d.pliage.angles, d.pliage.longueur);
   else dessin = Schemas.boite(d.pliage.longueur, d.pliage.largeur, d.pliage.bords);
   $("note-schema").textContent = mode3d ? "Faites glisser pour tourner la pièce, molette ou pincement pour zoomer. Vue indicative."
     : d.bibliotheque !== undefined ? (formeDeco ? "A et B : cotes hors tout. Changez la largeur, la hauteur suit." : "Choisissez une forme dans la liste.")
+    : d.lot ? `${d.lot.length} pièces découpées séparément, placées comme sur votre dessin ; A et B : cotes hors tout de l'ensemble.`
+    : d.dxf !== undefined && estStep() ? (ficheDxf.plis.length ? "Flan déplié de votre pièce, au rayon de pliage de l'atelier ; A et B : cotes hors tout." : "Pièce plane lue dans votre fichier ; A et B : cotes hors tout.")
     : d.dxf !== undefined ? (ficheDxf ? (echelleDxf === 1 ? "Pièce telle que lue dans votre fichier" : `Pièce à ${+(echelleDxf * 100).toFixed(2)} % de votre fichier`) + " ; A et B : cotes hors tout." : "Le dessin de la pièce s'affiche une fois le fichier lu.")
     : (dessin && dessin.note) || "Les lettres du schéma repèrent les cotes à saisir.";
   if (!dessin) return svg.replaceChildren();
@@ -204,6 +216,7 @@ function modele3d() {
   const d = demandeCourante();
   const m = catalogue.matieres.find((x) => x.matiere === d.matiere);
   const commun = { epaisseur: d.epaisseur, famille: m ? m.famille : "" };
+  if (d.dxf !== undefined && estStep()) return { type: "step", jeton: ficheDxf.jeton, octets: ficheDxf.octets, ...commun };
   if (d.dxf !== undefined) return ficheDxf ? { type: "plaque", contour: contourDxf(), ...commun } : null;
   if (d.bibliotheque !== undefined) return formeDeco ? { type: "plaque", contour: contourDeco(), ...commun } : null;
   if (d.libre) {
@@ -220,7 +233,8 @@ function modele3d() {
 }
 
 function majVue3d() {
-  if (mode3d && vue3d && catalogue) vue3d.afficher(modele3d());
+  if (!(mode3d && vue3d && catalogue)) return;
+  Promise.resolve(vue3d.afficher(modele3d())).catch((e) => { $("note-schema").textContent = e.message; });
 }
 
 async function basculerVue(en3d) {
@@ -265,6 +279,7 @@ function demandeCourante() {
   }
   if (type === "libre") return { ...base, libre: structuredClone(libre) };
   if (type === "bibliotheque") return { ...base, bibliotheque: formeDeco ? { cle: formeDeco.cle, largeur: Number($("biblio-largeur").value) } : null };
+  if (type === "dxf" && lotDxf) return { ...base, dxf: lotDxf[0].jeton, lot: lotDxf.map((f) => ({ ...base, dxf: f.jeton })) };
   if (type === "dxf") return { ...base, dxf: ficheDxf ? ficheDxf.jeton : null, ...(echelleDxf !== 1 ? { echelle: echelleDxf } : {}) };
   if (type === "profil") {
     lireProfil();
@@ -296,11 +311,27 @@ async function calculer() {
     return;
   }
   const appel = ++numeroAppel;
-  const { ok, corps } = await api("/api/prix", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(demande) });
+  const { ok, corps } = await api("/api/prix", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(demande.lot ? { lot: demande.lot } : demande) });
   if (appel !== numeroAppel) return; // une saisie plus récente est en cours
   if (!ok) return afficherErreur(corps.erreur || "Calcul impossible.");
-  dernier = { demande, resultat: corps };
-  afficherResultat(corps);
+  const resultat = demande.lot ? resultatLot(corps.lot || []) : corps;
+  dernier = { demande, resultat };
+  afficherResultat(resultat);
+}
+
+// Prix des pièces d'un dessin vectorisé, réunies en un « jeu » : chacune garde son prix, le total les additionne.
+function resultatLot(reponses) {
+  const lignes = reponses.map((r, i) => (r.erreur ? { statut: "refus", refus: [r.erreur], validations: [], prix_total_ht: null, designation: `Pièce ${i + 1}` } : r));
+  const statut = lignes.some((l) => l.statut === "refus") ? "refus" : lignes.some((l) => l.statut === "validation") ? "validation" : "ok";
+  const avecPrix = lignes.length > 0 && lignes.every((l) => l.prix_total_ht != null);
+  const somme = (cle) => lignes.reduce((s, l) => s + l[cle], 0);
+  const prefixe = (cle) => lignes.flatMap((l, i) => (l[cle] || []).map((m) => `Pièce ${i + 1} : ${m}`));
+  return {
+    statut, lot: lignes, designation: `${lignes.length} pièces de ${vecto.nom || "votre dessin"}`, refus: prefixe("refus"), validations: prefixe("validations"),
+    prix_total_ht: avecPrix ? somme("prix_total_ht") : null, prix_unitaire_ht: avecPrix ? somme("prix_unitaire_ht") : null,
+    largeur_mm: vecto.resultat ? vecto.resultat.largeurMm : null, hauteur_mm: vecto.resultat ? vecto.resultat.hauteurMm : null,
+    contour: lignes[0] && lignes[0].contour,
+  };
 }
 
 function afficherErreur(message) {
@@ -322,16 +353,23 @@ function afficherResultat(r) {
   $("etat").className = `etat ${r.statut}`;
   const avecPrix = r.prix_total_ht != null;
   $("prix-total").textContent = avecPrix ? euros(r.prix_total_ht) : "–";
-  $("prix-unitaire").textContent = avecPrix ? `soit ${euros(r.prix_unitaire_ht)} € HT la pièce` : "";
-  const details = [["Pièce", r.designation]];
+  $("prix-unitaire").textContent = !avecPrix ? "" : r.lot ? `soit ${euros(r.prix_unitaire_ht)} € HT le jeu de ${r.lot.length} pièces`
+    : `soit ${euros(r.prix_unitaire_ht)} € HT la pièce`;
+  const details = [[r.lot ? "Pièces" : "Pièce", r.designation]];
+  if (r.lot) {
+    r.lot.slice(0, 8).forEach((l, i) => details.push([`Pièce ${i + 1}`, (l.largeur_mm ? `${mm(l.largeur_mm)} × ${mm(l.hauteur_mm)} mm` : "–")
+      + (l.prix_total_ht != null ? ` : ${euros(l.prix_total_ht)} €` : "")]));
+    if (r.lot.length > 8) details.push(["…", `et ${r.lot.length - 8} autres`]);
+  }
   if (r.procede) details.push(["Découpe", PROCEDES[r.procede] || r.procede]);
-  if (r.largeur_mm) details.push([r.pliage ? "Flan à plat" : "Encombrement", `${mm(r.largeur_mm)} × ${mm(r.hauteur_mm)} mm`]);
+  if (r.largeur_mm) details.push([r.pliage ? "Flan à plat" : r.lot ? "Encombrement du dessin" : "Encombrement", `${mm(r.largeur_mm)} × ${mm(r.hauteur_mm)} mm`]);
   if (r.poids_kg) details.push(["Poids unitaire", `${r.poids_kg.toLocaleString("fr-FR", { maximumFractionDigits: 2 })} kg`]);
   if (r.pliage && r.pliage.angle_mini) details.push(["Angle de pli mini", `${r.pliage.angle_mini}°`]);
   $("details").replaceChildren(...details.flatMap(([t, v]) => [el("dt", { texte: t }), el("dd", { texte: v })]));
   $("messages").replaceChildren(...[...r.refus, ...r.validations].map((m) => el("li", { texte: m })));
   dessinerApercu(r.contour);
-  if (dernier && dernier.demande.bibliotheque) dessinerSchema(); // contour exact de l'ERP à la place de la vignette
+  // STEP : le flan chiffré (outillage de l'atelier) remplace l'aperçu du dépôt ; forme décorative : contour exact de l'ERP à la place de la vignette
+  if (estStep() || (dernier && dernier.demande.bibliotheque)) dessinerSchema();
   else majVue3d();
   $("ajouter").disabled = !avecPrix;
 }
@@ -375,7 +413,9 @@ function afficherPanier() {
 $("ajouter").addEventListener("click", () => {
   if (!dernier || dernier.resultat.prix_total_ht == null) return;
   const r = dernier.resultat;
-  panier.push({ demande: dernier.demande, designation: r.designation, prix_total_ht: r.prix_total_ht, statut: r.statut });
+  // un dessin en plusieurs pièces : une ligne par pièce (chacune a son fichier et son prix)
+  if (dernier.demande.lot) dernier.demande.lot.forEach((d, i) => panier.push({ demande: d, designation: r.lot[i].designation, prix_total_ht: r.lot[i].prix_total_ht, statut: r.lot[i].statut }));
+  else panier.push({ demande: dernier.demande, designation: r.designation, prix_total_ht: r.prix_total_ht, statut: r.statut });
   enregistrerPanier();
   afficherPanier();
   $("ajouter").textContent = "Ajouté ✓";
@@ -565,13 +605,14 @@ function lireEnBase64(fichier) {
 
 function majFormatsFichier(formats) {
   if (Array.isArray(formats) && formats.length) formatsFichier = formats;
-  const liste = formatsFichier.map((f) => f.toUpperCase());
+  const liste = formatsFichier.filter((f) => f !== "stp").map((f) => f.toUpperCase()); // .stp : même format que .step
   const texte = liste.length > 1 ? `${liste.slice(0, -1).join(", ")} ou ${liste[liste.length - 1]}` : liste[0];
   const images = vectorisable();
   $("onglet-fichier").textContent = `Fichier ${liste.join(", ")}` + (images ? " ou image" : "");
   $("titre-depot").textContent = `Choisissez un fichier ${texte}` + (images ? ", ou un dessin (PNG, JPG)" : "");
   $("fichier-dxf").accept = [...formatsFichier, ...(images ? IMAGES : [])].map((f) => `.${f}`).join(",");
   $("aide-depot").textContent = "Une pièce par fichier, cotes en mm, 1,5 Mo au plus."
+    + (formatsFichier.includes("step") ? " STEP : pièce plane ou pliée en tôle d'épaisseur constante, 30 Mo au plus, dépliée par nos soins." : "")
     + (formatsFichier.includes("svg") ? " SVG : convertissez les textes en tracés." : "")
     + (images ? " Un dessin ou une photo (fond clair, dessin foncé) est vectorisé ici." : "")
     + (formatsFichier.includes("dwg") ? "" : " Le DWG n'est pas lu en ligne : exportez-le en DXF.");
@@ -584,20 +625,35 @@ async function envoyerDxf(fichier, vectorise = null) {
   const extension = (fichier.name.match(/\.([a-z0-9]+)$/i) || [])[1];
   if (!vectorise && extension && vectorisable() && IMAGES.includes(extension.toLowerCase())) return ouvrirVecto(fichier);
   if (!vectorise) fermerVecto();
+  lotDxf = null;
   if (!extension || !formatsFichier.includes(extension.toLowerCase())) {
     etat.className = "aide erreur";
     etat.textContent = `Choisissez un fichier ${formatsFichier.map((f) => `.${f}`).join(", ")} (exporté depuis votre logiciel de dessin).`;
     return false;
   }
-  if (fichier.size > DXF_MAX) {
+  const step = ["step", "stp"].includes(extension.toLowerCase());
+  if (fichier.size > (step ? STEP_MAX : DXF_MAX)) {
     etat.className = "aide erreur";
-    etat.textContent = "Fichier trop gros (1,5 Mo au plus) : envoyez-le avec une demande de devis.";
+    etat.textContent = `Fichier trop gros (${step ? "30" : "1,5"} Mo au plus) : envoyez-le avec une demande de devis.`;
     return false;
   }
   etat.textContent = vectorise ? "Envoi du contour…" : `Lecture de ${fichier.name}…`;
-  let contenu;
+  let contenu, octets = null;
   try {
-    contenu = await lireEnBase64(fichier);
+    if (step) {
+      // Le STEP (texte) part compressé ; le navigateur garde le fichier pour la vue 3D.
+      octets = new Uint8Array(await fichier.arrayBuffer());
+      const compresse = typeof CompressionStream === "function" ? await new Response(new Blob([octets]).stream().pipeThrough(new CompressionStream("gzip"))).blob() : fichier;
+      if (compresse.size > DXF_MAX) {
+        etat.className = "aide erreur";
+        etat.textContent = "Fichier STEP trop lourd pour un prix en ligne : envoyez-le avec une demande de devis.";
+        return false;
+      }
+      contenu = await lireEnBase64(compresse);
+      etat.textContent = `Analyse de ${fichier.name} (épaisseur, plis, dépliage)…`;
+    } else {
+      contenu = await lireEnBase64(fichier);
+    }
   } catch {
     etat.className = "aide erreur";
     etat.textContent = "Le fichier n'a pas pu être lu.";
@@ -610,12 +666,28 @@ async function envoyerDxf(fichier, vectorise = null) {
     etat.textContent = corps.erreur || "Fichier refusé.";
     return false;
   }
-  ficheDxf = vectorise ? { ...corps, vectorise } : corps;
+  ficheDxf = vectorise ? { ...corps, vectorise } : octets ? { ...corps, octets } : corps;
   echelleDxf = 1;
-  etat.textContent = "";
+  etat.textContent = estStep() ? choisirEpaisseurStep() : "";
   afficherFicheDxf();
   calculerBientot();
+  if (estStep() && !mode3d) basculerVue(true); // comme l'aperçu d'un STEP : la pièce en volume d'abord
   return true;
+}
+
+// L'épaisseur d'une pièce STEP est celle du fichier : on la choisit (et la matière s'il le faut).
+function choisirEpaisseurStep() {
+  const e = ficheDxf.epaisseur_mm, egal = (x) => Math.abs(x - e) < 0.05;
+  let m = catalogue.matieres.find((x) => x.matiere === $("matiere").value);
+  if (!m || !m.epaisseurs.some(egal)) {
+    m = catalogue.matieres.find((x) => x.epaisseurs.some(egal));
+    if (!m) return `Votre pièce est en ${mm(e)} mm : cette épaisseur n'est pas vendue en ligne, envoyez-la avec une demande de devis.`;
+    $("matiere").value = m.matiere;
+    majEpaisseurs();
+  }
+  $("epaisseur").value = String(m.epaisseurs.find(egal));
+  majMiniDeco();
+  return "";
 }
 
 function majCotesDxf(sauf) {
@@ -629,10 +701,20 @@ function majCotesDxf(sauf) {
 function afficherFicheDxf() {
   const f = ficheDxf, infos = $("infos-dxf");
   infos.hidden = !f;
-  $("echelle-dxf").hidden = !f || Boolean(f.vectorise); // dessin vectorisé : la taille se règle dans le panneau du dessin
+  // dessin vectorisé : la taille se règle dans le panneau du dessin ; pièce 3D : fabriquée à la taille du fichier
+  $("echelle-dxf").hidden = !f || Boolean(f.vectorise) || estStep();
   majCotesDxf();
   if (!f) return infos.replaceChildren();
-  const lignes = [["Fichier", f.nom], [f.vectorise ? "Taille de la pièce" : "Taille du fichier", `${mm(f.largeur_mm)} × ${mm(f.hauteur_mm)} mm`], ["Découpes intérieures", String((f.contour.trous || []).length)]];
+  if (estStep()) {
+    const [x, y, z] = f.encombrement_mm;
+    const lignes = [["Fichier", f.nom], ["Épaisseur", `${mm(f.epaisseur_mm)} mm`], ["Encombrement", `${mm(x)} × ${mm(y)} × ${mm(z)} mm`],
+      ["Plis", f.plis.length ? f.plis.map((p) => `${mm(p.angle)}°`).join(", ") : "aucun (pièce plane)"],
+      ["Découpes intérieures", String((f.contour.trous || []).length)]];
+    if (f.avertissements && f.avertissements.length) lignes.push(["À vérifier", f.avertissements.join(" ")]);
+    return infos.replaceChildren(...lignes.flatMap(([t, v]) => [el("dt", { texte: t }), el("dd", { texte: v })]));
+  }
+  const lignes = lotDxf ? [["Pièces", `${lotDxf.length} fichiers (${lotDxf[0].nom}…)`], ["Taille de la plus grande", `${mm(f.largeur_mm)} × ${mm(f.hauteur_mm)} mm`]]
+    : [["Fichier", f.nom], [f.vectorise ? "Taille de la pièce" : "Taille du fichier", `${mm(f.largeur_mm)} × ${mm(f.hauteur_mm)} mm`], ["Découpes intérieures", String((f.contour.trous || []).length)]];
   if (f.avertissements && f.avertissements.length) lignes.push(["À vérifier", f.avertissements.join(" ")]);
   infos.replaceChildren(...lignes.flatMap(([t, v]) => [el("dt", { texte: t }), el("dd", { texte: v })]));
 }
@@ -804,6 +886,7 @@ async function ouvrirVecto(fichier) {
 function fermerVecto() {
   if (vecto.image) vecto.image.close();
   Object.assign(vecto, { image: null, url: "", gris: null, resultat: null });
+  lotDxf = null;
   clearTimeout(vecto.minuterie);
   $("bloc-vecto").hidden = true;
 }
@@ -837,7 +920,7 @@ function tracerVecto(envoyer, reprise = false) {
   const epaisseur = Number($("epaisseur").value) || 0;
   const r = Vectoriseur.vectoriser({ gris: grisVecto(w, h), w, h }, pxParMm, {
     seuil: vecto.seuilAuto ? undefined : Number($("vecto-seuil").value), inverser: $("vecto-inverser").checked,
-    lissage: Number($("vecto-lissage").value), grossirMm: Number($("vecto-grossir").value) || 0, epaisseurMm: epaisseur,
+    lissage: Number($("vecto-lissage").value), plusieurs: $("vecto-plusieurs").checked, pxSource: w / vecto.image.width, grossirMm: Number($("vecto-grossir").value) || 0, epaisseurMm: epaisseur,
   });
   if (vecto.seuilAuto) $("vecto-seuil").value = String(Math.round(r.seuil));
   if (!r.vide && r.largeurMm > 0) vecto.fraction = Math.min(Math.max(r.largeurMm / largeurImage, 0.01), 1);
@@ -848,6 +931,7 @@ function tracerVecto(envoyer, reprise = false) {
   clearTimeout(vecto.minuterie);
   if (r.vide && ficheDxf) {
     ficheDxf = null;
+    lotDxf = null;
     afficherFicheDxf();
     calculerBientot();
   }
@@ -865,18 +949,21 @@ function afficherVecto(r, L, H, epaisseur) {
   const chemin = document.createElementNS(NS, "path");
   chemin.setAttribute("class", "piece");
   chemin.setAttribute("fill-rule", "evenodd");
-  chemin.setAttribute("d", r.contours.map((c) => "M" + c.points.map(([x, y]) => `${x.toFixed(2)} ${y.toFixed(2)}`).join("L") + "Z").join(""));
+  chemin.setAttribute("d", Vectoriseur.chemin(r, 0, 0, 2));
   svg.replaceChildren(image, chemin);
   const messages = [];
   let info = "";
   if (r.vide) messages.push("Rien à découper : changez le contraste ou cochez « Inverser ».");
   else {
     const trous = r.contours.filter((c) => c.trou).length;
-    info = `Pièce de ${mm(r.largeurMm)} × ${mm(r.hauteurMm)} mm, ${trous} découpe${trous > 1 ? "s" : ""} intérieure${trous > 1 ? "s" : ""}.`;
-    if (r.ecartes) messages.push(`${r.ecartes} morceau${r.ecartes > 1 ? "x" : ""} détaché${r.ecartes > 1 ? "s" : ""} du reste retiré${r.ecartes > 1 ? "s" : ""} (il${r.ecartes > 1 ? "s" : ""} tomberai${r.ecartes > 1 ? "en" : ""}t à la découpe) : reliez-le${r.ecartes > 1 ? "s" : ""} à la pièce dans votre dessin, ou grossissez le trait.`);
+    info = r.pieces.length > 1 ? `${r.pieces.length} pièces séparées, ensemble de ${mm(r.largeurMm)} × ${mm(r.hauteurMm)} mm, ${trous} découpe${trous > 1 ? "s" : ""} intérieure${trous > 1 ? "s" : ""}.`
+      : `Pièce de ${mm(r.largeurMm)} × ${mm(r.hauteurMm)} mm, ${trous} découpe${trous > 1 ? "s" : ""} intérieure${trous > 1 ? "s" : ""}.`;
+    if (r.ecartes && $("vecto-plusieurs").checked) messages.push(`${r.ecartes} morceau${r.ecartes > 1 ? "x" : ""} trop petit${r.ecartes > 1 ? "s" : ""} pour être découpé${r.ecartes > 1 ? "s" : ""} retiré${r.ecartes > 1 ? "s" : ""}.`);
+    else if (r.ecartes) messages.push(`${r.ecartes} morceau${r.ecartes > 1 ? "x" : ""} détaché${r.ecartes > 1 ? "s" : ""} du reste retiré${r.ecartes > 1 ? "s" : ""} (il${r.ecartes > 1 ? "s" : ""} tomberai${r.ecartes > 1 ? "en" : ""}t à la découpe) : reliez-le${r.ecartes > 1 ? "s" : ""} à la pièce dans votre dessin, ou cochez « Découper chaque morceau ».`);
     if (r.combles >= Math.max(1, epaisseur * epaisseur)) messages.push(`Jours plus fins que la tôle (${mm(epaisseur)} mm) comblés.`);
     if (r.retires >= Math.max(1, epaisseur * epaisseur)) messages.push(`Traits plus fins que la tôle (${mm(epaisseur)} mm) retirés : grossissez le trait pour les garder.`);
   }
+  $("vecto-largeur-titre").textContent = r.pieces && r.pieces.length > 1 ? "Largeur de l'ensemble (mm)" : "Largeur de la pièce (mm)";
   $("vecto-info").textContent = info;
   $("vecto-messages").replaceChildren(...messages.map((m) => el("li", { texte: m })));
 }
@@ -886,8 +973,40 @@ async function envoyerVecto() {
   if (!r || r.vide) return;
   const n = ++vecto.envoi;
   const base = vecto.nom.replace(/\.[^.]+$/, "") || "dessin";
-  const fichier = new File([Vectoriseur.enSvg(r)], `${base}-vectorise.svg`, { type: "image/svg+xml" });
-  await envoyerDxf(fichier, { n, epaisseur: Number($("epaisseur").value) || 0 });
+  if (r.pieces.length === 1) {
+    const fichier = new File([Vectoriseur.enSvg(r.pieces[0])], `${base}-vectorise.svg`, { type: "image/svg+xml" });
+    return envoyerDxf(fichier, { n, epaisseur: Number($("epaisseur").value) || 0 });
+  }
+  // plusieurs pièces : un fichier SVG par pièce, déposés en un seul appel
+  const etat = $("etat-dxf");
+  etat.className = "aide";
+  etat.textContent = `Envoi des ${r.pieces.length} pièces…`;
+  const fichiers = r.pieces.map((p, i) => ({ nom: `${base}-piece-${i + 1}.svg`, contenu: btoa(unescape(encodeURIComponent(Vectoriseur.enSvg(p)))) }));
+  const { ok, corps } = await api("/api/dxf", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fichiers }) });
+  if (n !== vecto.envoi) return false; // un contour plus récent est parti entre-temps
+  const fiches = ok ? corps.fichiers || [] : [];
+  const refusees = fiches.map((f, i) => (f.erreur ? `pièce ${i + 1} : ${f.erreur}` : "")).filter(Boolean);
+  if (!ok || refusees.length || fiches.length !== r.pieces.length) {
+    etat.className = "aide erreur";
+    etat.textContent = ok ? `Pièces refusées (${refusees.join(" ; ")}).` : corps.erreur || "Pièces refusées.";
+    return false;
+  }
+  etat.textContent = "";
+  lotDxf = fiches.map((f) => ({ ...f, vectorise: { n } }));
+  ficheDxf = lotDxf[0];
+  echelleDxf = 1;
+  afficherFicheDxf();
+  calculerBientot();
+  return true;
+}
+
+// Pièces du dessin pour le schéma coté, placées comme sur le dessin (repère y vers le haut, comme les contours de l'ERP).
+function contourLot() {
+  const r = vecto.resultat;
+  if (!r || r.vide) return null;
+  const H = r.boite[3], x0 = r.boite[0], pts = (c) => c.points.map(([x, y]) => [x - x0, H - y]);
+  const pieces = r.pieces.map((p) => ({ exterieur: pts(p.contours.find((c) => !c.trou) || p.contours[0]), trous: p.contours.filter((c) => c.trou).map(pts) }));
+  return { ...pieces[0], autres: pieces.slice(1) };
 }
 
 $("bloc-vecto").addEventListener("input", (ev) => {

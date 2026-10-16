@@ -1,6 +1,7 @@
 // Vue 3D du configurateur (three.js, chargée seulement quand le client ouvre l'onglet 3D).
 // Pièce plane : contour calculé par l'ERP extrudé à l'épaisseur. Profil : section extrudée à la longueur.
-// Boîte : fond et bords relevés à leur angle. Purement visuel, comme le schéma coté.
+// Boîte : fond et bords relevés à leur angle. Fichier STEP : le modèle du client, lu dans le navigateur par OpenCascade
+// (occt-import-js, WebAssembly, chargé dans un worker au premier STEP affiché). Purement visuel, comme le schéma coté.
 import * as THREE from "./vendor/three.module.min.js";
 import { OrbitControls } from "./vendor/OrbitControls.js";
 
@@ -40,6 +41,22 @@ function sectionProfil(faces, angles, e) {
     return [p[0] + m[0] * e, p[1] + m[1] * e];
   });
   return { exterieur: [...pts, ...decale.reverse()], trous: [] };
+}
+
+// OpenCascade compilé en WebAssembly (occt-import-js, servi par le site) : la lecture du STEP se fait dans un worker.
+const maillagesStep = new Map(); // par jeton : le fichier n'est lu qu'une fois
+export function lireStep(jeton, octets) {
+  if (!maillagesStep.has(jeton)) {
+    const lecture = new Promise((ok, ko) => {
+      const worker = new Worker(new URL("./vendor/occt-worker.js", import.meta.url));
+      worker.onmessage = (ev) => { worker.terminate(); ev.data.erreur ? ko(new Error(ev.data.erreur)) : ok(ev.data.maillages); };
+      worker.onerror = (ev) => { worker.terminate(); ko(new Error(ev.message || "worker")); };
+      worker.postMessage({ octets, parametres: { linearUnit: "millimeter", linearDeflectionType: "bounding_box_ratio", linearDeflection: 0.001, angularDeflection: 0.3 } });
+    });
+    maillagesStep.set(jeton, lecture);
+    lecture.catch(() => maillagesStep.delete(jeton));
+  }
+  return maillagesStep.get(jeton);
 }
 
 export function creerVue(conteneur) {
@@ -112,16 +129,38 @@ export function creerVue(conteneur) {
   }
 
   let derniereCle = "";
+  let numero = 0; // un STEP se lit en différé : on ignore une lecture rendue après un autre affichage
   return {
     // modele : { type: "plaque", contour, epaisseur, famille } | { type: "profil", faces, angles, longueur, epaisseur, famille }
     //        | { type: "boite", longueur, largeur, bords: [A, B, C, D], angle, epaisseur, famille }
-    afficher(modele) {
+    //        | { type: "step", jeton, octets (Uint8Array du fichier), famille }
+    async afficher(modele) {
+      const n = ++numero;
+      let maillages = null;
+      if (modele && modele.type === "step") {
+        try {
+          maillages = await lireStep(modele.jeton, modele.octets);
+        } catch {
+          if (n === numero) { vider(); dessiner(); }
+          throw new Error("La vue 3D du fichier n'a pas pu se charger.");
+        }
+        if (n !== numero) return;
+      }
       vider();
       if (!modele) return dessiner();
       const e = Math.max(Number(modele.epaisseur) || 1, 0.1);
       const couleur = teinte(modele.famille);
       const groupe = new THREE.Group();
-      if (modele.type === "plaque" && modele.contour?.exterieur?.length) {
+      if (maillages) {
+        for (const m of maillages) {
+          const geo = new THREE.BufferGeometry();
+          geo.setAttribute("position", new THREE.Float32BufferAttribute(m.position, 3));
+          if (m.normale) geo.setAttribute("normal", new THREE.Float32BufferAttribute(m.normale, 3));
+          geo.setIndex(m.index);
+          if (!m.normale) geo.computeVertexNormals();
+          groupe.add(maille(geo, couleur));
+        }
+      } else if (modele.type === "plaque" && modele.contour?.exterieur?.length) {
         groupe.add(maille(new THREE.ExtrudeGeometry(forme(modele.contour), { depth: e, bevelEnabled: false, curveSegments: 4 }), couleur));
       } else if (modele.type === "profil") {
         const geo = new THREE.ExtrudeGeometry(forme(sectionProfil(modele.faces, modele.angles, e)), { depth: Math.max(modele.longueur || 1, 1), bevelEnabled: false });
@@ -157,7 +196,7 @@ export function creerVue(conteneur) {
       if (!groupe.children.length) return dessiner();
       piece = groupe;
       scene.add(piece);
-      const cle = modele.type;
+      const cle = modele.type === "step" ? modele.jeton : modele.type;
       cadrer(piece, cle === derniereCle);
       derniereCle = cle;
       ajuster();
