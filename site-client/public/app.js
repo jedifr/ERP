@@ -836,7 +836,7 @@ function tracerVecto(envoyer, reprise = false) {
   const epaisseur = Number($("epaisseur").value) || 0;
   const r = Vectoriseur.vectoriser({ gris: grisVecto(w, h), w, h }, pxParMm, {
     seuil: vecto.seuilAuto ? undefined : Number($("vecto-seuil").value), inverser: $("vecto-inverser").checked,
-    lissage: Number($("vecto-lissage").value), grossirMm: Number($("vecto-grossir").value) || 0, epaisseurMm: epaisseur,
+    lissage: Number($("vecto-lissage").value), pxSource: w / vecto.image.width, grossirMm: Number($("vecto-grossir").value) || 0, epaisseurMm: epaisseur,
   });
   if (vecto.seuilAuto) $("vecto-seuil").value = String(Math.round(r.seuil));
   if (!r.vide && r.largeurMm > 0) vecto.fraction = Math.min(Math.max(r.largeurMm / largeurImage, 0.01), 1);
@@ -864,7 +864,7 @@ function afficherVecto(r, L, H, epaisseur) {
   const chemin = document.createElementNS(NS, "path");
   chemin.setAttribute("class", "piece");
   chemin.setAttribute("fill-rule", "evenodd");
-  chemin.setAttribute("d", r.contours.map((c) => "M" + c.points.map(([x, y]) => `${x.toFixed(2)} ${y.toFixed(2)}`).join("L") + "Z").join(""));
+  chemin.setAttribute("d", Vectoriseur.chemin(r, 0, 0, 2));
   svg.replaceChildren(image, chemin);
   const messages = [];
   let info = "";

@@ -3,7 +3,8 @@
  * Étapes : niveaux de gris (le transparent compte comme du blanc) → lissage (flou) → seuil (foncé = matière, ou
  * l'inverse) → trait grossi si demandé → règle de découpe : ni jour ni trait plus fin que l'épaisseur de la tôle
  * (fermeture puis ouverture morphologiques au disque de diamètre = épaisseur) → on ne garde que le plus grand morceau
- * d'un seul tenant (une pièce par fichier) → contours suivis sur les bords des pixels, simplifiés (Douglas-Peucker).
+ * d'un seul tenant (une pièce par fichier) → contours suivis sur les bords des pixels, simplifiés (Douglas-Peucker) puis
+ * lissés en courbes de Bézier, les angles vifs gardés vifs.
  *
  * Le résultat part à l'ERP en SVG (cotes en mm) par le même chemin qu'un fichier envoyé par le client : l'ERP le lit,
  * le contrôle, le garde pour la fabrication et le chiffre. Aucun appel réseau ici ; testé sous Node (test/vectoriseur.test.js). */
@@ -232,13 +233,62 @@
     return points;
   }
 
+  // Vrais angles, gardés vifs ; les autres sommets sont arrondis (courbe de Bézier). Un sommet est un angle si son virage
+  // dépasse ANGLE_VIF, ou si le virage est trop franc pour une courbe simplifiée : sur un arc simplifié à la tolérance t,
+  // côté × virage reste sous 8 t (flèche ≤ t) ; au-delà, ce sont deux droites qui se coupent (losange, chanfrein).
+  const ANGLE_VIF = 55 * Math.PI / 180;
+  function anglesVifs(p, tolerance) {
+    const n = p.length;
+    return p.map((b, i) => {
+      const a = p[(i + n - 1) % n], c = p[(i + 1) % n];
+      const v = Math.abs(Math.atan2((b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]), (b[0] - a[0]) * (c[0] - b[0]) + (b[1] - a[1]) * (c[1] - b[1])));
+      const cote = Math.min(Math.hypot(b[0] - a[0], b[1] - a[1]), Math.hypot(c[0] - b[0], c[1] - b[1]));
+      return v > ANGLE_VIF || cote * v > 12 * tolerance;
+    });
+  }
+
+  // Contour lissé : de milieu de côté en milieu de côté, une courbe quadratique tirée vers chaque sommet (B-spline),
+  // ou deux droites par le sommet si c'est un angle vif. `rendu(x, y)` met un point en texte.
+  function tracer(sommets, coins, rendu) {
+    const n = sommets.length, milieu = (i) => { const a = sommets[i], b = sommets[(i + 1) % n]; return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]; };
+    let d = "M" + rendu(...milieu(n - 1));
+    for (let i = 0; i < n; i++) d += (coins[i] ? "L" + rendu(...sommets[i]) + "L" : "Q" + rendu(...sommets[i]) + " ") + rendu(...milieu(i));
+    return d + "Z";
+  }
+
+  // Le même contour en segments d'au plus `pas` (mm) : aire, encombrement, aperçu.
+  function aplatir(sommets, coins, pas) {
+    const n = sommets.length, out = [];
+    for (let i = 0; i < n; i++) {
+      const a = sommets[(i + n - 1) % n], b = sommets[i], c = sommets[(i + 1) % n];
+      const m0 = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], m1 = [(b[0] + c[0]) / 2, (b[1] + c[1]) / 2];
+      if (coins[i]) { out.push(m0, b); continue; }
+      const k = Math.max(2, Math.min(64, Math.ceil((Math.hypot(b[0] - m0[0], b[1] - m0[1]) + Math.hypot(c[0] - b[0], c[1] - b[1]) / 2) / pas)));
+      for (let j = 0; j < k; j++) {
+        const t = j / k, u = 1 - t;
+        out.push([u * u * m0[0] + 2 * u * t * b[0] + t * t * m1[0], u * u * m0[1] + 2 * u * t * b[1] + t * t * m1[1]]);
+      }
+    }
+    return out;
+  }
+
+  // Tracé SVG (attribut d) d'un résultat, décalé de (dx, dy) mm.
+  function chemin(resultat, dx = 0, dy = 0, decimales = 3) {
+    const f = (x, y) => `${+(x - dx).toFixed(decimales)} ${+(y - dy).toFixed(decimales)}`;
+    return resultat.contours.map((c) => tracer(c.sommets, c.coins, f)).join("");
+  }
+
   /* image : { gris: Float32Array|Uint8Array (0 = noir, 255 = blanc), w, h } à la résolution `pxParMm`.
-   * options : { seuil (0..255, sinon Otsu), inverser, lissage (0..4), grossirMm, epaisseurMm }.
+   * options : { seuil (0..255, sinon Otsu), inverser, lissage (0..4), grossirMm, epaisseurMm, pxSource (pixels de travail par
+   * pixel de l'image d'origine : le flou et la simplification suivent la finesse réelle du dessin, pas l'agrandissement) }.
    * Rend { contours: [{ points: [[x, y] mm, repère écran], trou }], largeurMm, hauteurMm, seuil, ecartes, combles, retires, vide }. */
   function vectoriser(image, pxParMm, options = {}) {
     const { w, h } = image;
     const lissage = Math.max(0, Math.min(4, Number(options.lissage) || 0));
-    const gris = flouter(image.gris, w, h, lissage * Math.max(1, pxParMm * 0.2));
+    const pxSource = Math.max(1, Number(options.pxSource) || 1);
+    const gris = flouter(image.gris, w, h, Math.max(lissage, lissage * 0.5 * pxSource));
+    // tolérance de simplification : grain de l'image d'origine (bruit JPEG, pixels agrandis), plus large si l'on lisse
+    const tolerance = Math.max(0.6, 0.5 * pxSource * (1 + lissage / 2));
     const seuil = Number.isFinite(options.seuil) ? options.seuil : seuilOtsu(gris);
     // marge blanche autour : les morphologies et le suivi de contour ne butent jamais sur le bord de l'image
     const rRegle = Math.max(0, (Number(options.epaisseurMm) || 0) * pxParMm / 2);
@@ -268,10 +318,12 @@
     if (resultat.vide) return resultat;
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const boucle of contours(morceau.masque, W, H)) {
-      const points = simplifier(lisser(boucle), 0.6).map(([x, y]) => [(x - marge) / pxParMm, (y - marge) / pxParMm]);
-      if (points.length < 3) continue;
+      const sommets = simplifier(lisser(boucle), tolerance).map(([x, y]) => [(x - marge) / pxParMm, (y - marge) / pxParMm]);
+      if (sommets.length < 3) continue;
+      const coins = anglesVifs(sommets, tolerance / pxParMm);
+      const points = aplatir(sommets, coins, 0.25 / pxParMm + 0.1);
       for (const [x, y] of points) { minX = Math.min(minX, x); minY = Math.min(minY, y); maxX = Math.max(maxX, x); maxY = Math.max(maxY, y); }
-      resultat.contours.push({ points, trou: aire(points) < 0 });
+      resultat.contours.push({ points, sommets, coins, trou: aire(points) < 0 });
     }
     resultat.largeurMm = maxX - minX;
     resultat.hauteurMm = maxY - minY;
@@ -283,10 +335,10 @@
   function enSvg(resultat) {
     const [x0, y0] = resultat.boite, W = resultat.largeurMm, H = resultat.hauteurMm;
     const f = (v) => String(+v.toFixed(3));
-    const d = resultat.contours.map((c) => "M" + c.points.map(([x, y]) => `${f(x - x0)} ${f(y - y0)}`).join("L") + "Z").join("");
+    const d = chemin(resultat, x0, y0);
     return `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="${f(W)}mm" height="${f(H)}mm" viewBox="0 0 ${f(W)} ${f(H)}">`
       + `<path fill="#000" fill-rule="evenodd" d="${d}"/></svg>\n`;
   }
 
-  racine.Vectoriseur = { resolution, seuilOtsu, vectoriser, enSvg, _interne: { dilater, eroder, plusGrandMorceau, contours, simplifier, aire } };
+  racine.Vectoriseur = { resolution, seuilOtsu, vectoriser, enSvg, chemin, _interne: { dilater, eroder, plusGrandMorceau, contours, simplifier, aire } };
 })(typeof window !== "undefined" ? window : globalThis);
