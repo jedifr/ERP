@@ -19,7 +19,7 @@ import binascii
 from .services.bibliotheque import liste as liste_bibliotheque
 from .services.demandes import enregistrer_demande
 from .services.dxf import ErreurDxf, deposer
-from .services.prix import ErreurPrixWeb, catalogue, chiffrer
+from .services.prix import ErreurPrixWeb, catalogue, chiffrer, taux_tva, ttc
 
 
 class CleWeb(BasePermission):
@@ -127,4 +127,4 @@ class DemandeWebVue(_VueWeb):
         except ErreurPrixWeb as exc:
             return Response({"erreur": str(exc)}, status=400)
         return Response({"numero": demande.numero, "total_pieces_ht": float(demande.total_pieces_ht), "total_ht": float(demande.total_ht),
-                         "a_valider": demande.a_valider}, status=201)
+                         "total_ttc": float(ttc(demande.total_ht, taux_tva())), "a_valider": demande.a_valider}, status=201)
