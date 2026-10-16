@@ -557,49 +557,55 @@ function majFormatsFichier(formats) {
   if (Array.isArray(formats) && formats.length) formatsFichier = formats;
   const liste = formatsFichier.map((f) => f.toUpperCase());
   const texte = liste.length > 1 ? `${liste.slice(0, -1).join(", ")} ou ${liste[liste.length - 1]}` : liste[0];
-  $("onglet-fichier").textContent = `Fichier ${liste.join(", ")}`;
-  $("titre-depot").textContent = `Choisissez un fichier ${texte}`;
-  $("fichier-dxf").accept = formatsFichier.map((f) => `.${f}`).join(",");
+  const images = vectorisable();
+  $("onglet-fichier").textContent = `Fichier ${liste.join(", ")}` + (images ? " ou image" : "");
+  $("titre-depot").textContent = `Choisissez un fichier ${texte}` + (images ? ", ou un dessin (PNG, JPG)" : "");
+  $("fichier-dxf").accept = [...formatsFichier, ...(images ? IMAGES : [])].map((f) => `.${f}`).join(",");
   $("aide-depot").textContent = "Une pièce par fichier, cotes en mm, 1,5 Mo au plus."
     + (formatsFichier.includes("svg") ? " SVG : convertissez les textes en tracés." : "")
+    + (images ? " Un dessin ou une photo (fond clair, dessin foncé) est vectorisé ici." : "")
     + (formatsFichier.includes("dwg") ? "" : " Le DWG n'est pas lu en ligne : exportez-le en DXF.");
 }
 
-async function envoyerDxf(fichier) {
-  if (!fichier) return;
+async function envoyerDxf(fichier, vectorise = null) {
+  if (!fichier) return false;
   const etat = $("etat-dxf");
   etat.className = "aide";
   const extension = (fichier.name.match(/\.([a-z0-9]+)$/i) || [])[1];
+  if (!vectorise && extension && vectorisable() && IMAGES.includes(extension.toLowerCase())) return ouvrirVecto(fichier);
+  if (!vectorise) fermerVecto();
   if (!extension || !formatsFichier.includes(extension.toLowerCase())) {
     etat.className = "aide erreur";
     etat.textContent = `Choisissez un fichier ${formatsFichier.map((f) => `.${f}`).join(", ")} (exporté depuis votre logiciel de dessin).`;
-    return;
+    return false;
   }
   if (fichier.size > DXF_MAX) {
     etat.className = "aide erreur";
     etat.textContent = "Fichier trop gros (1,5 Mo au plus) : envoyez-le avec une demande de devis.";
-    return;
+    return false;
   }
-  etat.textContent = `Lecture de ${fichier.name}…`;
+  etat.textContent = vectorise ? "Envoi du contour…" : `Lecture de ${fichier.name}…`;
   let contenu;
   try {
     contenu = await lireEnBase64(fichier);
   } catch {
     etat.className = "aide erreur";
     etat.textContent = "Le fichier n'a pas pu être lu.";
-    return;
+    return false;
   }
   const { ok, corps } = await api("/api/dxf", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ nom: fichier.name, contenu }) });
+  if (vectorise && vectorise.n !== vecto.envoi) return false; // un contour plus récent est parti entre-temps
   if (!ok) {
     etat.className = "aide erreur";
     etat.textContent = corps.erreur || "Fichier refusé.";
-    return;
+    return false;
   }
-  ficheDxf = corps;
+  ficheDxf = vectorise ? { ...corps, vectorise } : corps;
   echelleDxf = 1;
   etat.textContent = "";
   afficherFicheDxf();
   calculerBientot();
+  return true;
 }
 
 function majCotesDxf(sauf) {
@@ -613,10 +619,10 @@ function majCotesDxf(sauf) {
 function afficherFicheDxf() {
   const f = ficheDxf, infos = $("infos-dxf");
   infos.hidden = !f;
-  $("echelle-dxf").hidden = !f;
+  $("echelle-dxf").hidden = !f || Boolean(f.vectorise); // dessin vectorisé : la taille se règle dans le panneau du dessin
   majCotesDxf();
   if (!f) return infos.replaceChildren();
-  const lignes = [["Fichier", f.nom], ["Taille du fichier", `${mm(f.largeur_mm)} × ${mm(f.hauteur_mm)} mm`], ["Découpes intérieures", String((f.contour.trous || []).length)]];
+  const lignes = [["Fichier", f.nom], [f.vectorise ? "Taille de la pièce" : "Taille du fichier", `${mm(f.largeur_mm)} × ${mm(f.hauteur_mm)} mm`], ["Découpes intérieures", String((f.contour.trous || []).length)]];
   if (f.avertissements && f.avertissements.length) lignes.push(["À vérifier", f.avertissements.join(" ")]);
   infos.replaceChildren(...lignes.flatMap(([t, v]) => [el("dt", { texte: t }), el("dd", { texte: v })]));
 }
@@ -642,6 +648,149 @@ depot.addEventListener("drop", (ev) => {
   depot.classList.remove("survol");
   envoyerDxf(ev.dataTransfer.files[0]);
 });
+
+// ------------------------------------------------------------------ dessin vectorisé dans le navigateur (public/vectoriseur.js)
+// Le contour obtenu part à l'ERP en SVG (cotes en mm) comme un fichier du client : l'ERP le contrôle, le garde et le chiffre.
+const IMAGES = ["png", "jpg", "jpeg", "webp", "gif", "bmp"];
+const IMAGE_MAX = 25 * 1024 * 1024;
+const vecto = { image: null, url: "", nom: "", ratio: 1, fraction: 1, gris: null, cle: "", resultat: null, seuilAuto: true, minuterie: 0, envoi: 0 };
+const vectorisable = () => formatsFichier.includes("svg") && typeof Vectoriseur !== "undefined";
+
+async function ouvrirVecto(fichier) {
+  const etat = $("etat-dxf");
+  if (fichier.size > IMAGE_MAX) {
+    etat.className = "aide erreur";
+    etat.textContent = "Image trop lourde (25 Mo au plus).";
+    return false;
+  }
+  etat.textContent = `Lecture de ${fichier.name}…`;
+  let image;
+  try {
+    image = await createImageBitmap(fichier);
+  } catch {
+    etat.className = "aide erreur";
+    etat.textContent = "Image illisible : enregistrez-la en PNG ou JPG.";
+    return false;
+  }
+  fermerVecto();
+  etat.textContent = "";
+  // aperçu en data: (la politique de sécurité du site refuse les blob:), réduit pour rester léger
+  const k = Math.min(1, 800 / Math.max(image.width, image.height)), toile = document.createElement("canvas");
+  toile.width = Math.max(1, Math.round(image.width * k));
+  toile.height = Math.max(1, Math.round(image.height * k));
+  const ctx = toile.getContext("2d");
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, toile.width, toile.height);
+  ctx.drawImage(image, 0, 0, toile.width, toile.height);
+  Object.assign(vecto, { image, url: toile.toDataURL("image/jpeg", 0.8), nom: fichier.name, ratio: image.height / image.width, fraction: 1, gris: null, cle: "", seuilAuto: true });
+  ficheDxf = null;
+  afficherFicheDxf();
+  $("vecto-nom").textContent = fichier.name;
+  $("vecto-inverser").checked = false;
+  $("vecto-grossir").value = "0";
+  $("vecto-lissage").value = "1";
+  $("bloc-vecto").hidden = false;
+  tracerVecto(true);
+  return true;
+}
+
+function fermerVecto() {
+  if (vecto.image) vecto.image.close();
+  Object.assign(vecto, { image: null, url: "", gris: null, resultat: null });
+  clearTimeout(vecto.minuterie);
+  $("bloc-vecto").hidden = true;
+}
+
+// Niveaux de gris de l'image à la taille de travail (le transparent compte comme du blanc).
+function grisVecto(w, h) {
+  const cle = `${w}x${h}`;
+  if (vecto.cle === cle) return vecto.gris;
+  const toile = document.createElement("canvas");
+  toile.width = w;
+  toile.height = h;
+  const ctx = toile.getContext("2d", { willReadFrequently: true });
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, w, h);
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(vecto.image, 0, 0, w, h);
+  const px = ctx.getImageData(0, 0, w, h).data, gris = new Uint8Array(w * h);
+  for (let i = 0; i < gris.length; i++) gris[i] = (px[4 * i] * 77 + px[4 * i + 1] * 150 + px[4 * i + 2] * 29) >> 8;
+  Object.assign(vecto, { cle, gris });
+  return gris;
+}
+
+// Vectorise avec les réglages du panneau ; `envoyer` : le contour part à l'ERP (après une pause de saisie).
+function tracerVecto(envoyer, reprise = false) {
+  if (!vecto.image) return;
+  const voulue = Math.min(Math.max(Number($("vecto-largeur").value) || 200, 5), 3000);
+  // la largeur saisie est celle de la pièce : l'image est mise à l'échelle d'après la part qu'occupe la pièce
+  const largeurImage = voulue / vecto.fraction, hauteurImage = largeurImage * vecto.ratio;
+  const pxParMm = Vectoriseur.resolution(largeurImage, hauteurImage);
+  const w = Math.max(2, Math.round(largeurImage * pxParMm)), h = Math.max(2, Math.round(hauteurImage * pxParMm));
+  const epaisseur = Number($("epaisseur").value) || 0;
+  const r = Vectoriseur.vectoriser({ gris: grisVecto(w, h), w, h }, pxParMm, {
+    seuil: vecto.seuilAuto ? undefined : Number($("vecto-seuil").value), inverser: $("vecto-inverser").checked,
+    lissage: Number($("vecto-lissage").value), grossirMm: Number($("vecto-grossir").value) || 0, epaisseurMm: epaisseur,
+  });
+  if (vecto.seuilAuto) $("vecto-seuil").value = String(Math.round(r.seuil));
+  if (!r.vide && r.largeurMm > 0) vecto.fraction = Math.min(Math.max(r.largeurMm / largeurImage, 0.01), 1);
+  // la pièce n'occupe pas toute l'image : on refait le contour une fois à la bonne échelle
+  if (!r.vide && !reprise && Math.abs(r.largeurMm - voulue) > voulue * 0.005) return tracerVecto(envoyer, true);
+  vecto.resultat = r;
+  afficherVecto(r, largeurImage, hauteurImage, epaisseur);
+  clearTimeout(vecto.minuterie);
+  if (r.vide && ficheDxf) {
+    ficheDxf = null;
+    afficherFicheDxf();
+    calculerBientot();
+  }
+  if (envoyer && !r.vide) vecto.minuterie = setTimeout(envoyerVecto, 700);
+}
+
+function afficherVecto(r, L, H, epaisseur) {
+  const svg = $("vecto-apercu"), NS = "http://www.w3.org/2000/svg";
+  svg.setAttribute("viewBox", `0 0 ${L} ${H}`);
+  const image = document.createElementNS(NS, "image");
+  image.setAttribute("href", vecto.url);
+  image.setAttribute("width", L);
+  image.setAttribute("height", H);
+  image.setAttribute("preserveAspectRatio", "none");
+  const chemin = document.createElementNS(NS, "path");
+  chemin.setAttribute("class", "piece");
+  chemin.setAttribute("fill-rule", "evenodd");
+  chemin.setAttribute("d", r.contours.map((c) => "M" + c.points.map(([x, y]) => `${x.toFixed(2)} ${y.toFixed(2)}`).join("L") + "Z").join(""));
+  svg.replaceChildren(image, chemin);
+  const messages = [];
+  let info = "";
+  if (r.vide) messages.push("Rien à découper : changez le contraste ou cochez « Inverser ».");
+  else {
+    const trous = r.contours.filter((c) => c.trou).length;
+    info = `Pièce de ${mm(r.largeurMm)} × ${mm(r.hauteurMm)} mm, ${trous} découpe${trous > 1 ? "s" : ""} intérieure${trous > 1 ? "s" : ""}.`;
+    if (r.ecartes) messages.push(`${r.ecartes} morceau${r.ecartes > 1 ? "x" : ""} détaché${r.ecartes > 1 ? "s" : ""} du reste retiré${r.ecartes > 1 ? "s" : ""} (il${r.ecartes > 1 ? "s" : ""} tomberai${r.ecartes > 1 ? "en" : ""}t à la découpe) : reliez-le${r.ecartes > 1 ? "s" : ""} à la pièce dans votre dessin, ou grossissez le trait.`);
+    if (r.combles >= Math.max(1, epaisseur * epaisseur)) messages.push(`Jours plus fins que la tôle (${mm(epaisseur)} mm) comblés.`);
+    if (r.retires >= Math.max(1, epaisseur * epaisseur)) messages.push(`Traits plus fins que la tôle (${mm(epaisseur)} mm) retirés : grossissez le trait pour les garder.`);
+  }
+  $("vecto-info").textContent = info;
+  $("vecto-messages").replaceChildren(...messages.map((m) => el("li", { texte: m })));
+}
+
+async function envoyerVecto() {
+  const r = vecto.resultat;
+  if (!r || r.vide) return;
+  const n = ++vecto.envoi;
+  const base = vecto.nom.replace(/\.[^.]+$/, "") || "dessin";
+  const fichier = new File([Vectoriseur.enSvg(r)], `${base}-vectorise.svg`, { type: "image/svg+xml" });
+  await envoyerDxf(fichier, { n, epaisseur: Number($("epaisseur").value) || 0 });
+}
+
+$("bloc-vecto").addEventListener("input", (ev) => {
+  if (ev.target.id === "vecto-seuil") vecto.seuilAuto = false;
+  clearTimeout(vecto.minuterie);
+  vecto.minuterie = setTimeout(() => tracerVecto(true), ev.target.type === "range" ? 120 : 400);
+});
+// la règle « ni trait ni jour plus fin que la tôle » dépend de l'épaisseur : on refait le contour
+$("epaisseur").addEventListener("change", () => { if (vecto.image) tracerVecto(true); });
+$("matiere").addEventListener("change", () => setTimeout(() => { if (vecto.image) tracerVecto(true); })); // après la liste des épaisseurs
 
 // ------------------------------------------------------------------ saisie
 document.querySelectorAll("input[name=type]").forEach((r) => r.addEventListener("change", () => {

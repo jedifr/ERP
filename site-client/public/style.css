@@ -124,6 +124,13 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .depot strong { color: var(--accent); }
 .depot.survol, .depot:hover { border-color: var(--accent); background: var(--accent-doux); }
 .depot input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.vecto { margin-top: 1rem; }
+.vecto-apercu { margin-bottom: .75rem; }
+.vecto-apercu image { opacity: .35; }
+.vecto-apercu .piece { fill: var(--accent); fill-opacity: .45; stroke: var(--accent); stroke-width: 1.5; }
+.vecto input[type=range] { padding: .5rem 0; background: none; border: 0; accent-color: var(--accent); }
+.case { display: flex; align-items: center; gap: .5rem; font-size: .9rem; margin: .5rem 0; cursor: pointer; }
+.case input { width: auto; }
 .depot:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
 .aide.erreur { color: var(--refus); }
 
