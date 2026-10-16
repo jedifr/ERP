@@ -16,6 +16,7 @@ from rest_framework.views import APIView
 import base64
 import binascii
 
+from .services.bibliotheque import liste as liste_bibliotheque
 from .services.demandes import enregistrer_demande
 from .services.dxf import ErreurDxf, deposer
 from .services.prix import ErreurPrixWeb, catalogue, chiffrer
@@ -42,16 +43,25 @@ class CatalogueWeb(_VueWeb):
 
 
 class PrixWebVue(_VueWeb):
-    """POST {matiere, epaisseur, quantite, forme + cotes | pliage | libre | dxf (+ echelle)} → prix (voir web.services.prix.chiffrer)."""
+    """POST {matiere, epaisseur, quantite, forme + cotes | pliage | libre | dxf (+ echelle) | bibliotheque} → prix (voir web.services.prix.chiffrer)."""
 
     def post(self, request):
         d = request.data
         try:
             resultat = chiffrer(d.get("matiere"), d.get("epaisseur"), d.get("quantite"), forme=d.get("forme"), cotes=d.get("cotes"),
-                                pliage=d.get("pliage"), libre=d.get("libre"), dxf=d.get("dxf"), echelle=d.get("echelle"))
+                                pliage=d.get("pliage"), libre=d.get("libre"), dxf=d.get("dxf"), echelle=d.get("echelle"),
+                                bibliotheque=d.get("bibliotheque"))
         except ErreurPrixWeb as exc:
             return Response({"erreur": str(exc)}, status=400)
         return Response(resultat.en_dict_public())
+
+
+class BibliothequeWebVue(_VueWeb):
+    """GET → formes décoratives (clé, nom, proportion, rapport épaisseur / largeur maxi, vignette) et crédit de la source.
+    Le prix se demande ensuite avec {"bibliotheque": {"cle": ..., "largeur": mm}}."""
+
+    def get(self, request):
+        return Response(liste_bibliotheque())
 
 
 class DxfWebVue(_VueWeb):
