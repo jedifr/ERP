@@ -1,11 +1,13 @@
 from django.contrib import admin, messages
-from django.http import FileResponse, Http404, HttpResponse
+from django.http import FileResponse, Http404, HttpResponse, HttpResponseRedirect
 from django.shortcuts import get_object_or_404, render
 from django.urls import path, reverse
 from django.utils.html import format_html, format_html_join
 from django.utils.safestring import mark_safe
 from django.utils.text import slugify
 from unfold.admin import ModelAdmin
+from unfold.decorators import action as unfold_action
+from unfold.enums import ActionVariant
 
 from .models import DemandeWeb, ReglageWeb
 from .services.prix import ErreurPrixWeb, catalogue, chiffrer
@@ -39,8 +41,45 @@ class DemandeWebAdmin(ModelAdmin):
     list_display = ["numero", "date", "statut", "societe", "nom", "email", "nb_pieces", "total_ht", "a_valider"]
     list_filter = ["statut", "a_valider"]
     search_fields = ["numero", "nom", "societe", "email"]
-    readonly_fields = ["numero", "date", "nom", "societe", "email", "telephone", "adresse", "message", "pieces", "total_pieces_ht", "total_ht", "a_valider"]
-    fields = ["numero", "date", "statut", "nom", "societe", "email", "telephone", "adresse", "message", "pieces", "total_pieces_ht", "total_ht", "a_valider", "note_interne"]
+    readonly_fields = ["numero", "date", "nom", "societe", "email", "telephone", "adresse", "code_postal", "ville", "message", "pieces",
+                       "total_pieces_ht", "total_ht", "a_valider", "devis_lien"]
+    fields = ["numero", "date", "statut", "devis_lien", "nom", "societe", "email", "telephone", "adresse", "code_postal", "ville", "message",
+              "pieces", "total_pieces_ht", "total_ht", "a_valider", "note_interne"]
+    actions_detail = ["action_valider"]
+
+    @admin.display(description="Devis")
+    def devis_lien(self, obj):
+        if not obj.devis_id:
+            return "Pas encore : « Valider » crée le client et le devis."
+        return format_html("<a href='{}' style='{}'>{}</a>", reverse("admin:chiffrage_devis_change", args=[obj.devis_id]), LIEN, obj.devis_id)
+
+    def get_actions_detail(self, request, object_id):
+        actions = super().get_actions_detail(request, object_id)
+        if DemandeWeb.objects.filter(pk=object_id, devis__isnull=False).exists():  # déjà validée : plus de bouton
+            actions = [a for a in actions if not a.action_name.endswith("action_valider")]
+        return actions
+
+    def has_valider_permission(self, request, object_id=None):
+        return request.user.has_perm("chiffrage.add_devis") and request.user.has_perm("web.change_demandeweb")
+
+    @unfold_action(description="Valider : créer le client et le devis", icon="task_alt", variant=ActionVariant.PRIMARY,
+                   permissions=["valider"], url_path="valider")
+    def action_valider(self, request, object_id):
+        """Retrouve (par l'e-mail) ou crée le client, crée le devis de la demande et passe la demande en « Traitée »."""
+        from .services.conversion import ErreurConversion, creer_devis
+
+        demande = get_object_or_404(DemandeWeb, pk=object_id)
+        retour = HttpResponseRedirect(reverse("admin:web_demandeweb_change", args=[demande.pk]))
+        try:
+            devis, cree, remarques = creer_devis(demande)
+        except ErreurConversion as exc:
+            self.message_user(request, str(exc), level=messages.WARNING)
+            return retour
+        client = f"Client {devis.client} {'créé' if cree else 'retrouvé par son e-mail'}"
+        self.message_user(request, f"Devis {devis.numero} créé. {client}.", level=messages.SUCCESS)
+        for remarque in remarques:
+            self.message_user(request, remarque, level=messages.INFO)
+        return HttpResponseRedirect(reverse("admin:chiffrage_devis_change", args=[devis.pk]))
 
     def has_add_permission(self, request):
         return False

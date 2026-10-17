@@ -52,12 +52,18 @@ class DemandeWeb(models.Model):
     email = models.EmailField("e-mail")
     telephone = models.CharField("téléphone", max_length=30, blank=True)
     adresse = models.TextField("adresse de livraison", blank=True)
+    code_postal = models.CharField("code postal", max_length=20, blank=True)
+    ville = models.CharField("ville", max_length=100, blank=True)
     message = models.TextField("message", blank=True)
     lignes = models.JSONField("pièces", default=list, help_text="Demande du client et prix recalculé par l'ERP, ligne par ligne.")
     total_pieces_ht = ChampDecimal("total des pièces (€ HT)", **MONTANT)
     total_ht = ChampDecimal("total (€ HT)", help_text="Minimum de commande appliqué, hors port.", **MONTANT)
     a_valider = models.BooleanField("à valider par un technicien", default=False)
     note_interne = models.TextField("note interne", blank=True)
+    devis = models.ForeignKey(
+        "chiffrage.Devis", verbose_name="devis créé", on_delete=models.SET_NULL, null=True, blank=True, related_name="demandes_web",
+        help_text="Devis créé par « Valider » (client retrouvé par son e-mail ou créé).",
+    )
 
     class Meta:
         verbose_name = "Demande web"

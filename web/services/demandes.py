@@ -64,6 +64,8 @@ def enregistrer_demande(donnees):
             "cout_revient": float(r.cout_revient), "poids_kg": r.poids_kg,
             # contour découpé : de quoi sortir le DXF de fabrication depuis la demande (pièce libre ou forme)
             "contour": r.contour if not ligne.get("pliage") else None,
+            "tole": r.tole,
+            "pliage": {k: r.pliage.get(k) for k in ("nb_plis", "angle_mini", "developpe_mm", "flan_mm")} if r.pliage else None,
             **({"jeu": demande["jeu"], "format_tole": r.format_tole} if ligne.get("jeu") else {}),
         })
     minimum = ReglageWeb.charger().minimum_commande_ht
@@ -71,6 +73,7 @@ def enregistrer_demande(donnees):
     with transaction.atomic():
         return DemandeWeb.objects.create(
             nom=nom[:120], societe=champ("societe", 160), email=email, telephone=champ("telephone", 30), adresse=champ("adresse", 1000),
+            code_postal=champ("code_postal", 20), ville=champ("ville", 100),
             message=champ("message", 4000), lignes=enregistrees, total_pieces_ht=arrondir(total), total_ht=arrondir(max(total, minimum)),
             a_valider=a_valider,
         )

@@ -214,6 +214,73 @@ class DemandeWebTests(ConfigurateurBase):
         self.assertContains(page, "1 rue des Forges")
 
 
+class ValiderDemandeTests(ConfigurateurBase):
+    """« Valider » : client retrouvé ou créé, devis au prix de la demande, demande traitée."""
+
+    CLIENT = {"nom": "Jeanne Martin", "societe": "Atelier Martin", "email": "Jeanne@Example.com", "telephone": "0601020304",
+              "adresse": "1 rue des Forges", "code_postal": "67000", "ville": "Strasbourg"}
+    RECT = DemandeWebTests.RECT
+    U = {"matiere": "S235-W", "epaisseur": 2, "quantite": 3, "pliage": {"forme": "profil", "faces": [40, 60, 40], "angles": [90, 90], "longueur": 200}}
+
+    def setUp(self):
+        from .services.demandes import enregistrer_demande
+
+        self.enregistrer = enregistrer_demande
+        self.demande = enregistrer_demande({"client": self.CLIENT, "lignes": [self.RECT, self.U]})
+
+    def test_client_et_devis_crees(self):
+        from commercial.models import Tiers
+
+        from .services.conversion import ErreurConversion, creer_devis
+
+        devis, cree, remarques = creer_devis(self.demande)
+        self.assertTrue(cree)
+        client = devis.client
+        self.assertEqual((client.raison_sociale, client.type_tiers), ("Atelier Martin", Tiers.TypeTiers.CLIENT))
+        contact = client.contacts.get()
+        self.assertEqual((contact.prenom, contact.nom, contact.telephones.get().numero), ("Jeanne", "Martin", "0601020304"))
+        adresse = client.adresses.get()
+        self.assertEqual((adresse.adresse, adresse.code_postal, adresse.ville, adresse.pays_id), ("1 rue des Forges", "67000", "Strasbourg", "FR"))
+        self.assertTrue(adresse.est_livraison and adresse.est_facturation)
+        self.assertEqual((devis.adresse_livraison, devis.contact, devis.reference), (adresse, contact, f"Demande web {self.demande.numero}"))
+        lignes = list(devis.lignes.order_by("ordre", "id"))
+        self.assertEqual([l.quantite for l in lignes], [10, 3])
+        for ligne, web in zip(lignes, self.demande.lignes):
+            self.assertEqual(ligne.prix_vente_total, Decimal(str(web["prix_total_ht"])))  # prix annoncé au client
+        piece = devis.pieces_decoupe.get()  # le rectangle : DXF de fabrication joint au devis
+        self.assertEqual((piece.matiere_id, piece.epaisseur, piece.quantite, piece.tole), ("S235-W", 2, 10, self.tole))
+        self.assertTrue(piece.fichier_source.name.endswith(".dxf"))
+        self.assertEqual(piece.article, lignes[0].article)
+        self.assertTrue(lignes[0].article.gamme_etapes.exists())  # gamme de découpe alimentée (le paramètre a un poste)
+        self.assertIn("pliage", remarques[1])
+        self.demande.refresh_from_db()
+        self.assertEqual((self.demande.devis, self.demande.statut), (devis, DemandeWeb.Statut.TRAITEE))
+        with self.assertRaisesMessage(ErreurConversion, "déjà son devis"):
+            creer_devis(self.demande)
+
+    def test_client_retrouve_par_email(self):
+        from .services.conversion import creer_devis
+
+        premier, _, _ = creer_devis(self.demande)
+        autre = self.enregistrer({"client": {**self.CLIENT, "email": "jeanne@example.com", "societe": ""}, "lignes": [self.RECT]})
+        second, cree, _ = creer_devis(autre)
+        self.assertFalse(cree)
+        self.assertEqual(second.client, premier.client)
+        self.assertEqual(second.client.adresses.count(), 1)  # même adresse : pas de doublon
+        self.assertNotEqual(second.pk, premier.pk)
+
+    def test_bouton_valider(self):
+        self.client.force_login(get_user_model().objects.create_superuser("vw", "vw@example.com", "pass-vw-1234"))
+        page = self.client.get(f"/admin/web/demandeweb/{self.demande.pk}/change/")
+        self.assertContains(page, "Valider : créer le client et le devis")
+        page = self.client.get(f"/admin/web/demandeweb/{self.demande.pk}/valider/")
+        self.demande.refresh_from_db()
+        self.assertRedirects(page, f"/admin/chiffrage/devis/{self.demande.devis_id}/change/", fetch_redirect_response=False)
+        page = self.client.get(f"/admin/web/demandeweb/{self.demande.pk}/change/")
+        self.assertNotContains(page, "Valider : créer le client et le devis")
+        self.assertContains(page, self.demande.devis_id)
+
+
 PLAQUE = {"forme": "rectangle", "largeur": 300, "hauteur": 200, "rayon_angle": 10}
 
 

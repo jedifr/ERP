@@ -43,6 +43,7 @@ class PrixWeb:
     pliage: dict = None
     nb_feuilles: int = None
     format_tole: str = ""
+    tole: str = ""  # référence de la tôle retenue (interne : reprise par le devis créé depuis la demande)
     cout_matiere: Decimal = None
     cout_decoupe: Decimal = None
     cout_pliage: Decimal = None
@@ -383,6 +384,7 @@ def chiffrer(matiere_nom, epaisseur, quantite, forme=None, cotes=None, pliage=No
         return r.finaliser()
     tole, cout = meilleur
     r.nb_feuilles, r.format_tole, r.cout_matiere = cout.nb_feuilles, str(tole.format_tole), cout.cout_total
+    r.tole = tole.pk
 
     try:
         if parametre.poste_id is None:
@@ -429,6 +431,7 @@ class PrixJeu:
     poids_kg: float = None
     nb_feuilles: int = None
     format_tole: str = ""
+    tole: str = ""
     taux_utilisation_pct: float = None
     cout_matiere: Decimal = None
     cout_decoupe: Decimal = None
@@ -546,6 +549,7 @@ def chiffrer_jeu(demandes, aujourdhui=None):
         return j.finaliser()
     tole, resultat, j.cout_matiere = meilleur
     j.nb_feuilles, j.format_tole, j.taux_utilisation_pct = resultat.nb_feuilles, str(tole.format_tole), resultat.taux_utilisation_pct
+    j.tole = tole.pk
 
     temps = [c["temps"] for c in contextes]
     parametre = temps[0].parametre
@@ -583,7 +587,7 @@ def chiffrer_jeu(demandes, aujourdhui=None):
     surface = sum(p.surface_mm2 for p in pieces) or 1
     minutes = sum(t.total_min for t in temps) or 1
     for r, p, t, pli in zip(j.pieces, pieces, temps, couts_pliage):
-        r.nb_feuilles, r.format_tole = j.nb_feuilles, j.format_tole
+        r.nb_feuilles, r.format_tole, r.tole = j.nb_feuilles, j.format_tole, j.tole
         r.cout_matiere = arrondir(j.cout_matiere * D(p.surface_mm2 / surface))
         r.cout_decoupe = arrondir(j.cout_decoupe * D(t.total_min / minutes))
         r.cout_pliage = pli
