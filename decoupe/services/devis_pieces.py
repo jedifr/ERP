@@ -57,10 +57,11 @@ def _reference_article(devis, nom=None):
 
 
 @transaction.atomic
-def importer_pour_devis(devis, fichier, profil_import_id=None, procede=ProcedeCoupe.LASER, nom=None, parametres_forme=None):
+def importer_pour_devis(devis, fichier, profil_import_id=None, procede=ProcedeCoupe.LASER, nom=None, parametres_forme=None, regles_calques=None):
     """Importe un DXF/DWG dans le devis : pièce, géométrie et article fabriqué. Retourne la pièce (statut « erreur » si la
     géométrie n'a pas pu être lue : la pièce reste visible dans le devis pour être corrigée ou supprimée).
-    `nom` et `parametres_forme` servent aux pièces créées depuis la bibliothèque de formes (nom lisible, recette)."""
+    `nom` et `parametres_forme` servent aux pièces créées depuis la bibliothèque de formes (nom lisible, recette).
+    `regles_calques` : classement calque → rôle de ce fichier (ex. lignes de pli d'un flan écrit par l'ERP)."""
     extension = fichier.name.rsplit(".", 1)[-1].lower() if "." in fichier.name else ""
     if extension not in (PieceDecoupe.FormatSource.DXF, PieceDecoupe.FormatSource.DWG):
         raise ErreurPieceDevis(f"« {fichier.name} » : seuls les fichiers .dxf et .dwg sont acceptés.")
@@ -68,7 +69,7 @@ def importer_pour_devis(devis, fichier, profil_import_id=None, procede=ProcedeCo
     nom = (nom or Path(fichier.name).stem)[:200]
     piece = PieceDecoupe(
         nom=nom, devis=devis, procede=procede, profil_import=profil, format_source=extension, pas_rotation_deg=90,
-        parametres_forme=parametres_forme,
+        parametres_forme=parametres_forme, regles_calques_manuelles=regles_calques or {},
     )
     piece.fichier_source.save(Path(fichier.name).name, ContentFile(fichier.read()), save=False)
     piece.save()

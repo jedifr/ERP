@@ -15,6 +15,7 @@ Statut : « ok » (prix ferme), « validation » (prix affiché, commande vérif
 « refus » (pas de prix, demande de devis)."""
 
 import datetime
+import math
 from dataclasses import dataclass, field
 from decimal import Decimal
 
@@ -31,6 +32,7 @@ class PrixWeb:
     refus: list = field(default_factory=list)
     validations: list = field(default_factory=list)
     notes: list = field(default_factory=list)
+    modifications: list = field(default_factory=list)  # ce que l'atelier change à la pièce du client (montré au client)
     designation: str = ""
     matiere: str = ""
     epaisseur_mm: float = None
@@ -44,6 +46,7 @@ class PrixWeb:
     nb_feuilles: int = None
     format_tole: str = ""
     tole: str = ""  # référence de la tôle retenue (interne : reprise par le devis créé depuis la demande)
+    lignes_pli: list = None  # interne : lignes de pli du flan (calque PLIAGE du DXF de fabrication)
     cout_matiere: Decimal = None
     cout_decoupe: Decimal = None
     cout_pliage: Decimal = None
@@ -74,7 +77,7 @@ class PrixWeb:
         return public
 
 
-PUBLIC = ("statut", "refus", "validations", "designation", "matiere", "epaisseur_mm", "procede", "quantite", "largeur_mm", "hauteur_mm",
+PUBLIC = ("statut", "refus", "validations", "modifications", "designation", "matiere", "epaisseur_mm", "procede", "quantite", "largeur_mm", "hauteur_mm",
           "poids_kg", "contour", "pliage", "prix_total_ht", "prix_unitaire_ht", "taux_tva", "prix_total_ttc", "prix_unitaire_ttc",
           "minimum_commande_ht")
 
@@ -191,6 +194,41 @@ def _procede(matiere, epaisseur):
     return ProcedeCoupe.JET_EAU
 
 
+def decharges(contour, epaisseur, bord_mini):
+    """Trou trop près d'un pli (bord du trou à moins du bord mini de la ligne de pli) : oblong de décharge sur la ligne
+    de pli, large de l'épaisseur et long du diamètre du trou (son étendue le long du pli), centré en face du trou, pour
+    que le trou ne se déforme pas. Retourne (contour avec les oblongs, messages pour le client)."""
+    from shapely.geometry import LineString, Point, Polygon
+    from shapely.ops import unary_union
+
+    trous = [Polygon(t) for t in contour["trous"]]
+    oblongs, messages = [], []
+    for pli in contour.get("plis") or []:
+        ligne = LineString([pli["p1"], pli["p2"]])
+        (x1, y1), (x2, y2) = pli["p1"], pli["p2"]
+        longueur = math.dist((x1, y1), (x2, y2)) or 1
+        ux, uy = (x2 - x1) / longueur, (y2 - y1) / longueur
+        for trou in trous:
+            distance = trou.distance(ligne)
+            if distance >= bord_mini:
+                continue
+            le_long = [(px - x1) * ux + (py - y1) * uy for px, py in trou.exterior.coords]
+            diametre = max(le_long) - min(le_long)
+            centre = ligne.interpolate(ligne.project(trou.centroid))
+            demi = max(diametre - epaisseur, 0) / 2
+            axe = LineString([(centre.x - ux * demi, centre.y - uy * demi), (centre.x + ux * demi, centre.y + uy * demi)])
+            oblongs.append(axe.buffer(epaisseur / 2) if demi else Point(centre.x, centre.y).buffer(epaisseur / 2))
+            messages.append(f"{pli['nom']} : trou à {distance:.1f} mm de la ligne de pli (bord mini {bord_mini:.1f} mm), "
+                         f"oblong de décharge {diametre:.1f} × {epaisseur:g} mm ajouté sur le pli pour qu'il ne se déforme pas.")
+    if not oblongs:
+        return contour, []
+    piece = Polygon(contour["exterieur"], contour["trous"]).difference(unary_union(oblongs))
+    if piece.geom_type == "MultiPolygon":
+        piece = max(piece.geoms, key=lambda g: g.area)
+    arrondi = lambda anneau: [(round(px, 4), round(py, 4)) for px, py in list(anneau.coords)[:-1]]  # noqa: E731
+    return {**contour, "exterieur": arrondi(piece.exterior), "trous": [arrondi(i) for i in piece.interiors]}, messages
+
+
 def _piece_step(r, fiche, matiere, epaisseur, echelle):
     """Pièce d'un fichier STEP : contrôle de l'épaisseur, pliage des plis lus dans le fichier, flan déplié avec l'outillage
     retenu. Retourne (contour, résultat de pliage ou None) ; contour None si le pliage est refusé."""
@@ -218,6 +256,9 @@ def _piece_step(r, fiche, matiere, epaisseur, echelle):
         r.validations.append(f"Rayon de pli de {' / '.join(f'{v:g}' for v in grands)} mm dans le fichier (atelier : {ri:g} mm au vé) : "
                              "cintrage ou pli en plusieurs coups à valider.")
     contour = flan_atelier(fiche["jeton"], float(matiere.famille.coef_k), ri)
+    if resultat.bord_mini and contour.get("plis"):
+        contour, modifications = decharges(contour, epaisseur, resultat.bord_mini)
+        r.modifications += modifications
     xs, ys = [p[0] for p in contour["exterieur"]], [p[1] for p in contour["exterieur"]]
     resultat.developpe_mm, resultat.flan_mm = None, [round(max(xs) - min(xs), 2), round(max(ys) - min(ys), 2)]
     return contour, resultat
@@ -227,7 +268,7 @@ def _preparer(matiere_nom, epaisseur, quantite, forme=None, cotes=None, pliage=N
     """Pièce à chiffrer, avant matière et coûts : (résultat, contexte), contexte None si la pièce est déjà refusée.
     Voir `chiffrer` pour les arguments."""
     from decoupe.services import formes
-    from decoupe.services.pliage import ErreurPliage, calculer_boite, calculer_pliage
+    from decoupe.services.pliage import ErreurPliage, calculer_boite, calculer_pliage, lignes_pli_boite, lignes_pli_profil
     from decoupe.services.temps import ErreurTemps, estimer_temps_decoupe
 
     from web.models import ReglageWeb
@@ -329,6 +370,16 @@ def _preparer(matiere_nom, epaisseur, quantite, forme=None, cotes=None, pliage=N
         trous = []
     else:
         exterieur, trous = contour.exterieur, contour.trous
+
+    if contour_libre is not None:
+        r.lignes_pli = contour_libre.get("plis") or []
+    elif resultat_pliage is not None:
+        ri, k = resultat_pliage.rayon_interieur, float(matiere.famille.coef_k)
+        if pliage.get("forme") == "boite":
+            r.lignes_pli = lignes_pli_boite([float(h or 0) for h in pliage["bords"]], [float(a) for a in pliage.get("angles") or []] or None,
+                                            epaisseur, ri, k, resultat_pliage.flan_mm, resultat_pliage.crans_mm)
+        else:
+            r.lignes_pli = lignes_pli_profil(faces, angles, epaisseur, ri, k, longueur)
 
     procede = _procede(matiere, epaisseur)
     r.procede = procede

@@ -106,12 +106,13 @@ class DemandeWebAdmin(ModelAdmin):
         original = bool(request.GET.get("original"))
         fichier = chemin_fichier(ligne["demande"].get("dxf"), original=original)
         # Fichier mis à l'échelle par le client : le DXF de fabrication est recalculé depuis le contour chiffré.
-        if fichier and (original or float(ligne["demande"].get("echelle") or 1) == 1):
+        if fichier and (original or (not ligne.get("pliage") and float(ligne["demande"].get("echelle") or 1) == 1)):
             return FileResponse(open(fichier, "rb"), as_attachment=True, filename=nom[:-4] + fichier.suffix)
         contour = ligne.get("contour")
         if not contour:
             raise Http404("Pas de contour pour cette ligne (pièce pliée : flan calculé au devis).")
-        reponse = HttpResponse(formes.dxf_bytes(formes.Contour(contour["exterieur"], contour.get("trous") or [])), content_type="application/dxf")
+        contenu = formes.dxf_bytes(formes.Contour(contour["exterieur"], contour.get("trous") or []), plis=ligne.get("lignes_pli"))
+        reponse = HttpResponse(contenu, content_type="application/dxf")
         reponse["Content-Disposition"] = f'attachment; filename="{nom}"'
         return reponse
 
@@ -132,7 +133,8 @@ class DemandeWebAdmin(ModelAdmin):
         entete = "".join(f"<th style='padding-right:1em;text-align:left'>{t}</th>" for t in ("Pièce", "Matière", "Quantité", "Prix", "Fichier", ""))
         return format_html("<table><tr>{}</tr>{}</table>", mark_safe(entete), format_html_join("", "<tr><td style='padding-right:1em'>{}</td><td style='padding-right:1em'>{} {} mm</td><td style='padding-right:1em'>{} pièce(s)</td><td style='padding-right:1em'>{} € HT</td><td style='padding-right:1em'>{}</td><td>{}</td></tr>", (
             (l["designation"], l["demande"].get("matiere"), l["demande"].get("epaisseur"), l["demande"].get("quantite"), f"{l['prix_total_ht']:.2f}",
-             lien(i, l), "À valider : " + " ".join(l["validations"]) if l["validations"] else "")
+             lien(i, l), " ".join(filter(None, ["À valider : " + " ".join(l["validations"]) if l["validations"] else "",
+                                                  " ".join(l.get("modifications") or [])])))
             for i, l in enumerate(obj.lignes)
         )))
 
