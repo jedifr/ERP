@@ -721,9 +721,9 @@ class ProfileSectionAdmin(ModelAdmin):
 
 @admin.register(PosteTravail)
 class PosteTravailAdmin(ModificationParLotsMixin, ModelAdmin):
-    list_display = ["nom", "type_operation", "mode_calcul", "nombre_machines", "cout_horaire_actuel", "taux_marge_defaut"]
+    list_display = ["nom", "nom_planning", "type_operation", "mode_calcul", "nombre_machines", "cout_horaire_actuel", "taux_marge_defaut"]
     list_filter = ["mode_calcul"]
-    search_fields = ["nom"]
+    search_fields = ["nom", "nom_planning"]
     inlines = [TarifPosteInline]
     actions = ["action_modifier_par_lots", "action_hausse_tarifs"]
     champs_lot = lots_champs.champs_poste()

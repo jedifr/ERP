@@ -244,21 +244,44 @@ class ValiderDemandeTests(ConfigurateurBase):
         self.assertTrue(adresse.est_livraison and adresse.est_facturation)
         self.assertEqual((devis.adresse_livraison, devis.contact, devis.reference), (adresse, contact, f"Demande web {self.demande.numero}"))
         lignes = list(devis.lignes.order_by("ordre", "id"))
-        self.assertEqual([l.quantite for l in lignes], [10, 3])
+        self.assertEqual([l.quantite for l in lignes], [10, 3, 1])  # + le complément au minimum de commande
         for ligne, web in zip(lignes, self.demande.lignes):
             self.assertEqual(ligne.prix_vente_total, Decimal(str(web["prix_total_ht"])))  # prix annoncé au client
-        piece = devis.pieces_decoupe.get()  # le rectangle : DXF de fabrication joint au devis
+        piece, flan = devis.pieces_decoupe.order_by("id")  # le rectangle et le flan du U : DXF de fabrication joints au devis
         self.assertEqual((piece.matiere_id, piece.epaisseur, piece.quantite, piece.tole), ("S235-W", 2, 10, self.tole))
         self.assertTrue(piece.fichier_source.name.endswith(".dxf"))
         self.assertEqual(piece.article, lignes[0].article)
         self.assertTrue(lignes[0].article.gamme_etapes.exists())  # gamme de découpe alimentée (le paramètre a un poste)
-        self.assertIn("gamme de pliage sur", remarques[1])  # le U : pièce pliée calculée, étape de pliage sur la plieuse
-        self.assertEqual(lignes[1].article.pliage.faces_mm, [40, 60, 40])
-        self.assertEqual(lignes[1].article.gamme_etapes.get().origine, "pliage")
+        self.assertIn("pliage sur", remarques[1])  # le U : flan découpé, puis plié sur la plieuse retenue
+        self.assertEqual((flan.article, lignes[1].article.pliage.faces_mm), (lignes[1].article, [40, 60, 40]))
+        self.assertEqual([e.origine for e in lignes[1].article.gamme_etapes.order_by("ordre")], ["decoupe", "pliage"])
         self.demande.refresh_from_db()
         self.assertEqual((self.demande.devis, self.demande.statut), (devis, DemandeWeb.Statut.TRAITEE))
         with self.assertRaisesMessage(ErreurConversion, "déjà son devis"):
             creer_devis(self.demande)
+
+    def test_minimum_de_commande_en_ligne(self):
+        from .services.conversion import REFERENCE_MINIMUM, creer_devis
+
+        petite = self.enregistrer({"client": self.CLIENT, "lignes": [{**self.RECT, "quantite": 1}]})
+        self.assertGreater(petite.total_ht, petite.total_pieces_ht)
+        devis, _, remarques = creer_devis(petite)
+        ligne = devis.lignes.get(article__reference=REFERENCE_MINIMUM)
+        self.assertEqual(ligne.prix_vente_total, petite.total_ht - petite.total_pieces_ht)
+        self.assertEqual(sum(l.prix_vente_total for l in devis.lignes.all()), petite.total_ht)
+        self.assertIn("Minimum de commande", remarques[-1])
+
+    def test_ordres_de_fabrication_a_la_commande(self):
+        from chiffrage.models import Devis
+        from chiffrage.production import lancer_en_production
+
+        from .services.conversion import creer_devis
+
+        devis, _, _ = creer_devis(self.demande)
+        Devis.objects.filter(pk=devis.pk).update(statut=Devis.Statut.VALIDE)
+        with self.captureOnCommitCallbacks(execute=True):
+            commande = lancer_en_production(Devis.objects.get(pk=devis.pk))
+        self.assertEqual(commande.ordres_fabrication.count(), 2)  # le rectangle et le U, pas le minimum de commande
 
     def test_client_retrouve_par_email(self):
         from .services.conversion import creer_devis
