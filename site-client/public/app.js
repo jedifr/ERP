@@ -478,14 +478,11 @@ $("table-panier").addEventListener("click", (e) => {
   afficherPanier();
 });
 
-// Retrait à l'atelier : pas d'adresse de livraison ni de port.
+// Retrait à l'atelier : pas de port, mais l'adresse du client reste demandée.
 const retraitChoisi = () => document.querySelector("input[name=reception]:checked")?.value === "retrait";
 function majReception() {
   const retrait = retraitChoisi();
-  document.querySelectorAll("#form-demande .livraison").forEach((c) => {
-    c.hidden = retrait;
-    c.querySelector("input, textarea").required = !retrait;
-  });
+  $("libelle-adresse").textContent = retrait ? "Adresse *" : "Adresse de livraison *";
   const adresse = catalogue && catalogue.retrait ? catalogue.retrait.adresse : "";
   $("adresse-retrait").hidden = !retrait;
   $("adresse-retrait").textContent = adresse ? `Pièces à retirer à : ${adresse}` : "Nous vous indiquons l'adresse et les horaires de retrait par e-mail.";
@@ -501,7 +498,6 @@ $("form-demande").addEventListener("submit", async (e) => {
   if (!form.reportValidity()) return;
   const client = Object.fromEntries(new FormData(form));
   const retrait = client.reception === "retrait";
-  if (retrait) for (const k of ["adresse", "code_postal", "ville"]) delete client[k];
   const bouton = form.querySelector("button[type=submit]");
   bouton.disabled = true;
   retour.className = "retour";

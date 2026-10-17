@@ -89,7 +89,20 @@ class DemandeWebAdmin(ModelAdmin):
         return len(obj.lignes)
 
     def get_urls(self):
-        return [path("<int:pk>/dxf/<int:index>/", self.admin_site.admin_view(self.dxf_view), name="web_demandeweb_dxf")] + super().get_urls()
+        return [path("<int:pk>/dxf/<int:index>/", self.admin_site.admin_view(self.dxf_view), name="web_demandeweb_dxf"),
+                path("<int:pk>/plan/<int:index>/", self.admin_site.admin_view(self.plan_view), name="web_demandeweb_plan")] + super().get_urls()
+
+    def plan_view(self, request, pk, index):
+        """Plan PDF d'une pièce pliée : vue de profil cotée et mise à plat avec les plis cotés depuis chaque bord."""
+        from .services.plan import plan_pdf
+
+        demande = get_object_or_404(DemandeWeb, pk=pk)
+        if not self.has_view_permission(request, demande) or not 0 <= index < len(demande.lignes) or not demande.lignes[index].get("lignes_pli"):
+            raise Http404
+        nom = f"{demande.numero}-{index + 1}-{slugify(demande.lignes[index]['designation'])[:60] or 'piece'}-plan.pdf"
+        reponse = HttpResponse(plan_pdf(demande, index), content_type="application/pdf")
+        reponse["Content-Disposition"] = f'inline; filename="{nom}"'
+        return reponse
 
     def dxf_view(self, request, pk, index):
         """DXF de fabrication d'une ligne : le fichier envoyé par le client (converti en DXF s'il était en SVG ou DWG ;
@@ -125,10 +138,12 @@ class DemandeWebAdmin(ModelAdmin):
                 return ""
             url = reverse("admin:web_demandeweb_dxf", args=[obj.pk, i])
             original = chemin_fichier(l["demande"].get("dxf"), original=True)
-            dxf = format_html("<a href='{}' style='{}'>Télécharger le DXF</a>", url, LIEN)
+            liens = format_html("<a href='{}' style='{}'>Télécharger le DXF</a>", url, LIEN)
             if original and original.suffix != ".dxf":
-                return format_html("{} · <a href='{}?original=1' style='{}'>Fichier d'origine ({})</a>", dxf, url, LIEN, original.suffix[1:].upper())
-            return dxf
+                liens = format_html("{} · <a href='{}?original=1' style='{}'>Fichier d'origine ({})</a>", liens, url, LIEN, original.suffix[1:].upper())
+            if l.get("lignes_pli"):
+                liens = format_html("{} · <a href='{}' target='_blank' style='{}'>Plan PDF</a>", liens, reverse("admin:web_demandeweb_plan", args=[obj.pk, i]), LIEN)
+            return liens
 
         entete = "".join(f"<th style='padding-right:1em;text-align:left'>{t}</th>" for t in ("Pièce", "Matière", "Quantité", "Prix", "Fichier", ""))
         return format_html("<table><tr>{}</tr>{}</table>", mark_safe(entete), format_html_join("", "<tr><td style='padding-right:1em'>{}</td><td style='padding-right:1em'>{} {} mm</td><td style='padding-right:1em'>{} pièce(s)</td><td style='padding-right:1em'>{} € HT</td><td style='padding-right:1em'>{}</td><td>{}</td></tr>", (
