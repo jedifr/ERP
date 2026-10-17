@@ -290,6 +290,19 @@ class ValiderDemandeTests(ConfigurateurBase):
         with self.assertRaisesMessage(ErreurConversion, "déjà son devis"):
             creer_devis(self.demande)
 
+    def test_plan_pdf_des_pieces_pliees(self):
+        from .services.demandes import enregistrer_demande
+        from .services.plan import plan_pdf, profil_piece
+
+        boite = {"matiere": "S235-W", "epaisseur": 2, "quantite": 1, "pliage": {"forme": "boite", "longueur": 200, "largeur": 150, "bords": [40, 40, 40, 40]}}
+        demande = enregistrer_demande({"client": self.CLIENT, "lignes": [self.U, boite, self.RECT]})
+        self.assertEqual(profil_piece(demande.lignes[0]), ([40, 60, 40], [90, 90]))
+        self.assertIsNone(profil_piece(demande.lignes[1]))  # boîte : la mise à plat seule
+        for i in (0, 1):
+            self.assertEqual(plan_pdf(demande, i)[:4], b"%PDF")
+        self.client.force_login(get_user_model().objects.create_superuser("pl", "pl@example.com", "pass-pl-1234"))
+        self.assertEqual(self.client.get(f"/admin/web/demandeweb/{demande.pk}/plan/2/").status_code, 404)  # pièce plane
+
     def test_retrait_a_l_atelier(self):
         from .services.conversion import creer_devis
         from .services.demandes import enregistrer_demande
@@ -297,11 +310,14 @@ class ValiderDemandeTests(ConfigurateurBase):
         sans_adresse = {k: v for k, v in self.CLIENT.items() if k not in ("adresse", "code_postal", "ville")}
         with self.assertRaisesMessage(ErreurPrixWeb, "retrait à l'atelier"):
             enregistrer_demande({"client": sans_adresse, "lignes": [self.RECT]})
+        with self.assertRaisesMessage(ErreurPrixWeb, "Indiquez votre adresse"):  # retrait : adresse quand même demandée
+            enregistrer_demande({"client": {**sans_adresse, "reception": "retrait"}, "lignes": [self.RECT]})
         demande = enregistrer_demande({"client": {**self.CLIENT, "reception": "retrait"}, "lignes": [self.RECT]})
         self.assertTrue(demande.retrait_atelier)
-        self.assertEqual((demande.adresse, demande.ville), ("", ""))  # pas d'adresse de livraison retenue
+        self.assertEqual((demande.adresse, demande.ville), ("1 rue des Forges", "Strasbourg"))
         devis, _, _ = creer_devis(demande)
-        self.assertIsNone(devis.adresse_livraison)
+        self.assertIsNone(devis.adresse_livraison)  # pas de livraison, mais l'adresse est sur la fiche client
+        self.assertEqual(devis.client.adresses.get().ville, "Strasbourg")
         self.assertIn("retrait atelier", devis.reference)
 
     def test_minimum_de_commande_en_ligne(self):
@@ -745,7 +761,15 @@ class StepWebTests(ConfigurateurBase):
         self.client.force_login(get_user_model().objects.create_superuser("lp", "lp@example.com", "pass-lp-1234"))
         dxf = self.client.get(f"/admin/web/demandeweb/{demande.pk}/dxf/0/").content
         self.assertIn(b"PLIAGE", dxf)
-        self.assertIn("Pli 1 : 90° HAUT".encode(), dxf)
+        self.assertIn("Pli 1 : 90° HAUT Ri ".encode(), dxf)  # rayon intérieur de l'outillage avec l'angle
+        self.assertTrue(demande.lignes[0]["lignes_pli"][0]["rayon"])
+        self.assertContains(self.client.get(f"/admin/web/demandeweb/{demande.pk}/change/"), "Plan PDF")
+        plan = self.client.get(f"/admin/web/demandeweb/{demande.pk}/plan/0/")
+        self.assertEqual((plan.status_code, plan["Content-Type"], plan.content[:4]), (200, "application/pdf", b"%PDF"))
+        from .services.plan import profil_piece
+
+        faces, angles = profil_piece(demande.lignes[0])  # vue de profil retrouvée depuis le flan : la cornière 50 × 100
+        self.assertEqual((sorted(round(f) for f in faces), angles), ([50, 100], [90]))
         from .services.conversion import creer_devis
 
         devis, _, _ = creer_devis(demande)

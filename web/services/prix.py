@@ -439,6 +439,8 @@ def _preparer(matiere_nom, epaisseur, quantite, forme=None, cotes=None, pliage=N
                                             epaisseur, ri, k, resultat_pliage.flan_mm, resultat_pliage.crans_mm)
         else:
             r.lignes_pli = lignes_pli_profil(faces, angles, epaisseur, ri, k, longueur)
+    if resultat_pliage is not None and resultat_pliage.rayon_interieur:  # rayon intérieur de l'outillage, affiché avec l'angle
+        r.lignes_pli = [{**pli, "rayon": round(float(resultat_pliage.rayon_interieur), 2)} for pli in r.lignes_pli]
 
     procede = _procede(matiere, epaisseur, procede)
     r.procede = procede

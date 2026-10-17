@@ -13,7 +13,7 @@ LIGNES_MAX = 50
 
 def enregistrer_demande(donnees):
     """Crée une DemandeWeb depuis {client: {nom, societe, email, telephone, reception, adresse, code_postal, ville, message},
-    lignes: [demande de prix]}. `reception` : "retrait" pour venir chercher les pièces à l'atelier (sans port), sinon livraison.
+    lignes: [demande de prix]}. `reception` : "retrait" pour venir chercher les pièces à l'atelier (sans port, adresse du client quand même demandée), sinon livraison.
     Les lignes qui portent le même `jeu` (pièces d'un même dessin vectorisé) sont chiffrées ensemble (chiffrer_jeu) : chacune
     reçoit sa part du prix du jeu.
     Lève ErreurPrixWeb (message pour le client) si la demande est incomplète ou si une pièce n'a pas de prix en ligne."""
@@ -29,8 +29,8 @@ def enregistrer_demande(donnees):
     except ValidationError:
         raise ErreurPrixWeb("Cet e-mail n'est pas valide.")
     retrait = client.get("reception") == "retrait"
-    if not retrait and not (str(client.get("code_postal") or "").strip() and str(client.get("ville") or "").strip()):
-        raise ErreurPrixWeb("Indiquez l'adresse de livraison, ou choisissez le retrait à l'atelier.")
+    if not (str(client.get("code_postal") or "").strip() and str(client.get("ville") or "").strip()):
+        raise ErreurPrixWeb("Indiquez votre adresse." if retrait else "Indiquez l'adresse de livraison, ou choisissez le retrait à l'atelier.")
     if not isinstance(lignes, list) or not lignes:
         raise ErreurPrixWeb("Le panier est vide.")
     if len(lignes) > LIGNES_MAX:
@@ -80,7 +80,7 @@ def enregistrer_demande(donnees):
     with transaction.atomic():
         return DemandeWeb.objects.create(
             nom=nom[:120], societe=champ("societe", 160), email=email, telephone=champ("telephone", 30), retrait_atelier=retrait,
-            **({} if retrait else {"adresse": champ("adresse", 1000), "code_postal": champ("code_postal", 20), "ville": champ("ville", 100)}),
+            adresse=champ("adresse", 1000), code_postal=champ("code_postal", 20), ville=champ("ville", 100),
             message=champ("message", 4000), lignes=enregistrees, total_pieces_ht=arrondir(total), total_ht=arrondir(max(total, minimum)),
             a_valider=a_valider,
         )

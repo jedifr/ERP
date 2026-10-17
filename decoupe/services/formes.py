@@ -511,7 +511,7 @@ def dxf_bytes(contour, plis=None):
             rotation = math.degrees(math.atan2(y2 - y1, x2 - x1))
             if not -90 < rotation <= 90:  # texte lisible, jamais à l'envers
                 rotation -= 180 if rotation > 0 else -180
-            texte = f"{pli['nom']} : {pli['angle']:g}° {pli['sens'].upper()}"
+            texte = f"{pli['nom']} : {pli['angle']:g}° {pli['sens'].upper()}" + (f" Ri {pli['rayon']:g}" if pli.get("rayon") else "")
             msp.add_text(texte, height=3, rotation=rotation, dxfattribs={"layer": CALQUE_PLIAGE}).set_placement(
                 ((x1 + x2) / 2, (y1 + y2) / 2), align=ezdxf.enums.TextEntityAlignment.BOTTOM_CENTER)
     flux = io.StringIO()

@@ -335,7 +335,7 @@
       const u = [(b[0] - a[0]) / n, (b[1] - a[1]) / n];
       d.ligne([a[0] - u[0] * d.s * 0.4, a[1] - u[1] * d.s * 0.4], [b[0] + u[0] * d.s * 0.4, b[1] + u[1] * d.s * 0.4], "ligne-pli");
       const bout = [b[0] + u[0] * d.s * 1.1, b[1] + u[1] * d.s * 1.1];
-      d.texte(bout, `${fmt(pli.angle)}° ${pli.sens}`, Math.abs(u[0]) > 0.7 ? (u[0] > 0 ? "start" : "end") : "middle", "pli-texte");
+      d.texte(bout, `${fmt(pli.angle)}° ${pli.sens}${pli.rayon ? ` · Ri ${fmt(pli.rayon)}` : ""}`, Math.abs(u[0]) > 0.7 ? (u[0] > 0 ? "start" : "end") : "middle", "pli-texte");
     }
     d.lineaire([x0, y0], [x1, y0], -d.s * 1.6, lettres ? "A" : "", x1 - x0);
     d.lineaire([x0, y1], [x0, y0], -d.s * 1.6, lettres ? "B" : "", y1 - y0);
