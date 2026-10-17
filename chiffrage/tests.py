@@ -4822,6 +4822,15 @@ class OrdresDepuisCommandeTests(_FixtureOrdresCommande, TestCase):
         self.assertNotIn("composants", construire_payload(ancien))
         self.assertNotIn("date_livraison_prevue", construire_payload(ancien))
 
+    def test_payload_planning_nom_du_poste_dans_le_planning(self):
+        from .planning_sync import construire_payload
+
+        of = next(o for o in creer_ordres_fabrication(self.commande) if o.article == self.f)
+        poste = of.operations.order_by("ordre").first().poste
+        self.assertEqual(construire_payload(of)["operations"][0]["poste"], poste.nom)
+        PosteTravail.objects.filter(pk=poste.pk).update(nom_planning="Laser 1")
+        self.assertEqual(construire_payload(of)["operations"][0]["poste"], "Laser 1")
+
     def test_admin_apercu_puis_creation_avec_regroupement(self):
         url = f"/admin/chiffrage/commande/{self.commande.pk}/ordres-fabrication/"
         page = self.client.get(url)

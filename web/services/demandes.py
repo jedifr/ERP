@@ -63,9 +63,10 @@ def enregistrer_demande(donnees):
             "procede": r.procede, "prix_unitaire_ht": float(r.prix_unitaire_ht), "prix_total_ht": float(r.prix_total_ht),
             "cout_revient": float(r.cout_revient), "poids_kg": r.poids_kg,
             # contour découpé : de quoi sortir le DXF de fabrication depuis la demande (pièce libre ou forme)
-            "contour": r.contour if not ligne.get("pliage") else None,
+            "contour": r.contour,  # pièce pliée : son flan
             "tole": r.tole,
-            "pliage": {k: r.pliage.get(k) for k in ("nb_plis", "angle_mini", "developpe_mm", "flan_mm")} if r.pliage else None,
+            "pliage": {k: r.pliage.get(k) for k in ("nb_plis", "angle_mini", "developpe_mm", "flan_mm", "plieuse_id",
+                                                        "temps_reglage_min", "temps_pli_min")} if r.pliage else None,
             **({"jeu": demande["jeu"], "format_tole": r.format_tole} if ligne.get("jeu") else {}),
         })
     minimum = ReglageWeb.charger().minimum_commande_ht

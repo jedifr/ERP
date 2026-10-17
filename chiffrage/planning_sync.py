@@ -32,8 +32,8 @@ def construire_payload(of):
         "quantite": float(of.quantite),
         "date_lancement": of.date_lancement.isoformat(),
         "operations": [
-            {"poste": op.poste_id, "ordre": op.ordre, "temps_prevu": None if op.temps_prevu is None else float(op.temps_prevu)}
-            for op in of.operations.order_by("ordre")
+            {"poste": op.poste.nom_planning or op.poste_id, "ordre": op.ordre, "temps_prevu": None if op.temps_prevu is None else float(op.temps_prevu)}
+            for op in of.operations.select_related("poste").order_by("ordre")
         ],
     }
     # Ajoutés seulement s'ils existent : le contenu (donc l'empreinte) des OF antérieurs ne change pas.

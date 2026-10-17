@@ -521,6 +521,10 @@ class PosteTravail(models.Model):
 
     nom = models.CharField("nom", max_length=100, primary_key=True)
     type_operation = models.CharField("type d'opération", max_length=100, blank=True)
+    nom_planning = models.CharField(
+        "nom dans le Planning", max_length=100, blank=True,
+        help_text="Nom de la machine dans l'outil Planning de l'atelier, s'il diffère. Vide = même nom que le poste.",
+    )
     mode_calcul = models.CharField("mode de calcul", max_length=20, choices=ModeCalcul.choices)
     nombre_machines = models.PositiveIntegerField(
         "nombre de machines", default=1, help_text="Capacité agrégée (usage planning)"
