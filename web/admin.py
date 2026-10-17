@@ -17,7 +17,7 @@ from .services.prix import ErreurPrixWeb, catalogue, chiffrer
 class ReglageWebAdmin(ModelAdmin):
     """Marge web, minimum de commande et quantité maximale du configurateur."""
 
-    list_display = ["__str__", "taux_marge_pct", "minimum_commande_ht", "quantite_max"]
+    list_display = ["__str__", "taux_marge_pct", "minimum_commande_ht", "quantite_max", "adresse_retrait"]
 
     def get_queryset(self, request):
         ReglageWeb.charger()
@@ -38,12 +38,12 @@ LIEN = "color:#2563eb;text-decoration:underline;font-weight:600"
 class DemandeWebAdmin(ModelAdmin):
     """Paniers envoyés depuis le site client, prix recalculés par l'ERP : à transformer en devis."""
 
-    list_display = ["numero", "date", "statut", "societe", "nom", "email", "nb_pieces", "total_ht", "a_valider"]
-    list_filter = ["statut", "a_valider"]
+    list_display = ["numero", "date", "statut", "societe", "nom", "email", "nb_pieces", "total_ht", "retrait_atelier", "a_valider"]
+    list_filter = ["statut", "retrait_atelier", "a_valider"]
     search_fields = ["numero", "nom", "societe", "email"]
-    readonly_fields = ["numero", "date", "nom", "societe", "email", "telephone", "adresse", "code_postal", "ville", "message", "pieces",
+    readonly_fields = ["numero", "date", "nom", "societe", "email", "telephone", "retrait_atelier", "adresse", "code_postal", "ville", "message", "pieces",
                        "total_pieces_ht", "total_ht", "a_valider", "devis_lien"]
-    fields = ["numero", "date", "statut", "devis_lien", "nom", "societe", "email", "telephone", "adresse", "code_postal", "ville", "message",
+    fields = ["numero", "date", "statut", "devis_lien", "nom", "societe", "email", "telephone", "retrait_atelier", "adresse", "code_postal", "ville", "message",
               "pieces", "total_pieces_ht", "total_ht", "a_valider", "note_interne"]
     actions_detail = ["action_valider"]
 

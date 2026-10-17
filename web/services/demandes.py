@@ -12,7 +12,8 @@ LIGNES_MAX = 50
 
 
 def enregistrer_demande(donnees):
-    """Crée une DemandeWeb depuis {client: {nom, societe, email, telephone, adresse, message}, lignes: [demande de prix]}.
+    """Crée une DemandeWeb depuis {client: {nom, societe, email, telephone, reception, adresse, code_postal, ville, message},
+    lignes: [demande de prix]}. `reception` : "retrait" pour venir chercher les pièces à l'atelier (sans port), sinon livraison.
     Les lignes qui portent le même `jeu` (pièces d'un même dessin vectorisé) sont chiffrées ensemble (chiffrer_jeu) : chacune
     reçoit sa part du prix du jeu.
     Lève ErreurPrixWeb (message pour le client) si la demande est incomplète ou si une pièce n'a pas de prix en ligne."""
@@ -27,6 +28,9 @@ def enregistrer_demande(donnees):
         validate_email(email)
     except ValidationError:
         raise ErreurPrixWeb("Cet e-mail n'est pas valide.")
+    retrait = client.get("reception") == "retrait"
+    if not retrait and not (str(client.get("code_postal") or "").strip() and str(client.get("ville") or "").strip()):
+        raise ErreurPrixWeb("Indiquez l'adresse de livraison, ou choisissez le retrait à l'atelier.")
     if not isinstance(lignes, list) or not lignes:
         raise ErreurPrixWeb("Le panier est vide.")
     if len(lignes) > LIGNES_MAX:
@@ -52,12 +56,12 @@ def enregistrer_demande(donnees):
         r = prix_jeux.get(id(ligne)) or chiffrer(
             ligne.get("matiere"), ligne.get("epaisseur"), ligne.get("quantite"), forme=ligne.get("forme"), cotes=ligne.get("cotes"),
             pliage=ligne.get("pliage"), libre=ligne.get("libre"), dxf=ligne.get("dxf"), echelle=ligne.get("echelle"),
-            bibliotheque=ligne.get("bibliotheque"))
+            bibliotheque=ligne.get("bibliotheque"), procede=ligne.get("procede"))
         if r.statut == "refus":
             raise ErreurPrixWeb(f"Pièce {i} ({r.designation or 'sans nom'}) : pas de prix en ligne. " + " ".join(r.refus))
         a_valider |= r.statut == "validation"
         total += r.prix_total_ht
-        demande = {k: ligne.get(k) for k in ("matiere", "epaisseur", "quantite", "forme", "cotes", "pliage", "libre", "dxf", "echelle", "bibliotheque", "jeu") if ligne.get(k) is not None}
+        demande = {k: ligne.get(k) for k in ("matiere", "epaisseur", "quantite", "procede", "forme", "cotes", "pliage", "libre", "dxf", "echelle", "bibliotheque", "jeu") if ligne.get(k) is not None}
         enregistrees.append({
             "demande": demande, "designation": r.designation, "statut": r.statut, "validations": r.validations,
             "modifications": r.modifications,
@@ -75,8 +79,8 @@ def enregistrer_demande(donnees):
     champ = lambda cle, n: str(client.get(cle) or "").strip()[:n]
     with transaction.atomic():
         return DemandeWeb.objects.create(
-            nom=nom[:120], societe=champ("societe", 160), email=email, telephone=champ("telephone", 30), adresse=champ("adresse", 1000),
-            code_postal=champ("code_postal", 20), ville=champ("ville", 100),
+            nom=nom[:120], societe=champ("societe", 160), email=email, telephone=champ("telephone", 30), retrait_atelier=retrait,
+            **({} if retrait else {"adresse": champ("adresse", 1000), "code_postal": champ("code_postal", 20), "ville": champ("ville", 100)}),
             message=champ("message", 4000), lignes=enregistrees, total_pieces_ht=arrondir(total), total_ht=arrondir(max(total, minimum)),
             a_valider=a_valider,
         )

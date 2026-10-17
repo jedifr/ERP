@@ -125,6 +125,7 @@ async function demarrer() {
   majFormatsFichier(catalogue.formats_fichier);
   afficherCredit(catalogue.bibliotheque);
   majEpaisseurs();
+  majReception();
   majCotes();
   dessinerProfil();
   afficherBase();
@@ -138,6 +139,17 @@ function majEpaisseurs() {
   const m = catalogue.matieres.find((x) => x.matiere === $("matiere").value);
   const avant = $("epaisseur").value;
   remplir($("epaisseur"), (m ? m.epaisseurs : []).map((e) => [e, `${mm(e)} mm`]), avant);
+  majProcedes();
+}
+
+// Procédés possibles pour la tôle choisie (le premier est celui par défaut) ; un seul : affiché sans choix.
+const NOMS_PROCEDES = { laser: "Laser", jet_eau: "Jet d'eau" };
+function majProcedes() {
+  const m = catalogue.matieres.find((x) => x.matiere === $("matiere").value);
+  const liste = (m && m.procedes && m.procedes[String(Number($("epaisseur").value))]) || [];
+  const avant = $("procede").value;
+  remplir($("procede"), liste.map((p) => [p, NOMS_PROCEDES[p] || p]), liste.includes(avant) ? avant : liste[0]);
+  $("procede").disabled = liste.length < 2;
 }
 
 function majCotes() {
@@ -288,6 +300,7 @@ $("voir-3d").addEventListener("click", () => basculerVue(true));
 // ------------------------------------------------------------------ demande de prix
 function demandeCourante() {
   const base = { matiere: $("matiere").value, epaisseur: Number($("epaisseur").value), quantite: Number($("quantite").value) };
+  if ($("procede").value) base.procede = $("procede").value;
   const type = typePiece();
   if (type === "plane") {
     const cotes = {};
@@ -416,7 +429,7 @@ function afficherPanier() {
   if (vide) return;
   const corps = $("table-panier").querySelector("tbody");
   corps.replaceChildren(...panier.map((l, i) => el("tr", {},
-    el("td", { texte: l.designation }), el("td", { texte: `${l.demande.matiere} ${mm(l.demande.epaisseur)} mm` }),
+    el("td", { texte: l.designation }), el("td", { texte: `${l.demande.matiere} ${mm(l.demande.epaisseur)} mm${l.demande.procede ? ` · ${NOMS_PROCEDES[l.demande.procede] || l.demande.procede}` : ""}` }),
     el("td", { class: "nombre", texte: l.demande.quantite }), el("td", { class: "nombre", texte: `${euros(l.prix_total_ht)} €` }),
     el("td", {}, el("button", { type: "button", class: "retirer", "data-index": i, "aria-label": `Retirer ${l.designation}`, texte: "×" })))));
   const total = panier.reduce((s, l) => s + l.prix_total_ht, 0);
@@ -458,11 +471,30 @@ $("table-panier").addEventListener("click", (e) => {
   afficherPanier();
 });
 
+// Retrait à l'atelier : pas d'adresse de livraison ni de port.
+const retraitChoisi = () => document.querySelector("input[name=reception]:checked")?.value === "retrait";
+function majReception() {
+  const retrait = retraitChoisi();
+  document.querySelectorAll("#form-demande .livraison").forEach((c) => {
+    c.hidden = retrait;
+    c.querySelector("input, textarea").required = !retrait;
+  });
+  const adresse = catalogue && catalogue.retrait ? catalogue.retrait.adresse : "";
+  $("adresse-retrait").hidden = !retrait;
+  $("adresse-retrait").textContent = adresse ? `Pièces à retirer à : ${adresse}` : "Nous vous indiquons l'adresse et les horaires de retrait par e-mail.";
+  $("aide-demande").textContent = retrait
+    ? "Nous vérifions chaque demande et vous confirmons la commande et la date de retrait par e-mail."
+    : "Nous vérifions chaque demande et vous confirmons la commande, les frais de port et le délai par e-mail.";
+}
+document.querySelectorAll("input[name=reception]").forEach((r) => r.addEventListener("change", majReception));
+
 $("form-demande").addEventListener("submit", async (e) => {
   e.preventDefault();
   const form = e.currentTarget, retour = $("retour-demande");
   if (!form.reportValidity()) return;
   const client = Object.fromEntries(new FormData(form));
+  const retrait = client.reception === "retrait";
+  if (retrait) for (const k of ["adresse", "code_postal", "ville"]) delete client[k];
   const bouton = form.querySelector("button[type=submit]");
   bouton.disabled = true;
   retour.className = "retour";
@@ -481,8 +513,10 @@ $("form-demande").addEventListener("submit", async (e) => {
   afficherPanier();
   $("form-demande").hidden = false;
   form.reset();
+  majReception();
   retour.className = "retour succes";
-  retour.textContent = `Merci ! Demande ${corps.numero} reçue (${euros(corps.total_ht)} € HT${corps.total_ttc != null ? `, ${euros(corps.total_ttc)} € TTC` : ""} hors port). Nous vous confirmons la commande, le port et le délai par e-mail.`;
+  retour.textContent = `Merci ! Demande ${corps.numero} reçue (${euros(corps.total_ht)} € HT${corps.total_ttc != null ? `, ${euros(corps.total_ttc)} € TTC` : ""}${retrait ? ", retrait à l'atelier" : " hors port"}). `
+    + (retrait ? "Nous vous confirmons la commande et la date de retrait par e-mail." : "Nous vous confirmons la commande, le port et le délai par e-mail.");
 });
 
 // ------------------------------------------------------------------ forme libre
@@ -714,6 +748,7 @@ function choisirEpaisseurStep() {
     majEpaisseurs();
   }
   $("epaisseur").value = String(m.epaisseurs.find(egal));
+  majProcedes();
   majMiniDeco();
   return "";
 }
@@ -1060,7 +1095,7 @@ document.querySelectorAll("input[name=type]").forEach((r) => r.addEventListener(
 }));
 $("forme").addEventListener("change", () => { majCotes(); calculerBientot(); });
 $("matiere").addEventListener("change", () => { majEpaisseurs(); majMiniDeco(); calculerBientot(); });
-$("epaisseur").addEventListener("change", majMiniDeco);
+$("epaisseur").addEventListener("change", () => { majProcedes(); majMiniDeco(); });
 $("modele-profil").addEventListener("change", (e) => { profil = structuredClone(MODELES[e.target.value]); dessinerProfil(); calculerBientot(); });
 $("ajout-face").addEventListener("click", () => { lireProfil(); profil.faces.push(30); profil.angles.push(90); dessinerProfil(); calculerBientot(); });
 $("retrait-face").addEventListener("click", () => { lireProfil(); profil.faces.pop(); profil.angles.pop(); dessinerProfil(); calculerBientot(); });
@@ -1081,7 +1116,9 @@ function recevoirDepuisSite(pret) {
     const extension = (fichier.name.split(".").pop() || "").toLowerCase();
     if (!["dxf", "svg", "step", "stp"].includes(extension)) return;
     await pret; // formats lisibles connus (catalogue)
-    // d.procede (« Jet d'eau », « Laser », « Pliage ») : le procédé est choisi par l'ERP selon la matière, rien à présélectionner.
+    // d.procede (« Jet d'eau », « Laser », « Pliage ») : présélectionné s'il est proposé pour la tôle choisie
+    const voulu = { "jet d'eau": "jet_eau", laser: "laser" }[String(d.procede || "").toLowerCase()];
+    if (voulu && [...$("procede").options].some((o) => o.value === voulu)) $("procede").value = voulu;
     const onglet = document.querySelector("input[name=type][value=dxf]");
     onglet.checked = true;
     onglet.dispatchEvent(new Event("change"));

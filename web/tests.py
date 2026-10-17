@@ -48,6 +48,24 @@ class PrixWebTests(ConfigurateurBase):
         self.assertEqual((r.taux_tva, r.prix_total_ttc), (Decimal("20"), (r.prix_total_ht * Decimal("1.2")).quantize(Decimal("0.01"))))
         self.assertEqual(r.prix_unitaire_ttc, (r.prix_unitaire_ht * Decimal("1.2")).quantize(Decimal("0.01")))
 
+    def test_choix_du_procede(self):
+        from decoupe.models import ProcedeCoupe
+
+        rect = {"forme": "rectangle", "cotes": {"largeur": 100, "hauteur": 50}}
+        self.assertEqual(catalogue()["matieres"][0]["procedes"], {"2": ["jet_eau"]})
+        with self.assertRaisesMessage(ErreurPrixWeb, "ne se découpe pas par le laser"):
+            chiffrer("S235-W", 2, 10, procede="laser", **rect)
+        jet = ParametreCoupe.objects.get(matiere=self.matiere)
+        vitesse = jet.vitesses.get()
+        laser = ParametreCoupe.objects.get(pk=jet.pk)
+        laser.pk, laser.procede = None, ProcedeCoupe.LASER
+        laser.save()
+        vitesse.pk, vitesse.parametre = None, laser
+        vitesse.save()
+        self.assertEqual(catalogue()["matieres"][0]["procedes"], {"2": ["laser", "jet_eau"]})  # laser par défaut
+        self.assertEqual(chiffrer("S235-W", 2, 10, **rect).procede, "laser")
+        self.assertEqual(chiffrer("S235-W", 2, 10, procede="jet_eau", **rect).procede, "jet_eau")
+
     def test_tva_du_referentiel(self):
         from commercial.models import TauxTVA
 
@@ -122,7 +140,7 @@ class PrixWebTests(ConfigurateurBase):
 
     def test_catalogue(self):
         c = catalogue()
-        self.assertEqual(c["matieres"], [{"matiere": "S235-W", "famille": "Acier", "epaisseurs": [2.0]}])
+        self.assertEqual(c["matieres"], [{"matiere": "S235-W", "famille": "Acier", "epaisseurs": [2.0], "procedes": {"2": ["jet_eau"]}}])
         self.assertIn("rectangle", [f["cle"] for f in c["formes"]])
         self.assertEqual((c["minimum_commande_ht"], c["quantite_max"]), (60.0, 500))
 
@@ -175,7 +193,8 @@ class ApercuConfigurateurTests(ConfigurateurBase):
 
 
 class DemandeWebTests(ConfigurateurBase):
-    CLIENT = {"nom": "Jeanne Martin", "societe": "Atelier Martin", "email": "jeanne@example.com", "adresse": "1 rue des Forges"}
+    CLIENT = {"nom": "Jeanne Martin", "societe": "Atelier Martin", "email": "jeanne@example.com", "adresse": "1 rue des Forges",
+              "code_postal": "67000", "ville": "Strasbourg"}
     RECT = {"matiere": "S235-W", "epaisseur": 2, "quantite": 10, "forme": "rectangle", "cotes": {"largeur": 100, "hauteur": 50}, "prix_total_ht": 0.01}
 
     @override_settings(WEB_CLE_API="secret-web")
@@ -266,6 +285,20 @@ class ValiderDemandeTests(ConfigurateurBase):
         self.assertEqual((self.demande.devis, self.demande.statut), (devis, DemandeWeb.Statut.TRAITEE))
         with self.assertRaisesMessage(ErreurConversion, "déjà son devis"):
             creer_devis(self.demande)
+
+    def test_retrait_a_l_atelier(self):
+        from .services.conversion import creer_devis
+        from .services.demandes import enregistrer_demande
+
+        sans_adresse = {k: v for k, v in self.CLIENT.items() if k not in ("adresse", "code_postal", "ville")}
+        with self.assertRaisesMessage(ErreurPrixWeb, "retrait à l'atelier"):
+            enregistrer_demande({"client": sans_adresse, "lignes": [self.RECT]})
+        demande = enregistrer_demande({"client": {**self.CLIENT, "reception": "retrait"}, "lignes": [self.RECT]})
+        self.assertTrue(demande.retrait_atelier)
+        self.assertEqual((demande.adresse, demande.ville), ("", ""))  # pas d'adresse de livraison retenue
+        devis, _, _ = creer_devis(demande)
+        self.assertIsNone(devis.adresse_livraison)
+        self.assertIn("retrait atelier", devis.reference)
 
     def test_minimum_de_commande_en_ligne(self):
         from .services.conversion import REFERENCE_MINIMUM, creer_devis
