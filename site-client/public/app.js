@@ -1066,4 +1066,28 @@ $("ajout-face").addEventListener("click", () => { lireProfil(); profil.faces.pus
 $("retrait-face").addEventListener("click", () => { lireProfil(); profil.faces.pop(); profil.angles.pop(); dessinerProfil(); calculerBientot(); });
 document.querySelector(".configurateur").addEventListener("input", calculerBientot);
 
-demarrer();
+// ------------------------------------------------------------------ fichier envoyé par decoupe.eu
+// decoupe.eu ouvre ?depot=site dans un nouvel onglet : on lui dit qu'on est prêt (h2o-pret), il envoie le fichier
+// (h2o-fichier), qui s'importe comme un dépôt du visiteur. Le fichier passe d'onglet à onglet, sans serveur.
+const ORIGINES_DEPOT = ["https://decoupe.eu", "https://www.decoupe.eu"];
+
+function recevoirDepuisSite(pret) {
+  if (!window.opener || new URLSearchParams(location.search).get("depot") !== "site") return;
+  window.addEventListener("message", async (ev) => {
+    if (!ORIGINES_DEPOT.includes(ev.origin)) return; // aucun autre site
+    const d = ev.data;
+    if (!d || d.type !== "h2o-fichier" || !(d.fichier instanceof Blob)) return;
+    const fichier = d.fichier instanceof File ? d.fichier : new File([d.fichier], String(d.nom || "piece"));
+    const extension = (fichier.name.split(".").pop() || "").toLowerCase();
+    if (!["dxf", "svg", "step", "stp"].includes(extension)) return;
+    await pret; // formats lisibles connus (catalogue)
+    // d.procede (« Jet d'eau », « Laser », « Pliage ») : le procédé est choisi par l'ERP selon la matière, rien à présélectionner.
+    const onglet = document.querySelector("input[name=type][value=dxf]");
+    onglet.checked = true;
+    onglet.dispatchEvent(new Event("change"));
+    envoyerDxf(fichier);
+  });
+  for (const origine of ORIGINES_DEPOT) window.opener.postMessage({ type: "h2o-pret" }, origine);
+}
+
+recevoirDepuisSite(demarrer());
