@@ -1009,12 +1009,13 @@ class Poincon(models.Model):
         return f"{self.nom} ({self.angle_nez_deg:g}°)"
 
 
+REGLAGE_PLI_COURT_MIN, REGLAGE_PLI_LONG_MIN = 5, 7.5  # sans tranche d'épaisseur
+
+
 class ReglagePliage(models.Model):
     """Réglage unique du chiffrage du pliage : marges de sécurité et temps de l'atelier."""
 
     marge_force_pct = models.FloatField("force utilisable (% de la capacité)", default=70, help_text="70 : une plieuse de 50 t ne prend que les plis de 35 t au plus.")
-    reglage_court_min = models.FloatField("réglage d'un pli court (min)", default=5)
-    reglage_long_min = models.FloatField("réglage d'un pli long (min)", default=7.5)
     seuil_pli_long_mm = models.FloatField("pli long à partir de (mm)", default=800)
     temps_pli_s = models.FloatField("temps par pli (s)", default=30)
     temps_pli_serie_s = models.FloatField("temps par pli en série (s)", default=15)
@@ -1040,15 +1041,16 @@ class ReglagePliage(models.Model):
 
     def temps_reglage(self, epaisseur):
         """(réglage d'un pli court, d'un pli long) en minutes pour cette épaisseur : la première tranche dont l'épaisseur
-        maximale la couvre, sinon les temps généraux."""
-        tranche = self.tranches.filter(epaisseur_max_mm__gte=epaisseur).order_by("epaisseur_max_mm").first() if self.pk else None
+        maximale la couvre ; au-delà, la dernière tranche ; sans tranche, 5 et 7,5 min."""
+        tranches = self.tranches.order_by("epaisseur_max_mm") if self.pk else ReglagePliageEpaisseur.objects.none()
+        tranche = tranches.filter(epaisseur_max_mm__gte=epaisseur).first() or tranches.last()
         if tranche is None:
-            return self.reglage_court_min, self.reglage_long_min
+            return REGLAGE_PLI_COURT_MIN, REGLAGE_PLI_LONG_MIN
         return tranche.reglage_court_min, tranche.reglage_long_min
 
 
 class ReglagePliageEpaisseur(models.Model):
-    """Temps de réglage d'une tranche d'épaisseur (jusqu'à `epaisseur_max_mm` inclus) : remplace les temps généraux."""
+    """Temps de réglage d'une tranche d'épaisseur (jusqu'à `epaisseur_max_mm` inclus) ; la dernière vaut aussi au-delà."""
 
     reglage = models.ForeignKey(ReglagePliage, verbose_name="réglage", on_delete=models.CASCADE, related_name="tranches")
     epaisseur_max_mm = models.FloatField("jusqu'à l'épaisseur (mm)", help_text="Inclus. Ex. 3 : de la tranche précédente jusqu'à 3 mm.")
