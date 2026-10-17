@@ -107,7 +107,7 @@ def construire(recette, epaisseur=None):
         raise ErreurLibre("Pièce libre : liste d'éléments illisible.")
     if len(elements) > ELEMENTS_MAX:
         raise ErreurLibre(f"Pièce libre : {ELEMENTS_MAX} éléments au plus ; au-delà, envoyez un fichier DXF.")
-    validations, retires = [], []
+    validations = []
     for i, e in enumerate(elements, start=1):
         poly, mode, taille = _element(e, i)
         if mode == "ajouter":
@@ -120,7 +120,6 @@ def construire(recette, epaisseur=None):
             if not poly.intersects(piece):
                 raise ErreurLibre(f"Élément {i} : il est en dehors de la pièce.")
             piece = piece.difference(poly)
-            retires.append((i, taille))
         if piece.is_empty:
             raise ErreurLibre(f"Élément {i} : il ne reste plus de matière.")
     if isinstance(piece, MultiPolygon):
@@ -130,9 +129,6 @@ def construire(recette, epaisseur=None):
         raise ErreurLibre("La pièce obtenue n'est pas valide.")
 
     if epaisseur:
-        petits = [i for i, t in retires if t < epaisseur]
-        if petits:
-            validations.append(f"Découpe(s) plus petite(s) que l'épaisseur ({', '.join(map(str, petits))}) : faisabilité vérifiée par l'atelier.")
         # Matière plus fine que l'épaisseur entre deux découpes, ou entre une découpe et le bord.
         bords = [LineString(i.coords) for i in piece.interiors]
         exterieur = LineString(piece.exterior.coords)

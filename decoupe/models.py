@@ -742,6 +742,24 @@ class ReglageProcede(models.Model):
         "qualité des petits trous", max_digits=2, decimal_places=1, default=Decimal("4.0"), choices=QUALITES_COUPE,
         help_text="Jet d'eau : qualité de coupe des petits trous quand celle de la pièce est plus grossière.",
     )
+    trou_mini_coef = models.FloatField(
+        "diamètre de trou mini (× épaisseur)", default=0,
+        help_text="Laser : 0,6 = un trou d'au moins 0,6 × l'épaisseur. Plus petit : la pièce passe en validation technicien. 0 : pas de règle.",
+    )
+    trou_mini_seuil_mm = models.FloatField(
+        "à partir de l'épaisseur (mm)", default=0,
+        help_text="Épaisseur à partir de laquelle le coefficient des tôles épaisses s'applique (laser : 15). 0 : pas de seconde règle.",
+    )
+    trou_mini_coef_epais = models.FloatField(
+        "diamètre de trou mini des tôles épaisses (× épaisseur)", default=0, help_text="Laser : 0,8 à partir de 15 mm.",
+    )
+    trou_mini_mm = models.FloatField(
+        "diamètre de trou mini (mm)", default=0, help_text="Minimum absolu, quelle que soit l'épaisseur (jet d'eau : 2). 0 : pas de règle.",
+    )
+    distance_trou_bord_coef = models.FloatField(
+        "distance trou-bord mini (× épaisseur)", default=0,
+        help_text="Laser : 2 = un trou à au moins 2 × l'épaisseur du bord de la pièce. Plus près : validation technicien. 0 : pas de règle.",
+    )
     espacement_minimum_mm = models.FloatField(
         "écart minimal entre pièces (mm)", default=4,
         help_text="Plancher de l'écart entre deux pièces à l'imbrication, quelles que soient la matière et l'épaisseur (jet d'eau : 6 ; laser : 10). Au laser, la base donne un écart plus grand quand l'épaisseur augmente : le plus grand des deux est retenu.",
@@ -768,12 +786,19 @@ class ReglageProcede(models.Model):
         grande, petite = max(self.capacite_largeur_mm, self.capacite_longueur_mm), min(self.capacite_largeur_mm, self.capacite_longueur_mm)
         return f"{grande:g} × {petite:g} mm"
 
+    def trou_mini(self, epaisseur):
+        """Diamètre de trou minimal (mm) à cette épaisseur, 0 sans règle."""
+        coef = self.trou_mini_coef_epais if self.trou_mini_seuil_mm and epaisseur >= self.trou_mini_seuil_mm else self.trou_mini_coef
+        return max(coef * epaisseur, self.trou_mini_mm)
+
     @classmethod
     def pour(cls, procede):
         """Réglage du procédé (créé avec les valeurs usuelles s'il n'existe pas encore)."""
         defauts = {
-            "jet_eau": {"espacement_minimum_mm": 6, "bord_tole_minimum_mm": 5, "temps_palpage_s": 4, "diametre_petits_trous_mm": 20, "capacite_largeur_mm": 2000, "capacite_longueur_mm": 4000},
-            "laser": {"coefficient_vitesse": 0.85, "espacement_minimum_mm": 10, "bord_tole_minimum_mm": 10, "capacite_largeur_mm": 1500, "capacite_longueur_mm": 3000},
+            "jet_eau": {"espacement_minimum_mm": 6, "bord_tole_minimum_mm": 5, "temps_palpage_s": 4, "diametre_petits_trous_mm": 20, "capacite_largeur_mm": 2000, "capacite_longueur_mm": 4000,
+                        "trou_mini_mm": 2},
+            "laser": {"coefficient_vitesse": 0.85, "espacement_minimum_mm": 10, "bord_tole_minimum_mm": 10, "capacite_largeur_mm": 1500, "capacite_longueur_mm": 3000,
+                      "trou_mini_coef": 0.6, "trou_mini_seuil_mm": 15, "trou_mini_coef_epais": 0.8, "distance_trou_bord_coef": 2},
         }
         return cls.objects.get_or_create(procede=procede, defaults=defauts.get(procede, {}))[0]
 
