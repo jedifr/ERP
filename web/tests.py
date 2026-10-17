@@ -296,6 +296,7 @@ class DxfWebTests(ConfigurateurBase):
         demande = DemandeWeb.objects.get()
         self.client.force_login(get_user_model().objects.create_superuser("dx", "dx@example.com", "pass-dx-1234"))
         self.assertContains(self.client.get(f"/admin/web/demandeweb/{demande.pk}/change/"), "/dxf/1/")
+        self.assertContains(self.client.get(f"/admin/web/demandeweb/{demande.pk}/change/"), "Télécharger le DXF")
         original = self.client.get(f"/admin/web/demandeweb/{demande.pk}/dxf/0/")
         self.assertEqual(b"".join(original.streaming_content), contenu)  # le fichier du client, tel quel
         genere = self.client.get(f"/admin/web/demandeweb/{demande.pk}/dxf/1/")
@@ -573,7 +574,7 @@ class StepWebTests(ConfigurateurBase):
         self.assertEqual(page.status_code, 201, page.content)
         demande = DemandeWeb.objects.get()
         self.client.force_login(get_user_model().objects.create_superuser("st", "st@example.com", "pass-st-1234"))
-        self.assertContains(self.client.get(f"/admin/web/demandeweb/{demande.pk}/change/"), ">STEP<")
+        self.assertContains(self.client.get(f"/admin/web/demandeweb/{demande.pk}/change/"), "Fichier d'origine (STEP)")
         original = self.client.get(f"/admin/web/demandeweb/{demande.pk}/dxf/0/?original=1")
         self.assertEqual(b"".join(original.streaming_content), contenu)  # le STEP décompressé, tel qu'exporté par le client
         dxf = self.client.get(f"/admin/web/demandeweb/{demande.pk}/dxf/0/")
