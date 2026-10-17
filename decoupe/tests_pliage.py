@@ -70,6 +70,8 @@ class PliageCalculTests(TestCase):
 
     def test_temps_de_reglage_par_epaisseur(self):
         reglage = ReglagePliage.charger()
+        self.assertEqual(reglage.temps_reglage(2), (5, 7.5))  # ligne créée par la migration depuis les anciens temps généraux
+        reglage.tranches.all().delete()
         ReglagePliageEpaisseur.objects.create(reglage=reglage, epaisseur_max_mm=3, reglage_court_min=4, reglage_long_min=6)
         ReglagePliageEpaisseur.objects.create(reglage=reglage, epaisseur_max_mm=6, reglage_court_min=10, reglage_long_min=15)
         r = calculer_pliage(self.acier, 2, [50, 100], [90], 60)  # tranche jusqu'à 3 mm, pli court
@@ -78,8 +80,8 @@ class PliageCalculTests(TestCase):
         self.assertEqual(r.temps_reglage_min, 6)
         r = calculer_pliage(self.acier, 5, [50, 100], [90], 60)
         self.assertEqual(r.temps_reglage_min, 10)
-        r = calculer_pliage(self.acier, 8, [100, 100], [90], 1000)  # au-delà des tranches : temps généraux
-        self.assertEqual(r.temps_reglage_min, 7.5)
+        r = calculer_pliage(self.acier, 8, [100, 100], [90], 1000)  # au-delà de la dernière tranche : ses temps
+        self.assertEqual(r.temps_reglage_min, 15)
 
     def test_reglages_distincts(self):
         r = calculer_pliage(self.acier, 2, [40, 200, 40], [90, 90], 1000)  # U symétrique : un seul réglage, pli long
