@@ -252,7 +252,9 @@ class ValiderDemandeTests(ConfigurateurBase):
         self.assertTrue(piece.fichier_source.name.endswith(".dxf"))
         self.assertEqual(piece.article, lignes[0].article)
         self.assertTrue(lignes[0].article.gamme_etapes.exists())  # gamme de découpe alimentée (le paramètre a un poste)
-        self.assertIn("pliage", remarques[1])
+        self.assertIn("gamme de pliage sur", remarques[1])  # le U : pièce pliée calculée, étape de pliage sur la plieuse
+        self.assertEqual(lignes[1].article.pliage.faces_mm, [40, 60, 40])
+        self.assertEqual(lignes[1].article.gamme_etapes.get().origine, "pliage")
         self.demande.refresh_from_db()
         self.assertEqual((self.demande.devis, self.demande.statut), (devis, DemandeWeb.Statut.TRAITEE))
         with self.assertRaisesMessage(ErreurConversion, "déjà son devis"):

@@ -3,7 +3,7 @@ passe la demande en « Traitée ».
 
 Chaque pièce découpée devient une pièce à découper du devis (fichier DXF de fabrication, article fabriqué, gamme de découpe
 dès que le paramètre de coupe a un poste), comme une pièce importée à la main. Une pièce pliée devient un article fabriqué
-sans gamme : le pliage se prépare au devis. Le prix de chaque ligne est celui annoncé au client (prix unitaire forcé), même
+avec sa pièce pliée et l'étape de pliage de sa gamme (poste de la plieuse retenue). Le prix de chaque ligne est celui annoncé au client (prix unitaire forcé), même
 si les tarifs de l'ERP ont bougé depuis."""
 
 import datetime
@@ -148,20 +148,43 @@ def _piece_decoupee(devis, ligne, index, contenu):
 
 
 def _article_simple(devis, ligne, index):
-    """Article fabriqué d'une pièce pliée : sans gamme ni nomenclature (le pliage se prépare au devis)."""
+    """Article fabriqué d'une pièce pliée, avec sa pièce pliée (profil ou boîte) : l'étape de pliage de la gamme est calculée
+    sur le poste de la plieuse retenue. Le flan à découper n'est pas encore relié (pas de nomenclature)."""
+    from decoupe.models import PliageArticle
     from decoupe.services.devis_pieces import _reference_article
+    from decoupe.services.gamme import alimenter_gamme_pliage
+    from decoupe.services.pliage import ErreurPliage
     from technique.models import Article, Matiere
 
     nom = (ligne.get("designation") or f"Pièce {index}")[:200]
     reference, par_regle = _reference_article(devis, nom)
     d = ligne["demande"]
+    matiere = Matiere.objects.filter(pk=d.get("matiere")).first()
     article = Article.objects.create(
-        reference=reference, libelle=nom, nature=Article.Nature.FABRIQUE,
-        matiere=Matiere.objects.filter(pk=d.get("matiere")).first(), epaisseur=d.get("epaisseur"),
+        reference=reference, libelle=nom, nature=Article.Nature.FABRIQUE, matiere=matiere, epaisseur=d.get("epaisseur"),
     )
     if par_regle:
         enregistrer_code_utilise(RegleCodification.Entite.ARTICLE, reference)
-    return article, "Pièce pliée : gamme de pliage à préparer."
+    p = d.get("pliage") or {}
+    if matiere is None or p.get("forme") not in PliageArticle.Forme.values:
+        return article, "Pièce pliée : gamme de pliage à préparer."
+    try:
+        nombres = lambda valeurs: [float(v or 0) for v in valeurs or []]  # noqa: E731
+        if p["forme"] == PliageArticle.Forme.BOITE:
+            pliage = PliageArticle.objects.create(
+                article=article, matiere=matiere, epaisseur_mm=float(d["epaisseur"]), forme=p["forme"],
+                longueur_fond_mm=float(p["longueur"]), largeur_fond_mm=float(p["largeur"]), bords_mm=nombres(p.get("bords")),
+                angles_bords_deg=nombres(p.get("angles")),
+            )
+        else:
+            pliage = PliageArticle.objects.create(
+                article=article, matiere=matiere, epaisseur_mm=float(d["epaisseur"]), forme=p["forme"],
+                longueur_pli_mm=float(p["longueur"]), faces_mm=nombres(p.get("faces")), angles_deg=nombres(p.get("angles")),
+            )
+        etape, _ = alimenter_gamme_pliage(pliage)
+    except (ErreurPliage, KeyError, TypeError, ValueError) as exc:
+        return article, f"Pièce pliée : gamme de pliage à préparer ({exc})."
+    return article, f"gamme de pliage sur « {etape.poste} » ; découpe du flan à ajouter."
 
 
 def _ligne_devis(devis, article, ligne):
