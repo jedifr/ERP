@@ -1056,7 +1056,7 @@ class ReglagePliageEpaisseurInline(TabularInline):
     model = ReglagePliageEpaisseur
     extra = 0
     fields = ["epaisseur_max_mm", "reglage_court_min", "reglage_long_min"]
-    verbose_name_plural = "Temps de réglage par épaisseur (sinon les temps ci-dessus)"
+    verbose_name_plural = "Temps de réglage par épaisseur (la dernière ligne vaut aussi au-delà)"
 
 
 @admin.register(ReglagePliage)
