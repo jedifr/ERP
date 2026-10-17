@@ -78,7 +78,7 @@ class PrixWeb:
         return public
 
 
-PUBLIC = ("statut", "refus", "validations", "modifications", "designation", "matiere", "epaisseur_mm", "procede", "quantite", "largeur_mm", "hauteur_mm",
+PUBLIC = ("statut", "refus", "validations", "modifications", "lignes_pli", "designation", "matiere", "epaisseur_mm", "procede", "quantite", "largeur_mm", "hauteur_mm",
           "poids_kg", "contour", "pliage", "prix_total_ht", "prix_unitaire_ht", "taux_tva", "prix_total_ttc", "prix_unitaire_ttc",
           "minimum_commande_ht")
 
@@ -209,9 +209,10 @@ def _procede(matiere, epaisseur, choix=None):
     return possibles[0]
 
 
-def controle_trous(exterieur, trous, epaisseur, procede):
+def controle_trous(exterieur, trous, epaisseur, procede, lignes_pli=None):
     """Trous trop petits pour le procédé (Ø mini selon l'épaisseur, réglage du procédé) ou trop près du bord de la pièce :
-    messages de validation technicien. Le Ø d'un trou est le petit côté de son rectangle englobant minimal."""
+    messages de validation technicien. Le Ø d'un trou est le petit côté de son rectangle englobant minimal. Les oblongs de
+    décharge que l'atelier ajoute sur les lignes de pli (`lignes_pli`) ne sont pas contrôlés."""
     from shapely.geometry import LineString, Polygon
 
     from decoupe.models import ProcedeCoupe, ReglageProcede
@@ -220,9 +221,12 @@ def controle_trous(exterieur, trous, epaisseur, procede):
     mini, coef_bord = reglage.trou_mini(epaisseur), reglage.distance_trou_bord_coef
     nom = "jet d'eau" if procede == ProcedeCoupe.JET_EAU else "laser"
     bord = LineString(list(exterieur) + [exterieur[0]])
+    plis = [LineString([p["p1"], p["p2"]]) for p in lignes_pli or []]
     petits, proches = [], []
     for t in trous:
         trou = Polygon(t)
+        if any(trou.intersects(pli) for pli in plis):
+            continue  # oblong de décharge sur un pli
         rect = trou.minimum_rotated_rectangle
         cotes = [LineString(rect.exterior.coords[i:i + 2]).length for i in range(2)] if rect.geom_type == "Polygon" else [0]
         diametre = min(cotes)
@@ -243,14 +247,18 @@ def controle_trous(exterieur, trous, epaisseur, procede):
     return messages
 
 
+LARGEUR_DECHARGE = 0.5  # largeur de l'oblong de décharge, en épaisseurs de tôle (règle de l'atelier)
+
+
 def decharges(contour, epaisseur, bord_mini):
     """Trou trop près d'un pli (bord du trou à moins du bord mini de la ligne de pli) : oblong de décharge sur la ligne
-    de pli, large de l'épaisseur et long du diamètre du trou (son étendue le long du pli), centré en face du trou, pour
+    de pli, large d'une demi-épaisseur et long du diamètre du trou (son étendue le long du pli), centré en face du trou, pour
     que le trou ne se déforme pas. Retourne (contour avec les oblongs, messages pour le client)."""
     from shapely.geometry import LineString, Point, Polygon
     from shapely.ops import unary_union
 
     trous = [Polygon(t) for t in contour["trous"]]
+    largeur = LARGEUR_DECHARGE * epaisseur
     oblongs, messages = [], []
     for pli in contour.get("plis") or []:
         ligne = LineString([pli["p1"], pli["p2"]])
@@ -264,11 +272,12 @@ def decharges(contour, epaisseur, bord_mini):
             le_long = [(px - x1) * ux + (py - y1) * uy for px, py in trou.exterior.coords]
             diametre = max(le_long) - min(le_long)
             centre = ligne.interpolate(ligne.project(trou.centroid))
-            demi = max(diametre - epaisseur, 0) / 2
+            demi = max(diametre - largeur, 0) / 2
             axe = LineString([(centre.x - ux * demi, centre.y - uy * demi), (centre.x + ux * demi, centre.y + uy * demi)])
-            oblongs.append(axe.buffer(epaisseur / 2) if demi else Point(centre.x, centre.y).buffer(epaisseur / 2))
-            messages.append(f"{pli['nom']} : trou à {distance:.1f} mm de la ligne de pli (bord mini {bord_mini:.1f} mm), "
-                         f"oblong de décharge {diametre:.1f} × {epaisseur:g} mm ajouté sur le pli pour qu'il ne se déforme pas.")
+            oblongs.append(axe.buffer(largeur / 2) if demi else Point(centre.x, centre.y).buffer(largeur / 2))
+            mm = lambda v: f"{v:.1f}".rstrip("0").rstrip(".").replace(".", ",")  # noqa: E731
+            messages.append(f"{pli['nom']} : trou à {mm(distance)} mm de la ligne de pli (bord mini {mm(bord_mini)} mm), "
+                            f"oblong de décharge {mm(diametre)} × {mm(largeur)} mm ajouté sur le pli pour qu'il ne se déforme pas.")
     if not oblongs:
         return contour, []
     piece = Polygon(contour["exterieur"], contour["trous"]).difference(unary_union(oblongs))
@@ -433,7 +442,7 @@ def _preparer(matiere_nom, epaisseur, quantite, forme=None, cotes=None, pliage=N
 
     procede = _procede(matiere, epaisseur, procede)
     r.procede = procede
-    r.validations += controle_trous(exterieur, trous, epaisseur, procede)
+    r.validations += controle_trous(exterieur, trous, epaisseur, procede, r.lignes_pli)
     piece = _piece(matiere, epaisseur, procede, exterieur, trous)
     r.largeur_mm, r.hauteur_mm = round(piece.largeur_mm, 2), round(piece.hauteur_mm, 2)
     r.contour = piece.contour_json

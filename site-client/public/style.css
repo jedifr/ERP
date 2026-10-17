@@ -5,6 +5,7 @@
   --texte-doux: #5b6676;
   --bord: #d9dee5;
   --accent: #0b6bcb;
+  --pli: #c2410c;
   --accent-texte: #ffffff;
   --accent-doux: #e3effb;
   --ok: #1a7f37;
@@ -21,6 +22,7 @@
     --texte-doux: #9aa6b5;
     --bord: #2e3846;
     --accent: #5aa9f5;
+    --pli: #fb923c;
     --accent-texte: #0b1520;
     --accent-doux: #1b3550;
     --ok: #4cc26d;
@@ -81,6 +83,9 @@ input:disabled { opacity: .5; cursor: not-allowed; }
 .schema .fond-plat { fill: var(--accent-doux); stroke: none; }
 .schema .arete { stroke: var(--accent); stroke-width: 1.5; }
 .schema .pli { stroke: var(--accent); stroke-width: 1.2; stroke-dasharray: 5 4; }
+.schema .ligne-pli { stroke: var(--pli, #c2410c); stroke-width: 1.4; stroke-dasharray: 10 4 2 4; vector-effect: non-scaling-stroke; }
+.schema .pli-texte { fill: var(--pli); stroke: var(--fond); paint-order: stroke; font-weight: 600; font-family: inherit; }
+#apercu .ligne-pli { stroke: var(--pli); stroke-width: 1.2; stroke-dasharray: 6 3; vector-effect: non-scaling-stroke; fill: none; }
 .schema .cote { stroke: var(--texte-doux); stroke-width: 1; }
 .schema .rappel { stroke: var(--texte-doux); stroke-width: .6; }
 .schema .axe { stroke: var(--texte-doux); stroke-width: .8; stroke-dasharray: 8 3 2 3; }
