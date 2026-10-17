@@ -720,16 +720,22 @@ class StepWebTests(ConfigurateurBase):
         self.assertEqual(self.prix(fiche["jeton"], echelle=2).status_code, 400)
 
     def test_lignes_de_pli_et_oblong_de_decharge(self):
-        # Cornière dont un trou de 6 mm tombe à 3 mm du pli (bord mini 8,5 mm en V12) : oblong 6 × 2 sur la ligne de pli.
+        # Cornière dont un trou de 6 mm tombe à 3 mm du pli (bord mini 8,5 mm en V12) : oblong 6 × 1 (demi-épaisseur) sur le pli.
         solide = self.profil([46, 96], [90], 2, 2, 60, trous=[(40, 0, 30, (0, 1, 0), 6)])
         fiche = self.envoyer(self.ecrire(solide), "corniere.stp").json()
+        from shapely.geometry import Polygon
+
         r = chiffrer("S235-W", 2, 10, dxf=fiche["jeton"])
         saisi = chiffrer("S235-W", 2, 10, pliage={"forme": "profil", "faces": [50, 100], "angles": [90], "longueur": 60})
         (pli,), (pli_saisi,) = r.lignes_pli, saisi.lignes_pli
         self.assertEqual((pli["angle"], pli["sens"]), (90, "haut"))
         self.assertAlmostEqual(pli["p1"][0], pli_saisi["p1"][0], places=1)  # même ligne que le profil saisi à la main
         self.assertEqual(len(r.modifications), 1)
-        self.assertIn("oblong de décharge 6.0 × 2 mm", r.modifications[0])
+        self.assertIn("oblong de décharge 6 × 1 mm", r.modifications[0])
+        oblong = min((Polygon(t) for t in r.contour["trous"]), key=lambda t: t.area)
+        x0, y0, x1, y1 = oblong.bounds
+        self.assertEqual(sorted((round(x1 - x0, 1), round(y1 - y0, 1))), [1, 6])
+        self.assertEqual(self.prix(fiche["jeton"]).json()["lignes_pli"], r.lignes_pli)  # pour le schéma du site
         self.assertEqual(len(r.contour["trous"]), 2)  # le trou et l'oblong
         self.assertIn("oblong de décharge", self.prix(fiche["jeton"]).json()["modifications"][0])
         page = self.client.post("/api/web/v1/demandes/", {"client": DemandeWebTests.CLIENT, "lignes": [

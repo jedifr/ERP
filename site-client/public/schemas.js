@@ -34,11 +34,11 @@
       const n = Math.hypot(dx, dy) || 1, ux = dx / n, uy = dy / n, l = s * 0.55, e = s * 0.2;
       morceaux.push(`<path class="fleche" d="M${pt(pointe)}L${pt([pointe[0] + ux * l - uy * e, pointe[1] + uy * l + ux * e])}L${pt([pointe[0] + ux * l + uy * e, pointe[1] + uy * l - ux * e])}Z"/>`);
     };
-    const texte = ([x, y], t, ancre = "middle") => {
+    const texte = ([x, y], t, ancre = "middle", classe = "cote-texte") => {
       const largeur = String(t).length * s * 0.58;
       const x0 = ancre === "middle" ? x - largeur / 2 : ancre === "end" ? x - largeur : x;
       etendre(x0, y - s * 0.5); etendre(x0 + largeur, y + s * 0.5);
-      morceaux.push(`<text class="cote-texte" x="${+x.toFixed(3)}" y="${+(-y).toFixed(3)}" font-size="${+s.toFixed(3)}" stroke-width="${+(s * 0.3).toFixed(3)}" text-anchor="${ancre}" dominant-baseline="central">${echapper(t)}</text>`);
+      morceaux.push(`<text class="${classe}" x="${+x.toFixed(3)}" y="${+(-y).toFixed(3)}" font-size="${+s.toFixed(3)}" stroke-width="${+(s * 0.3).toFixed(3)}" text-anchor="${ancre}" dominant-baseline="central">${echapper(t)}</text>`);
     };
     const etiquette = (lettre, valeur) => (lettre ? `${lettre} = ${fmt(valeur)}` : fmt(valeur));
 
@@ -327,6 +327,16 @@
     const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
     const d = Dessin(Math.max(x1 - x0, y1 - y0, 1));
     for (const p of pieces) d.chemin([p.exterieur, ...(p.trous || [])], "piece");
+    // lignes de pli du flan (pièce pliée) : trait mixte, angle et sens écrits au-delà du bout de la ligne
+    for (const pli of c.plis || []) {
+      // texte au bout haut (ou droit) de la ligne : les cotes A et B sont en bas et à gauche
+      const [a, b] = (pli.p2[0] - pli.p1[0]) + (pli.p2[1] - pli.p1[1]) >= 0 ? [pli.p1, pli.p2] : [pli.p2, pli.p1];
+      const n = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+      const u = [(b[0] - a[0]) / n, (b[1] - a[1]) / n];
+      d.ligne([a[0] - u[0] * d.s * 0.4, a[1] - u[1] * d.s * 0.4], [b[0] + u[0] * d.s * 0.4, b[1] + u[1] * d.s * 0.4], "ligne-pli");
+      const bout = [b[0] + u[0] * d.s * 1.1, b[1] + u[1] * d.s * 1.1];
+      d.texte(bout, `${fmt(pli.angle)}° ${pli.sens}`, Math.abs(u[0]) > 0.7 ? (u[0] > 0 ? "start" : "end") : "middle", "pli-texte");
+    }
     d.lineaire([x0, y0], [x1, y0], -d.s * 1.6, lettres ? "A" : "", x1 - x0);
     d.lineaire([x0, y1], [x0, y0], -d.s * 1.6, lettres ? "B" : "", y1 - y0);
     return d.svg("", legende);

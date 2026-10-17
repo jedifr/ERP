@@ -38,7 +38,8 @@ const VIGNETTES_MAX = 150;
 
 // Flan d'un STEP : celui que l'ERP vient de chiffrer (outillage de l'atelier), sinon l'aperçu rendu au dépôt.
 function flanStep() {
-  return dernier && dernier.demande.dxf === ficheDxf.jeton && dernier.resultat.contour ? dernier.resultat.contour : ficheDxf.contour;
+  const r = dernier && dernier.demande.dxf === ficheDxf.jeton && dernier.resultat.contour ? dernier.resultat : null;
+  return r ? { ...r.contour, plis: r.lignes_pli || [] } : ficheDxf.contour;
 }
 
 // Contour du fichier à l'échelle choisie (affichage seulement : l'ERP refait le calcul).
@@ -231,7 +232,7 @@ function dessinerSchema() {
   $("note-schema").textContent = mode3d ? "Faites glisser pour tourner la pièce, molette ou pincement pour zoomer. Vue indicative."
     : d.bibliotheque !== undefined ? (formeDeco ? "A et B : cotes hors tout. Changez la largeur, la hauteur suit." : "Choisissez une forme dans la liste.")
     : d.lot ? `${d.lot.length} pièces découpées séparément, placées comme sur votre dessin ; A et B : cotes hors tout de l'ensemble.`
-    : d.dxf !== undefined && estStep() ? (ficheDxf.plis.length ? "Flan déplié de votre pièce, au rayon de pliage de l'atelier ; A et B : cotes hors tout." : "Pièce plane lue dans votre fichier ; A et B : cotes hors tout.")
+    : d.dxf !== undefined && estStep() ? (ficheDxf.plis.length ? "Flan déplié de votre pièce, au rayon de pliage de l'atelier ; A et B : cotes hors tout. Trait mixte : ligne de pli, avec l'angle et le sens (haut : le bord se relève vers vous)." : "Pièce plane lue dans votre fichier ; A et B : cotes hors tout.")
     : d.dxf !== undefined ? (ficheDxf ? (echelleDxf === 1 ? "Pièce telle que lue dans votre fichier" : `Pièce à ${+(echelleDxf * 100).toFixed(2)} % de votre fichier`) + " ; A et B : cotes hors tout." : "Le dessin de la pièce s'affiche une fois le fichier lu.")
     : (dessin && dessin.note) || "Les lettres du schéma repèrent les cotes à saisir.";
   if (!dessin) return svg.replaceChildren();
@@ -397,14 +398,14 @@ function afficherResultat(r) {
   if (r.pliage && r.pliage.angle_mini) details.push(["Angle de pli mini", `${r.pliage.angle_mini}°`]);
   $("details").replaceChildren(...details.flatMap(([t, v]) => [el("dt", { texte: t }), el("dd", { texte: v })]));
   $("messages").replaceChildren(...[...r.refus, ...r.validations, ...(r.modifications || [])].map((m) => el("li", { texte: m })));
-  dessinerApercu(r.contour);
+  dessinerApercu(r.contour, r.lignes_pli);
   // contour exact de l'ERP à la place de la vignette (bibliothèque) ou du dépôt (flan STEP chiffré avec l'outillage de l'atelier)
   if ((dernier && dernier.demande.bibliotheque) || estStep()) dessinerSchema();
   else majVue3d();
   $("ajouter").disabled = !avecPrix;
 }
 
-function dessinerApercu(contour) {
+function dessinerApercu(contour, plis = []) {
   const svg = $("apercu");
   if (!contour || !contour.exterieur || !contour.exterieur.length) return svg.replaceChildren();
   const xs = contour.exterieur.map((p) => p[0]), ys = contour.exterieur.map((p) => p[1]);
@@ -416,7 +417,13 @@ function dessinerApercu(contour) {
   chemin.setAttribute("d", d);
   chemin.setAttribute("fill-rule", "evenodd");
   chemin.setAttribute("vector-effect", "non-scaling-stroke");
-  svg.replaceChildren(chemin);
+  const lignes = (plis || []).map((p) => {
+    const l = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    l.setAttribute("d", `M${p.p1[0]},${-p.p1[1]}L${p.p2[0]},${-p.p2[1]}`);
+    l.setAttribute("class", "ligne-pli");
+    return l;
+  });
+  svg.replaceChildren(chemin, ...lignes);
 }
 
 // ------------------------------------------------------------------ panier
