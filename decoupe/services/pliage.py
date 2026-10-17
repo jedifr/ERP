@@ -264,10 +264,8 @@ def _outillage(r, matiere, epaisseur, faces, plis, plieuses, reglage):
     # Un réglage par réglage distinct : même angle, mêmes faces adjacentes et même longueur de pli.
     reglages = {(round(abs(p.angle), 1), tuple(sorted(p.faces)), p.longueur) for p in plis}
     r.nb_reglages = len(reglages)
-    r.temps_reglage_min = round(sum(
-        reglage.reglage_long_min if longueur >= reglage.seuil_pli_long_mm else reglage.reglage_court_min
-        for _, _, longueur in reglages
-    ), 3)
+    court, long_ = reglage.temps_reglage(epaisseur)
+    r.temps_reglage_min = round(sum(long_ if longueur >= reglage.seuil_pli_long_mm else court for _, _, longueur in reglages), 3)
     r.temps_pli_min = round(len(plis) * reglage.temps_pli_s / 60, 3)
     return {"famille": famille, "bmin": bmin, "plieuse": plieuse}
 

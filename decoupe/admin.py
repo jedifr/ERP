@@ -22,6 +22,7 @@ from .models import (
     Plieuse,
     Poincon,
     ReglagePliage,
+    ReglagePliageEpaisseur,
     Ve,
     ReglageImbrication,
     FormatTole,
@@ -1051,9 +1052,18 @@ class PlieuseAdmin(ModelAdmin):
     inlines = [VeInline, PoinconInline]
 
 
+class ReglagePliageEpaisseurInline(TabularInline):
+    model = ReglagePliageEpaisseur
+    extra = 0
+    fields = ["epaisseur_max_mm", "reglage_court_min", "reglage_long_min"]
+    verbose_name_plural = "Temps de réglage par épaisseur (sinon les temps ci-dessus)"
+
+
 @admin.register(ReglagePliage)
 class ReglagePliageAdmin(ModelAdmin):
-    """Force utilisable des plieuses, temps de réglage et de pli, marge de retour élastique."""
+    """Force utilisable des plieuses, temps de réglage (généraux ou par épaisseur) et de pli, marge de retour élastique."""
+
+    inlines = [ReglagePliageEpaisseurInline]
 
     list_display = ["__str__", "marge_force_pct", "temps_pli_s", "temps_pli_serie_s", "seuil_serie"]
 
