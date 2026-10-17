@@ -60,10 +60,12 @@ def enregistrer_demande(donnees):
         demande = {k: ligne.get(k) for k in ("matiere", "epaisseur", "quantite", "forme", "cotes", "pliage", "libre", "dxf", "echelle", "bibliotheque", "jeu") if ligne.get(k) is not None}
         enregistrees.append({
             "demande": demande, "designation": r.designation, "statut": r.statut, "validations": r.validations,
+            "modifications": r.modifications,
             "procede": r.procede, "prix_unitaire_ht": float(r.prix_unitaire_ht), "prix_total_ht": float(r.prix_total_ht),
             "cout_revient": float(r.cout_revient), "poids_kg": r.poids_kg,
             # contour découpé : de quoi sortir le DXF de fabrication depuis la demande (pièce libre ou forme)
             "contour": r.contour,  # pièce pliée : son flan
+            "lignes_pli": r.lignes_pli or [],
             "tole": r.tole,
             "pliage": {k: r.pliage.get(k) for k in ("nb_plis", "angle_mini", "developpe_mm", "flan_mm", "plieuse_id",
                                                         "temps_reglage_min", "temps_pli_min")} if r.pliage else None,

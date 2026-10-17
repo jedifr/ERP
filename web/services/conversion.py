@@ -125,20 +125,21 @@ def _fichier_fabrication(ligne):
     contour = ligne.get("contour")
     if not contour:
         return None
-    return formes.dxf_bytes(formes.Contour(contour["exterieur"], contour.get("trous") or []))
+    return formes.dxf_bytes(formes.Contour(contour["exterieur"], contour.get("trous") or []), plis=ligne.get("lignes_pli"))
 
 
 def _piece_decoupee(devis, ligne, index, contenu):
     """Pièce à découper du devis (et son article fabriqué), réglée comme la demande ; la gamme de découpe est alimentée si le
     paramètre de coupe a un poste. Retourne (article, remarque)."""
     from decoupe.models import ProcedeCoupe
-    from decoupe.services import devis_pieces
+    from decoupe.services import devis_pieces, formes
     from technique.models import Article
 
     d = ligne["demande"]
     nom = (ligne.get("designation") or f"Pièce {index}")[:200]
     procede = ligne.get("procede") if ligne.get("procede") in ProcedeCoupe.values else ProcedeCoupe.LASER
-    piece = devis_pieces.importer_pour_devis(devis, ContentFile(contenu, name=f"{slugify(nom)[:80] or 'piece'}.dxf"), procede=procede, nom=nom)
+    piece = devis_pieces.importer_pour_devis(devis, ContentFile(contenu, name=f"{slugify(nom)[:80] or 'piece'}.dxf"), procede=procede, nom=nom,
+                                             regles_calques=formes.REGLES_CALQUES_PLIAGE if ligne.get("lignes_pli") else None)
     devis_pieces.appliquer_reglages(piece, {"matiere": str(d.get("matiere") or ""), "epaisseur": str(d.get("epaisseur") or ""),
                                             "quantite": str(d.get("quantite") or 1)})
     tole = Article.objects.filter(pk=ligne.get("tole")).first() if ligne.get("tole") else None

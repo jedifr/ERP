@@ -119,6 +119,49 @@ def developpe(faces, angles, epaisseur, ri, coef_k):
     return total
 
 
+def _recul(alpha, epaisseur, ri):
+    beta = math.radians(180 - alpha)
+    return (ri + epaisseur) * math.tan(beta / 2) if alpha >= 90 else ri + epaisseur
+
+
+def _bande(alpha, epaisseur, ri, coef_k):
+    return math.radians(180 - alpha) * (ri + coef_k * epaisseur)
+
+
+def ligne_pli(nom, p1, p2, angle):
+    """Ligne de pli du flan (milieu de la bande pliée) : angle de la pièce et sens (haut : le bord se relève vers
+    l'observateur du flan, bas : il s'en éloigne)."""
+    return {"nom": nom, "p1": [round(p1[0], 3), round(p1[1], 3)], "p2": [round(p2[0], 3), round(p2[1], 3)],
+            "angle": round(abs(angle), 2), "sens": "haut" if angle > 0 else "bas"}
+
+
+def lignes_pli_profil(faces, angles, epaisseur, ri, coef_k, longueur):
+    """Lignes de pli du flan d'un profil (développé le long de x, longueur de pli le long de y). Angle positif = haut."""
+    lignes, x = [], 0.0
+    for i, angle in enumerate(angles):
+        alpha = abs(angle)
+        x += faces[i] - (_recul(abs(angles[i - 1]), epaisseur, ri) if i else 0) - _recul(alpha, epaisseur, ri)
+        bande = _bande(alpha, epaisseur, ri, coef_k)
+        lignes.append(ligne_pli(f"Pli {i + 1}", (x + bande / 2, 0), (x + bande / 2, longueur), angle))
+        x += bande
+    return lignes
+
+
+def lignes_pli_boite(bords, angles, epaisseur, ri, coef_k, flan_mm, crans_mm):
+    """Lignes de pli du flan d'une boîte (D à gauche, B à droite, A en bas, C en haut), bords relevés vers le haut."""
+    x, y = flan_mm
+    cran = dict(zip(COTES_BOITE, crans_mm))
+    lignes = []
+    for c, h, a in zip(COTES_BOITE, bords, angles or [90] * 4):
+        if not h:
+            continue
+        d = (h or 0) - _recul(abs(a), epaisseur, ri) + _bande(abs(a), epaisseur, ri, coef_k) / 2
+        p1, p2 = {"A": ((cran["D"], d), (x - cran["B"], d)), "C": ((cran["D"], y - d), (x - cran["B"], y - d)),
+                  "D": ((d, cran["A"]), (d, y - cran["C"])), "B": ((x - d, cran["A"]), (x - d, y - cran["C"]))}[c]
+        lignes.append(ligne_pli(f"Bord {c}", p1, p2, abs(a)))
+    return lignes
+
+
 @dataclass
 class ResultatPliage:
     statut: str = "ok"  # ok, validation, refus
