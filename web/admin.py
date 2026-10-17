@@ -164,7 +164,7 @@ def apercu_configurateur_view(request):
         matiere, _, epaisseur = (saisie.get("tole") or "").rpartition("|")
         try:
             resultat = chiffrer(matiere, epaisseur, saisie.get("quantite") or 1, forme=saisie.get("forme") if type_piece == "forme" else None,
-                                cotes=cotes, pliage=pliage).en_dict()
+                                cotes=cotes, pliage=pliage, procede=saisie.get("procede") or None).en_dict()
         except ErreurPrixWeb as exc:
             messages.error(request, str(exc))
     contexte = {

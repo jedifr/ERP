@@ -64,7 +64,11 @@ class PrixWebTests(ConfigurateurBase):
         vitesse.save()
         self.assertEqual(catalogue()["matieres"][0]["procedes"], {"2": ["laser", "jet_eau"]})  # laser par défaut
         self.assertEqual(chiffrer("S235-W", 2, 10, **rect).procede, "laser")
-        self.assertEqual(chiffrer("S235-W", 2, 10, procede="jet_eau", **rect).procede, "jet_eau")
+        jet_eau = chiffrer("S235-W", 2, 10, procede="jet_eau", **rect)
+        self.assertEqual(jet_eau.procede, "jet_eau")
+        d = jet_eau.detail_decoupe  # d'où vient le coût de découpe, pour l'écran d'essai
+        self.assertEqual((d["poste"], d["taux_horaire"], d["nb_feuilles"], d["mise_en_place_min"]), ("Jet d'eau W", 60.0, 1, 10.0))
+        self.assertNotIn("detail_decoupe", jet_eau.en_dict_public())
 
     def test_tva_du_referentiel(self):
         from commercial.models import TauxTVA
