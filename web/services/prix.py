@@ -140,9 +140,11 @@ def catalogue():
 
     matieres = {}
     for tole in toles_en_ligne():
-        m = matieres.setdefault(tole.matiere_id, {"matiere": tole.matiere.nom, "famille": str(tole.matiere.famille or ""), "epaisseurs": []})
+        m = matieres.setdefault(tole.matiere_id, {"matiere": tole.matiere.nom, "famille": str(tole.matiere.famille or ""), "epaisseurs": [],
+                                                  "procedes": {}})
         if tole.epaisseur not in m["epaisseurs"]:
             m["epaisseurs"].append(tole.epaisseur)
+            m["procedes"][f"{tole.epaisseur:g}"] = procedes_possibles(tole.matiere, tole.epaisseur)  # le premier : par défaut
     reglage = ReglageWeb.charger()
     return {
         "matieres": list(matieres.values()),
@@ -156,6 +158,7 @@ def catalogue():
         "quantite_max": reglage.quantite_max,
         "formats_fichier": formats_fichier(),
         "bibliotheque": resume_bibliotheque(),
+        "retrait": {"adresse": reglage.adresse_retrait},
     }
 
 
@@ -185,13 +188,24 @@ def _piece(matiere, epaisseur, procede, exterieur, trous=()):
     )
 
 
-def _procede(matiere, epaisseur):
+def procedes_possibles(matiere, epaisseur):
+    """Procédés qui ont un paramètre de coupe pour cette matière et cette épaisseur, laser d'abord (procédé par défaut)."""
     from decoupe.models import ProcedeCoupe
     from decoupe.services.parametres import meilleur_parametre
 
-    if meilleur_parametre(matiere, epaisseur, ProcedeCoupe.LASER) is not None:
-        return ProcedeCoupe.LASER
-    return ProcedeCoupe.JET_EAU
+    possibles = [p for p in (ProcedeCoupe.LASER, ProcedeCoupe.JET_EAU) if meilleur_parametre(matiere, epaisseur, p) is not None]
+    return [str(p) for p in possibles] or [str(ProcedeCoupe.JET_EAU)]
+
+
+def _procede(matiere, epaisseur, choix=None):
+    """Procédé choisi par le client s'il est possible pour cette tôle, sinon le procédé par défaut (laser s'il le peut)."""
+    possibles = procedes_possibles(matiere, epaisseur)
+    if choix:
+        if choix not in possibles:
+            nom = "le jet d'eau" if choix == "jet_eau" else "le laser" if choix == "laser" else f"« {choix} »"
+            raise ErreurPrixWeb(f"{matiere.nom} en {epaisseur:g} mm ne se découpe pas par {nom} en ligne.")
+        return choix
+    return possibles[0]
 
 
 def controle_trous(exterieur, trous, epaisseur, procede):
@@ -298,7 +312,8 @@ def _piece_step(r, fiche, matiere, epaisseur, echelle):
     return contour, resultat
 
 
-def _preparer(matiere_nom, epaisseur, quantite, forme=None, cotes=None, pliage=None, libre=None, dxf=None, echelle=None, bibliotheque=None):
+def _preparer(matiere_nom, epaisseur, quantite, forme=None, cotes=None, pliage=None, libre=None, dxf=None, echelle=None, bibliotheque=None,
+              procede=None):
     """Pièce à chiffrer, avant matière et coûts : (résultat, contexte), contexte None si la pièce est déjà refusée.
     Voir `chiffrer` pour les arguments."""
     from decoupe.services import formes
@@ -415,7 +430,7 @@ def _preparer(matiere_nom, epaisseur, quantite, forme=None, cotes=None, pliage=N
         else:
             r.lignes_pli = lignes_pli_profil(faces, angles, epaisseur, ri, k, longueur)
 
-    procede = _procede(matiere, epaisseur)
+    procede = _procede(matiere, epaisseur, procede)
     r.procede = procede
     r.validations += controle_trous(exterieur, trous, epaisseur, procede)
     piece = _piece(matiere, epaisseur, procede, exterieur, trous)
@@ -434,12 +449,13 @@ def _preparer(matiere_nom, epaisseur, quantite, forme=None, cotes=None, pliage=N
 
 
 def chiffrer(matiere_nom, epaisseur, quantite, forme=None, cotes=None, pliage=None, libre=None, dxf=None, echelle=None,
-             bibliotheque=None, aujourdhui=None):
+             bibliotheque=None, procede=None, aujourdhui=None):
     """Prix instantané. `forme` + `cotes` : pièce plane de la bibliothèque. `pliage` : {"forme": "profil", "faces": [...],
     "angles": [...], "longueur": L} ou {"forme": "boite", "longueur": L, "largeur": l, "bords": [A, B, C, D], "angles": [...]}.
     `libre` : recette d'une pièce libre (web.services.libre). `dxf` : jeton d'un fichier déposé (web.services.dxf),
     agrandi ou réduit par `echelle` (1 = taille du fichier). `bibliotheque` : {"cle": forme décorative, "largeur": mm}
-    (web.services.bibliotheque), refusée en dessous de sa largeur mini à cette épaisseur.
+    (web.services.bibliotheque), refusée en dessous de sa largeur mini à cette épaisseur. `procede` : "laser" ou "jet_eau" au
+    choix du client, parmi ceux de la tôle (catalogue) ; sans choix, laser s'il le peut.
     Lève ErreurPrixWeb pour une demande mal formée ; une pièce infaisable donne un résultat « refus »."""
     from chiffrage.moteur import ChiffrageError, cout_etape_gamme
     from chiffrage.reglage import minutes_mise_en_place
@@ -449,7 +465,7 @@ def chiffrer(matiere_nom, epaisseur, quantite, forme=None, cotes=None, pliage=No
 
     aujourdhui = aujourdhui or datetime.date.today()
     r, ctx = _preparer(matiere_nom, epaisseur, quantite, forme=forme, cotes=cotes, pliage=pliage, libre=libre, dxf=dxf, echelle=echelle,
-                       bibliotheque=bibliotheque)
+                       bibliotheque=bibliotheque, procede=procede)
     if ctx is None:
         return r
     piece, temps, toles, quantite, reglage, resultat_pliage = (ctx[k] for k in ("piece", "temps", "toles", "quantite", "reglage", "pliage"))
@@ -596,16 +612,16 @@ def chiffrer_jeu(demandes, aujourdhui=None):
     aujourdhui = aujourdhui or datetime.date.today()
     if not demandes:
         raise ErreurPrixWeb("Le jeu ne contient aucune pièce.")
-    communs = {(str(d.get("matiere")), str(d.get("epaisseur")), str(d.get("quantite"))) for d in demandes}
+    communs = {(str(d.get("matiere")), str(d.get("epaisseur")), str(d.get("quantite")), str(d.get("procede") or "")) for d in demandes}
     if len(communs) > 1:
-        raise ErreurPrixWeb("Les pièces d'un même jeu partagent la matière, l'épaisseur et la quantité.")
+        raise ErreurPrixWeb("Les pièces d'un même jeu partagent la matière, l'épaisseur, le procédé et la quantité.")
     j = PrixJeu()
     contextes = []
     for d in demandes:
         try:
             r, ctx = _preparer(d.get("matiere"), d.get("epaisseur"), d.get("quantite"), forme=d.get("forme"), cotes=d.get("cotes"),
                                pliage=d.get("pliage"), libre=d.get("libre"), dxf=d.get("dxf"), echelle=d.get("echelle"),
-                               bibliotheque=d.get("bibliotheque"))
+                               bibliotheque=d.get("bibliotheque"), procede=d.get("procede"))
         except ErreurPrixWeb as exc:
             j.pieces.append({"erreur": str(exc)})
             continue

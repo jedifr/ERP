@@ -65,6 +65,7 @@ h3 { font-size: 1.05rem; margin: 1.5rem 0 .75rem; }
 .grille-champs { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: .75rem 1rem; }
 .champ { display: flex; flex-direction: column; gap: .25rem; margin-bottom: .5rem; }
 .champ.large { grid-column: 1 / -1; }
+.etiquette { font-size: .875rem; color: var(--texte-doux); }
 .champ label, .pli label { font-size: .875rem; color: var(--texte-doux); }
 input, select, textarea { font: inherit; color: var(--texte); background: var(--fond); border: 1px solid var(--bord); border-radius: 8px; padding: .5rem .6rem; width: 100%; min-width: 0; }
 input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 0; border-color: var(--accent); }

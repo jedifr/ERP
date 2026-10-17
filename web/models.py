@@ -22,6 +22,10 @@ class ReglageWeb(models.Model):
     quantite_max = models.PositiveIntegerField(
         "quantité max par pièce", default=500, help_text="Au-delà, le configurateur renvoie vers une demande de devis.",
     )
+    adresse_retrait = models.TextField(
+        "adresse de retrait", blank=True,
+        help_text="Où le client vient chercher ses pièces s'il choisit le retrait à l'atelier (affichée sur le site, avec les horaires si besoin).",
+    )
 
     class Meta:
         verbose_name = "Réglage de la vente en ligne"
@@ -51,6 +55,7 @@ class DemandeWeb(models.Model):
     societe = models.CharField("société", max_length=160, blank=True)
     email = models.EmailField("e-mail")
     telephone = models.CharField("téléphone", max_length=30, blank=True)
+    retrait_atelier = models.BooleanField("retrait à l'atelier", default=False, help_text="Le client vient chercher ses pièces : pas de port.")
     adresse = models.TextField("adresse de livraison", blank=True)
     code_postal = models.CharField("code postal", max_length=20, blank=True)
     ville = models.CharField("ville", max_length=100, blank=True)

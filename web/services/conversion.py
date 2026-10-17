@@ -246,11 +246,11 @@ def creer_devis(demande):
     if demande.devis_id:
         raise ErreurConversion(f"La demande {demande.numero} a déjà son devis ({demande.devis_id}).")
     tiers, contact, cree = _client(demande)
-    livraison = _adresse(tiers, demande)
+    livraison = None if demande.retrait_atelier else _adresse(tiers, demande) or Adresse.par_defaut(tiers, "est_livraison")
     devis = Devis.objects.create(
         numero=_numero_devis(demande), client=tiers, contact=contact, date_creation=datetime.date.today(),
-        reference=f"Demande web {demande.numero}"[:100],
-        adresse_livraison=livraison or Adresse.par_defaut(tiers, "est_livraison"),
+        reference=f"Demande web {demande.numero}{' · retrait atelier' if demande.retrait_atelier else ''}"[:100],
+        adresse_livraison=livraison,
         adresse_facturation=Adresse.par_defaut(tiers, "est_facturation"),
     )
     remarques = []

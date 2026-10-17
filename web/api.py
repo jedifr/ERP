@@ -57,7 +57,7 @@ def _lot(request):
 
 
 class PrixWebVue(_VueWeb):
-    """POST {matiere, epaisseur, quantite, forme + cotes | pliage | libre | dxf (+ echelle) | bibliotheque} → prix (voir web.services.prix.chiffrer).
+    """POST {matiere, epaisseur, quantite, procede?, forme + cotes | pliage | libre | dxf (+ echelle) | bibliotheque} → prix (voir web.services.prix.chiffrer).
     POST {lot: [demande, ...]} → {lot: [prix | {erreur}]} : plusieurs pièces en un appel, chiffrées chacune seule.
     POST {lot: [...], jeu: true} → prix du jeu (web.services.prix.chiffrer_jeu) : les pièces d'un dessin vectorisé, découpées ensemble
     dans la même tôle, avec la part de chacune dans `pieces`."""
@@ -66,7 +66,7 @@ class PrixWebVue(_VueWeb):
     def _chiffrer(d):
         return chiffrer(d.get("matiere"), d.get("epaisseur"), d.get("quantite"), forme=d.get("forme"), cotes=d.get("cotes"),
                         pliage=d.get("pliage"), libre=d.get("libre"), dxf=d.get("dxf"), echelle=d.get("echelle"),
-                        bibliotheque=d.get("bibliotheque")).en_dict_public()
+                        bibliotheque=d.get("bibliotheque"), procede=d.get("procede")).en_dict_public()
 
     def post(self, request):
         try:
