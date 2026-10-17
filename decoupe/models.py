@@ -1038,6 +1038,32 @@ class ReglagePliage(models.Model):
     def charger(cls):
         return cls.objects.get_or_create(pk=1)[0]
 
+    def temps_reglage(self, epaisseur):
+        """(réglage d'un pli court, d'un pli long) en minutes pour cette épaisseur : la première tranche dont l'épaisseur
+        maximale la couvre, sinon les temps généraux."""
+        tranche = self.tranches.filter(epaisseur_max_mm__gte=epaisseur).order_by("epaisseur_max_mm").first() if self.pk else None
+        if tranche is None:
+            return self.reglage_court_min, self.reglage_long_min
+        return tranche.reglage_court_min, tranche.reglage_long_min
+
+
+class ReglagePliageEpaisseur(models.Model):
+    """Temps de réglage d'une tranche d'épaisseur (jusqu'à `epaisseur_max_mm` inclus) : remplace les temps généraux."""
+
+    reglage = models.ForeignKey(ReglagePliage, verbose_name="réglage", on_delete=models.CASCADE, related_name="tranches")
+    epaisseur_max_mm = models.FloatField("jusqu'à l'épaisseur (mm)", help_text="Inclus. Ex. 3 : de la tranche précédente jusqu'à 3 mm.")
+    reglage_court_min = models.FloatField("réglage d'un pli court (min)")
+    reglage_long_min = models.FloatField("réglage d'un pli long (min)")
+
+    class Meta:
+        verbose_name = "Temps de réglage par épaisseur"
+        verbose_name_plural = "Temps de réglage par épaisseur"
+        ordering = ["epaisseur_max_mm"]
+        constraints = [models.UniqueConstraint(fields=["reglage", "epaisseur_max_mm"], name="reglage_pliage_epaisseur_unique")]
+
+    def __str__(self):
+        return f"Jusqu'à {self.epaisseur_max_mm:g} mm"
+
 
 class PliageArticle(models.Model):
     """Pièce pliée d'un article fabriqué.

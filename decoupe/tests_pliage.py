@@ -8,7 +8,7 @@ from django.test import TestCase
 from chiffrage.moteur import cout_etape_gamme
 from technique.models import Article, FamilleMatiere, Gamme, Matiere, PosteTravail, TarifPoste
 
-from .models import PliageArticle, Plieuse, ReglagePliage
+from .models import PliageArticle, Plieuse, ReglagePliage, ReglagePliageEpaisseur
 from .services.gamme import alimenter_gamme_pliage
 from .services.pliage import ErreurPliage, calculer_boite, calculer_pliage, developpe, force_abaque, table_pour
 
@@ -67,6 +67,19 @@ class PliageCalculTests(TestCase):
         self.assertIn("2 × bord mini", r.validations[0])
         r = calculer_pliage(self.acier, 8, [100, 100], [90], 1000)
         self.assertEqual((r.statut, r.ve, r.plieuse), ("validation", "V80/80°", "Plieuse 3 m / 200 t"))
+
+    def test_temps_de_reglage_par_epaisseur(self):
+        reglage = ReglagePliage.charger()
+        ReglagePliageEpaisseur.objects.create(reglage=reglage, epaisseur_max_mm=3, reglage_court_min=4, reglage_long_min=6)
+        ReglagePliageEpaisseur.objects.create(reglage=reglage, epaisseur_max_mm=6, reglage_court_min=10, reglage_long_min=15)
+        r = calculer_pliage(self.acier, 2, [50, 100], [90], 60)  # tranche jusqu'à 3 mm, pli court
+        self.assertEqual(r.temps_reglage_min, 4)
+        r = calculer_pliage(self.acier, 3, [50, 100], [90], 1000)  # 3 mm inclus dans la première tranche, pli long
+        self.assertEqual(r.temps_reglage_min, 6)
+        r = calculer_pliage(self.acier, 5, [50, 100], [90], 60)
+        self.assertEqual(r.temps_reglage_min, 10)
+        r = calculer_pliage(self.acier, 8, [100, 100], [90], 1000)  # au-delà des tranches : temps généraux
+        self.assertEqual(r.temps_reglage_min, 7.5)
 
     def test_reglages_distincts(self):
         r = calculer_pliage(self.acier, 2, [40, 200, 40], [90, 90], 1000)  # U symétrique : un seul réglage, pli long
