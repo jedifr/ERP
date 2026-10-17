@@ -340,11 +340,32 @@ class PieceLibreTests(ConfigurateurBase):
     def test_points_a_verifier(self):
         petit = chiffrer("S235-W", 2, 1, libre={"base": PLAQUE, "elements": [{"type": "rond", "x": 50, "y": 50, "diametre": 1.5}]})
         self.assertEqual(petit.statut, "validation")
-        self.assertIn("plus petite(s) que l'épaisseur", petit.validations[0])
+        self.assertIn("Trou(s) Ø1,5 mm : minimum Ø2 mm en 2 mm au jet d'eau", petit.validations[0])
         pont = chiffrer("S235-W", 2, 1, libre={"base": PLAQUE, "elements": [
             {"type": "rond", "x": 50, "y": 50, "diametre": 20}, {"type": "rond", "x": 71, "y": 50, "diametre": 20}]})
         self.assertEqual(pont.statut, "validation")  # 1 mm de matière entre les deux trous, pour 2 mm d'épaisseur
         self.assertIn("plus fine que l'épaisseur", " ".join(pont.validations))
+
+    def test_trous_mini_selon_le_procede(self):
+        from decoupe.models import ReglageProcede
+        from web.services.prix import controle_trous
+
+        laser = ReglageProcede.pour("laser")
+        self.assertEqual((laser.trou_mini(3), laser.trou_mini(15), ReglageProcede.pour("jet_eau").trou_mini(10)), (0.6 * 3, 0.8 * 15, 2))
+        plaque = [(0, 0), (100, 0), (100, 100), (0, 100)]
+
+        def carre(x, y, c):
+            return [(x, y), (x + c, y), (x + c, y + c), (x, y + c)]
+
+        self.assertEqual(controle_trous(plaque, [carre(50, 50, 2)], 3, "laser"), [])
+        self.assertEqual(controle_trous(plaque, [carre(50, 50, 1.5)], 3, "laser"),
+                         ["Trou(s) Ø1,5 mm : minimum Ø1,8 mm en 3 mm au laser, faisabilité vérifiée par l'atelier."])
+        self.assertEqual(len(controle_trous(plaque, [carre(50, 50, 11)], 15, "laser")), 1)  # 0,8 × 15 = 12 mm dès 15 mm
+        self.assertEqual(controle_trous(plaque, [carre(50, 50, 1.5)], 1, "jet_eau"),
+                         ["Trou(s) Ø1,5 mm : minimum Ø2 mm en 1 mm au jet d'eau, faisabilité vérifiée par l'atelier."])
+        self.assertEqual(controle_trous(plaque, [carre(4, 50, 10)], 3, "laser"),
+                         ["Trou(s) à 4 mm du bord : minimum 6 mm (2 × l'épaisseur) au laser, faisabilité vérifiée par l'atelier."])
+        self.assertEqual(controle_trous(plaque, [carre(4, 50, 10)], 3, "jet_eau"), [])  # pas de règle de bord au jet d'eau
 
     def test_recettes_refusees(self):
         for recette, message in (

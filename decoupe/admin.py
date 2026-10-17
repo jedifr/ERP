@@ -795,13 +795,26 @@ class ParametreCoupeAdmin(ModelAdmin):
 class ReglageProcedeAdmin(ModelAdmin):
     """Pondération des vitesses du laser et écart minimal entre pièces de chaque procédé."""
 
-    list_display = ["procede", "coefficient_vitesse", "temps_palpage_s", "espacement_minimum_mm", "bord_tole_minimum_mm"]
+    list_display = ["procede", "coefficient_vitesse", "temps_palpage_s", "espacement_minimum_mm", "bord_tole_minimum_mm", "trou_mini_regle"]
 
     def get_exclude(self, request, obj=None):
         exclude = list(super().get_exclude(request, obj) or [])
         if obj is not None and obj.procede != "jet_eau":
             exclude += ["temps_palpage_s", "diametre_petits_trous_mm", "qualite_petits_trous"]  # propres au jet d'eau
         return exclude
+
+    @admin.display(description="Trou mini")
+    def trou_mini_regle(self, obj):
+        regles = []
+        if obj.trou_mini_coef:
+            regles.append(f"Ø ≥ {obj.trou_mini_coef:g} × ép.")
+            if obj.trou_mini_seuil_mm and obj.trou_mini_coef_epais:
+                regles.append(f"{obj.trou_mini_coef_epais:g} × dès {obj.trou_mini_seuil_mm:g} mm")
+        if obj.trou_mini_mm:
+            regles.append(f"Ø ≥ {obj.trou_mini_mm:g} mm")
+        if obj.distance_trou_bord_coef:
+            regles.append(f"bord ≥ {obj.distance_trou_bord_coef:g} × ép.")
+        return ", ".join(regles) or "—"
 
     def has_add_permission(self, request):
         return False  # un réglage par procédé, créé avec les valeurs usuelles

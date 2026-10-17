@@ -194,6 +194,40 @@ def _procede(matiere, epaisseur):
     return ProcedeCoupe.JET_EAU
 
 
+def controle_trous(exterieur, trous, epaisseur, procede):
+    """Trous trop petits pour le procédé (Ø mini selon l'épaisseur, réglage du procédé) ou trop près du bord de la pièce :
+    messages de validation technicien. Le Ø d'un trou est le petit côté de son rectangle englobant minimal."""
+    from shapely.geometry import LineString, Polygon
+
+    from decoupe.models import ProcedeCoupe, ReglageProcede
+
+    reglage = ReglageProcede.pour(procede)
+    mini, coef_bord = reglage.trou_mini(epaisseur), reglage.distance_trou_bord_coef
+    nom = "jet d'eau" if procede == ProcedeCoupe.JET_EAU else "laser"
+    bord = LineString(list(exterieur) + [exterieur[0]])
+    petits, proches = [], []
+    for t in trous:
+        trou = Polygon(t)
+        rect = trou.minimum_rotated_rectangle
+        cotes = [LineString(rect.exterior.coords[i:i + 2]).length for i in range(2)] if rect.geom_type == "Polygon" else [0]
+        diametre = min(cotes)
+        if mini and diametre < mini - 1e-6:
+            petits.append(diametre)
+        if coef_bord and trou.exterior.distance(bord) < coef_bord * epaisseur - 1e-6:
+            proches.append(trou.exterior.distance(bord))
+    def mm(v):
+        return f"{v:.1f}".rstrip("0").rstrip(".").replace(".", ",")
+
+    messages = []
+    if petits:
+        liste = ", ".join(f"Ø{mm(d)}" for d in sorted(set(round(d, 1) for d in petits)))
+        messages.append(f"Trou(s) {liste} mm : minimum Ø{mm(mini)} mm en {epaisseur:g} mm au {nom}, faisabilité vérifiée par l'atelier.")
+    if proches:
+        messages.append(f"Trou(s) à {mm(min(proches))} mm du bord : minimum {mm(coef_bord * epaisseur)} mm ({coef_bord:g} × l'épaisseur) "
+                        f"au {nom}, faisabilité vérifiée par l'atelier.")
+    return messages
+
+
 def decharges(contour, epaisseur, bord_mini):
     """Trou trop près d'un pli (bord du trou à moins du bord mini de la ligne de pli) : oblong de décharge sur la ligne
     de pli, large de l'épaisseur et long du diamètre du trou (son étendue le long du pli), centré en face du trou, pour
@@ -383,6 +417,7 @@ def _preparer(matiere_nom, epaisseur, quantite, forme=None, cotes=None, pliage=N
 
     procede = _procede(matiere, epaisseur)
     r.procede = procede
+    r.validations += controle_trous(exterieur, trous, epaisseur, procede)
     piece = _piece(matiere, epaisseur, procede, exterieur, trous)
     r.largeur_mm, r.hauteur_mm = round(piece.largeur_mm, 2), round(piece.hauteur_mm, 2)
     r.contour = piece.contour_json
