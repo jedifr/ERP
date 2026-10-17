@@ -26,6 +26,12 @@
       {% for valeur, libelle in toles %}<option value="{{ valeur }}" {% if saisie.tole == valeur %}selected{% endif %}>{{ libelle }}</option>
       {% empty %}<option value="">Aucune tôle vendue en ligne</option>{% endfor %}
     </select>
+    <label for="procede">Procédé</label>
+    <select id="procede" name="procede">
+      <option value="">Par défaut (laser s'il le peut)</option>
+      <option value="laser" {% if saisie.procede == "laser" %}selected{% endif %}>Laser</option>
+      <option value="jet_eau" {% if saisie.procede == "jet_eau" %}selected{% endif %}>Jet d'eau</option>
+    </select>
     <label for="quantite">Quantité</label>
     <input id="quantite" name="quantite" type="number" min="1" value="{{ saisie.quantite|default:'1' }}">
     <label for="type_piece">Pièce</label>
@@ -76,7 +82,12 @@
         {% if resultat.cout_revient is not None %}
           <tr><th>Tôles</th><td>{{ resultat.nb_feuilles }} × {{ resultat.format_tole }}</td></tr>
           <tr><th>Coût matière</th><td>{{ resultat.cout_matiere|floatformat:2 }} €</td></tr>
-          <tr><th>Coût découpe</th><td>{{ resultat.cout_decoupe|floatformat:2 }} €</td></tr>
+          <tr><th>Coût découpe</th><td>{{ resultat.cout_decoupe|floatformat:2 }} €
+            {% with d=resultat.detail_decoupe %}{% if d %}<br><span class="text-sm text-base-500">
+              Poste {{ d.poste }}{% if d.taux_horaire is not None %} à {{ d.taux_horaire|floatformat:2 }} €/h{% endif %} (paramètre {{ d.parametre }}).<br>
+              Mise en place : {{ d.mise_en_place_min|floatformat:1 }} min × {{ d.nb_feuilles }} tôle(s) = {{ d.mise_en_place_total_min|floatformat:1 }} min.<br>
+              Coupe : {{ d.coupe_piece_min|floatformat:2 }} min par pièce ({{ d.longueur_coupe_mm }} mm, {{ d.nb_percages }} perçage(s)), {{ d.coupe_total_min|floatformat:1 }} min en tout.
+            </span>{% endif %}{% endwith %}</td></tr>
           {% if resultat.pliage %}<tr><th>Coût pliage</th><td>{{ resultat.cout_pliage|floatformat:2 }} € ({{ resultat.pliage.ve }}, {{ resultat.pliage.plieuse }})</td></tr>{% endif %}
           <tr><th>Coût de revient</th><td>{{ resultat.cout_revient|floatformat:2 }} €, marge web {{ resultat.taux_marge_pct|floatformat:0 }} %</td></tr>
         {% endif %}

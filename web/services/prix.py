@@ -47,6 +47,7 @@ class PrixWeb:
     format_tole: str = ""
     tole: str = ""  # référence de la tôle retenue (interne : reprise par le devis créé depuis la demande)
     lignes_pli: list = None  # interne : lignes de pli du flan (calque PLIAGE du DXF de fabrication)
+    detail_decoupe: dict = None  # interne : d'où vient le coût de découpe (écran d'essai de l'ERP)
     cout_matiere: Decimal = None
     cout_decoupe: Decimal = None
     cout_pliage: Decimal = None
@@ -448,6 +449,24 @@ def _preparer(matiere_nom, epaisseur, quantite, forme=None, cotes=None, pliage=N
                "pliage": resultat_pliage}
 
 
+def _detail_decoupe(parametre, decoupe, temps, quantite, nb_feuilles, aujourdhui):
+    """Décomposition du coût de découpe : poste et son taux, mise en place par tôle, temps de coupe par pièce."""
+    from chiffrage.moteur import tarif_poste_valide
+    from technique.models import PosteTravail
+
+    poste = parametre.poste
+    taux = None
+    if poste.mode_calcul == PosteTravail.ModeCalcul.HORAIRE:
+        tarif = tarif_poste_valide(poste, aujourdhui)
+        taux = float(tarif.cout_horaire) if tarif else None
+    return {
+        "parametre": str(parametre), "poste": str(poste), "taux_horaire": taux, "nb_feuilles": nb_feuilles,
+        "mise_en_place_min": round(decoupe.temps_fixe / nb_feuilles, 2) if nb_feuilles else 0, "mise_en_place_total_min": round(decoupe.temps_fixe, 2),
+        "coupe_piece_min": round(temps.total_min, 3), "coupe_total_min": round(temps.total_min * quantite, 2),
+        "longueur_coupe_mm": round(temps.longueur_coupe_mm), "nb_percages": temps.nb_percages,
+    }
+
+
 def chiffrer(matiere_nom, epaisseur, quantite, forme=None, cotes=None, pliage=None, libre=None, dxf=None, echelle=None,
              bibliotheque=None, procede=None, aujourdhui=None):
     """Prix instantané. `forme` + `cotes` : pièce plane de la bibliothèque. `pliage` : {"forme": "profil", "faces": [...],
@@ -493,6 +512,7 @@ def chiffrer(matiere_nom, epaisseur, quantite, forme=None, cotes=None, pliage=No
             raise ChiffrageError(f"Le paramètre de coupe « {parametre} » n'a pas de poste de travail.")
         decoupe = Gamme(poste=parametre.poste, temps_fixe=cout.nb_feuilles * minutes_mise_en_place(parametre), temps_variable=temps.total_min)
         r.cout_decoupe = cout_etape_gamme(decoupe, quantite, aujourdhui)
+        r.detail_decoupe = _detail_decoupe(parametre, decoupe, temps, quantite, cout.nb_feuilles, aujourdhui)
         r.cout_pliage = D(0)
         if resultat_pliage is not None:
             plieuse = Plieuse.objects.select_related("poste").get(pk=resultat_pliage.plieuse_id)
