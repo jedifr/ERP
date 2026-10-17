@@ -82,6 +82,8 @@ test("sert la page et ses fichiers, jamais en dehors du dossier public", async (
   const page = await fetch(`${base}/`);
   assert.equal(page.status, 200);
   assert.match(page.headers.get("content-security-policy"), /default-src 'self'/);
+  // decoupe.eu ouvre le configurateur et lui passe un fichier : pas d'isolement de l'onglet ouvert (COOP same-origin)
+  assert.equal(page.headers.get("cross-origin-opener-policy"), null);
   assert.match(await page.text(), /Configurer une pièce/);
   assert.equal((await fetch(`${base}/app.js`)).headers.get("content-type"), "text/javascript; charset=utf-8");
   assert.equal((await fetch(`${base}/..%2fserver.js`)).status, 404);
