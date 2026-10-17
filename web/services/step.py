@@ -39,6 +39,7 @@ class Pli:
     longueur_mm: float
     faces_mm: tuple = ()
     axe: tuple = (0, 0, 1)
+    sens: str = "haut"  # côté où se relève ce qui suit le pli, vu du flan (côté de la face de départ)
 
     @property
     def angle(self):
@@ -468,8 +469,9 @@ class _Depliage:
         radial = _sous(_sous(p, c["origine"]), _fois(c["axe"], _scal(_sous(p, c["origine"]), c["axe"])))
         convexe = _scal(n, radial) > 0
         ri = c["rayon"] - e if convexe else c["rayon"]
+        # Peau à l'extérieur du pli : il s'éloigne du côté de la peau (vu du flan : vers le bas) ; à l'intérieur : vers le haut.
         return Pli(beta_deg=round(math.degrees(beta), 2), rayon_mm=round(max(ri, 0), 3), longueur_mm=round(longueur, 2),
-                   axe=tuple(round(v, 6) for v in c["axe"]))
+                   axe=tuple(round(v, 6) for v in c["axe"]), sens="bas" if convexe else "haut")
 
     def deplier(self, largeur):
         """Polygones 2D (listes [extérieur, trous...]) de chaque face de la peau, dans le repère de la face de départ."""
@@ -506,12 +508,16 @@ class _Depliage:
         if len(place) < len(m.peau):
             raise ErreurStep("Une partie de la pièce n'a pas pu être dépliée : dépliage sur devis.")
         polygones = []
+        self.bandes = {}  # groupe de pli → faces cylindriques dépliées (la bande du pli à plat)
         for i in sorted(place):
             t = place[i]
             contours = _contours_face(f.faces[i])
             if self.m.types[i] == "cylindre":
                 contours = [[self._a_plat(i, p, largeurs) for p in c] for c in contours]
-            polygones.append([[_transformer(t, p) for p in c] for c in contours])
+            a_plat = [[_transformer(t, p) for p in c] for c in contours]
+            polygones.append(a_plat)
+            if self.m.types[i] == "cylindre":
+                self.bandes.setdefault(self.groupe[i], []).append(a_plat)
         return polygones
 
     def _entree(self, j, arete):
@@ -569,8 +575,9 @@ def _repere_plan(modele):
     return _vec(pos.Location()), x, y, n
 
 
-def _flan(modele, polygones):
-    """Réunion des faces dépliées : contour {exterieur, trous} en mm, recalé à l'origine."""
+def _flan(modele, polygones, depliage=None):
+    """Réunion des faces dépliées : contour {exterieur, trous} en mm, recalé à l'origine, et ses lignes de pli (axe de
+    chaque bande pliée, angle de la pièce, sens) quand `depliage` est donné."""
     from shapely.geometry import MultiPolygon, Polygon
     from shapely.ops import unary_union
 
@@ -592,7 +599,36 @@ def _flan(modele, polygones):
     minx, miny, _, _ = union.bounds
     ext = [(round(px - minx, 4), round(py - miny, 4)) for px, py in list(union.exterior.coords)[:-1]]
     trous = [[(round(px - minx, 4), round(py - miny, 4)) for px, py in list(i.coords)[:-1]] for i in union.interiors]
-    return {"exterieur": ext, "trous": trous}, modele_avert
+    contour = {"exterieur": ext, "trous": trous}
+    if depliage is not None:
+        contour["plis"] = _lignes_pli(depliage, o, x, y, minx, miny)
+    return contour, modele_avert
+
+
+def _lignes_pli(depliage, o, x, y, minx, miny):
+    """Axe de chaque bande pliée à plat : la médiane du plus petit rectangle qui l'entoure, dans le sens de la longueur."""
+    from shapely.geometry import Polygon
+    from shapely.ops import unary_union
+
+    from decoupe.services.pliage import ligne_pli
+
+    lignes = []
+    for g, pli in enumerate(depliage.plis):
+        morceaux = []
+        for contours in depliage.bandes.get(g, []):
+            pts2d = [(_scal(_sous(p, o), x) - minx, _scal(_sous(p, o), y) - miny) for p in contours[0]]
+            poly = Polygon(pts2d).buffer(0)
+            if not poly.is_empty:
+                morceaux.append(poly.buffer(0.01, join_style=2))
+        if not morceaux:
+            continue
+        coins = list(unary_union(morceaux).minimum_rotated_rectangle.exterior.coords)[:4]
+        cotes = [(coins[i], coins[(i + 1) % 4]) for i in range(4)]
+        court = min(cotes, key=lambda c: math.dist(*c))
+        oppose = cotes[(cotes.index(court) + 2) % 4]
+        milieu = lambda c: ((c[0][0] + c[1][0]) / 2, (c[0][1] + c[1][1]) / 2)  # noqa: E731
+        lignes.append(ligne_pli(f"Pli {g + 1}", milieu(court), milieu(oppose), pli.angle if pli.sens == "haut" else -pli.angle))
+    return lignes
 
 
 # ------------------------------------------------------------------ cotes des faces autour des plis
@@ -660,7 +696,7 @@ class PieceStep:
         e = self.modele.epaisseur
         try:
             polygones = self.depliage.deplier(lambda p: largeur_bande(p, e, coef_k, ri_atelier))
-            contour, avert = _flan(self.modele, polygones)
+            contour, avert = _flan(self.modele, polygones, self.depliage)
         except ErreurStep:
             raise
         except Exception:
@@ -718,7 +754,7 @@ def flan_atelier(jeton, coef_k, ri_atelier):
 
     from .dxf import ErreurDxf, dossier
 
-    cle = f"{jeton}-flan-k{coef_k:g}-r{ri_atelier:g}.json"
+    cle = f"{jeton}-flan-k{coef_k:g}-r{ri_atelier:g}-plis.json"  # « -plis » : avec les lignes de pli
     cache = dossier() / cle
     if cache.exists():
         return json.loads(cache.read_text("utf-8"))

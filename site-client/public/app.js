@@ -383,7 +383,7 @@ function afficherResultat(r) {
   if (r.poids_kg) details.push(["Poids unitaire", `${r.poids_kg.toLocaleString("fr-FR", { maximumFractionDigits: 2 })} kg`]);
   if (r.pliage && r.pliage.angle_mini) details.push(["Angle de pli mini", `${r.pliage.angle_mini}°`]);
   $("details").replaceChildren(...details.flatMap(([t, v]) => [el("dt", { texte: t }), el("dd", { texte: v })]));
-  $("messages").replaceChildren(...[...r.refus, ...r.validations].map((m) => el("li", { texte: m })));
+  $("messages").replaceChildren(...[...r.refus, ...r.validations, ...(r.modifications || [])].map((m) => el("li", { texte: m })));
   dessinerApercu(r.contour);
   // contour exact de l'ERP à la place de la vignette (bibliothèque) ou du dépôt (flan STEP chiffré avec l'outillage de l'atelier)
   if ((dernier && dernier.demande.bibliotheque) || estStep()) dessinerSchema();

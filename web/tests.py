@@ -74,6 +74,12 @@ class PrixWebTests(ConfigurateurBase):
         self.assertEqual((r.largeur_mm, r.hauteur_mm), (273.08, 223.08))
         self.assertEqual(r.pliage["crans_mm"], [36.54] * 4)
         self.assertEqual(len(r.contour["exterieur"]), 12)  # quatre coins crantés
+        lignes = {l["nom"]: l for l in r.lignes_pli}
+        self.assertEqual(sorted(lignes), ["Bord A", "Bord B", "Bord C", "Bord D"])
+        a = lignes["Bord A"]  # au milieu de la bande pliée, de cran à cran
+        self.assertTrue(36.54 < a["p1"][1] == a["p2"][1] < 40)  # bord de 40 : reculé de (ri + e), plus la moitié de l'arc
+        self.assertEqual((a["p1"][0], a["p2"][0], a["angle"], a["sens"]), (36.54, 273.08 - 36.54, 90, "haut"))
+        self.assertAlmostEqual(lignes["Bord C"]["p1"][1], 223.08 - a["p1"][1], places=2)
         self.assertEqual(r.cout_pliage, Decimal("20.00"))  # 2 réglages (10 min) + 5 pièces × 4 plis × 30 s (10 min) à 60 €/h
 
     def test_contour_sans_bord_d_un_cote(self):
@@ -244,21 +250,45 @@ class ValiderDemandeTests(ConfigurateurBase):
         self.assertTrue(adresse.est_livraison and adresse.est_facturation)
         self.assertEqual((devis.adresse_livraison, devis.contact, devis.reference), (adresse, contact, f"Demande web {self.demande.numero}"))
         lignes = list(devis.lignes.order_by("ordre", "id"))
-        self.assertEqual([l.quantite for l in lignes], [10, 3])
+        self.assertEqual([l.quantite for l in lignes], [10, 3, 1])  # + le complément au minimum de commande
         for ligne, web in zip(lignes, self.demande.lignes):
             self.assertEqual(ligne.prix_vente_total, Decimal(str(web["prix_total_ht"])))  # prix annoncé au client
-        piece = devis.pieces_decoupe.get()  # le rectangle : DXF de fabrication joint au devis
+        piece, flan = devis.pieces_decoupe.order_by("id")  # le rectangle et le flan du U : DXF de fabrication joints au devis
         self.assertEqual((piece.matiere_id, piece.epaisseur, piece.quantite, piece.tole), ("S235-W", 2, 10, self.tole))
         self.assertTrue(piece.fichier_source.name.endswith(".dxf"))
         self.assertEqual(piece.article, lignes[0].article)
         self.assertTrue(lignes[0].article.gamme_etapes.exists())  # gamme de découpe alimentée (le paramètre a un poste)
-        self.assertIn("gamme de pliage sur", remarques[1])  # le U : pièce pliée calculée, étape de pliage sur la plieuse
-        self.assertEqual(lignes[1].article.pliage.faces_mm, [40, 60, 40])
-        self.assertEqual(lignes[1].article.gamme_etapes.get().origine, "pliage")
+        self.assertIn("pliage sur", remarques[1])  # le U : flan découpé, puis plié sur la plieuse retenue
+        self.assertEqual((flan.article, lignes[1].article.pliage.faces_mm), (lignes[1].article, [40, 60, 40]))
+        self.assertEqual(len(flan.pliage_json["traits"]), 2)  # les deux lignes de pli du U, sur leur calque
+        self.assertEqual([e.origine for e in lignes[1].article.gamme_etapes.order_by("ordre")], ["decoupe", "pliage"])
         self.demande.refresh_from_db()
         self.assertEqual((self.demande.devis, self.demande.statut), (devis, DemandeWeb.Statut.TRAITEE))
         with self.assertRaisesMessage(ErreurConversion, "déjà son devis"):
             creer_devis(self.demande)
+
+    def test_minimum_de_commande_en_ligne(self):
+        from .services.conversion import REFERENCE_MINIMUM, creer_devis
+
+        petite = self.enregistrer({"client": self.CLIENT, "lignes": [{**self.RECT, "quantite": 1}]})
+        self.assertGreater(petite.total_ht, petite.total_pieces_ht)
+        devis, _, remarques = creer_devis(petite)
+        ligne = devis.lignes.get(article__reference=REFERENCE_MINIMUM)
+        self.assertEqual(ligne.prix_vente_total, petite.total_ht - petite.total_pieces_ht)
+        self.assertEqual(sum(l.prix_vente_total for l in devis.lignes.all()), petite.total_ht)
+        self.assertIn("Minimum de commande", remarques[-1])
+
+    def test_ordres_de_fabrication_a_la_commande(self):
+        from chiffrage.models import Devis
+        from chiffrage.production import lancer_en_production
+
+        from .services.conversion import creer_devis
+
+        devis, _, _ = creer_devis(self.demande)
+        Devis.objects.filter(pk=devis.pk).update(statut=Devis.Statut.VALIDE)
+        with self.captureOnCommitCallbacks(execute=True):
+            commande = lancer_en_production(Devis.objects.get(pk=devis.pk))
+        self.assertEqual(commande.ordres_fabrication.count(), 2)  # le rectangle et le U, pas le minimum de commande
 
     def test_client_retrouve_par_email(self):
         from .services.conversion import creer_devis
@@ -630,6 +660,33 @@ class StepWebTests(ConfigurateurBase):
                                unite_cout=Article.UniteCout.SURFACE, cout_unitaire=30, format_tole=self.tole.format_tole, vendu_en_ligne=True)
         self.assertIn("choisissez 2 mm", self.prix(fiche["jeton"], epaisseur=3).json()["erreur"])  # épaisseur imposée par le fichier
         self.assertEqual(self.prix(fiche["jeton"], echelle=2).status_code, 400)
+
+    def test_lignes_de_pli_et_oblong_de_decharge(self):
+        # Cornière dont un trou de 6 mm tombe à 3 mm du pli (bord mini 8,5 mm en V12) : oblong 6 × 2 sur la ligne de pli.
+        solide = self.profil([46, 96], [90], 2, 2, 60, trous=[(40, 0, 30, (0, 1, 0), 6)])
+        fiche = self.envoyer(self.ecrire(solide), "corniere.stp").json()
+        r = chiffrer("S235-W", 2, 10, dxf=fiche["jeton"])
+        saisi = chiffrer("S235-W", 2, 10, pliage={"forme": "profil", "faces": [50, 100], "angles": [90], "longueur": 60})
+        (pli,), (pli_saisi,) = r.lignes_pli, saisi.lignes_pli
+        self.assertEqual((pli["angle"], pli["sens"]), (90, "haut"))
+        self.assertAlmostEqual(pli["p1"][0], pli_saisi["p1"][0], places=1)  # même ligne que le profil saisi à la main
+        self.assertEqual(len(r.modifications), 1)
+        self.assertIn("oblong de décharge 6.0 × 2 mm", r.modifications[0])
+        self.assertEqual(len(r.contour["trous"]), 2)  # le trou et l'oblong
+        self.assertIn("oblong de décharge", self.prix(fiche["jeton"]).json()["modifications"][0])
+        page = self.client.post("/api/web/v1/demandes/", {"client": DemandeWebTests.CLIENT, "lignes": [
+            {"matiere": "S235-W", "epaisseur": 2, "quantite": 2, "dxf": fiche["jeton"]}]}, content_type="application/json", HTTP_X_CLE_WEB="secret-web")
+        self.assertEqual(page.status_code, 201, page.content)
+        demande = DemandeWeb.objects.get()
+        self.client.force_login(get_user_model().objects.create_superuser("lp", "lp@example.com", "pass-lp-1234"))
+        dxf = self.client.get(f"/admin/web/demandeweb/{demande.pk}/dxf/0/").content
+        self.assertIn(b"PLIAGE", dxf)
+        self.assertIn("Pli 1 : 90° HAUT".encode(), dxf)
+        from .services.conversion import creer_devis
+
+        devis, _, _ = creer_devis(demande)
+        piece = devis.pieces_decoupe.get()  # le flan importé : lignes de pli à part, pas découpées
+        self.assertEqual((piece.statut, piece.nb_contours_interieurs, len(piece.pliage_json["traits"])), ("ok", 2, 1))
 
     def test_plaque_plane_compressee_et_demande(self):
         import gzip
