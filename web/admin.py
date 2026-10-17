@@ -3,6 +3,7 @@ from django.http import FileResponse, Http404, HttpResponse
 from django.shortcuts import get_object_or_404, render
 from django.urls import path, reverse
 from django.utils.html import format_html, format_html_join
+from django.utils.safestring import mark_safe
 from django.utils.text import slugify
 from unfold.admin import ModelAdmin
 
@@ -25,6 +26,10 @@ class ReglageWebAdmin(ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+
+# Lien bien visible dans un champ en lecture seule (l'admin ne colore pas les liens qu'on y place).
+LIEN = "color:#2563eb;text-decoration:underline;font-weight:600"
 
 
 @admin.register(DemandeWeb)
@@ -80,11 +85,13 @@ class DemandeWebAdmin(ModelAdmin):
                 return ""
             url = reverse("admin:web_demandeweb_dxf", args=[obj.pk, i])
             original = chemin_fichier(l["demande"].get("dxf"), original=True)
+            dxf = format_html("<a href='{}' style='{}'>Télécharger le DXF</a>", url, LIEN)
             if original and original.suffix != ".dxf":
-                return format_html("<a href='{}'>DXF</a> · <a href='{}?original=1'>{}</a>", url, url, original.suffix[1:].upper())
-            return format_html("<a href='{}'>DXF</a>", url)
+                return format_html("{} · <a href='{}?original=1' style='{}'>Fichier d'origine ({})</a>", dxf, url, LIEN, original.suffix[1:].upper())
+            return dxf
 
-        return format_html("<table>{}</table>", format_html_join("", "<tr><td style='padding-right:1em'>{}</td><td style='padding-right:1em'>{} × {} mm</td><td style='padding-right:1em'>{} pièce(s)</td><td style='padding-right:1em'>{} € HT</td><td style='padding-right:1em'>{}</td><td>{}</td></tr>", (
+        entete = "".join(f"<th style='padding-right:1em;text-align:left'>{t}</th>" for t in ("Pièce", "Matière", "Quantité", "Prix", "Fichier", ""))
+        return format_html("<table><tr>{}</tr>{}</table>", mark_safe(entete), format_html_join("", "<tr><td style='padding-right:1em'>{}</td><td style='padding-right:1em'>{} {} mm</td><td style='padding-right:1em'>{} pièce(s)</td><td style='padding-right:1em'>{} € HT</td><td style='padding-right:1em'>{}</td><td>{}</td></tr>", (
             (l["designation"], l["demande"].get("matiere"), l["demande"].get("epaisseur"), l["demande"].get("quantite"), f"{l['prix_total_ht']:.2f}",
              lien(i, l), "À valider : " + " ".join(l["validations"]) if l["validations"] else "")
             for i, l in enumerate(obj.lignes)
